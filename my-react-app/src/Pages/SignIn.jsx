@@ -102,7 +102,7 @@ function SignIn() {
         sessionStorage.removeItem(SESSION_KEY);
         navigate('/results', { state: { recommendations, assessment: formData } });
       } else {
-        navigate('/assessment');
+        navigate('/');
       }
     } catch (err) {
       setError(err.message);
