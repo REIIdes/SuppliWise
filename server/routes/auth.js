@@ -73,7 +73,13 @@ router.post('/register', async (req, res) => {
       token: generateToken(user._id),
     });
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error('[register]', error.message);
+    // Pass Mongoose validation errors through cleanly; hide everything else
+    if (error.name === 'ValidationError') {
+      const msg = Object.values(error.errors).map(e => e.message).join(' ');
+      return res.status(400).json({ message: msg });
+    }
+    res.status(500).json({ message: 'Something went wrong. Please try again later.' });
   }
 });
 
@@ -110,7 +116,8 @@ router.post('/login', async (req, res) => {
       token: generateToken(user._id),
     });
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error('[login]', error.message);
+    res.status(500).json({ message: 'Something went wrong. Please try again later.' });
   }
 });
 

@@ -25,6 +25,27 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'Server is running' });
 });
 
+// ── Global error handler — catches any unhandled errors in routes ──────────
+// Must be defined AFTER all routes and have 4 parameters (err, req, res, next)
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  // Log the full technical error internally
+  console.error('[Global Error Handler]', {
+    message: err.message,
+    stack: err.stack,
+    path: req.path,
+    method: req.method,
+  });
+
+  // Never expose stack traces or raw DB errors to the client
+  const status = err.status || err.statusCode || 500;
+  const userMessage = status < 500
+    ? (err.message || 'An error occurred.')
+    : 'Something went wrong. Please try again later.';
+
+  res.status(status).json({ message: userMessage });
+});
+
 // Connect to MongoDB and start server
 const PORT = process.env.PORT || 5000;
 

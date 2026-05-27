@@ -124,7 +124,7 @@ router.post('/', async (req, res) => {
     return res.json({ reply: smartFallback(q, context || []), source: 'fallback' });
 
   } catch (err) {
-    console.error('Chat route error:', err.message);
+    console.error('[chat route]', err.message);
     return res.json({
       reply: "I'm having trouble right now. Please try again in a moment.",
       source: 'error',

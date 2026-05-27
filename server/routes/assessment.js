@@ -56,8 +56,8 @@ router.post('/', protect, async (req, res) => {
     console.log('Assessment saved to DB, id:', assessment._id);
     res.status(201).json({ message: 'Assessment saved', assessment });
   } catch (error) {
-    console.error('Assessment save error:', error.message, error.stack);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error('[assessment POST]', error.message);
+    res.status(500).json({ message: 'Could not save your assessment. Please try again.' });
   }
 });
 
@@ -71,7 +71,8 @@ router.get('/history', protect, async (req, res) => {
       .limit(20);
     res.json(assessments);
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error('[assessment GET /history]', error.message);
+    res.status(500).json({ message: 'Could not load your history. Please try again.' });
   }
 });
 
@@ -81,10 +82,11 @@ router.get('/history', protect, async (req, res) => {
 router.get('/me', protect, async (req, res) => {
   try {
     const assessment = await Assessment.findOne({ user: req.user._id }).sort({ createdAt: -1 });
-    if (!assessment) return res.status(404).json({ message: 'No assessment found' });
+    if (!assessment) return res.status(404).json({ message: 'No assessment found.' });
     res.json(assessment);
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error('[assessment GET /me]', error.message);
+    res.status(500).json({ message: 'Could not load your assessment. Please try again.' });
   }
 });
 
@@ -98,10 +100,11 @@ router.patch('/:id/results', protect, async (req, res) => {
       { aiResults: req.body },
       { new: true }
     );
-    if (!assessment) return res.status(404).json({ message: 'Assessment not found' });
+    if (!assessment) return res.status(404).json({ message: 'Assessment not found.' });
     res.json({ message: 'Results saved', assessment });
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error('[assessment PATCH /:id/results]', error.message);
+    res.status(500).json({ message: 'Could not save results. Please try again.' });
   }
 });
 
@@ -114,10 +117,11 @@ router.delete('/:id', protect, async (req, res) => {
       _id: req.params.id,
       user: req.user._id,
     });
-    if (!assessment) return res.status(404).json({ message: 'Assessment not found' });
+    if (!assessment) return res.status(404).json({ message: 'Assessment not found.' });
     res.json({ message: 'Assessment deleted' });
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error('[assessment DELETE /:id]', error.message);
+    res.status(500).json({ message: 'Could not delete the assessment. Please try again.' });
   }
 });
 

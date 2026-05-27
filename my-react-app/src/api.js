@@ -6,7 +6,7 @@ const authHeader = () => {
   return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
-// Safely parse JSON — returns null if body is empty
+// Safely parse JSON — returns null if body is empty or unparseable
 const parseJSON = async (res) => {
   const text = await res.text();
   if (!text) return null;
@@ -14,6 +14,26 @@ const parseJSON = async (res) => {
     return JSON.parse(text);
   } catch {
     return null;
+  }
+};
+
+// Map HTTP status codes to user-friendly messages.
+// Server validation messages (4xx with a message field) are passed through as-is.
+// Generic 5xx and network errors get a safe fallback message.
+const friendlyError = (status, serverMessage) => {
+  // Trust explicit server validation messages for 4xx
+  if (status >= 400 && status < 500 && serverMessage) return serverMessage;
+
+  switch (status) {
+    case 401: return 'Your session has expired. Please sign in again.';
+    case 403: return 'You do not have permission to do that.';
+    case 404: return 'The requested resource was not found.';
+    case 429: return 'Too many requests. Please wait a moment and try again.';
+    case 500:
+    case 502:
+    case 503:
+    case 504: return 'Something went wrong on our end. Please try again later.';
+    default:  return serverMessage || 'Something went wrong. Please try again.';
   }
 };
 
@@ -25,7 +45,7 @@ export const registerUser = async (name, email, password) => {
     body: JSON.stringify({ name, email, password }),
   });
   const data = await parseJSON(res);
-  if (!res.ok) throw new Error(data?.message || `Server error (${res.status})`);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
   return data;
 };
 
@@ -37,7 +57,7 @@ export const loginUser = async (email, password) => {
     body: JSON.stringify({ email, password }),
   });
   const data = await parseJSON(res);
-  if (!res.ok) throw new Error(data?.message || `Server error (${res.status})`);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
   return data;
 };
 
@@ -52,7 +72,7 @@ export const saveAssessment = async (assessmentData) => {
     body: JSON.stringify(assessmentData),
   });
   const data = await parseJSON(res);
-  if (!res.ok) throw new Error(data?.message || `Server error (${res.status})`);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
   return data;
 };
 
@@ -67,7 +87,7 @@ export const getRecommendations = async (assessmentData) => {
     body: JSON.stringify(assessmentData),
   });
   const data = await parseJSON(res);
-  if (!res.ok) throw new Error(data?.message || `Server error (${res.status})`);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
   return data;
 };
 
@@ -77,7 +97,7 @@ export const getHistory = async () => {
     headers: { ...authHeader() },
   });
   const data = await parseJSON(res);
-  if (!res.ok) throw new Error(data?.message || `Server error (${res.status})`);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
   return data;
 };
 
@@ -89,7 +109,7 @@ export const saveAssessmentResults = async (assessmentId, results) => {
     body: JSON.stringify(results),
   });
   const data = await parseJSON(res);
-  if (!res.ok) throw new Error(data?.message || `Server error (${res.status})`);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
   return data;
 };
 
@@ -100,7 +120,7 @@ export const deleteAssessment = async (assessmentId) => {
     headers: { ...authHeader() },
   });
   const data = await parseJSON(res);
-  if (!res.ok) throw new Error(data?.message || `Server error (${res.status})`);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
   return data;
 };
 
@@ -112,6 +132,6 @@ export const sendChatMessage = async (message, context = [], history = []) => {
     body: JSON.stringify({ message, context, history }),
   });
   const data = await parseJSON(res);
-  if (!res.ok) throw new Error(data?.message || `Server error (${res.status})`);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
   return data;
 };

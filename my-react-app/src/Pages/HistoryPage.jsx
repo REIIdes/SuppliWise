@@ -104,7 +104,14 @@ function HistoryPage() {
         </div>
 
         {loading && <p className="history-status">Loading history...</p>}
-        {error && <p className="history-status error">{error}</p>}
+        {error && (
+          <div className="history-error-box">
+            <div className="history-error-icon">⚠️</div>
+            <p className="history-error-title">Could not load your history</p>
+            <p className="history-error-msg">{error}</p>
+            <button className="btn-primary" onClick={() => window.location.reload()}>Try Again</button>
+          </div>
+        )}
         {!loading && !error && history.length === 0 && (
           <div className="history-empty">
             <div className="history-empty-icon">📋</div>

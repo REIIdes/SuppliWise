@@ -735,7 +735,13 @@ function AssessmentPage() {
       sessionStorage.removeItem(SESSION_KEY);
       navigate('/results', { state: { recommendations, assessment: formData } });
     } catch (err) {
-      setSubmitError(err.message);
+      // Show a friendly message — never expose raw server/network errors
+      const msg = err.message || '';
+      if (msg.toLowerCase().includes('network') || msg.toLowerCase().includes('fetch')) {
+        setSubmitError('Unable to connect. Please check your internet connection and try again.');
+      } else {
+        setSubmitError(err.message || 'Something went wrong. Please try again.');
+      }
     } finally {
       setSubmitting(false);
     }
