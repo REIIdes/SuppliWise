@@ -117,13 +117,26 @@
 .confidence-bar-wrap { display: flex; align-items: center; gap: 8px; }
 .confidence-bar-track {
   flex: 1;
-  height: 5px;
+  height: 6px;
   background: #f3f4f6;
   border-radius: 999px;
   overflow: hidden;
 }
-.confidence-bar-fill { height: 100%; border-radius: 999px; transition: width 0.5s ease; }
-.confidence-label { font-size: 11px; font-weight: 700; white-space: nowrap; }
+.confidence-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.7s cubic-bezier(0.25, 1, 0.5, 1);
+  width: 0%;
+}
+.confidence-bar-fill.done {
+  animation: bar-pulse 0.4s ease 0.7s 1;
+}
+@keyframes bar-pulse {
+  0%   { opacity: 1; }
+  50%  { opacity: 0.6; }
+  100% { opacity: 1; }
+}
+.confidence-label { font-size: 11px; font-weight: 700; white-space: nowrap; min-width: 56px; text-align: right; }
 
 /* Triggered by */
 .rec-triggered {

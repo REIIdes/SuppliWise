@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import './ResultsPage.css';
@@ -24,19 +24,54 @@ function getSupplementIcon(name) {
   return '💊';
 }
 
-function ConfidenceBar({ score }) {
+function ConfidenceBar({ score, delay = 0 }) {
+  const [width, setWidth] = useState(0);
+  const [displayed, setDisplayed] = useState(0);
+  const rafRef = useRef(null);
+
+  // Animate the bar fill after mount (with optional stagger delay)
+  useEffect(() => {
+    const timer = setTimeout(() => setWidth(score), delay);
+    return () => clearTimeout(timer);
+  }, [score, delay]);
+
+  // Count-up the number in sync with the bar
+  useEffect(() => {
+    if (width === 0) { setDisplayed(0); return; }
+    const duration = 700; // ms — matches CSS transition
+    const start = performance.now();
+    const from = displayed;
+
+    const tick = (now) => {
+      const elapsed = now - start;
+      const progress = Math.min(elapsed / duration, 1);
+      // ease-out curve
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setDisplayed(Math.round(from + (score - from) * eased));
+      if (progress < 1) rafRef.current = requestAnimationFrame(tick);
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [width]);
+
   const color = score >= 85 ? '#22c55e' : score >= 75 ? '#d97706' : '#6b7280';
+
   return (
     <div className="confidence-bar-wrap">
       <div className="confidence-bar-track">
-        <div className="confidence-bar-fill" style={{ width: `${score}%`, background: color }} />
+        <div
+          className="confidence-bar-fill"
+          style={{ width: `${width}%`, background: color }}
+        />
       </div>
-      <span className="confidence-label" style={{ color }}>{score}% match</span>
+      <span className="confidence-label" style={{ color }}>{displayed}% match</span>
     </div>
   );
 }
 
-function SupplementCard({ rec }) {
+function SupplementCard({ rec, index = 0 }) {
   const [expanded, setExpanded] = useState(false);
   const icon = getSupplementIcon(rec.name);
   const pColor = priorityColor[rec.priority] || '#6b7280';
@@ -61,7 +96,7 @@ function SupplementCard({ rec }) {
         </div>
       </div>
 
-      {rec.confidenceScore && <ConfidenceBar score={rec.confidenceScore} />}
+      {rec.confidenceScore && <ConfidenceBar score={rec.confidenceScore} delay={index * 120} />}
 
       {rec.triggeredBy && (
         <div className="rec-triggered">
@@ -176,7 +211,7 @@ function ResultsPage() {
             <div className="results-section-title">💊 Priority Supplements</div>
             <p className="results-section-sub">These are most relevant to your reported symptoms and health profile.</p>
             <div className="results-grid">
-              {highPriority.map((rec, i) => <SupplementCard key={i} rec={rec} />)}
+              {highPriority.map((rec, i) => <SupplementCard key={i} rec={rec} index={i} />)}
             </div>
           </>
         )}
@@ -187,7 +222,7 @@ function ResultsPage() {
             <div className="results-section-title">✨ Optional Supplements</div>
             <p className="results-section-sub">These may provide additional support based on your goals and lifestyle.</p>
             <div className="results-grid">
-              {otherPriority.map((rec, i) => <SupplementCard key={i} rec={rec} />)}
+              {otherPriority.map((rec, i) => <SupplementCard key={i} rec={rec} index={highPriority.length + i} />)}
             </div>
           </>
         )}
