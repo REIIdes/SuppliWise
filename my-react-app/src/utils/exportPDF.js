@@ -322,16 +322,6 @@ export function exportResultsToPDF(recommendations, assessment) {
           }
         }
       },
-      didDrawCell(data) {
-        // Draw a small coloured dot before priority text
-        if (data.column.index === 1 && data.section === 'body') {
-          const rgb = PRIORITY_COLORS[data.cell.raw];
-          if (rgb) {
-            doc.setFillColor(...rgb);
-            doc.circle(data.cell.x + 3, data.cell.y + data.cell.height / 2, 1.2, 'F');
-          }
-        }
-      },
     });
     y = doc.lastAutoTable.finalY + 8;
   }
