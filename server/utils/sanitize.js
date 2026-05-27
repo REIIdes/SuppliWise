@@ -4,7 +4,6 @@
  */
 
 const SPELLING_FIXES = {
-  // Health/supplement misspellings
   tireed: 'tired', tierd: 'tired',
   fatige: 'fatigue', fatique: 'fatigue',
   vitamen: 'vitamin', vitamn: 'vitamin',
@@ -26,18 +25,16 @@ const SPELLING_FIXES = {
   anxeity: 'anxiety', anixety: 'anxiety',
   depresion: 'depression', deppression: 'depression',
   excersize: 'exercise', excercise: 'exercise',
-  // Food/allergy
   'sea food': 'seafood', 'sea foods': 'seafood',
   diary: 'dairy', 'diary products': 'dairy products',
   shelfish: 'shellfish', 'shell fish': 'shellfish',
   'pea nuts': 'peanuts', 'pea nut': 'peanut',
   'tree nut': 'tree nuts',
   'soy bean': 'soy', soya: 'soy',
-  // Common body/symptom terms
   headche: 'headache', headach: 'headache',
   stomache: 'stomach', stomack: 'stomach',
   dizyness: 'dizziness', dizzines: 'dizziness',
-  inflamation: 'inflammation', inflamation: 'inflammation',
+  inflamation: 'inflammation',
   sweling: 'swelling', swolen: 'swollen',
   numbnes: 'numbness', numness: 'numbness',
   weekness: 'weakness', weaknes: 'weakness',
@@ -45,13 +42,15 @@ const SPELLING_FIXES = {
   diareah: 'diarrhea',
   vommiting: 'vomiting', vomitting: 'vomiting',
   nausia: 'nausea',
-  // Tagalog/Filipino common health terms → English
   masakit: 'pain', sumasakit: 'painful',
   nahihilo: 'dizziness', pagod: 'fatigue', napapagod: 'fatigue',
   gutom: 'hunger', uhaw: 'thirst',
   nilalagnat: 'fever', lagnat: 'fever',
   sipon: 'runny nose', ubo: 'cough',
   sakit: 'pain', 'may sakit': 'illness',
+  hirap: 'difficulty', mahirap: 'difficulty',
+  naiinis: 'irritability', inis: 'irritability',
+  takot: 'anxiety', kinakabahan: 'nervousness',
 };
 
 const SLANG_TO_CLINICAL = {
@@ -119,40 +118,114 @@ const SLANG_TO_CLINICAL = {
   'losing hair': 'hair loss',
 };
 
+// ── Common English words (enough to detect real sentences) ─────────────────
+// If a text has NONE of these, it's likely nonsense
+const COMMON_WORDS = new Set([
+  'i','im','ive','my','me','the','a','an','is','am','are','was','were','be',
+  'been','have','has','had','do','does','did','will','would','could','should',
+  'can','may','might','shall','not','no','yes','and','or','but','so','if',
+  'in','on','at','to','for','of','with','by','from','up','about','into',
+  'feel','feeling','felt','pain','ache','hurt','hurts','tired','fatigue',
+  'sick','ill','weak','dizzy','nausea','headache','stomach','back','chest',
+  'sleep','sleeping','slept','eat','eating','ate','drink','drinking','drank',
+  'body','head','leg','arm','hand','foot','eye','ear','nose','throat','skin',
+  'blood','heart','lung','liver','kidney','bone','muscle','joint','nerve',
+  'health','medical','doctor','hospital','medicine','medication','drug',
+  'vitamin','supplement','allergy','allergic','condition','disease','symptom',
+  'weight','height','age','diet','exercise','stress','anxiety','depression',
+  'always','often','sometimes','never','daily','every','since','after','before',
+  'very','really','quite','much','more','less','little','lot','some','any',
+  'been','getting','having','taking','using','trying','started','stopped',
+  'worse','better','severe','mild','moderate','chronic','acute',
+  // Tagalog common words
+  'ako','ko','ng','sa','na','at','ay','ang','mga','ito','iyon','siya',
+  'niya','namin','natin','nila','kami','kayo','sila','hindi','oo','wala',
+  'mahal','mabuti','masama','malaki','maliit','bago','luma','puti','itim',
+]);
+
 /**
- * Detects if text is garbage (button mashing, symbols, nonsense).
+ * Checks if a string of words contains at least one recognizable word.
+ * "Niduwahjkwd" → false (no real words)
+ * "I feel tired" → true
+ */
+function hasRealWords(text) {
+  const words = text.toLowerCase().replace(/[^a-z\s]/g, '').split(/\s+/).filter(Boolean);
+  if (words.length === 0) return false;
+
+  // Check against known words
+  const knownCount = words.filter(w => COMMON_WORDS.has(w)).length;
+  if (knownCount > 0) return true;
+
+  // Also accept if any word is 3+ chars and looks like a real word
+  // (not random consonant clusters like "nkwdjf")
+  // Real words tend to have vowels
+  const hasVowelWord = words.some(w => {
+    if (w.length < 3) return false;
+    const vowels = (w.match(/[aeiou]/g) || []).length;
+    const vowelRatio = vowels / w.length;
+    // Real words typically have 20-60% vowels
+    return vowelRatio >= 0.2 && vowelRatio <= 0.7;
+  });
+
+  return hasVowelWord;
+}
+
+/**
+ * Detects if text is garbage (button mashing, symbols, nonsense, random strings).
  * Returns true if the text should be rejected/cleared.
  */
 function isGarbage(text) {
   if (!text || !text.trim()) return false;
   const t = text.trim();
   if (t.length < 3) return true;
-  // All same character repeated: "aaaaaaa", "!!!!!!"
+
+  // All same character: "aaaaaaa", "!!!!!!"
   if (/^(.)\1{4,}$/.test(t)) return true;
-  // Only symbols/numbers, no real words
+
+  // Only symbols/numbers, no letters
   if (/^[^a-zA-Z]+$/.test(t)) return true;
+
   // Keyboard mashing patterns
   if (/^(asdf|qwerty|zxcv|hjkl|uiop|bnm|1234|abcd)/i.test(t)) return true;
+
   // Repeated word spam: "test test test test"
   if (/^(\w+\s+)\1{3,}$/.test(t)) return true;
-  // Less than 20% actual letters (mostly symbols/numbers)
+
+  // Less than 20% actual letters
   const letters = (t.match(/[a-zA-Z]/g) || []).length;
   if (letters / t.length < 0.2) return true;
+
+  // ── Key check: does it contain any real words? ──
+  // Split into individual "words" and check each one
+  const words = t.split(/\s+/);
+
+  // If it's a single word with no vowels or weird consonant cluster → garbage
+  if (words.length === 1) {
+    const w = words[0].toLowerCase();
+    const vowels = (w.match(/[aeiou]/g) || []).length;
+    const vowelRatio = vowels / w.length;
+    // Single word with < 15% vowels is almost certainly random (e.g. "nkwdjfhsd")
+    if (vowelRatio < 0.15) return true;
+    // Single word > 12 chars with no spaces is suspicious unless it's a known word
+    if (w.length > 12 && !COMMON_WORDS.has(w)) return true;
+  }
+
+  // Multi-word: if NO word is recognizable, it's garbage
+  if (!hasRealWords(t)) return true;
+
   return false;
 }
 
 /**
  * Sanitizes a free-text field:
- * - Returns empty string if garbage
- * - Fixes spelling mistakes
- * - Converts slang to clinical language
- * - Normalizes whitespace and capitalizes
+ * - Returns { value: '', garbage: true } if garbage detected
+ * - Returns { value: cleanedText, garbage: false } otherwise
  */
 function sanitizeTextField(text) {
-  if (!text || typeof text !== 'string') return '';
+  if (!text || typeof text !== 'string') return { value: '', garbage: false };
   const trimmed = text.trim();
-  if (!trimmed) return '';
-  if (isGarbage(trimmed)) return '';
+  if (!trimmed) return { value: '', garbage: false };
+  if (isGarbage(trimmed)) return { value: '', garbage: true };
 
   let cleaned = trimmed.replace(/\s+/g, ' ');
 
@@ -160,7 +233,7 @@ function sanitizeTextField(text) {
   cleaned = cleaned.replace(/\b(like|um|uh|you know|basically|literally)\b/gi, '');
   cleaned = cleaned.replace(/\s+/g, ' ').trim();
 
-  // Apply spelling fixes (longer phrases first to avoid partial matches)
+  // Apply spelling fixes (longer phrases first)
   const spellingEntries = Object.entries(SPELLING_FIXES).sort((a, b) => b[0].length - a[0].length);
   for (const [wrong, correct] of spellingEntries) {
     const regex = new RegExp(`\\b${wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
@@ -180,18 +253,17 @@ function sanitizeTextField(text) {
   // Capitalize first letter of sentences
   cleaned = cleaned.replace(/(^\w|[.!?]\s+\w)/g, m => m.toUpperCase());
 
-  return cleaned.trim();
+  return { value: cleaned.trim(), garbage: false };
 }
 
 /**
  * Sanitizes a short field (medications, allergies, supplements).
- * Less aggressive — just fixes spelling and normalizes whitespace.
  */
 function sanitizeShortField(text) {
-  if (!text || typeof text !== 'string') return text;
+  if (!text || typeof text !== 'string') return { value: text || '', garbage: false };
   const trimmed = text.trim();
-  if (!trimmed) return '';
-  if (isGarbage(trimmed)) return '';
+  if (!trimmed) return { value: '', garbage: false };
+  if (isGarbage(trimmed)) return { value: '', garbage: true };
 
   let cleaned = trimmed.replace(/\s+/g, ' ');
 
@@ -201,7 +273,7 @@ function sanitizeShortField(text) {
     cleaned = cleaned.replace(regex, correct);
   }
 
-  return cleaned.trim();
+  return { value: cleaned.trim(), garbage: false };
 }
 
 module.exports = { sanitizeTextField, sanitizeShortField, isGarbage };

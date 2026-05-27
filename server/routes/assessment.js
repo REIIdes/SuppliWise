@@ -39,12 +39,19 @@ router.post('/', protect, async (req, res) => {
       return res.status(400).json({ message: `Current supplements must be ${SHORT_MAX} characters or fewer.` });
 
     // ── Sanitize all free-text fields before saving ──────────────────────
-    // Garbage input is cleared; spelling/slang is fixed; whitespace normalized
-    const cleanedDescription   = sanitizeTextField(feelingDescription);
-    const cleanedMedications   = sanitizeShortField(currentMedications);
-    const cleanedAllergies     = sanitizeShortField(allergies);
-    const cleanedSupplements   = sanitizeShortField(currentSupplements);
-    const cleanedBloodResults  = sanitizeTextField(req.body.bloodTestResults);
+    const descResult        = sanitizeTextField(feelingDescription);
+    const medsResult        = sanitizeShortField(currentMedications);
+    const allergiesResult   = sanitizeShortField(allergies);
+    const suppsResult       = sanitizeShortField(currentSupplements);
+    const bloodResult       = sanitizeTextField(req.body.bloodTestResults);
+
+    // Track which fields had garbage so the frontend can warn the user
+    const garbageFields = [];
+    if (descResult.garbage)     garbageFields.push('feelingDescription');
+    if (medsResult.garbage)     garbageFields.push('currentMedications');
+    if (allergiesResult.garbage) garbageFields.push('allergies');
+    if (suppsResult.garbage)    garbageFields.push('currentSupplements');
+    if (bloodResult.garbage)    garbageFields.push('bloodTestResults');
 
     const assessment = await Assessment.create({
       user: req.user._id,
@@ -54,21 +61,21 @@ router.post('/', protect, async (req, res) => {
       dietType, healthGoals,
       symptoms, symptomSeverity, stressLevel, sleepQuality, waterIntake,
       medicalConditions,
-      currentMedications: cleanedMedications,
-      allergies: cleanedAllergies,
-      feelingDescription: cleanedDescription,
+      currentMedications: medsResult.value,
+      allergies: allergiesResult.value,
+      feelingDescription: descResult.value,
       lifestyleHabits, pregnancyStatus,
       takingSupplements,
-      currentSupplements: cleanedSupplements,
+      currentSupplements: suppsResult.value,
       recentBloodTest,
-      bloodTestResults: cleanedBloodResults,
+      bloodTestResults: bloodResult.value,
       sunExposure: req.body.sunExposure,
       fitnessFocus: req.body.fitnessFocus,
       proteinIntake: req.body.proteinIntake,
     });
 
     console.log('Assessment saved to DB, id:', assessment._id);
-    res.status(201).json({ message: 'Assessment saved', assessment });
+    res.status(201).json({ message: 'Assessment saved', assessment, garbageFields });
   } catch (error) {
     console.error('[assessment POST]', error.message);
     res.status(500).json({ message: 'Could not save your assessment. Please try again.' });

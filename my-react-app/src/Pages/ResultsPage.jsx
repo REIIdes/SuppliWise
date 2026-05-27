@@ -157,7 +157,7 @@ function SupplementCard({ rec, index = 0 }) {
 function ResultsPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { recommendations: r, assessment } = location.state || {};
+  const { recommendations: r, assessment, garbageFields = [] } = location.state || {};
   const [exporting, setExporting] = useState(false);
 
   const handleExportPDF = async () => {
@@ -216,6 +216,27 @@ function ResultsPage() {
           <h2>Your Personalized Health Plan</h2>
           <p className="results-summary">{r.summary}</p>
         </div>
+
+        {/* Garbage input warning */}
+        {garbageFields.length > 0 && (
+          <div className="results-garbage-warning">
+            <span className="results-garbage-icon">⚠️</span>
+            <div>
+              <strong>Some of your inputs were unreadable and could not be used.</strong>
+              <p>
+                The following {garbageFields.length === 1 ? 'field' : 'fields'} contained unrecognizable text and {garbageFields.length === 1 ? 'was' : 'were'} cleared:{' '}
+                <strong>{garbageFields.map(f => ({
+                  feelingDescription: 'Health Concerns',
+                  currentMedications: 'Current Medications',
+                  allergies: 'Allergies',
+                  currentSupplements: 'Current Supplements',
+                  bloodTestResults: 'Blood Test Results',
+                }[f] || f)).join(', ')}</strong>.
+                Please retake the assessment and describe your health concerns in plain words for more accurate recommendations.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* High Priority Supplements */}
         {highPriority.length > 0 && (

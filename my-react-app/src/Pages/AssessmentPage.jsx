@@ -784,26 +784,21 @@ function AssessmentPage() {
 
     setSubmitting(true);
     try {
-      // Step 1: Save assessment — retry once on failure so it always records
       let assessmentId = null;
+      let garbageFields = [];
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
           const saveResult = await saveAssessment(formData);
           assessmentId = saveResult?.assessment?._id;
+          garbageFields = saveResult?.garbageFields || [];
           if (assessmentId) break;
         } catch (saveErr) {
           console.error(`Assessment save attempt ${attempt} failed:`, saveErr.message);
-          if (attempt === 2) {
-            // Still don't block the user — log but continue
-            console.error('Assessment could not be saved after 2 attempts. Continuing to get recommendations.');
-          }
         }
       }
 
-      // Step 2: Get AI recommendations
       const recommendations = await getRecommendations(formData);
 
-      // Step 3: Attach AI results to the saved assessment
       if (assessmentId) {
         try {
           await saveAssessmentResults(assessmentId, recommendations);
@@ -813,7 +808,7 @@ function AssessmentPage() {
       }
 
       sessionStorage.removeItem(SESSION_KEY);
-      navigate('/results', { state: { recommendations, assessment: formData } });
+      navigate('/results', { state: { recommendations, assessment: formData, garbageFields } });
     } catch (err) {
       // Show a friendly message — never expose raw server/network errors
       const msg = err.message || '';
