@@ -7,6 +7,7 @@ const authRoutes = require('./routes/auth');
 const assessmentRoutes = require('./routes/assessment');
 const recommendRoutes = require('./routes/recommend');
 const chatRoutes = require('./routes/chat');
+const polishRoutes = require('./routes/polish');
 
 const app = express();
 
@@ -19,6 +20,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/assessment', assessmentRoutes);
 app.use('/api/recommend', recommendRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/polish', polishRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

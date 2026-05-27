@@ -328,3 +328,106 @@
   margin-bottom: 16px;
   font-family: sans-serif;
 }
+
+/* ── AI Polish Textarea ── */
+.polish-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.polish-textarea-wrap {
+  position: relative;
+}
+
+.polish-wrap textarea {
+  padding: 10px 14px;
+  border: none;
+  border-radius: 8px;
+  background: #f3f4f6;
+  font-size: 14px;
+  color: #111827;
+  font-family: sans-serif;
+  outline: none;
+  resize: vertical;
+  transition: box-shadow 0.2s;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.polish-wrap textarea:focus {
+  box-shadow: 0 0 0 2px #4ade80;
+}
+
+/* Spinner shown inside the textarea corner while polishing */
+.polish-indicator {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(255,255,255,0.85);
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: #16a34a;
+  font-family: sans-serif;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.polish-footer {
+  display: flex;
+  align-items: center;
+}
+
+@keyframes polish-spin {
+  to { transform: rotate(360deg); }
+}
+
+.polish-spinner {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border: 2px solid #bbf7d0;
+  border-top-color: #16a34a;
+  border-radius: 50%;
+  animation: polish-spin 0.7s linear infinite;
+}
+
+.polish-status {
+  font-size: 12.5px;
+  border-radius: 6px;
+  padding: 7px 12px;
+  font-family: sans-serif;
+  line-height: 1.5;
+}
+
+.polish-status--success {
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.polish-status--warn {
+  background: #fff7ed;
+  color: #92400e;
+  border: 1px solid #fed7aa;
+}
+
+.polish-undo {
+  background: none;
+  border: none;
+  color: #16a34a;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  font-family: sans-serif;
+}
+
+.polish-undo:hover {
+  color: #15803d;
+}
