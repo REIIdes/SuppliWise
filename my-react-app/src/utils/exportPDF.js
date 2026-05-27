@@ -1,393 +1,574 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// ── Colour palette ─────────────────────────────────────────────────────────
-const GREEN       = [34, 197, 94];
-const GREEN_DARK  = [22, 163, 74];
-const GREEN_LIGHT = [240, 253, 244];
-const GRAY_DARK   = [17, 24, 39];
-const GRAY_MID    = [75, 85, 99];
-const GRAY_LIGHT  = [243, 244, 246];
-const RED_LIGHT   = [254, 242, 242];
-const RED_MID     = [153, 27, 27];
-const AMBER_LIGHT = [255, 247, 237];
-const AMBER_MID   = [146, 64, 14];
-const WHITE       = [255, 255, 255];
+// ── Palette ────────────────────────────────────────────────────────────────
+const C = {
+  green:       [34, 197, 94],
+  greenDark:   [22, 163, 74],
+  greenDeep:   [20, 83, 45],
+  greenLight:  [240, 253, 244],
+  greenBorder: [187, 247, 208],
+  white:       [255, 255, 255],
+  grayDark:    [17, 24, 39],
+  grayMid:     [107, 114, 128],
+  grayLight:   [249, 250, 251],
+  grayBorder:  [229, 231, 235],
+  redLight:    [254, 242, 242],
+  redMid:      [185, 28, 28],
+  redBorder:   [252, 165, 165],
+  amberDark:   [180, 83, 9],
+  amberLight:  [255, 251, 235],
+  blueDark:    [30, 64, 175],
+  blueLight:   [239, 246, 255],
+  blueBorder:  [191, 219, 254],
+};
 
-const PRIORITY_COLOR = {
+const PRIORITY_COLORS = {
   High:   [220, 38, 38],
   Medium: [217, 119, 6],
   Low:    [107, 114, 128],
 };
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-function hex(rgb) {
-  return '#' + rgb.map(v => v.toString(16).padStart(2, '0')).join('');
+// ── Utilities ──────────────────────────────────────────────────────────────
+const PAGE_W = 210;
+const PAGE_H = 297;
+const ML = 14;   // margin left
+const MR = 14;   // margin right
+const CW = PAGE_W - ML - MR;  // content width = 182mm
+
+function addPage(doc) {
+  doc.addPage();
+  return 18;
 }
 
-function wrap(doc, text, x, y, maxWidth, lineHeight = 5) {
-  const lines = doc.splitTextToSize(String(text || ''), maxWidth);
-  doc.text(lines, x, y);
-  return y + lines.length * lineHeight;
-}
-
-function sectionTitle(doc, text, y, pageW) {
-  doc.setFillColor(...GREEN_LIGHT);
-  doc.rect(14, y - 4, pageW - 28, 9, 'F');
-  doc.setDrawColor(...GREEN);
-  doc.setLineWidth(0.5);
-  doc.line(14, y - 4, 14, y + 5);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
-  doc.setTextColor(...GREEN_DARK);
-  doc.text(text, 18, y + 1);
-  doc.setTextColor(...GRAY_DARK);
-  return y + 10;
-}
-
-function checkPage(doc, y, needed = 20) {
-  if (y + needed > doc.internal.pageSize.height - 20) {
-    doc.addPage();
-    return 20;
-  }
+function checkY(doc, y, needed) {
+  if (y + needed > PAGE_H - 18) return addPage(doc);
   return y;
 }
 
-// ── Main export function ───────────────────────────────────────────────────
-export function exportResultsToPDF(recommendations, assessment) {
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-  const pageW = doc.internal.pageSize.width;
-  const pageH = doc.internal.pageSize.height;
-  const margin = 14;
-  const contentW = pageW - margin * 2;
-  let y = 0;
+// Draws a left-accented section heading (no emoji)
+function sectionHeading(doc, label, y) {
+  y = checkY(doc, y, 14);
 
-  // ── Cover header ──────────────────────────────────────────────────────
-  doc.setFillColor(...GREEN);
-  doc.rect(0, 0, pageW, 38, 'F');
+  // Accent bar
+  doc.setFillColor(...C.green);
+  doc.rect(ML, y, 3, 8, 'F');
 
+  // Label
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(22);
-  doc.setTextColor(...WHITE);
-  doc.text('SuppliWise', margin, 16);
+  doc.setFontSize(11);
+  doc.setTextColor(...C.greenDeep);
+  doc.text(label.toUpperCase(), ML + 6, y + 5.8);
+
+  // Underline
+  doc.setDrawColor(...C.greenBorder);
+  doc.setLineWidth(0.3);
+  doc.line(ML, y + 9, ML + CW, y + 9);
+
+  return y + 14;
+}
+
+// Draws a small key-value row inline
+function kvRow(doc, key, value, y, keyW = 42) {
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(...C.grayMid);
+  doc.text(key, ML, y);
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(11);
-  doc.text('Personalized Supplement & Wellness Report', margin, 24);
+  doc.setTextColor(...C.grayDark);
+  const lines = doc.splitTextToSize(String(value || ''), CW - keyW);
+  doc.text(lines, ML + keyW, y);
+  return y + lines.length * 5 + 1.5;
+}
 
+// Pill badge (coloured rounded rect + text)
+function pill(doc, text, x, y, rgb) {
+  const w = doc.getTextWidth(text) + 6;
+  doc.setFillColor(rgb[0], rgb[1], rgb[2], 0.12);
+  doc.setDrawColor(...rgb);
+  doc.setLineWidth(0.3);
+  doc.roundedRect(x, y - 3.5, w, 5.5, 1.5, 1.5, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(...rgb);
+  doc.text(text, x + 3, y + 0.5);
+  return x + w + 3;
+}
+
+// ── Footer on every page ───────────────────────────────────────────────────
+function drawFooters(doc) {
+  const total = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= total; p++) {
+    doc.setPage(p);
+    doc.setFillColor(...C.greenDeep);
+    doc.rect(0, PAGE_H - 9, PAGE_W, 9, 'F');
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7);
+    doc.setTextColor(...C.white);
+    doc.text('SuppliWise  |  Educational purposes only. Not medical advice.', ML, PAGE_H - 3.2);
+    doc.text(`Page ${p} / ${total}`, PAGE_W - MR, PAGE_H - 3.2, { align: 'right' });
+  }
+}
+
+// ── Main export ────────────────────────────────────────────────────────────
+export function exportResultsToPDF(recommendations, assessment) {
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
+  let y = 0;
+
+  // ── COVER HEADER ────────────────────────────────────────────────────────
+  // Full-width green band
+  doc.setFillColor(...C.green);
+  doc.rect(0, 0, PAGE_W, 42, 'F');
+
+  // Logo text
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(26);
+  doc.setTextColor(...C.white);
+  doc.text('SuppliWise', ML, 18);
+
+  // Subtitle
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(11);
+  doc.setTextColor(220, 252, 231);
+  doc.text('Personalized Supplement & Wellness Report', ML, 27);
+
+  // Date — right aligned
   const dateStr = new Date().toLocaleDateString('en-US', {
     year: 'numeric', month: 'long', day: 'numeric',
   });
-  doc.setFontSize(9);
-  doc.setTextColor(220, 252, 231);
-  doc.text(`Generated: ${dateStr}`, margin, 32);
+  doc.setFontSize(8.5);
+  doc.setTextColor(187, 247, 208);
+  doc.text(dateStr, PAGE_W - MR, 36, { align: 'right' });
 
-  y = 46;
+  // Thin accent line below header
+  doc.setFillColor(...C.greenDark);
+  doc.rect(0, 42, PAGE_W, 1.5, 'F');
 
-  // ── Disclaimer banner ─────────────────────────────────────────────────
-  doc.setFillColor(239, 246, 255);
-  doc.setDrawColor(191, 219, 254);
+  y = 52;
+
+  // ── DISCLAIMER ──────────────────────────────────────────────────────────
+  doc.setFillColor(...C.blueLight);
+  doc.setDrawColor(...C.blueBorder);
   doc.setLineWidth(0.3);
-  doc.roundedRect(margin, y, contentW, 10, 2, 2, 'FD');
+  doc.roundedRect(ML, y, CW, 11, 2, 2, 'FD');
+  doc.setFillColor(...C.blueDark);
+  doc.rect(ML, y, 2.5, 11, 'F');
   doc.setFont('helvetica', 'italic');
-  doc.setFontSize(8);
-  doc.setTextColor(30, 64, 175);
+  doc.setFontSize(7.8);
+  doc.setTextColor(...C.blueDark);
   doc.text(
-    'Educational & wellness purposes only. Not a substitute for professional medical advice. Consult a licensed healthcare provider before starting any supplement.',
-    margin + 3, y + 6.5,
-    { maxWidth: contentW - 6 }
+    'For educational and wellness purposes only. This report does not diagnose, treat, or cure any disease. Always consult a licensed healthcare professional before starting any supplement regimen.',
+    ML + 5, y + 4,
+    { maxWidth: CW - 7, lineHeightFactor: 1.5 }
   );
-  y += 16;
+  y += 17;
 
-  // ── Clinical summary ──────────────────────────────────────────────────
+  // ── CLINICAL SUMMARY ────────────────────────────────────────────────────
   if (recommendations.summary) {
-    y = sectionTitle(doc, '📋  Clinical Summary', y, pageW);
+    y = sectionHeading(doc, 'Clinical Summary', y);
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9.5);
-    doc.setTextColor(...GRAY_MID);
-    y = wrap(doc, recommendations.summary, margin, y, contentW, 5.5);
-    y += 6;
+    doc.setFontSize(9);
+    doc.setTextColor(...C.grayMid);
+    const lines = doc.splitTextToSize(recommendations.summary, CW);
+    doc.text(lines, ML, y);
+    y += lines.length * 5 + 6;
   }
 
-  // ── Consult doctor alert ──────────────────────────────────────────────
+  // ── CONSULT DOCTOR ALERT ─────────────────────────────────────────────────
   if (recommendations.consultDoctor && recommendations.consultReason) {
-    y = checkPage(doc, y, 18);
-    doc.setFillColor(...RED_LIGHT);
-    doc.setDrawColor(252, 165, 165);
-    doc.roundedRect(margin, y, contentW, 14, 2, 2, 'FD');
+    y = checkY(doc, y, 20);
+    doc.setFillColor(...C.redLight);
+    doc.setDrawColor(...C.redBorder);
+    doc.setLineWidth(0.4);
+    doc.roundedRect(ML, y, CW, 16, 2, 2, 'FD');
+    doc.setFillColor(...C.redMid);
+    doc.rect(ML, y, 3, 16, 'F');
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
-    doc.setTextColor(...RED_MID);
-    doc.text('⚠  Medical Consultation Recommended', margin + 3, y + 5);
+    doc.setTextColor(...C.redMid);
+    doc.text('Medical Consultation Recommended', ML + 6, y + 6);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8.5);
     doc.setTextColor(127, 29, 29);
-    doc.text(recommendations.consultReason, margin + 3, y + 11, { maxWidth: contentW - 6 });
-    y += 20;
+    const rLines = doc.splitTextToSize(recommendations.consultReason, CW - 10);
+    doc.text(rLines, ML + 6, y + 12);
+    y += 16 + rLines.length * 4.5 + 4;
   }
 
-  // ── Patient profile ───────────────────────────────────────────────────
+  // ── PATIENT PROFILE ──────────────────────────────────────────────────────
   if (assessment) {
-    y = checkPage(doc, y, 30);
-    y = sectionTitle(doc, '👤  Patient Profile', y, pageW);
+    y = checkY(doc, y, 40);
+    y = sectionHeading(doc, 'Patient Profile', y);
 
-    const profileRows = [];
-    if (assessment.age)           profileRows.push(['Age', `${assessment.age} years`]);
-    if (assessment.gender)        profileRows.push(['Gender', assessment.gender]);
-    if (assessment.weight)        profileRows.push(['Weight', `${assessment.weight} kg`]);
-    if (assessment.height)        profileRows.push(['Height', `${assessment.height} cm`]);
-    if (assessment.activityLevel) profileRows.push(['Activity Level', assessment.activityLevel]);
-    if (assessment.dietType)      profileRows.push(['Diet Type', assessment.dietType]);
-    if (assessment.sleepQuality)  profileRows.push(['Sleep Quality', assessment.sleepQuality]);
-    if (assessment.waterIntake)   profileRows.push(['Water Intake', assessment.waterIntake]);
+    // Two-column grid layout
+    const col1 = [
+      assessment.age     ? ['Age',            `${assessment.age} years`]  : null,
+      assessment.weight  ? ['Weight',          `${assessment.weight} kg`]  : null,
+      assessment.activityLevel ? ['Activity', assessment.activityLevel]    : null,
+      assessment.sleepQuality  ? ['Sleep',    assessment.sleepQuality]     : null,
+    ].filter(Boolean);
 
-    if (profileRows.length > 0) {
-      autoTable(doc, {
-        startY: y,
-        head: [],
-        body: profileRows,
-        theme: 'plain',
-        styles: { fontSize: 9, cellPadding: 2.5, textColor: GRAY_DARK },
-        columnStyles: {
-          0: { fontStyle: 'bold', cellWidth: 45, textColor: GRAY_MID },
-          1: { cellWidth: contentW - 45 },
-        },
-        margin: { left: margin, right: margin },
-        tableWidth: contentW,
-      });
-      y = doc.lastAutoTable.finalY + 4;
+    const col2 = [
+      assessment.gender  ? ['Gender',  assessment.gender]                  : null,
+      assessment.height  ? ['Height',  `${assessment.height} cm`]          : null,
+      assessment.dietType ? ['Diet',   assessment.dietType]                : null,
+      assessment.waterIntake ? ['Water', assessment.waterIntake]           : null,
+    ].filter(Boolean);
+
+    const rows = Math.max(col1.length, col2.length);
+    const colW = CW / 2 - 4;
+
+    for (let i = 0; i < rows; i++) {
+      y = checkY(doc, y, 7);
+      if (col1[i]) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8.5);
+        doc.setTextColor(...C.grayMid);
+        doc.text(col1[i][0], ML, y);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(...C.grayDark);
+        doc.text(String(col1[i][1]), ML + 22, y);
+      }
+      if (col2[i]) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8.5);
+        doc.setTextColor(...C.grayMid);
+        doc.text(col2[i][0], ML + colW + 8, y);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(...C.grayDark);
+        doc.text(String(col2[i][1]), ML + colW + 30, y);
+      }
+      y += 6;
     }
 
+    // Health goals
     if (assessment.healthGoals?.length > 0) {
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8.5);
-      doc.setTextColor(...GRAY_MID);
-      doc.text('Health Goals:', margin, y);
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(...GRAY_DARK);
-      y = wrap(doc, assessment.healthGoals.join('  •  '), margin + 28, y, contentW - 28, 5);
-      y += 3;
+      y = checkY(doc, y, 8);
+      y = kvRow(doc, 'Health Goals', assessment.healthGoals.join('  |  '), y);
     }
 
-    if (assessment.symptoms?.filter(s => s !== 'No current symptoms').length > 0) {
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8.5);
-      doc.setTextColor(...GRAY_MID);
-      doc.text('Symptoms:', margin, y);
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(...GRAY_DARK);
-      y = wrap(doc, assessment.symptoms.filter(s => s !== 'No current symptoms').join('  •  '), margin + 24, y, contentW - 24, 5);
-      y += 4;
+    // Symptoms
+    const symptoms = (assessment.symptoms || []).filter(s => s !== 'No current symptoms');
+    if (symptoms.length > 0) {
+      y = checkY(doc, y, 8);
+      y = kvRow(doc, 'Symptoms', symptoms.join('  |  '), y);
     }
+
+    // Medical conditions
+    const conditions = (assessment.medicalConditions || []).filter(c => c !== 'None');
+    if (conditions.length > 0) {
+      y = checkY(doc, y, 8);
+      y = kvRow(doc, 'Conditions', conditions.join('  |  '), y);
+    }
+
+    y += 4;
   }
 
-  // ── Supplement recommendations ────────────────────────────────────────
+  // ── SUPPLEMENT RECOMMENDATIONS ───────────────────────────────────────────
   if (recommendations.recommendations?.length > 0) {
-    y = checkPage(doc, y, 20);
-    y = sectionTitle(doc, '💊  Supplement Recommendations', y, pageW);
-
-    const tableBody = recommendations.recommendations.map(rec => {
-      const priorityLabel = rec.priority || '';
-      const score = rec.confidenceScore ? `${rec.confidenceScore}%` : '—';
-      const reason = rec.reason || '';
-      const dosage = rec.dosage || '—';
-      const timing = rec.timing || '—';
-      const interactions = (rec.interactions && rec.interactions !== 'None identified') ? rec.interactions : 'None';
-      return [rec.name || '', priorityLabel, score, reason, dosage, timing, interactions];
-    });
+    y = checkY(doc, y, 24);
+    y = sectionHeading(doc, 'Supplement Recommendations', y);
 
     autoTable(doc, {
       startY: y,
       head: [['Supplement', 'Priority', 'Match', 'Reason', 'Dosage', 'Timing', 'Interactions']],
-      body: tableBody,
+      body: recommendations.recommendations.map(rec => [
+        rec.name || '',
+        rec.priority || '',
+        rec.confidenceScore ? `${rec.confidenceScore}%` : '-',
+        rec.reason || '',
+        rec.dosage || '-',
+        rec.timing || '-',
+        (rec.interactions && rec.interactions !== 'None identified') ? rec.interactions : 'None',
+      ]),
       theme: 'grid',
       headStyles: {
-        fillColor: GREEN,
-        textColor: WHITE,
+        fillColor: C.greenDeep,
+        textColor: C.white,
         fontSize: 8,
         fontStyle: 'bold',
-        cellPadding: 3,
+        cellPadding: { top: 4, bottom: 4, left: 3, right: 3 },
+        halign: 'left',
       },
       bodyStyles: {
-        fontSize: 7.5,
-        cellPadding: 2.5,
-        textColor: GRAY_DARK,
+        fontSize: 8,
+        cellPadding: { top: 3, bottom: 3, left: 3, right: 3 },
+        textColor: C.grayDark,
         valign: 'top',
+        lineColor: C.grayBorder,
+        lineWidth: 0.2,
       },
-      alternateRowStyles: { fillColor: GREEN_LIGHT },
+      alternateRowStyles: {
+        fillColor: C.greenLight,
+      },
       columnStyles: {
-        0: { cellWidth: 30, fontStyle: 'bold' },
-        1: { cellWidth: 16 },
-        2: { cellWidth: 12, halign: 'center' },
-        3: { cellWidth: 48 },
+        0: { cellWidth: 32, fontStyle: 'bold' },
+        1: { cellWidth: 18, halign: 'center' },
+        2: { cellWidth: 14, halign: 'center' },
+        3: { cellWidth: 50 },
         4: { cellWidth: 28 },
         5: { cellWidth: 22 },
-        6: { cellWidth: 26 },
+        6: { cellWidth: 18 },
       },
-      margin: { left: margin, right: margin },
-      tableWidth: contentW,
+      margin: { left: ML, right: MR },
+      tableWidth: CW,
       didParseCell(data) {
-        // Colour-code the Priority column
         if (data.column.index === 1 && data.section === 'body') {
-          const val = data.cell.raw;
-          const rgb = PRIORITY_COLOR[val];
+          const rgb = PRIORITY_COLORS[data.cell.raw];
           if (rgb) {
             data.cell.styles.textColor = rgb;
             data.cell.styles.fontStyle = 'bold';
           }
         }
       },
+      didDrawCell(data) {
+        // Draw a small coloured dot before priority text
+        if (data.column.index === 1 && data.section === 'body') {
+          const rgb = PRIORITY_COLORS[data.cell.raw];
+          if (rgb) {
+            doc.setFillColor(...rgb);
+            doc.circle(data.cell.x + 3, data.cell.y + data.cell.height / 2, 1.2, 'F');
+          }
+        }
+      },
     });
-    y = doc.lastAutoTable.finalY + 6;
+    y = doc.lastAutoTable.finalY + 8;
   }
 
-  // ── Daily schedule ────────────────────────────────────────────────────
+  // ── DAILY SCHEDULE ───────────────────────────────────────────────────────
   if (recommendations.dailySchedule?.length > 0) {
-    y = checkPage(doc, y, 20);
-    y = sectionTitle(doc, '🕐  Daily Schedule', y, pageW);
+    y = checkY(doc, y, 24);
+    y = sectionHeading(doc, 'Daily Schedule', y);
 
     autoTable(doc, {
       startY: y,
-      head: [['Time of Day', 'Supplements']],
+      head: [['Time of Day', 'Supplements to Take']],
       body: recommendations.dailySchedule.map(slot => [
         slot.time,
         (slot.supplements || []).join(', '),
       ]),
       theme: 'striped',
-      headStyles: { fillColor: GREEN, textColor: WHITE, fontSize: 8.5, fontStyle: 'bold' },
-      bodyStyles: { fontSize: 8.5, cellPadding: 3, textColor: GRAY_DARK },
-      alternateRowStyles: { fillColor: GREEN_LIGHT },
-      columnStyles: {
-        0: { cellWidth: 40, fontStyle: 'bold' },
-        1: { cellWidth: contentW - 40 },
+      headStyles: {
+        fillColor: C.greenDeep,
+        textColor: C.white,
+        fontSize: 8.5,
+        fontStyle: 'bold',
+        cellPadding: { top: 4, bottom: 4, left: 4, right: 4 },
       },
-      margin: { left: margin, right: margin },
-      tableWidth: contentW,
+      bodyStyles: {
+        fontSize: 8.5,
+        cellPadding: { top: 3.5, bottom: 3.5, left: 4, right: 4 },
+        textColor: C.grayDark,
+        lineColor: C.grayBorder,
+        lineWidth: 0.2,
+      },
+      alternateRowStyles: { fillColor: C.greenLight },
+      columnStyles: {
+        0: { cellWidth: 42, fontStyle: 'bold', textColor: C.greenDark },
+        1: { cellWidth: CW - 42 },
+      },
+      margin: { left: ML, right: MR },
+      tableWidth: CW,
     });
-    y = doc.lastAutoTable.finalY + 6;
+    y = doc.lastAutoTable.finalY + 8;
   }
 
-  // ── Lifestyle advice ──────────────────────────────────────────────────
+  // ── LIFESTYLE ADVICE ─────────────────────────────────────────────────────
   if (recommendations.lifestyleAdvice?.length > 0) {
-    y = checkPage(doc, y, 20);
-    y = sectionTitle(doc, '🌿  Lifestyle Recommendations', y, pageW);
+    y = checkY(doc, y, 24);
+    y = sectionHeading(doc, 'Lifestyle Recommendations', y);
 
     autoTable(doc, {
       startY: y,
       head: [['Category', 'Advice']],
       body: recommendations.lifestyleAdvice.map(item => [item.category, item.advice]),
       theme: 'striped',
-      headStyles: { fillColor: GREEN, textColor: WHITE, fontSize: 8.5, fontStyle: 'bold' },
-      bodyStyles: { fontSize: 8.5, cellPadding: 3, textColor: GRAY_DARK },
-      alternateRowStyles: { fillColor: GREEN_LIGHT },
-      columnStyles: {
-        0: { cellWidth: 35, fontStyle: 'bold', textColor: GREEN_DARK },
-        1: { cellWidth: contentW - 35 },
+      headStyles: {
+        fillColor: C.greenDeep,
+        textColor: C.white,
+        fontSize: 8.5,
+        fontStyle: 'bold',
+        cellPadding: { top: 4, bottom: 4, left: 4, right: 4 },
       },
-      margin: { left: margin, right: margin },
-      tableWidth: contentW,
+      bodyStyles: {
+        fontSize: 8.5,
+        cellPadding: { top: 3.5, bottom: 3.5, left: 4, right: 4 },
+        textColor: C.grayDark,
+        lineColor: C.grayBorder,
+        lineWidth: 0.2,
+      },
+      alternateRowStyles: { fillColor: C.greenLight },
+      columnStyles: {
+        0: { cellWidth: 36, fontStyle: 'bold', textColor: C.greenDark },
+        1: { cellWidth: CW - 36 },
+      },
+      margin: { left: ML, right: MR },
+      tableWidth: CW,
     });
-    y = doc.lastAutoTable.finalY + 6;
+    y = doc.lastAutoTable.finalY + 8;
   }
 
-  // ── Meal recommendations ──────────────────────────────────────────────
+  // ── MEAL RECOMMENDATIONS ─────────────────────────────────────────────────
   if (recommendations.mealRecommendations?.length > 0) {
-    y = checkPage(doc, y, 20);
-    y = sectionTitle(doc, '🍽️  Meal Recommendations', y, pageW);
+    y = checkY(doc, y, 24);
+    y = sectionHeading(doc, 'Meal Recommendations', y);
 
     autoTable(doc, {
       startY: y,
       head: [['Meal', 'Suggestion']],
       body: recommendations.mealRecommendations.map(m => [m.meal, m.suggestion]),
       theme: 'striped',
-      headStyles: { fillColor: [217, 119, 6], textColor: WHITE, fontSize: 8.5, fontStyle: 'bold' },
-      bodyStyles: { fontSize: 8.5, cellPadding: 3, textColor: GRAY_DARK },
-      alternateRowStyles: { fillColor: AMBER_LIGHT },
-      columnStyles: {
-        0: { cellWidth: 28, fontStyle: 'bold', textColor: AMBER_MID },
-        1: { cellWidth: contentW - 28 },
+      headStyles: {
+        fillColor: [180, 83, 9],
+        textColor: C.white,
+        fontSize: 8.5,
+        fontStyle: 'bold',
+        cellPadding: { top: 4, bottom: 4, left: 4, right: 4 },
       },
-      margin: { left: margin, right: margin },
-      tableWidth: contentW,
+      bodyStyles: {
+        fontSize: 8.5,
+        cellPadding: { top: 3.5, bottom: 3.5, left: 4, right: 4 },
+        textColor: C.grayDark,
+        lineColor: C.grayBorder,
+        lineWidth: 0.2,
+      },
+      alternateRowStyles: { fillColor: C.amberLight },
+      columnStyles: {
+        0: { cellWidth: 28, fontStyle: 'bold', textColor: C.amberDark },
+        1: { cellWidth: CW - 28 },
+      },
+      margin: { left: ML, right: MR },
+      tableWidth: CW,
     });
-    y = doc.lastAutoTable.finalY + 6;
+    y = doc.lastAutoTable.finalY + 8;
   }
 
-  // ── Action plan ───────────────────────────────────────────────────────
+  // ── ACTION PLAN ──────────────────────────────────────────────────────────
   if (recommendations.actionPlan?.length > 0) {
-    y = checkPage(doc, y, 20);
-    y = sectionTitle(doc, '📋  Action Plan', y, pageW);
+    y = checkY(doc, y, 24);
+    y = sectionHeading(doc, 'Action Plan', y);
 
     autoTable(doc, {
       startY: y,
       head: [['#', 'Step']],
-      body: recommendations.actionPlan.map((step, i) => [i + 1, step]),
+      body: recommendations.actionPlan.map((step, i) => [`${i + 1}`, step]),
       theme: 'plain',
-      headStyles: { fillColor: GREEN, textColor: WHITE, fontSize: 8.5, fontStyle: 'bold' },
-      bodyStyles: { fontSize: 8.5, cellPadding: 3, textColor: GRAY_DARK },
-      alternateRowStyles: { fillColor: GRAY_LIGHT },
-      columnStyles: {
-        0: { cellWidth: 10, halign: 'center', fontStyle: 'bold', textColor: GREEN_DARK },
-        1: { cellWidth: contentW - 10 },
+      headStyles: {
+        fillColor: C.greenDeep,
+        textColor: C.white,
+        fontSize: 8.5,
+        fontStyle: 'bold',
+        cellPadding: { top: 4, bottom: 4, left: 4, right: 4 },
       },
-      margin: { left: margin, right: margin },
-      tableWidth: contentW,
+      bodyStyles: {
+        fontSize: 8.5,
+        cellPadding: { top: 4, bottom: 4, left: 4, right: 4 },
+        textColor: C.grayDark,
+        lineColor: C.grayBorder,
+        lineWidth: 0.2,
+      },
+      alternateRowStyles: { fillColor: C.grayLight },
+      columnStyles: {
+        0: { cellWidth: 10, halign: 'center', fontStyle: 'bold', textColor: C.greenDark },
+        1: { cellWidth: CW - 10 },
+      },
+      margin: { left: ML, right: MR },
+      tableWidth: CW,
     });
-    y = doc.lastAutoTable.finalY + 6;
+    y = doc.lastAutoTable.finalY + 8;
   }
 
-  // ── Warnings & avoid list ─────────────────────────────────────────────
-  if (recommendations.warnings?.length > 0 || recommendations.avoidList?.length > 0) {
-    y = checkPage(doc, y, 20);
-    y = sectionTitle(doc, '⚠️  Warnings & Supplements to Avoid', y, pageW);
+  // ── WARNINGS & AVOID LIST ────────────────────────────────────────────────
+  const hasWarnings = recommendations.warnings?.length > 0;
+  const hasAvoid    = recommendations.avoidList?.length > 0;
 
-    if (recommendations.warnings?.length > 0) {
-      doc.setFillColor(...RED_LIGHT);
-      doc.setDrawColor(252, 165, 165);
-      doc.roundedRect(margin, y, contentW, 7 + recommendations.warnings.length * 5.5, 2, 2, 'FD');
+  if (hasWarnings || hasAvoid) {
+    y = checkY(doc, y, 24);
+    y = sectionHeading(doc, 'Warnings & Supplements to Avoid', y);
+
+    if (hasWarnings) {
+      const wLines = recommendations.warnings.map(w => `  •  ${w}`);
+      const blockH = 8 + wLines.length * 5.5;
+      y = checkY(doc, y, blockH);
+
+      doc.setFillColor(...C.redLight);
+      doc.setDrawColor(...C.redBorder);
+      doc.setLineWidth(0.3);
+      doc.roundedRect(ML, y, CW, blockH, 2, 2, 'FD');
+      doc.setFillColor(...C.redMid);
+      doc.rect(ML, y, 3, blockH, 'F');
+
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(8.5);
-      doc.setTextColor(...RED_MID);
-      doc.text('Important Warnings:', margin + 3, y + 5);
-      y += 9;
+      doc.setTextColor(...C.redMid);
+      doc.text('Important Warnings', ML + 6, y + 5.5);
+
       doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
       doc.setTextColor(127, 29, 29);
+      let wy = y + 10;
       recommendations.warnings.forEach(w => {
-        y = wrap(doc, `• ${w}`, margin + 5, y, contentW - 8, 5);
+        const wl = doc.splitTextToSize(`• ${w}`, CW - 10);
+        doc.text(wl, ML + 6, wy);
+        wy += wl.length * 5;
       });
-      y += 4;
+      y += blockH + 5;
     }
 
-    if (recommendations.avoidList?.length > 0) {
-      y = checkPage(doc, y, 14);
+    if (hasAvoid) {
+      const aLines = recommendations.avoidList.map(a => `• ${a}`);
+      const blockH = 8 + aLines.length * 5.5;
+      y = checkY(doc, y, blockH);
+
+      doc.setFillColor(255, 247, 237);
+      doc.setDrawColor(253, 186, 116);
+      doc.setLineWidth(0.3);
+      doc.roundedRect(ML, y, CW, blockH, 2, 2, 'FD');
+      doc.setFillColor(...C.amberDark);
+      doc.rect(ML, y, 3, blockH, 'F');
+
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(8.5);
-      doc.setTextColor(...RED_MID);
-      doc.text('Supplements to Avoid:', margin, y);
-      y += 5;
+      doc.setTextColor(...C.amberDark);
+      doc.text('Supplements to Avoid', ML + 6, y + 5.5);
+
       doc.setFont('helvetica', 'normal');
-      doc.setTextColor(127, 29, 29);
+      doc.setFontSize(8);
+      doc.setTextColor(120, 53, 15);
+      let ay = y + 10;
       recommendations.avoidList.forEach(a => {
-        y = wrap(doc, `• ${a}`, margin + 4, y, contentW - 8, 5);
+        const al = doc.splitTextToSize(`• ${a}`, CW - 10);
+        doc.text(al, ML + 6, ay);
+        ay += al.length * 5;
       });
-      y += 4;
+      y += blockH + 5;
     }
   }
 
-  // ── Footer on every page ──────────────────────────────────────────────
-  const totalPages = doc.internal.getNumberOfPages();
-  for (let p = 1; p <= totalPages; p++) {
-    doc.setPage(p);
-    doc.setFillColor(...GREEN);
-    doc.rect(0, pageH - 10, pageW, 10, 'F');
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7.5);
-    doc.setTextColor(...WHITE);
-    doc.text('SuppliWise — Educational purposes only. Not medical advice.', margin, pageH - 3.5);
-    doc.text(`Page ${p} of ${totalPages}`, pageW - margin, pageH - 3.5, { align: 'right' });
-  }
+  // ── EVIDENCE SOURCES ─────────────────────────────────────────────────────
+  y = checkY(doc, y, 20);
+  doc.setFillColor(...C.grayLight);
+  doc.setDrawColor(...C.grayBorder);
+  doc.setLineWidth(0.3);
+  doc.roundedRect(ML, y, CW, 14, 2, 2, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(...C.grayMid);
+  doc.text('Evidence Sources', ML + 4, y + 5);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.setTextColor(...C.grayMid);
+  doc.text(
+    'NIH Office of Dietary Supplements  |  PubMed clinical studies  |  Mayo Clinic guidelines  |  WHO nutrition guidelines  |  Peer-reviewed clinical nutrition research',
+    ML + 4, y + 10,
+    { maxWidth: CW - 8 }
+  );
 
-  // ── Save ──────────────────────────────────────────────────────────────
+  // ── FOOTERS ───────────────────────────────────────────────────────────────
+  drawFooters(doc);
+
+  // ── SAVE ─────────────────────────────────────────────────────────────────
   const filename = `SuppliWise_Report_${new Date().toISOString().slice(0, 10)}.pdf`;
   doc.save(filename);
 }
