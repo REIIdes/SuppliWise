@@ -391,3 +391,28 @@
   .rec-name { font-size: 14px; }
   .action-step { padding: 12px 14px; }
 }
+
+/* ── Export PDF button ── */
+.btn-export-pdf {
+  display: inline-flex;
+  align-items: center;
+  padding: 12px 20px;
+  background: #fff;
+  color: #16a34a;
+  border: 1.5px solid #22c55e;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: sans-serif;
+  transition: background 0.2s, color 0.2s;
+  gap: 4px;
+}
+.btn-export-pdf:hover:not(:disabled) {
+  background: #f0fdf4;
+  border-color: #16a34a;
+}
+.btn-export-pdf:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
