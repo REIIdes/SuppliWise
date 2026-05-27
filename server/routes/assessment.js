@@ -93,23 +93,22 @@ router.post('/', protect, async (req, res) => {
     const bloodResult     = sanitizeTextField(req.body.bloodTestResults);
 
     // ── AI-polish the health description ────────────────────────────────
-    // First do a quick garbage check; if it passes, send to Groq for rewrite
     const garbageFields = [];
-    if (medsResult.garbage)      garbageFields.push('currentMedications');
-    if (allergiesResult.garbage) garbageFields.push('allergies');
-    if (suppsResult.garbage)     garbageFields.push('currentSupplements');
-    if (bloodResult.garbage)     garbageFields.push('bloodTestResults');
+    if (medsResult.garbage)      garbageFields.push({ field: 'currentMedications',  label: 'Current Medications',  value: currentMedications });
+    if (allergiesResult.garbage) garbageFields.push({ field: 'allergies',            label: 'Allergies',            value: allergies });
+    if (suppsResult.garbage)     garbageFields.push({ field: 'currentSupplements',   label: 'Current Supplements',  value: currentSupplements });
+    if (bloodResult.garbage)     garbageFields.push({ field: 'bloodTestResults',     label: 'Blood Test Results',   value: req.body.bloodTestResults });
 
     let cleanedDescription = '';
     if (feelingDescription && feelingDescription.trim()) {
       if (isGarbage(feelingDescription)) {
-        garbageFields.push('feelingDescription');
+        garbageFields.push({ field: 'feelingDescription', label: 'Health Concerns', value: feelingDescription });
         cleanedDescription = '';
       } else {
         // Try AI polish first; fall back to rule-based if Groq is unavailable
         const aiResult = await aiPolishText(feelingDescription);
         if (aiResult === '__GARBAGE__') {
-          garbageFields.push('feelingDescription');
+          garbageFields.push({ field: 'feelingDescription', label: 'Health Concerns', value: feelingDescription });
           cleanedDescription = '';
         } else if (aiResult) {
           cleanedDescription = aiResult;
