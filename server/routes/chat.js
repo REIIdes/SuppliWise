@@ -91,18 +91,18 @@ IMPORTANT: Never respond to navigation or action requests with the generic help 
 - Remembers conversation context within the session
 - Can answer questions about the app, supplements, health, wellness, and your specific recommendations
 
-## FEATURES THAT DO NOT EXIST YET — NEVER TELL USERS HOW TO USE THESE
-If a user asks about any of these, honestly say it isn't available yet and suggest what they CAN do instead:
-- Profile editing / changing name, email, or password — no profile or settings page
-- Password reset / forgot password — not implemented
-- Notifications or reminders — not implemented
-- Supplement tracking or logging daily intake — not implemented
-- Social features, sharing, or community — not implemented
-- Dark mode — not implemented
-- Mobile app — web only, no mobile app
-- Comparing assessments side by side — not implemented
-- Subscription, premium, or paid features — not implemented
-- QR/barcode scanning — not implemented
+## FEATURES THAT DO NOT EXIST YET — BE HONEST, SUGGEST ALTERNATIVES
+If a user asks about any of these, clearly say it isn't available yet and suggest what they CAN do instead. Never give a joke redirect for these — give a real, helpful answer:
+- **Profile editing / changing name, email, password, profile picture, avatar** — no profile or settings page exists. Tell them to retake the assessment to update their health profile.
+- **Password reset / forgot password** — not implemented. Suggest contacting support or creating a new account.
+- **Notifications or reminders** — not implemented
+- **Supplement tracking or logging daily intake** — not implemented
+- **Social features, sharing, or community** — not implemented
+- **Dark mode** — not implemented
+- **Mobile app** — web only, no mobile app
+- **Comparing assessments side by side** — not implemented
+- **Subscription, premium, or paid features** — not implemented
+- **QR/barcode scanning** — not implemented
 ${recContext ? `\n## USER'S CURRENT RECOMMENDATIONS\n${recContext}` : ''}
 
 Answer every question fully and helpfully. Never say you can't answer something.`;
@@ -316,8 +316,8 @@ function smartFallback(question, context) {
   }
 
   // ── App questions ──
-  if (/how.*start|get started|how.*use|how.*work/.test(q)) {
-    return `Here's how to use SuppliWise:\n\n1. **Start Assessment** — Click the button on the home page\n2. **Complete 4 steps** — Basic info, diet & goals, symptoms, medical info\n3. **Get Results** — Personalized supplement recommendations\n4. **View History** — All past assessments saved in your account`;
+  if (/how.*start|get started|how.*use|how.*work|where.*start|where do i begin|how do i begin/.test(q)) {
+    return `Here's how to use SuppliWise:\n\n1. **Start Assessment** — Click the button on the home page\n2. **Complete 4 steps** — Basic info, diet & goals, symptoms, medical info\n3. **Get Results** — Personalized supplement recommendations\n4. **View History** — All past assessments saved in your account\n\nYou need to be logged in to submit — if you're not, you'll be redirected to sign in and your progress is saved automatically.`;
   }
 
   if (/confidence|match.*score|%.*mean/.test(q)) {
@@ -334,6 +334,11 @@ function smartFallback(question, context) {
 
   if (/log.?in|sign.?in/.test(q)) {
     return `To log in:\n1. Click **Sign In** in the top-right navbar\n2. Enter your email and password\n3. Click "Sign In"`;
+  }
+
+  // ── Profile / account editing — feature doesn't exist yet ──
+  if (/profile|profile pic|pfp|avatar|change.*name|change.*email|change.*password|edit.*account|account.*settings|settings/.test(q)) {
+    return `Profile editing isn't available yet in SuppliWise — there's currently no settings or profile page.\n\nWhat you **can** do:\n- View your past assessments in **History**\n- Retake the assessment anytime to update your health profile\n- Export a PDF of your recommendations\n\nProfile editing, password reset, and account settings are planned for a future update.`;
   }
 
   // ── Off-topic — playful redirect ──
