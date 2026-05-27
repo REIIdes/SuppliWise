@@ -25,9 +25,9 @@ function validateEmail(email) {
 
 function validatePassword(password) {
   if (!password) return 'Please enter a password.';
-  if (password.length < 8) return 'Password must be at least 8 characters.';
-  if (!/[A-Z]/.test(password)) return 'Password must contain at least one uppercase letter.';
-  if (!/[0-9]/.test(password)) return 'Password must contain at least one number.';
+  if (password.length < 8) return 'Your password is too short — please use at least 8 characters.';
+  if (!/[A-Z]/.test(password)) return 'Add at least one capital letter to make your password stronger.';
+  if (!/[0-9]/.test(password)) return 'Add at least one number to make your password stronger.';
   return '';
 }
 
@@ -155,13 +155,14 @@ function SignIn() {
 
           <div className={`auth-field ${fieldErrors.password ? 'field-has-error' : ''}`}>
             <label>Password</label>
+            <p className="auth-field-hint">Use 8+ characters with a capital letter and a number.</p>
             <div className="auth-input-wrap">
               <input
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => { setPassword(e.target.value); if (fieldErrors.password) validateField('password', e.target.value); }}
                 onBlur={(e) => validateField('password', e.target.value)}
-                placeholder="Min 8 chars, 1 uppercase, 1 number"
+                placeholder="Create a strong password"
                 required
               />
               <button type="button" className="eye-btn" onClick={() => setShowPassword(s => !s)} aria-label="Toggle password visibility">

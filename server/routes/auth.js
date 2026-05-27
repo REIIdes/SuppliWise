@@ -48,13 +48,13 @@ router.post('/register', async (req, res) => {
 
     // Password validation
     if (password.length < 8) {
-      return res.status(400).json({ message: 'Password must be at least 8 characters.' });
+      return res.status(400).json({ message: 'Your password is too short — please use at least 8 characters.' });
     }
     if (!/[A-Z]/.test(password)) {
-      return res.status(400).json({ message: 'Password must contain at least one uppercase letter.' });
+      return res.status(400).json({ message: 'Add at least one capital letter to make your password stronger.' });
     }
     if (!/[0-9]/.test(password)) {
-      return res.status(400).json({ message: 'Password must contain at least one number.' });
+      return res.status(400).json({ message: 'Add at least one number to make your password stronger.' });
     }
 
     // Check if user already exists
