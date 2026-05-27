@@ -135,7 +135,7 @@ router.post('/', protect, async (req, res) => {
           // Groq unavailable — use rule-based sanitize
           const fallback = sanitizeTextField(feelingDescription);
           cleanedDescription = fallback.value;
-          if (fallback.garbage) garbageFields.push('feelingDescription');
+          if (fallback.garbage) garbageFields.push({ field: 'feelingDescription', label: 'Health Concerns', value: feelingDescription });
         }
       }
     }
