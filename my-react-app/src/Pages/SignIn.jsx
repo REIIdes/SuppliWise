@@ -155,7 +155,6 @@ function SignIn() {
 
           <div className={`auth-field ${fieldErrors.password ? 'field-has-error' : ''}`}>
             <label>Password</label>
-            <p className="auth-field-hint">Use 8+ characters with a capital letter and a number.</p>
             <div className="auth-input-wrap">
               <input
                 type={showPassword ? 'text' : 'password'}
