@@ -92,13 +92,14 @@ export const getRecommendations = async (assessmentData) => {
 };
 
 // Get assessment history for logged-in user
-export const getHistory = async () => {
-  const res = await fetch(`${BASE_URL}/assessment/history`, {
+export const getHistory = async (page = 1, limit = 10) => {
+  const res = await fetch(`${BASE_URL}/assessment/history?page=${page}&limit=${limit}`, {
     headers: { ...authHeader() },
   });
   const data = await parseJSON(res);
   if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
-  return data;
+  // Support both old array response and new paginated response
+  return Array.isArray(data) ? data : (data.assessments || []);
 };
 
 // Save AI results to an assessment record

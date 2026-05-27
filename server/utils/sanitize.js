@@ -282,4 +282,55 @@ function sanitizeShortField(text) {
   return { value: cleaned.trim(), garbage: false };
 }
 
-module.exports = { sanitizeTextField, sanitizeShortField, isGarbage };
+module.exports = { sanitizeTextField, sanitizeShortField, isGarbage, preprocessUserInput, sanitizeMedicalField };
+
+// ── preprocessUserInput ────────────────────────────────────────────────────
+// Normalises free-text before it is sent to the AI prompt.
+// Fixes spelling, converts slang/Tagalog to clinical English, strips garbage.
+function preprocessUserInput(text) {
+  if (!text || typeof text !== 'string') return '';
+
+  let cleaned = text.trim();
+  cleaned = cleaned.replace(/\s+/g, ' ');
+
+  // Remove filler words
+  cleaned = cleaned.replace(/\b(like|um|uh|you know|basically|literally|actually)\b/gi, '');
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+
+  // Apply spelling fixes (longer phrases first to avoid partial matches)
+  const spellingEntries = Object.entries(SPELLING_FIXES).sort((a, b) => b[0].length - a[0].length);
+  for (const [wrong, correct] of spellingEntries) {
+    const regex = new RegExp(`\\b${wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+    cleaned = cleaned.replace(regex, correct);
+  }
+
+  // Apply slang → clinical (longer phrases first)
+  const slangEntries = Object.entries(SLANG_TO_CLINICAL).sort((a, b) => b[0].length - a[0].length);
+  for (const [slang, clinical] of slangEntries) {
+    const regex = new RegExp(`\\b${slang.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+    cleaned = cleaned.replace(regex, clinical);
+  }
+
+  // Collapse repeated characters (sooooo → so)
+  cleaned = cleaned.replace(/(.)\1{3,}/g, '$1$1');
+
+  // Capitalise first letter of sentences
+  cleaned = cleaned.replace(/(^\w|[.!?]\s+\w)/g, m => m.toUpperCase());
+
+  // Reject pure garbage patterns
+  if (/^(.)\1{4,}$/.test(cleaned)) return '[unspecified]';
+  if (/^[^a-zA-Z0-9]+$/.test(cleaned)) return '[unspecified]';
+  if (cleaned.length < 3) return '[unspecified]';
+
+  return cleaned;
+}
+
+// ── sanitizeMedicalField ───────────────────────────────────────────────────
+// Wraps preprocessUserInput for short medical fields (medications, allergies,
+// supplements). Returns 'Not specified' when the result is unreadable.
+function sanitizeMedicalField(text) {
+  if (!text || typeof text !== 'string') return '';
+  const cleaned = preprocessUserInput(text);
+  if (cleaned === '[unspecified]' || cleaned.trim().length < 2) return 'Not specified';
+  return cleaned;
+}

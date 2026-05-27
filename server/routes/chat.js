@@ -28,6 +28,26 @@ Examples of the tone to use:
 
 The key rule: always be warm and funny, never dismissive, and always bring it back to SuppliWise or health.
 
+## HANDLING ACTION REQUESTS & NAVIGATION QUESTIONS
+When a user asks to perform an action (like logging out, signing in, going somewhere), you CANNOT do it for them — you are a chat assistant, not a controller. Instead:
+- Acknowledge what they want to do
+- Give clear, specific instructions on how to do it themselves
+- Be brief and direct — don't pad with unrelated suggestions
+
+**Logout / Sign out:** The "Log Out" button is directly visible in the top-right navbar when you're logged in. Just click it.
+
+**Login / Sign in:** Click "Sign In" in the top-right navbar. Enter email and password, then click Sign In.
+
+**History page:** Click the clock icon (🕐) in the top navigation bar on the right side. It's always visible in the navbar when you're logged in.
+
+**Home page:** Click the SuppliWise logo or "Home" in the navbar.
+
+**Assessment:** Click "Start Assessment" on the home page, or "Assessment" in the navbar.
+
+**Results:** After completing an assessment you'll be taken to Results automatically. You can also access past results from the History page.
+
+IMPORTANT: Never respond to navigation or action requests with the generic help message. Always give specific instructions.
+
 ## SUPPLIWISE APP — COMPLETE FEATURE OVERVIEW
 
 ### Account & Authentication
@@ -234,6 +254,32 @@ function smartFallback(question, context) {
     if (/magnesium/.test(q)) return `**Magnesium** is involved in over 300 body processes:\n- Muscle and nerve function\n- Sleep quality\n- Stress and anxiety regulation\n- Energy production\n- Blood sugar control\n\n**Best forms:** Glycinate (sleep/anxiety), Citrate (constipation), Malate (energy)\n**Dosage:** 200–400mg daily\n**Deficiency signs:** Muscle cramps, poor sleep, anxiety, fatigue, headaches`;
     if (/omega.?3|fish oil/.test(q)) return `**Omega-3 fatty acids** (EPA and DHA) are essential fats your body can't make:\n- Reduce inflammation throughout the body\n- Support heart health (lower triglycerides)\n- Brain function and mood\n- Joint health\n- Skin hydration\n\n**Dosage:** 1,000–3,000mg combined EPA+DHA daily with meals\n**Sources:** Fatty fish (salmon, sardines), fish oil capsules, algae oil (vegan)\n**Note:** May interact with blood thinners at high doses`;
     if (/zinc/.test(q)) return `**Zinc** is a mineral essential for:\n- Immune function\n- Wound healing\n- DNA synthesis\n- Taste and smell\n- Testosterone production\n\n**Dosage:** 15–30mg daily with food (to avoid nausea)\n**Deficiency signs:** Frequent illness, hair loss, poor wound healing, loss of taste/smell\n**Note:** Don't take long-term at high doses — it depletes copper`;
+  }
+
+  // ── Logout ──
+  if (/log.?out|sign.?out|log me out|logout|signout/.test(q)) {
+    return `To log out, click the **"Log Out"** button in the **top-right corner** of the navbar — it's always visible when you're signed in.\n\nYou'll be redirected to the login page after logging out.`;
+  }
+
+  // ── Where is [page] ──
+  if (/where.*history|find.*history|go.*history|history.*page|navigate.*history/.test(q)) {
+    return `The **History page** is in the **top navigation bar** — click the **clock icon (🕐)** on the right side of the navbar.\n\nEach card lets you view results, download a PDF, or delete the assessment.`;
+  }
+
+  if (/where.*home|go.*home|back.*home|find.*home/.test(q)) {
+    return `Click the **SuppliWise logo** in the top-left of the navbar, or click **"Home"** in the navigation menu.`;
+  }
+
+  if (/where.*assessment|find.*assessment|go.*assessment|start.*assessment/.test(q)) {
+    return `Click **"Start Assessment"** on the home page, or click **"Assessment"** in the top navigation bar.`;
+  }
+
+  if (/where.*result|find.*result|go.*result|see.*result/.test(q)) {
+    return `Your results appear automatically after completing an assessment. To revisit past results:\n1. Click **"History"** in the navbar\n2. Click the **👁 eye icon** on any past assessment card`;
+  }
+
+  if (/where.*navbar|where.*nav|where.*menu|find.*menu/.test(q)) {
+    return `The navigation bar is at the **top of every page**. It contains links to Home, Assessment, History, and your account (Sign In / Log Out).`;
   }
 
   // ── SuppliWise app questions ──

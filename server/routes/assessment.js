@@ -170,14 +170,32 @@ router.post('/', protect, async (req, res) => {
 });
 
 // @route   GET /api/assessment/history
-// @desc    Get all assessments for the current user (newest first)
+// @desc    Get all assessments for the current user (newest first, paginated)
 // @access  Private
 router.get('/history', protect, async (req, res) => {
   try {
-    const assessments = await Assessment.find({ user: req.user._id })
-      .sort({ createdAt: -1 })
-      .limit(20);
-    res.json(assessments);
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(20, Math.max(1, parseInt(req.query.limit) || 10));
+    const skip  = (page - 1) * limit;
+
+    const [assessments, total] = await Promise.all([
+      Assessment.find({ user: req.user._id })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Assessment.countDocuments({ user: req.user._id }),
+    ]);
+
+    res.json({
+      assessments,
+      pagination: {
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit),
+        hasMore: skip + assessments.length < total,
+      },
+    });
   } catch (error) {
     console.error('[assessment GET /history]', error.message);
     res.status(500).json({ message: 'Could not load your history. Please try again.' });
