@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Assessment = require('../models/Assessment');
 const { protect } = require('../middleware/auth');
+const { sanitizeTextField, sanitizeShortField } = require('../utils/sanitize');
 
 // @route   POST /api/assessment
 // @desc    Save a completed health assessment
@@ -37,6 +38,14 @@ router.post('/', protect, async (req, res) => {
     if (currentSupplements && currentSupplements.length > SHORT_MAX)
       return res.status(400).json({ message: `Current supplements must be ${SHORT_MAX} characters or fewer.` });
 
+    // ── Sanitize all free-text fields before saving ──────────────────────
+    // Garbage input is cleared; spelling/slang is fixed; whitespace normalized
+    const cleanedDescription   = sanitizeTextField(feelingDescription);
+    const cleanedMedications   = sanitizeShortField(currentMedications);
+    const cleanedAllergies     = sanitizeShortField(allergies);
+    const cleanedSupplements   = sanitizeShortField(currentSupplements);
+    const cleanedBloodResults  = sanitizeTextField(req.body.bloodTestResults);
+
     const assessment = await Assessment.create({
       user: req.user._id,
       userEmail: req.user.email,
@@ -44,10 +53,15 @@ router.post('/', protect, async (req, res) => {
       age, gender, weight, height, activityLevel,
       dietType, healthGoals,
       symptoms, symptomSeverity, stressLevel, sleepQuality, waterIntake,
-      medicalConditions, currentMedications, allergies, feelingDescription,
+      medicalConditions,
+      currentMedications: cleanedMedications,
+      allergies: cleanedAllergies,
+      feelingDescription: cleanedDescription,
       lifestyleHabits, pregnancyStatus,
-      takingSupplements, currentSupplements, recentBloodTest,
-      bloodTestResults: req.body.bloodTestResults,
+      takingSupplements,
+      currentSupplements: cleanedSupplements,
+      recentBloodTest,
+      bloodTestResults: cleanedBloodResults,
       sunExposure: req.body.sunExposure,
       fitnessFocus: req.body.fitnessFocus,
       proteinIntake: req.body.proteinIntake,
