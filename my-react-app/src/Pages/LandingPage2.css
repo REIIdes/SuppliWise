@@ -1,0 +1,91 @@
+.landing2-container{
+    width: 100%;
+    min-height: 100vh;
+    background: #F5F7F2;
+    padding-top: 100px;
+}
+
+.how-title{
+    text-align: center;
+    font-size: 42px;
+    font-family: sans-serif;
+    margin-bottom: 70px;
+    color: #111;
+}
+
+.cards-container{
+    display: flex;
+    justify-content: center;
+    gap: 35px;
+    flex-wrap: wrap;
+}
+
+.info-card{
+    width: 300px;
+    height: 320px;
+    background: white;
+    border: 1px solid #71C27B;
+    border-radius: 20px;
+    padding: 25px;
+    box-shadow: 0px 4px 10px rgba(0,0,0,0.08);
+
+    transition: 0.3s;
+    margin-top: -30px;
+}
+
+.info-card:hover{
+    transform: translateY(-5px);
+}
+
+.icon{
+    width: 45px;
+    height: 45px;
+    border-radius: 12px;
+
+    display: flex;
+    justify-content: center;
+    align-items: center;
+
+    font-size: 22px;
+    color: white;
+    margin-bottom: 20px;
+}
+
+.green-icon{
+    background: #4CAF50;
+}
+.cardLogo{
+    width: 20px;
+    height: 20px;
+    object-fit: contain;
+}
+
+.blue-icon{
+    background: #4285F4;
+}
+.cardLogo2{
+    width: 23px;
+    height: 23px;
+    object-fit: contain;
+}
+.purple-icon{
+    background: #9033EE;
+}
+.cardLogo3{
+    width: 20px;
+    height: 20px;
+    object-fit: contain;
+}
+.info-card h2{
+    font-size: 24px;
+    margin-bottom: 20px;
+    font-family: sans-serif;
+    color: #111;
+}
+
+.info-card p{
+    font-size: 16px;
+    line-height: 1.6;
+    color: #666;
+    font-family: sans-serif;
+}

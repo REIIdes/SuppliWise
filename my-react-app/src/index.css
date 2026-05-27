@@ -1,0 +1,19 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: sans-serif;
+  background: #f0faf0;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* Mobile base */
+@media (max-width: 640px) {
+  html { font-size: 15px; }
+}
