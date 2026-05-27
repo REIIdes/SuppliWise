@@ -13,9 +13,11 @@ const polishRoutes = require('./routes/polish');
 
 const app = express();
 
-// ── Security headers (helmet sets X-Frame-Options, X-Content-Type-Options,
-//    Strict-Transport-Security, X-XSS-Protection, etc. automatically) ───────
-app.use(helmet());
+// ── Security headers ──────────────────────────────────────────────────────
+// Helmet sets X-Frame-Options, X-Content-Type-Options, HSTS, etc.
+// CSP is disabled — it blocks localhost API calls in development and
+// requires domain-specific config before enabling in production.
+app.use(helmet({ contentSecurityPolicy: false }));
 
 // Middleware
 app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:5174'], credentials: true }));
@@ -31,8 +33,8 @@ const authLimiter = rateLimit({
   message: { message: 'Too many attempts. Please wait 15 minutes and try again.' },
 });
 
-// AI routes: 15 requests per 10 min per IP (protects Groq quota)
-const aiLimiter = rateLimit({
+// Recommend: 15 requests per 10 min per IP (protects Groq quota)
+const recommendLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   max: 15,
   standardHeaders: true,
@@ -43,8 +45,8 @@ const aiLimiter = rateLimit({
 // Routes
 app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/assessment', assessmentRoutes);
-app.use('/api/recommend', aiLimiter, recommendRoutes);
-app.use('/api/chat', aiLimiter, chatRoutes);
+app.use('/api/recommend', recommendLimiter, recommendRoutes);
+app.use('/api/chat', chatRoutes);       // no rate limit — chat needs to feel instant
 app.use('/api/polish', polishRoutes);
 
 // Health check
