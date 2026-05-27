@@ -7,6 +7,30 @@ import './SignIn.css';
 
 const SESSION_KEY = 'pending_assessment';
 
+// Strict email regex — requires a proper TLD (2–6 letters), rejects .con, .cmo, etc.
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,6}$/;
+
+// Common typo TLDs to warn about
+const SUSPICIOUS_TLDS = ['.con', '.cmo', '.ocm', '.nte', '.ogr', '.cpm'];
+
+function validateEmail(email) {
+  const trimmed = email.trim();
+  if (!trimmed) return 'Please enter your email address.';
+  if (!EMAIL_REGEX.test(trimmed)) return 'Please enter a valid email address (e.g. name@example.com).';
+  const lower = trimmed.toLowerCase();
+  if (SUSPICIOUS_TLDS.some(tld => lower.endsWith(tld)))
+    return 'That email looks like a typo. Did you mean .com or .net?';
+  return '';
+}
+
+function validatePassword(password) {
+  if (!password) return 'Please enter a password.';
+  if (password.length < 8) return 'Password must be at least 8 characters.';
+  if (!/[A-Z]/.test(password)) return 'Password must contain at least one uppercase letter.';
+  if (!/[0-9]/.test(password)) return 'Password must contain at least one number.';
+  return '';
+}
+
 function SignIn() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -14,6 +38,7 @@ function SignIn() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState({});
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
@@ -21,11 +46,40 @@ function SignIn() {
 
   const fromAssessment = location.state?.fromAssessment;
 
+  // Validate a single field and update fieldErrors
+  const validateField = (field, value) => {
+    let msg = '';
+    if (field === 'name') {
+      if (!value.trim()) msg = 'Please enter your name.';
+      else if (value.trim().length < 2) msg = 'Name must be at least 2 characters.';
+      else if (value.trim().length > 50) msg = 'Name must be 50 characters or fewer.';
+    }
+    if (field === 'email') msg = validateEmail(value);
+    if (field === 'password') msg = validatePassword(value);
+    if (field === 'confirmPassword') {
+      if (!value) msg = 'Please confirm your password.';
+      else if (value !== password) msg = 'Passwords do not match.';
+    }
+    setFieldErrors(prev => ({ ...prev, [field]: msg }));
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    if (password !== confirmPassword) { setError('Passwords do not match'); return; }
-    if (password.length < 6) { setError('Password must be at least 6 characters'); return; }
+
+    // Run all validations
+    const nameErr = !name.trim() ? 'Please enter your name.'
+      : name.trim().length < 2 ? 'Name must be at least 2 characters.'
+      : name.trim().length > 50 ? 'Name must be 50 characters or fewer.' : '';
+    const emailErr = validateEmail(email);
+    const passwordErr = validatePassword(password);
+    const confirmErr = !confirmPassword ? 'Please confirm your password.'
+      : confirmPassword !== password ? 'Passwords do not match.' : '';
+
+    const newErrors = { name: nameErr, email: emailErr, password: passwordErr, confirmPassword: confirmErr };
+    setFieldErrors(newErrors);
+
+    if (Object.values(newErrors).some(Boolean)) return;
 
     setLoading(true);
     try {
@@ -73,36 +127,41 @@ function SignIn() {
 
           {error && <p className="auth-error">{error}</p>}
 
-          <div className="auth-field">
+          <div className={`auth-field ${fieldErrors.name ? 'field-has-error' : ''}`}>
             <label>Name</label>
             <input
               type="text"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => { setName(e.target.value); if (fieldErrors.name) validateField('name', e.target.value); }}
+              onBlur={(e) => validateField('name', e.target.value)}
               placeholder="Enter your Name"
               required
             />
+            {fieldErrors.name && <span className="auth-field-error">{fieldErrors.name}</span>}
           </div>
 
-          <div className="auth-field">
+          <div className={`auth-field ${fieldErrors.email ? 'field-has-error' : ''}`}>
             <label>Email</label>
             <input
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="Your.Email@example.com"
+              onChange={(e) => { setEmail(e.target.value); if (fieldErrors.email) validateField('email', e.target.value); }}
+              onBlur={(e) => validateField('email', e.target.value)}
+              placeholder="your.email@example.com"
               required
             />
+            {fieldErrors.email && <span className="auth-field-error">{fieldErrors.email}</span>}
           </div>
 
-          <div className="auth-field">
+          <div className={`auth-field ${fieldErrors.password ? 'field-has-error' : ''}`}>
             <label>Password</label>
             <div className="auth-input-wrap">
               <input
                 type={showPassword ? 'text' : 'password'}
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter your password"
+                onChange={(e) => { setPassword(e.target.value); if (fieldErrors.password) validateField('password', e.target.value); }}
+                onBlur={(e) => validateField('password', e.target.value)}
+                placeholder="Min 8 chars, 1 uppercase, 1 number"
                 required
               />
               <button type="button" className="eye-btn" onClick={() => setShowPassword(s => !s)} aria-label="Toggle password visibility">
@@ -113,15 +172,17 @@ function SignIn() {
                 )}
               </button>
             </div>
+            {fieldErrors.password && <span className="auth-field-error">{fieldErrors.password}</span>}
           </div>
 
-          <div className="auth-field">
+          <div className={`auth-field ${fieldErrors.confirmPassword ? 'field-has-error' : ''}`}>
             <label>Confirm Password</label>
             <div className="auth-input-wrap">
               <input
                 type={showConfirm ? 'text' : 'password'}
                 value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
+                onChange={(e) => { setConfirmPassword(e.target.value); if (fieldErrors.confirmPassword) validateField('confirmPassword', e.target.value); }}
+                onBlur={(e) => validateField('confirmPassword', e.target.value)}
                 placeholder="Confirm your password"
                 required
               />
@@ -133,6 +194,7 @@ function SignIn() {
                 )}
               </button>
             </div>
+            {fieldErrors.confirmPassword && <span className="auth-field-error">{fieldErrors.confirmPassword}</span>}
           </div>
 
           <button type="submit" className="auth-btn" disabled={loading}>

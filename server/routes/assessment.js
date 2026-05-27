@@ -19,9 +19,23 @@ router.post('/', protect, async (req, res) => {
     } = req.body;
 
     // Validate numeric ranges
-    if (age && (age < 1 || age > 120)) return res.status(400).json({ message: 'Age must be between 1 and 120' });
-    if (weight && (weight < 1 || weight > 500)) return res.status(400).json({ message: 'Weight must be between 1 and 500 kg' });
-    if (height && (height < 30 || height > 300)) return res.status(400).json({ message: 'Height must be between 30 and 300 cm' });
+    if (age && (age < 1 || age > 120)) return res.status(400).json({ message: 'Age must be between 1 and 120.' });
+    if (weight && (weight < 1 || weight > 500)) return res.status(400).json({ message: 'Weight must be between 1 and 500 kg.' });
+    if (height && (height < 30 || height > 300)) return res.status(400).json({ message: 'Height must be between 30 and 300 cm.' });
+
+    // Validate string field lengths (prevent oversized payloads)
+    const TEXT_MAX = 1000;
+    const SHORT_MAX = 200;
+    if (currentMedications && currentMedications.length > TEXT_MAX)
+      return res.status(400).json({ message: `Current medications must be ${TEXT_MAX} characters or fewer.` });
+    if (allergies && allergies.length > SHORT_MAX)
+      return res.status(400).json({ message: `Allergies must be ${SHORT_MAX} characters or fewer.` });
+    if (feelingDescription && feelingDescription.length > TEXT_MAX)
+      return res.status(400).json({ message: `Health description must be ${TEXT_MAX} characters or fewer.` });
+    if (req.body.bloodTestResults && req.body.bloodTestResults.length > TEXT_MAX)
+      return res.status(400).json({ message: `Blood test results must be ${TEXT_MAX} characters or fewer.` });
+    if (currentSupplements && currentSupplements.length > SHORT_MAX)
+      return res.status(400).json({ message: `Current supplements must be ${SHORT_MAX} characters or fewer.` });
 
     const assessment = await Assessment.create({
       user: req.user._id,
