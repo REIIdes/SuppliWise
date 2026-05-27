@@ -195,16 +195,22 @@ function isGarbage(text) {
   const letters = (t.match(/[a-zA-Z]/g) || []).length;
   if (letters / t.length < 0.2) return true;
 
-  // ── Key check: does it contain any real words? ──
-  // Split into individual "words" and check each one
+  // ── Mixed alphanumeric nonsense: letters and digits jumbled with no spaces ──
+  // e.g. "sad12312asd", "abc123xyz456", "hello123world"
+  // Real text doesn't embed numbers inside words like this
   const words = t.split(/\s+/);
+  const mixedAlphanumericWords = words.filter(w => /[a-zA-Z]/.test(w) && /[0-9]/.test(w));
+  // If MORE than half the words are mixed alphanumeric, it's garbage
+  if (words.length > 0 && mixedAlphanumericWords.length / words.length > 0.5) return true;
+  // Single word that mixes letters and numbers = garbage
+  if (words.length === 1 && /[a-zA-Z]/.test(words[0]) && /[0-9]/.test(words[0])) return true;
 
-  // If it's a single word with no vowels or weird consonant cluster → garbage
+  // ── Single word checks ──
   if (words.length === 1) {
     const w = words[0].toLowerCase();
     const vowels = (w.match(/[aeiou]/g) || []).length;
     const vowelRatio = vowels / w.length;
-    // Single word with < 15% vowels is almost certainly random (e.g. "nkwdjfhsd")
+    // Single word with < 15% vowels is almost certainly random
     if (vowelRatio < 0.15) return true;
     // Single word > 12 chars with no spaces is suspicious unless it's a known word
     if (w.length > 12 && !COMMON_WORDS.has(w)) return true;
