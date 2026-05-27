@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
-import { saveAssessment, getRecommendations, saveAssessmentResults, polishDescription } from '../api';
+import { saveAssessment, getRecommendations, saveAssessmentResults } from '../api';
 import './AssessmentPage.css';
 
 const TOTAL_STEPS = 4;
@@ -331,90 +331,6 @@ function Step3({ data, onChange }) {
   );
 }
 
-// ── AI Polish Textarea ─────────────────────────────────────────────────────
-function PolishTextarea({ value, onChange, placeholder, rows = 4 }) {
-  const [polishing, setPolishing] = useState(false);
-  const [status, setStatus] = useState(null); // 'polished' | 'rejected' | 'error' | null
-  const [originalValue, setOriginalValue] = useState('');
-  const debounceRef = useRef(null);
-
-  // Auto-polish 1.2s after the user stops typing (if text is long enough)
-  useEffect(() => {
-    clearTimeout(debounceRef.current);
-
-    // Only trigger if there's meaningful content and it hasn't been polished yet
-    if (value.trim().length < 15 || status === 'polished') return;
-
-    debounceRef.current = setTimeout(async () => {
-      setPolishing(true);
-      setStatus(null);
-      try {
-        const result = await polishDescription(value);
-        if (result.rejected) {
-          setStatus('rejected');
-        } else if (result.polished && result.polished !== value) {
-          setOriginalValue(value);
-          onChange(result.polished);
-          setStatus('polished');
-        }
-      } catch {
-        setStatus('error');
-      } finally {
-        setPolishing(false);
-      }
-    }, 1200);
-
-    return () => clearTimeout(debounceRef.current);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
-
-  const handleUndo = () => {
-    onChange(originalValue);
-    setStatus(null);
-    setOriginalValue('');
-  };
-
-  return (
-    <div className="polish-wrap">
-      <div className="polish-textarea-wrap">
-        <textarea
-          placeholder={placeholder}
-          value={value}
-          onChange={(e) => { onChange(e.target.value); if (status === 'rejected' || status === 'error') setStatus(null); }}
-          rows={rows}
-          style={{ resize: 'vertical' }}
-        />
-        {polishing && (
-          <div className="polish-indicator" title="AI is polishing your text...">
-            <span className="polish-spinner" />
-          </div>
-        )}
-      </div>
-
-      <div className="polish-footer">
-        <span className="field-hint">The more detail you provide, the more personalized your recommendations will be.</span>
-      </div>
-
-      {status === 'polished' && (
-        <div className="polish-status polish-status--success">
-          ✓ Rewritten professionally by AI.{' '}
-          <button type="button" className="polish-undo" onClick={handleUndo}>Undo</button>
-        </div>
-      )}
-      {status === 'rejected' && (
-        <div className="polish-status polish-status--warn">
-          Please describe your actual health concerns — the AI couldn't find any health-related content in your input.
-        </div>
-      )}
-      {status === 'error' && (
-        <div className="polish-status polish-status--warn">
-          Couldn't reach the AI right now. Your text was kept as-is.
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── Step 4: Medical Information ────────────────────────────────────────────
 function Step4({ data, onChange, errors }) {
   const conditions = [
@@ -642,12 +558,16 @@ function Step4({ data, onChange, errors }) {
         <label>
           Describe Your Current Health Concerns <span className="field-hint">(optional)</span>
         </label>
-        <PolishTextarea
-          value={data.feelingDescription || ''}
-          onChange={(val) => onChange('feelingDescription', val)}
+        <textarea
           placeholder="Describe how you've been feeling lately in your own words — e.g. 'I've been feeling exhausted even after 8 hours of sleep, my joints ache in the morning, and I feel foggy at work...'"
+          value={data.feelingDescription || ''}
+          onChange={(e) => onChange('feelingDescription', e.target.value)}
           rows={4}
+          style={{ resize: 'vertical' }}
         />
+        <span className="field-hint" style={{ marginTop: '4px', display: 'block' }}>
+          The more detail you provide, the more personalized your recommendations will be.
+        </span>
       </div>
     </div>
   );

@@ -2,7 +2,55 @@ const express = require('express');
 const router = express.Router();
 const Assessment = require('../models/Assessment');
 const { protect } = require('../middleware/auth');
-const { sanitizeTextField, sanitizeShortField } = require('../utils/sanitize');
+const { sanitizeTextField, sanitizeShortField, isGarbage } = require('../utils/sanitize');
+
+// ── AI rewrite using Groq ──────────────────────────────────────────────────
+// Rewrites a health description: fixes spelling/grammar, converts slang to
+// clinical language. Returns null if the text is garbage/unrelated to health.
+async function aiPolishText(text) {
+  const GROQ_API_KEY = process.env.GROQ_API_KEY;
+  if (!GROQ_API_KEY || GROQ_API_KEY === 'your_groq_api_key_here') return null;
+  if (!text || !text.trim() || text.trim().length < 5) return null;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${GROQ_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a clinical documentation assistant. Fix spelling and grammar errors in the patient\'s health description. Convert informal/slang to professional language. Keep the same meaning. Output ONLY the corrected text — no explanations, no quotes, no extra words. If the input is gibberish or completely unrelated to health, output exactly: GARBAGE',
+          },
+          {
+            role: 'user',
+            content: text.trim(),
+          },
+        ],
+        max_tokens: 300,
+        temperature: 0.1,
+        stream: false,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!response.ok) return null;
+    const data = await response.json();
+    const result = data.choices?.[0]?.message?.content?.trim();
+    if (!result || result === 'GARBAGE') return result === 'GARBAGE' ? '__GARBAGE__' : null;
+    return result;
+  } catch {
+    return null; // timeout or network error — fall back to basic sanitize
+  }
+}
 
 // @route   POST /api/assessment
 // @desc    Save a completed health assessment
@@ -24,7 +72,7 @@ router.post('/', protect, async (req, res) => {
     if (weight && (weight < 1 || weight > 500)) return res.status(400).json({ message: 'Weight must be between 1 and 500 kg.' });
     if (height && (height < 30 || height > 300)) return res.status(400).json({ message: 'Height must be between 30 and 300 cm.' });
 
-    // Validate string field lengths (prevent oversized payloads)
+    // Validate string field lengths
     const TEXT_MAX = 1000;
     const SHORT_MAX = 200;
     if (currentMedications && currentMedications.length > TEXT_MAX)
@@ -38,20 +86,41 @@ router.post('/', protect, async (req, res) => {
     if (currentSupplements && currentSupplements.length > SHORT_MAX)
       return res.status(400).json({ message: `Current supplements must be ${SHORT_MAX} characters or fewer.` });
 
-    // ── Sanitize all free-text fields before saving ──────────────────────
-    const descResult        = sanitizeTextField(feelingDescription);
-    const medsResult        = sanitizeShortField(currentMedications);
-    const allergiesResult   = sanitizeShortField(allergies);
-    const suppsResult       = sanitizeShortField(currentSupplements);
-    const bloodResult       = sanitizeTextField(req.body.bloodTestResults);
+    // ── Sanitize short fields (rule-based) ───────────────────────────────
+    const medsResult      = sanitizeShortField(currentMedications);
+    const allergiesResult = sanitizeShortField(allergies);
+    const suppsResult     = sanitizeShortField(currentSupplements);
+    const bloodResult     = sanitizeTextField(req.body.bloodTestResults);
 
-    // Track which fields had garbage so the frontend can warn the user
+    // ── AI-polish the health description ────────────────────────────────
+    // First do a quick garbage check; if it passes, send to Groq for rewrite
     const garbageFields = [];
-    if (descResult.garbage)     garbageFields.push('feelingDescription');
-    if (medsResult.garbage)     garbageFields.push('currentMedications');
+    if (medsResult.garbage)      garbageFields.push('currentMedications');
     if (allergiesResult.garbage) garbageFields.push('allergies');
-    if (suppsResult.garbage)    garbageFields.push('currentSupplements');
-    if (bloodResult.garbage)    garbageFields.push('bloodTestResults');
+    if (suppsResult.garbage)     garbageFields.push('currentSupplements');
+    if (bloodResult.garbage)     garbageFields.push('bloodTestResults');
+
+    let cleanedDescription = '';
+    if (feelingDescription && feelingDescription.trim()) {
+      if (isGarbage(feelingDescription)) {
+        garbageFields.push('feelingDescription');
+        cleanedDescription = '';
+      } else {
+        // Try AI polish first; fall back to rule-based if Groq is unavailable
+        const aiResult = await aiPolishText(feelingDescription);
+        if (aiResult === '__GARBAGE__') {
+          garbageFields.push('feelingDescription');
+          cleanedDescription = '';
+        } else if (aiResult) {
+          cleanedDescription = aiResult;
+        } else {
+          // Groq unavailable — use rule-based sanitize
+          const fallback = sanitizeTextField(feelingDescription);
+          cleanedDescription = fallback.value;
+          if (fallback.garbage) garbageFields.push('feelingDescription');
+        }
+      }
+    }
 
     const assessment = await Assessment.create({
       user: req.user._id,
@@ -63,7 +132,7 @@ router.post('/', protect, async (req, res) => {
       medicalConditions,
       currentMedications: medsResult.value,
       allergies: allergiesResult.value,
-      feelingDescription: descResult.value,
+      feelingDescription: cleanedDescription,
       lifestyleHabits, pregnancyStatus,
       takingSupplements,
       currentSupplements: suppsResult.value,
