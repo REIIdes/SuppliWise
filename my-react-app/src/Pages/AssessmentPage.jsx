@@ -204,14 +204,14 @@ function Step2({ data, onChange }) {
 // ── Step 3: Current Symptoms ───────────────────────────────────────────────
 const SYMPTOM_LIST = [
   'Fatigue',            'Digestive Issue',
-  'Poor Sleep',         'Frequent Colds',
-  'Brain Fog',          'Anxiety/Stress',
-  'Joint Pain',         'Hair Loss',
-  'Muscle Weakness',    'Dry Skin',
-  'Acne/Skin Issues',   'Frequent Headaches',
-  'Mood Swings',        'Low Libido',
-  'Numbness/Tingling',  'Slow Recovery',
-  'Bloating',           'Low Appetite',
+  'Frequent Colds',     'Brain Fog',
+  'Anxiety/Stress',     'Joint Pain',
+  'Hair Loss',          'Muscle Weakness',
+  'Dry Skin',           'Acne/Skin Issues',
+  'Frequent Headaches', 'Mood Swings',
+  'Low Libido',         'Numbness/Tingling',
+  'Slow Recovery',      'Bloating',
+  'Low Appetite',
 ];
 
 const SEVERITY_OPTIONS = ['Mild', 'Moderate', 'Severe'];
