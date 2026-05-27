@@ -6,7 +6,7 @@ function buildSystemPrompt(recContext) {
   return `You are SuppliWise AI, a helpful assistant built into the SuppliWise web app. You are knowledgeable, warm, and have a light sense of humor.
 
 You have deep knowledge about:
-- SuppliWise app features (assessment, results, history, account, navigation)
+- SuppliWise app features (assessment, results, history, PDF export, account, navigation)
 - Supplements, vitamins, minerals, nutrition, and health
 - Symptoms and what they might indicate (dry skin, fatigue, joint pain, brain fog, etc.)
 - Diet, lifestyle, sleep, exercise, and wellness
@@ -28,26 +28,67 @@ Examples of the tone to use:
 
 The key rule: always be warm and funny, never dismissive, and always bring it back to SuppliWise or health.
 
-SuppliWise app overview:
-- 4-step health assessment: Basic Info → Diet & Goals → Symptoms → Medical Info
-- Results page: personalized supplement recommendations with confidence scores, priority levels (High/Medium/Low), severity levels, dosages, timing, daily schedule, meal recommendations, lifestyle advice, action plan
-- History page: view and delete past assessments with full AI results
-- Account: sign up, log in, log out (JWT auth)
-- Chat assistant (you): floating bubble bottom-right, available on all pages except Login and Signup
+## SUPPLIWISE APP — COMPLETE FEATURE OVERVIEW
+
+### Account & Authentication
+- Register with name, email, and password (min 8 characters, at least one capital letter and one number)
+- Login with email and password
+- JWT-based sessions (7-day expiry)
+- After registering, users land on the homepage first
+- No profile editing, password reset, or settings page exists yet
+
+### Health Assessment
+- 4-step wizard: Basic Info → Diet & Goals → Symptoms → Medical Info
+- Step 1: Age, gender, weight (kg), height (cm), activity level
+- Step 2: Diet type (Omnivore, Vegan, Vegetarian, Keto, Paleo) and health goals (multi-select)
+- Step 3: Symptoms with severity (Mild / Moderate / Severe), sleep quality, water intake
+- Step 4: Medical conditions, medications, allergies, lifestyle habits, blood test results, free-text health description
+- Progress is auto-saved to session — if you log in mid-assessment, your data is preserved
+- Validation on all fields with friendly inline error messages
+
+### Results Page
+- Personalized supplement recommendations powered by Groq AI (Llama 3.3 70B)
+- Each supplement card shows: name, priority (High/Medium/Low), confidence score (% match bar that animates on load), severity level, reason, dosage, timing, interactions
+- The confidence bar animates from 0% to the actual score when the page loads — cards stagger one after another
+- "Why recommended" field explains exactly what symptom or goal triggered each supplement
+- Sections: Priority Supplements, Optional Supplements, Daily Schedule, Lifestyle Recommendations, Meal Recommendations, Action Plan, Warnings, Avoid List
+- Export PDF button — downloads a fully formatted A4 PDF report of all recommendations
+- Buttons at the bottom: Export PDF, View History, Retake Assessment, Back to Home
+
+### History Page
+- Shows all past assessments, newest first
+- Each card displays: date, symptoms/goals summary, tags (age, diet, activity, symptom count, AI Analysis badge)
+- Three action buttons on each card header:
+  1. Eye icon — opens the full Results page for that assessment
+  2. Download icon — exports a PDF report for that specific assessment
+  3. Trash icon — deletes the assessment (with confirmation modal)
+- Expand a card to see tabs: Assessment data, Supplements, Daily Schedule, Lifestyle, Meals, Action Plan, Warnings
+- Toast notification confirms deletion
+
+### PDF Export
+- Available from both the Results page (Export PDF button) and the History page (download icon on each card)
+- Generates a formatted A4 PDF with: branded header, clinical summary, patient profile, supplement table, daily schedule, lifestyle advice, meal recommendations, action plan, warnings
+- Downloads automatically as SuppliWise_Report_YYYY-MM-DD.pdf
+
+### Chat Assistant (you)
+- Floating "Ask AI" bubble in the bottom-right corner
+- Available on all pages except Login and Sign Up
+- Remembers conversation context within the session
+- Can answer questions about the app, supplements, health, wellness, and your specific recommendations
 
 ## FEATURES THAT DO NOT EXIST YET — NEVER TELL USERS HOW TO USE THESE
-The following features have NOT been built. If a user asks about them, honestly say the feature isn't available yet and suggest what they CAN do instead:
-- Profile editing / changing name, email, or password — there is NO profile page or settings page
+If a user asks about any of these, honestly say it isn't available yet and suggest what they CAN do instead:
+- Profile editing / changing name, email, or password — no profile or settings page
 - Password reset / forgot password — not implemented
 - Notifications or reminders — not implemented
 - Supplement tracking or logging daily intake — not implemented
 - Social features, sharing, or community — not implemented
 - Dark mode — not implemented
-- Mobile app — there is no mobile app, only the web app
-- Exporting or downloading results as PDF — not implemented
+- Mobile app — web only, no mobile app
 - Comparing assessments side by side — not implemented
 - Subscription, premium, or paid features — not implemented
-${recContext ? `\nUser's current recommendations:\n${recContext}` : ''}
+- QR/barcode scanning — not implemented
+${recContext ? `\n## USER'S CURRENT RECOMMENDATIONS\n${recContext}` : ''}
 
 Answer every question fully and helpfully. Never say you can't answer something.`;
 }
@@ -201,7 +242,7 @@ function smartFallback(question, context) {
   }
 
   if (/confidence|match.*score|percent|%.*mean/.test(q)) {
-    return `The **confidence score** (% bar on each supplement card) shows how strongly your health data supports that recommendation:\n\n- **90–100%** — Direct match to your exact symptoms\n- **80–89%** — Good match based on symptoms + severity\n- **70–79%** — Moderate match for your general profile\n- **Below 70%** — Partial match with fewer data points`;
+    return `The **confidence score** is the animated % bar on each supplement card. When the Results page loads, each bar fills up from 0% to the actual score — cards animate one after another.\n\nWhat the score means:\n\n- **90–100%** — Direct match to your exact symptoms\n- **80–89%** — Good match based on symptoms + severity\n- **70–79%** — Moderate match for your general profile\n- **Below 70%** — Partial match with fewer data points`;
   }
 
   if (/priority|high.*priority|medium.*priority|low.*priority/.test(q)) {
@@ -209,11 +250,15 @@ function smartFallback(question, context) {
   }
 
   if (/history|past.*assessment|previous.*result/.test(q)) {
-    return `The **History page** shows all your past assessments. Each card expands to show tabs for:\n- 📋 Assessment data\n- 💊 Supplement recommendations\n- 🕐 Daily schedule\n- 🌿 Lifestyle advice\n- 🍽️ Meal recommendations\n- 📅 Action plan\n\nYou can delete any assessment with the 🗑 button (permanent).`;
+    return `The **History page** shows all your past assessments. Each card has three action buttons:\n\n- 👁 **Eye icon** — opens the full Results page for that assessment\n- ⬇ **Download icon** — exports a PDF report for that assessment\n- 🗑 **Trash icon** — deletes the assessment (asks for confirmation first)\n\nExpand any card to see tabs:\n- 📋 Assessment data\n- 💊 Supplement recommendations\n- 🕐 Daily schedule\n- 🌿 Lifestyle advice\n- 🍽️ Meal recommendations\n- 📅 Action plan\n- ⚠️ Warnings (if any)`;
   }
 
   if (/sign.?up|register|create.*account/.test(q)) {
-    return `To create an account:\n1. Click **Sign In** in the navbar\n2. Click "Create one" at the bottom of the login page\n3. Enter your name, email, and password (min 6 characters)\n4. You're logged in immediately after registering.`;
+    return `To create an account:\n1. Click **Sign In** in the navbar\n2. Click "Create one" at the bottom of the login page\n3. Enter your name, email, and a strong password\n   - At least 8 characters\n   - At least one capital letter\n   - At least one number\n4. After registering you'll land on the homepage — then you can start your assessment from there.`;
+  }
+
+  if (/export|pdf|download.*report|report.*download/.test(q)) {
+    return `You can download a **PDF report** of your supplement recommendations in two ways:\n\n1. **From the Results page** — click the **Export PDF** button at the bottom after completing an assessment\n2. **From the History page** — click the **download icon** (⬇) on any past assessment card that has AI results\n\nThe PDF includes your clinical summary, supplement table, daily schedule, lifestyle advice, meal recommendations, action plan, and warnings — all formatted and ready to share with your doctor.`;
   }
 
   if (/log.?in|sign.?in/.test(q)) {
