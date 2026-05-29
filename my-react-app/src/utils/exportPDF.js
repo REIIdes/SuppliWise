@@ -114,7 +114,91 @@ function drawFooters(doc, userName) {
   }
 }
 
-// ── Main export ────────────────────────────────────────────────────────────
+// ── Water intake display labels ────────────────────────────────────────────
+const WATER_LABELS = {
+  'Less than 4 glasses': 'Less than 4 glasses a day',
+  '4–6 glasses':         '4–6 glasses a day',
+  '7–8 glasses':         '7–8 glasses a day',
+  '9+ glasses':          '9 or more glasses a day',
+};
+
+
+const ACTIVITY_LABELS = {
+  Sedentary: 'Sedentary / No Exercise',
+  Light:     'Light (1–3 days/week)',
+  Moderate:  'Moderate (3–5 days/week)',
+  Very:      'Very Active (6–7 days/week)',
+};
+
+// ── Food expansion (mirrors ResultsPage logic) ─────────────────────────────
+const FOOD_SPECIFICS = {
+  'fatty fish':       'fatty fish (salmon, tuna, sardines, mackerel)',
+  'leafy greens':     'leafy greens (spinach, kale, Swiss chard)',
+  'leafy green':      'leafy greens (spinach, kale, Swiss chard)',
+  'nuts':             'nuts (almonds, cashews, walnuts, pumpkin seeds)',
+  'dairy':            'dairy (Greek yogurt, cheddar cheese, whole milk)',
+  'dairy products':   'dairy (Greek yogurt, cheddar cheese, whole milk)',
+  'citrus':           'citrus (oranges, grapefruit, kiwi)',
+  'citrus fruits':    'citrus (oranges, grapefruit, kiwi)',
+  'legumes':          'legumes (lentils, chickpeas, black beans)',
+  'whole grains':     'whole grains (oats, brown rice, quinoa)',
+  'lean meats':       'lean meats (chicken breast, turkey, lean beef)',
+  'lean meat':        'lean meats (chicken breast, turkey, lean beef)',
+  'red meat':         'red meat (beef, lamb, bison)',
+  'shellfish':        'shellfish (oysters, clams, crab, shrimp)',
+  'seeds':            'seeds (pumpkin seeds, sunflower seeds, chia seeds)',
+  'berries':          'berries (blueberries, strawberries, raspberries)',
+  'cruciferous vegetables': 'cruciferous vegetables (broccoli, Brussels sprouts, cauliflower)',
+  'organ meats':      'organ meats (beef liver, chicken liver)',
+  'fermented foods':  'fermented foods (kefir, kimchi, sauerkraut, miso)',
+};
+
+function expandFoodItem(item) {
+  const lower = item.toLowerCase().trim();
+  for (const [key, expanded] of Object.entries(FOOD_SPECIFICS)) {
+    if (lower === key || lower.startsWith(key + ' ') || lower.endsWith(' ' + key)) {
+      return expanded.charAt(0).toUpperCase() + expanded.slice(1);
+    }
+  }
+  return item;
+}
+
+function sanitizeFoods(str) {
+  if (!str) return str;
+  let cleaned = str
+    .replace(/,?\s*(such as|which are|are naturally|naturally rich|found in|including)[^,;]*/gi, '')
+    .replace(/,?\s*are\s+[a-z].*$/gi, '')
+    .trim()
+    .replace(/,\s*$/, '');
+  return cleaned || str;
+}
+
+function splitFoods(str) {
+  const items = [];
+  let current = '';
+  let depth = 0;
+  for (const ch of str) {
+    if (ch === '(') { depth++; current += ch; }
+    else if (ch === ')') { depth--; current += ch; }
+    else if ((ch === ',' || ch === ';') && depth === 0) {
+      if (current.trim()) items.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim()) items.push(current.trim());
+  return items;
+}
+
+function expandFoods(str) {
+  if (!str || str === '—') return str;
+  const cleaned = sanitizeFoods(str);
+  const items = splitFoods(cleaned).map(f => expandFoodItem(f)).filter(Boolean);
+  return items.length > 0 ? items.join(', ') : expandFoodItem(cleaned);
+}
+
+
 export function exportResultsToPDF(recommendations, assessment) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
   let y = 0;
@@ -142,18 +226,23 @@ export function exportResultsToPDF(recommendations, assessment) {
   doc.setTextColor(220, 252, 231);
   doc.text('Personalized Supplement & Wellness Report', ML, 27);
 
-  // Patient name + date — same row, same size, same style
-  const dateStr = new Date().toLocaleDateString('en-US', {
+  // Patient name + date/time — same row, same size, same style
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-US', {
     year: 'numeric', month: 'long', day: 'numeric',
   });
+  const timeStr = now.toLocaleTimeString('en-US', {
+    hour: '2-digit', minute: '2-digit', hour12: true,
+  });
+  const dateTimeStr = `${dateStr}  ${timeStr}`;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(12);
   doc.setTextColor(220, 252, 231);
   if (userName) {
     doc.text(`Prepared for: ${userName}`, ML, 38);
-    doc.text(dateStr, PAGE_W - MR, 38, { align: 'right' });
+    doc.text(dateTimeStr, PAGE_W - MR, 38, { align: 'right' });
   } else {
-    doc.text(dateStr, PAGE_W - MR, 38, { align: 'right' });
+    doc.text(dateTimeStr, PAGE_W - MR, 38, { align: 'right' });
   }
 
   // Thin accent line below header
@@ -216,78 +305,166 @@ export function exportResultsToPDF(recommendations, assessment) {
     y = checkY(doc, y, 40);
     y = sectionHeading(doc, 'Patient Profile', y);
 
-    // Name row — full width if present
-    if (userName) {
-      y = checkY(doc, y, 7);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8.5);
-      doc.setTextColor(...C.grayMid);
-      doc.text('Name', ML, y);
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(...C.grayDark);
-      doc.text(userName, ML + 22, y);
-      y += 6;
-    }
-
-    // Two-column grid layout
-    const col1 = [
-      assessment.age     ? ['Age',            `${assessment.age} years`]  : null,
-      assessment.weight  ? ['Weight',          `${assessment.weight} kg`]  : null,
-      assessment.activityLevel ? ['Activity', assessment.activityLevel]    : null,
-      assessment.sleepQuality  ? ['Sleep',    assessment.sleepQuality]     : null,
+    // Build rows: each row = [label1, value1, label2, value2]
+    const profileFields = [
+      userName                  ? ['Name',                   userName,                                                              null,              null]                                                                                    : null,
+      (assessment.age || assessment.gender) ? [
+        'Age',    assessment.age    ? `${assessment.age} years` : '—',
+        'Gender', assessment.gender || '—',
+      ] : null,
+      (assessment.weight || assessment.height) ? [
+        'Weight', assessment.weight ? `${assessment.weight} kg` : '—',
+        'Height', assessment.height ? `${assessment.height} cm` : '—',
+      ] : null,
+      (assessment.activityLevel || assessment.dietType) ? [
+        'Physical Activity Level', ACTIVITY_LABELS[assessment.activityLevel] || assessment.activityLevel || '—',
+        'Diet Type',               assessment.dietType || '—',
+      ] : null,
+      (assessment.sleepQuality || assessment.waterIntake) ? [
+        'Sleep Quality', assessment.sleepQuality || '—',
+        'Water Intake',  WATER_LABELS[assessment.waterIntake] || assessment.waterIntake || '—',
+      ] : null,
     ].filter(Boolean);
 
-    const col2 = [
-      assessment.gender  ? ['Gender',  assessment.gender]                  : null,
-      assessment.height  ? ['Height',  `${assessment.height} cm`]          : null,
-      assessment.dietType ? ['Diet',   assessment.dietType]                : null,
-      assessment.waterIntake ? ['Water', assessment.waterIntake]           : null,
-    ].filter(Boolean);
-
-    const rows = Math.max(col1.length, col2.length);
-    const colW = CW / 2 - 4;
-
-    for (let i = 0; i < rows; i++) {
-      y = checkY(doc, y, 7);
-      if (col1[i]) {
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(8.5);
-        doc.setTextColor(...C.grayMid);
-        doc.text(col1[i][0], ML, y);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(...C.grayDark);
-        doc.text(String(col1[i][1]), ML + 22, y);
+    // Rows where col2 is empty (e.g. Name spans full width)
+    const tableBody = profileFields.map(row => {
+      if (row[2] === null) {
+        // Full-width row — merge visually by putting value in col2 area too
+        return [row[0], row[1], '', ''];
       }
-      if (col2[i]) {
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(8.5);
-        doc.setTextColor(...C.grayMid);
-        doc.text(col2[i][0], ML + colW + 8, y);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(...C.grayDark);
-        doc.text(String(col2[i][1]), ML + colW + 30, y);
-      }
-      y += 6;
-    }
+      return row;
+    });
 
-    // Health goals
+    autoTable(doc, {
+      startY: y,
+      body: tableBody,
+      theme: 'plain',
+      styles: {
+        fontSize: 8.5,
+        cellPadding: { top: 3.5, bottom: 3.5, left: 4, right: 4 },
+        valign: 'middle',
+        lineColor: C.grayBorder,
+        lineWidth: 0,
+      },
+      columnStyles: {
+        0: { cellWidth: 46, fontStyle: 'bold', textColor: C.grayMid },
+        1: { cellWidth: 49, textColor: C.grayDark },
+        2: { cellWidth: 42, fontStyle: 'bold', textColor: C.grayMid },
+        3: { cellWidth: 45, textColor: C.grayDark },
+      },
+      margin: { left: ML, right: MR },
+      tableWidth: CW,
+      didParseCell(data) {
+        if (data.section === 'body') {
+          // row 0 = green, row 1 = white, row 2 = green …
+          data.cell.styles.fillColor = data.row.index % 2 === 0 ? C.greenLight : C.white;
+        }
+      },
+      didDrawCell(data) {
+        if (data.section === 'body' && data.row.index < tableBody.length - 1) {
+          doc.setDrawColor(...C.grayBorder);
+          doc.setLineWidth(0.2);
+          doc.line(
+            data.cell.x,
+            data.cell.y + data.cell.height,
+            data.cell.x + data.cell.width,
+            data.cell.y + data.cell.height
+          );
+        }
+      },
+    });
+    // Track how many rows the profile grid used so the extra table continues the pattern
+    const profileRowCount = tableBody.length;
+    y = doc.lastAutoTable.finalY + 4;
+
+    // Health goals, Symptoms, Conditions + all other answered optional fields
+    const extraRows = [];
     if (assessment.healthGoals?.length > 0) {
-      y = checkY(doc, y, 8);
-      y = kvRow(doc, 'Health Goals', assessment.healthGoals.join('  |  '), y);
+      extraRows.push(['Health Goals', assessment.healthGoals.join('  |  ')]);
     }
-
-    // Symptoms
     const symptoms = (assessment.symptoms || []).filter(s => s !== 'No current symptoms');
     if (symptoms.length > 0) {
-      y = checkY(doc, y, 8);
-      y = kvRow(doc, 'Symptoms', symptoms.join('  |  '), y);
+      extraRows.push(['Symptoms', symptoms.join('  |  ')]);
     }
-
-    // Medical conditions
     const conditions = (assessment.medicalConditions || []).filter(c => c !== 'None');
     if (conditions.length > 0) {
-      y = checkY(doc, y, 8);
-      y = kvRow(doc, 'Conditions', conditions.join('  |  '), y);
+      extraRows.push(['Conditions', conditions.join('  |  ')]);
+    }
+    const habits = (assessment.lifestyleHabits || []).filter(h => h !== 'None');
+    if (habits.length > 0) {
+      extraRows.push(['Lifestyle Habits', habits.join('  |  ')]);
+    }
+    if (assessment.currentMedications) {
+      extraRows.push(['Current Medications', assessment.currentMedications]);
+    }
+    if (assessment.allergies) {
+      extraRows.push(['Allergies', assessment.allergies]);
+    }
+    if (assessment.takingSupplements) {
+      const suppVal = assessment.takingSupplements === 'Yes' && assessment.currentSupplements
+        ? `Yes — ${assessment.currentSupplements}`
+        : assessment.takingSupplements;
+      extraRows.push(['Currently Taking Supplements', suppVal]);
+    }
+    if (assessment.pregnancyStatus && assessment.pregnancyStatus !== 'Not applicable') {
+      extraRows.push(['Pregnancy / Breastfeeding', assessment.pregnancyStatus]);
+    }
+    if (assessment.sunExposure) {
+      extraRows.push(['Daily Sun Exposure', assessment.sunExposure]);
+    }
+    if (assessment.proteinIntake && assessment.proteinIntake !== 'Not sure') {
+      extraRows.push(['Daily Protein Intake', assessment.proteinIntake]);
+    }
+    if (assessment.fitnessFocus && assessment.fitnessFocus !== 'Not applicable') {
+      extraRows.push(['Primary Fitness Focus', assessment.fitnessFocus]);
+    }
+    if (assessment.recentBloodTest === 'Yes') {
+      const bloodVal = assessment.bloodTestResults
+        ? `Yes — ${assessment.bloodTestResults}`
+        : 'Yes (no results provided)';
+      extraRows.push(['Recent Blood Test', bloodVal]);
+    }
+
+    if (extraRows.length > 0) {
+      y = checkY(doc, y, 10);
+      autoTable(doc, {
+        startY: y,
+        body: extraRows,
+        theme: 'plain',
+        styles: {
+          fontSize: 8.5,
+          cellPadding: { top: 3.5, bottom: 3.5, left: 4, right: 4 },
+          valign: 'top',
+          lineColor: C.grayBorder,
+          lineWidth: 0,
+        },
+        columnStyles: {
+          0: { cellWidth: 46, fontStyle: 'bold', textColor: C.grayMid },
+          1: { cellWidth: CW - 46, textColor: C.grayDark },
+        },
+        margin: { left: ML, right: MR },
+        tableWidth: CW,
+        didParseCell(data) {
+          if (data.section === 'body') {
+            // Continue the green-white pattern from the profile grid above
+            const globalIndex = profileRowCount + data.row.index;
+            data.cell.styles.fillColor = globalIndex % 2 === 0 ? C.greenLight : C.white;
+          }
+        },
+        didDrawCell(data) {
+          if (data.section === 'body' && data.row.index < extraRows.length - 1) {
+            doc.setDrawColor(...C.grayBorder);
+            doc.setLineWidth(0.2);
+            doc.line(
+              data.cell.x,
+              data.cell.y + data.cell.height,
+              data.cell.x + data.cell.width,
+              data.cell.y + data.cell.height
+            );
+          }
+        },
+      });
+      y = doc.lastAutoTable.finalY + 4;
     }
 
     y += 4;
@@ -298,6 +475,7 @@ export function exportResultsToPDF(recommendations, assessment) {
     y = checkY(doc, y, 24);
     y = sectionHeading(doc, 'Supplement Recommendations', y);
 
+    // Table 1 — core info
     autoTable(doc, {
       startY: y,
       head: [['Supplement', 'Priority', 'Match', 'Reason', 'Dosage', 'Timing', 'Interactions']],
@@ -350,6 +528,53 @@ export function exportResultsToPDF(recommendations, assessment) {
           }
         }
       },
+    });
+    y = doc.lastAutoTable.finalY + 6;
+
+    // Table 2 — evidence, food sources, side effects
+    // Keep ALL recs in the same order as the main table (no filtering) so row numbers match
+    const detailRows = recommendations.recommendations.map(rec => [
+      rec.name || '',
+      rec.evidence || '—',
+      expandFoods(rec.foods) || '—',
+      rec.sideEffects || '—',
+    ]);
+
+    y = checkY(doc, y, 24);
+    y = sectionHeading(doc, 'Evidence, Food Sources & Side Effects', y);
+
+    autoTable(doc, {
+      startY: y,
+      head: [['Supplement', 'Evidence', 'Food Sources', 'Side Effects']],
+      body: detailRows,
+      theme: 'grid',
+      headStyles: {
+        fillColor: C.greenDeep,
+        textColor: C.white,
+        fontSize: 7.5,
+        fontStyle: 'bold',
+        cellPadding: { top: 4, bottom: 4, left: 3, right: 3 },
+        halign: 'left',
+      },
+      bodyStyles: {
+        fontSize: 7.5,
+        cellPadding: { top: 3, bottom: 3, left: 3, right: 3 },
+        textColor: C.grayDark,
+        valign: 'top',
+        lineColor: C.grayBorder,
+        lineWidth: 0.2,
+      },
+      alternateRowStyles: {
+        fillColor: C.greenLight,
+      },
+      columnStyles: {
+        0: { cellWidth: 30, fontStyle: 'bold' },  // Supplement
+        1: { cellWidth: 56 },                     // Evidence
+        2: { cellWidth: 52 },                     // Food Sources
+        3: { cellWidth: 44 },                     // Side Effects
+      },
+      margin: { left: ML, right: MR },
+      tableWidth: CW,
     });
     y = doc.lastAutoTable.finalY + 8;
   }
@@ -582,8 +807,10 @@ export function exportResultsToPDF(recommendations, assessment) {
     y = sectionHeading(doc, 'Warnings & Supplements to Avoid', y);
 
     if (hasWarnings) {
-      const wLines = recommendations.warnings.map(w => `  •  ${w}`);
-      const blockH = 8 + wLines.length * 5.5;
+      const wTextLines = recommendations.warnings.flatMap(w =>
+        doc.splitTextToSize(`• ${w}`, CW - 14)
+      );
+      const blockH = 10 + wTextLines.length * 5.5 + 6;
       y = checkY(doc, y, blockH);
 
       doc.setFillColor(...C.redLight);
@@ -594,25 +821,27 @@ export function exportResultsToPDF(recommendations, assessment) {
       doc.rect(ML, y, 3, blockH, 'F');
 
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8.5);
+      doc.setFontSize(9);
       doc.setTextColor(...C.redMid);
-      doc.text('Important Warnings', ML + 6, y + 5.5);
+      doc.text('Important Warnings', ML + 7, y + 7);
 
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
+      doc.setFontSize(8.5);
       doc.setTextColor(127, 29, 29);
-      let wy = y + 10;
+      let wy = y + 14;
       recommendations.warnings.forEach(w => {
-        const wl = doc.splitTextToSize(`• ${w}`, CW - 10);
-        doc.text(wl, ML + 6, wy);
-        wy += wl.length * 5;
+        const wl = doc.splitTextToSize(`• ${w}`, CW - 14);
+        doc.text(wl, ML + 7, wy);
+        wy += wl.length * 5.5;
       });
-      y += blockH + 5;
+      y += blockH + 7;
     }
 
     if (hasAvoid) {
-      const aLines = recommendations.avoidList.map(a => `• ${a}`);
-      const blockH = 8 + aLines.length * 5.5;
+      const aTextLines = recommendations.avoidList.flatMap(a =>
+        doc.splitTextToSize(`• ${a}`, CW - 14)
+      );
+      const blockH = 10 + aTextLines.length * 5.5 + 6;
       y = checkY(doc, y, blockH);
 
       doc.setFillColor(255, 247, 237);
@@ -623,20 +852,20 @@ export function exportResultsToPDF(recommendations, assessment) {
       doc.rect(ML, y, 3, blockH, 'F');
 
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8.5);
+      doc.setFontSize(9);
       doc.setTextColor(...C.amberDark);
-      doc.text('Supplements to Avoid', ML + 6, y + 5.5);
+      doc.text('Supplements to Avoid', ML + 7, y + 7);
 
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
+      doc.setFontSize(8.5);
       doc.setTextColor(120, 53, 15);
-      let ay = y + 10;
+      let ay = y + 14;
       recommendations.avoidList.forEach(a => {
-        const al = doc.splitTextToSize(`• ${a}`, CW - 10);
-        doc.text(al, ML + 6, ay);
-        ay += al.length * 5;
+        const al = doc.splitTextToSize(`• ${a}`, CW - 14);
+        doc.text(al, ML + 7, ay);
+        ay += al.length * 5.5;
       });
-      y += blockH + 5;
+      y += blockH + 7;
     }
   }
 
@@ -663,8 +892,9 @@ export function exportResultsToPDF(recommendations, assessment) {
   drawFooters(doc, userName);
 
   // ── SAVE ─────────────────────────────────────────────────────────────────
-  const datePart = new Date().toISOString().slice(0, 10);
+  const datePart = now.toISOString().slice(0, 10);
+  const timePart = now.toTimeString().slice(0, 8).replace(/:/g, '-');
   const namePart = userName ? `_${userName.replace(/\s+/g, '_')}` : '';
-  const filename = `SuppliWise_Report${namePart}_${datePart}.pdf`;
+  const filename = `SuppliWise_Report${namePart}_${datePart}_${timePart}.pdf`;
   doc.save(filename);
 }

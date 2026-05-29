@@ -180,7 +180,7 @@ Respond with ONLY valid JSON, no markdown, no code fences:
       "confidenceScore": 85,
       "severityLevel": "Moderate",
       "interactions": "Known interactions or 'None identified'",
-      "evidence": "Brief evidence reference e.g. 'Supported by NIH studies on magnesium and sleep quality'",
+      "evidence": "Cite 1-2 specific peer-reviewed studies or authoritative guidelines with journal name, author(s), year, and PMID where available. Format: 'Author et al. (Year) Journal — brief finding (PMID: XXXXXXX); Source 2 if applicable.' Examples: 'Ferracioli-Oda et al. (2013) PLOS ONE meta-analysis — melatonin reduces sleep onset latency (PMID: 23691095)' or 'NIH Office of Dietary Supplements Vitamin D Fact Sheet; Holick et al. (2011) Journal of Clinical Endocrinology & Metabolism — Vitamin D deficiency guidelines (PMID: 21646368)'. NEVER write vague phrases like 'Supported by studies on X'. Always name the source.",
       "foods": "A clean comma-separated list of 4-6 specific food names only. NO sentences, NO 'such as', NO 'are naturally rich in', NO filler phrases. Just food names. If a category must be mentioned, immediately follow it with specific examples in parentheses. Examples of correct format: 'Atlantic salmon, canned tuna, sardines, mackerel, herring, anchovies' OR 'Fatty fish (salmon, tuna, sardines, mackerel), walnuts, chia seeds, flaxseeds'. NEVER write sentences like 'X are naturally rich in Y'.",
       "sideEffects": "Common side effects at recommended dose"
     }
@@ -340,6 +340,13 @@ Provide exactly 20 supplement recommendations total. Assign priority based on cl
 
     // Use AI result if valid, otherwise rule-based fallback
     if (aiResult && aiResult.recommendations) {
+      // Enrich AI recs with fallback evidence/foods/sideEffects if the AI omitted them
+      aiResult.recommendations = aiResult.recommendations.map(rec => ({
+        ...rec,
+        evidence:    rec.evidence    || inferEvidence(rec.name),
+        foods:       rec.foods       || inferFoods(rec.name),
+        sideEffects: rec.sideEffects || inferSideEffects(rec.name),
+      }));
       return res.json(aiResult);
     }
 
@@ -1025,7 +1032,7 @@ function buildResult(a, recs, lifestyleAdvice, actionPlan, warnings, avoidList, 
   const consultReason = triggered?.reason || null;
 
   // Ã¢â€â‚¬Ã¢â€â‚¬ Enrich recs with new fields Ã¢â€â‚¬Ã¢â€â‚¬
-  const enrichedRecs = recs.slice(0, 7).map(rec => ({
+  const enrichedRecs = recs.map(rec => ({
     ...rec,
     triggeredBy: rec.triggeredBy || inferTriggeredBy(rec.name, symptoms, goals, conditions, a),
     confidenceScore: rec.confidenceScore || inferConfidence(rec.name, symptoms, goals, conditions, a),
@@ -1125,7 +1132,59 @@ function inferEvidence(name) {
   if (n.includes('iron')) return 'Supported by WHO guidelines on iron deficiency and NIH Office of Dietary Supplements iron fact sheet.';
   if (n.includes('lion')) return 'Supported by clinical trial in Phytotherapy Research (2009) on Lion\'s Mane and cognitive function.';
   if (n.includes('berberine')) return 'Supported by meta-analysis in Evidence-Based Complementary Medicine on berberine and blood glucose regulation.';
-  return 'Based on clinical nutrition guidelines and peer-reviewed research.';
+  if (n.includes('vitamin c')) return 'Supported by Cochrane Review on Vitamin C for prevention and treatment of the common cold (Hemila & Chalker, 2013, PMID: 23440782).';
+  if (n.includes('vitamin b6') || n.includes('pyridoxine')) return 'Supported by NIH Office of Dietary Supplements Vitamin B6 Fact Sheet and studies on B6 in neurotransmitter synthesis.';
+  if (n.includes('vitamin k2') || n.includes('mk-7') || n.includes('menaquinone')) return 'Supported by Knapen et al. (2013) Osteoporosis International on Vitamin K2 and bone mineral density (PMID: 23525894).';
+  if (n.includes('vitamin k')) return 'Supported by NIH Office of Dietary Supplements Vitamin K Fact Sheet and studies on bone and cardiovascular health.';
+  if (n.includes('vitamin a') || n.includes('retinol')) return 'Supported by NIH Office of Dietary Supplements Vitamin A Fact Sheet and WHO guidelines on Vitamin A deficiency.';
+  if (n.includes('vitamin e') || n.includes('tocopherol')) return 'Supported by NIH Office of Dietary Supplements Vitamin E Fact Sheet and antioxidant research.';
+  if (n.includes('folate') || n.includes('folic')) return 'Supported by CDC and WHO guidelines on folate for neural tube defect prevention and NIH folate fact sheet.';
+  if (n.includes('riboflavin') || n.includes('vitamin b2')) return 'Supported by NIH Office of Dietary Supplements Riboflavin Fact Sheet and studies on migraine prevention (PMID: 9484373).';
+  if (n.includes('niacin') || n.includes('vitamin b3')) return 'Supported by NIH Office of Dietary Supplements Niacin Fact Sheet and AHA guidelines on niacin for lipid management.';
+  if (n.includes('thiamine') || n.includes('vitamin b1')) return 'Supported by NIH Office of Dietary Supplements Thiamine Fact Sheet and studies on neurological function.';
+  if (n.includes('biotin') || n.includes('vitamin b7')) return 'Supported by Patel et al. (2017) Skin Appendage Disorders review on biotin and hair/nail health (PMID: 28879195).';
+  if (n.includes('calcium')) return 'Supported by NIH Office of Dietary Supplements Calcium Fact Sheet and National Osteoporosis Foundation guidelines on bone health.';
+  if (n.includes('selenium')) return 'Supported by Rayman (2012) Lancet review on selenium and human health (PMID: 22381456) and NIH Selenium Fact Sheet.';
+  if (n.includes('iodine')) return 'Supported by WHO guidelines on iodine deficiency disorders and NIH Office of Dietary Supplements Iodine Fact Sheet.';
+  if (n.includes('potassium')) return 'Supported by NIH Office of Dietary Supplements Potassium Fact Sheet and AHA guidelines on potassium and blood pressure.';
+  if (n.includes('copper')) return 'Supported by NIH Office of Dietary Supplements Copper Fact Sheet and studies on copper in immune function and antioxidant defense.';
+  if (n.includes('manganese')) return 'Supported by NIH Office of Dietary Supplements Manganese Fact Sheet and studies on manganese in bone formation and antioxidant enzymes.';
+  if (n.includes('molybdenum')) return 'Supported by NIH Office of Dietary Supplements Molybdenum Fact Sheet and studies on molybdenum as an essential trace mineral cofactor.';
+  if (n.includes('chromium')) return 'Supported by Balk et al. (2007) Diabetes Care systematic review on chromium and glycemic control (PMID: 17327355).';
+  if (n.includes('krill')) return 'Supported by Ulven et al. (2011) Lipids study comparing krill oil and fish oil bioavailability (PMID: 21042875).';
+  if (n.includes('rhodiola')) return 'Supported by Darbinyan et al. (2000) Phytomedicine RCT on Rhodiola rosea and stress-related fatigue (PMID: 10839209).';
+  if (n.includes('ginseng') || n.includes('panax')) return 'Supported by Reay et al. (2005) Psychopharmacology RCT on Panax ginseng and cognitive performance (PMID: 15739076).';
+  if (n.includes('maca')) return 'Supported by Gonzales et al. (2002) Asian Journal of Andrology RCT on maca and sexual desire (PMID: 12181983).';
+  if (n.includes('valerian')) return 'Supported by Bent et al. (2006) American Journal of Medicine meta-analysis on valerian and sleep quality (PMID: 16461960).';
+  if (n.includes('elderberry') || n.includes('sambucus')) return 'Supported by Zakay-Rones et al. (2004) Journal of International Medical Research RCT on elderberry and influenza (PMID: 15080016).';
+  if (n.includes('echinacea')) return 'Supported by Shah et al. (2007) Lancet Infectious Diseases meta-analysis on echinacea and cold prevention (PMID: 17597571).';
+  if (n.includes('milk thistle') || n.includes('silymarin')) return 'Supported by Abenavoli et al. (2010) Phytotherapy Research review on silymarin and liver protection (PMID: 20564545).';
+  if (n.includes('ginkgo')) return 'Supported by Birks & Grimley Evans (2009) Cochrane Review on Ginkgo biloba and cognitive function (PMID: 19160216).';
+  if (n.includes('bacopa')) return 'Supported by Stough et al. (2001) Psychopharmacology RCT on Bacopa monnieri and memory (PMID: 11498727).';
+  if (n.includes('theanine') || n.includes('l-theanine')) return 'Supported by Nobre et al. (2008) Asia Pacific Journal of Clinical Nutrition on L-theanine and relaxed alertness (PMID: 18296328).';
+  if (n.includes('alpha-lipoic') || n.includes('lipoic')) return 'Supported by Ziegler et al. (2006) Diabetes Care RCT on alpha-lipoic acid and diabetic neuropathy (PMID: 16873787).';
+  if (n.includes('resveratrol')) return 'Supported by Bhatt et al. (2012) Nutrition Research meta-analysis on resveratrol and cardiovascular biomarkers (PMID: 22652374).';
+  if (n.includes('glucosamine')) return 'Supported by Towheed et al. (2005) Cochrane Review on glucosamine for osteoarthritis (PMID: 15846645).';
+  if (n.includes('chondroitin')) return 'Supported by Wandel et al. (2010) BMJ meta-analysis on chondroitin for joint pain (PMID: 20847017).';
+  if (n.includes('collagen')) return 'Supported by Shaw et al. (2017) British Journal of Nutrition RCT on collagen peptides and joint pain in athletes (PMID: 28177710).';
+  if (n.includes('boswellia')) return 'Supported by Siddiqui (2011) Phytotherapy Research review on Boswellia serrata and joint inflammation (PMID: 21671421).';
+  if (n.includes('creatine')) return 'Supported by ISSN Position Stand on creatine monohydrate (Kreider et al., 2017, PMID: 28615996).';
+  if (n.includes('melatonin')) return 'Supported by Ferracioli-Oda et al. (2013) PLOS ONE meta-analysis on melatonin and sleep onset latency (PMID: 23691095).';
+  if (n.includes('5-htp')) return 'Supported by Birdsall (1998) Alternative Medicine Review on 5-HTP and serotonin synthesis (PMID: 9727088).';
+  if (n.includes('tart cherry')) return 'Supported by Bell et al. (2014) Scandinavian Journal of Medicine & Science in Sports on tart cherry and muscle recovery (PMID: 24804818).';
+  if (n.includes('garlic') || n.includes('allicin')) return 'Supported by Ried et al. (2016) Journal of Nutrition meta-analysis on garlic and blood pressure (PMID: 26764327).';
+  if (n.includes('nattokinase')) return 'Supported by Kim et al. (2008) Hypertension Research RCT on nattokinase and blood pressure (PMID: 18971533).';
+  if (n.includes('saw palmetto')) return 'Supported by Tacklind et al. (2012) Cochrane Review on saw palmetto for benign prostatic hyperplasia (PMID: 22972105).';
+  if (n.includes('vitex') || n.includes('chaste')) return 'Supported by Schellenberg (2001) BMJ RCT on Vitex agnus-castus and premenstrual syndrome (PMID: 11159568).';
+  if (n.includes('tribulus')) return 'Supported by Roaiah et al. (2016) Journal of Sex & Marital Therapy RCT on Tribulus terrestris and sexual function (PMID: 26727646).';
+  if (n.includes('hyaluronic')) return 'Supported by Kawada et al. (2014) Journal of Clinical Biochemistry and Nutrition RCT on oral hyaluronic acid and skin hydration (PMID: 24876314).';
+  if (n.includes('astaxanthin')) return 'Supported by Tominaga et al. (2012) Acta Biochimica Polonica RCT on astaxanthin and skin aging (PMID: 22428137).';
+  if (n.includes('phosphatidylserine')) return 'Supported by Kato-Kataoka et al. (2010) Journal of Clinical Biochemistry and Nutrition RCT on phosphatidylserine and memory (PMID: 20520964).';
+  if (n.includes('hmb') || n.includes('beta-hydroxy')) return 'Supported by Wilson et al. (2014) Journal of Strength and Conditioning Research meta-analysis on HMB and muscle mass (PMID: 24714538).';
+  if (n.includes('citrulline')) return 'Supported by Perez-Guisado & Jakeman (2010) Journal of Strength and Conditioning Research on citrulline malate and exercise performance (PMID: 20386132).';
+  if (n.includes('beta-alanine')) return 'Supported by Hobson et al. (2012) Amino Acids meta-analysis on beta-alanine and exercise capacity (PMID: 22270875).';
+  if (n.includes('whey') || (n.includes('protein') && n.includes('supplement'))) return 'Supported by Morton et al. (2018) British Journal of Sports Medicine meta-analysis on protein supplementation and muscle mass (PMID: 28698222).';
+  return 'Supported by peer-reviewed research indexed in PubMed and guidelines from the NIH Office of Dietary Supplements. Consult a healthcare provider for personalized evidence review.';
 }
 
 // Ã¢â€â‚¬Ã¢â€â‚¬ Helper: infer food sources Ã¢â€â‚¬Ã¢â€â‚¬
@@ -1153,7 +1212,53 @@ function inferFoods(name) {
   if (n.includes('creatine')) return 'Beef, pork, herring, salmon, tuna, chicken breast (creatine is found almost exclusively in animal muscle tissue)';
   if (n.includes('melatonin')) return 'Tart cherries, walnuts, almonds, oats, bananas, tomatoes, grapes';
   if (n.includes('inositol')) return 'Cantaloupe, citrus fruits, beans, brown rice, corn, sesame seeds, wheat germ';
-  return 'Obtain from a varied whole-food diet including lean proteins, leafy greens, legumes, and whole grains';
+  if (n.includes('copper')) return 'Beef liver, oysters, dark chocolate, almonds, cashews, sunflower seeds, shiitake mushrooms';
+  if (n.includes('manganese')) return 'Mussels, hazelnuts, pecans, brown rice, chickpeas, spinach, pineapple, black tea';
+  if (n.includes('molybdenum')) return 'Legumes (lentils, black beans, peas), whole grains, nuts, leafy vegetables, liver';
+  if (n.includes('chromium')) return 'Broccoli, grape juice, whole wheat bread, beef, orange juice, turkey breast, potatoes';
+  if (n.includes('vitamin c')) return 'Red bell peppers, guava, kiwi, strawberries, broccoli, papaya, orange juice, Brussels sprouts';
+  if (n.includes('vitamin a') || n.includes('retinol')) return 'Beef liver, sweet potatoes, carrots, spinach, kale, butternut squash, eggs, fortified dairy';
+  if (n.includes('vitamin e') || n.includes('tocopherol')) return 'Sunflower seeds, almonds, hazelnuts, peanut butter, spinach, broccoli, avocado, wheat germ oil';
+  if (n.includes('vitamin b6') || n.includes('pyridoxine')) return 'Chickpeas, yellowfin tuna, chicken breast, potatoes, bananas, pistachio nuts, avocado';
+  if (n.includes('riboflavin') || n.includes('vitamin b2')) return 'Beef liver, lamb, milk, natural yogurt, mushrooms, almonds, eggs, quinoa';
+  if (n.includes('niacin') || n.includes('vitamin b3')) return 'Chicken breast, tuna, turkey, salmon, beef, peanuts, mushrooms, avocado, brown rice';
+  if (n.includes('thiamine') || n.includes('vitamin b1')) return 'Pork, trout, black beans, edamame, sunflower seeds, fortified cereals, asparagus, acorn squash';
+  if (n.includes('pantothenic') || n.includes('vitamin b5')) return 'Beef liver, sunflower seeds, chicken, tuna, avocado, mushrooms, sweet potatoes, lentils';
+  if (n.includes('biotin') || n.includes('vitamin b7')) return 'Beef liver, eggs, salmon, avocado, pork, sweet potatoes, almonds, sunflower seeds';
+  if (n.includes('vitamin k2') || n.includes('mk-7') || n.includes('menaquinone')) return 'Natto (fermented soybeans), hard cheeses, soft cheeses, egg yolks, butter, chicken liver, salami';
+  if (n.includes('vitamin k')) return 'Kale, Swiss chard, spinach, Brussels sprouts, broccoli, natto, parsley, collard greens';
+  if (n.includes('rhodiola')) return 'Rhodiola rosea root (supplement form — grows in cold mountainous regions, not a common food)';
+  if (n.includes('ginseng') || n.includes('panax')) return 'Ginseng root (supplement form — not commonly found in everyday foods)';
+  if (n.includes('maca')) return 'Maca root powder (supplement form — can be added to smoothies, oatmeal, or baked goods)';
+  if (n.includes('valerian')) return 'Valerian root (supplement form — not commonly found in food)';
+  if (n.includes('elderberry') || n.includes('sambucus')) return 'Elderberries (cooked or processed — raw berries are toxic), elderberry syrup, elderberry tea';
+  if (n.includes('echinacea')) return 'Echinacea (supplement form — not commonly found in food)';
+  if (n.includes('milk thistle') || n.includes('silymarin')) return 'Milk thistle seeds (supplement form — not commonly found in everyday foods)';
+  if (n.includes('ginkgo')) return 'Ginkgo biloba leaves (supplement form — not commonly found in food)';
+  if (n.includes('bacopa')) return 'Bacopa monnieri (supplement form — not commonly found in food)';
+  if (n.includes('theanine') || n.includes('l-theanine')) return 'Green tea, black tea, white tea, matcha (L-theanine is found almost exclusively in tea leaves)';
+  if (n.includes('alpha-lipoic') || n.includes('lipoic')) return 'Beef liver, spinach, broccoli, Brussels sprouts, tomatoes, peas, rice bran (small amounts in food)';
+  if (n.includes('resveratrol')) return 'Red grapes, red wine, blueberries, cranberries, peanuts, dark chocolate, mulberries';
+  if (n.includes('glucosamine')) return 'Shellfish shells (supplement derived — not found in significant amounts in common foods)';
+  if (n.includes('chondroitin')) return 'Animal cartilage (supplement derived — bone broth contains small amounts)';
+  if (n.includes('boswellia')) return 'Boswellia serrata resin (supplement form — not commonly found in food)';
+  if (n.includes('tart cherry')) return 'Tart cherries (Montmorency variety), tart cherry juice, tart cherry extract';
+  if (n.includes('garlic') || n.includes('allicin')) return 'Fresh garlic, garlic powder, black garlic, garlic oil, leeks, onions, chives';
+  if (n.includes('saw palmetto')) return 'Saw palmetto berries (supplement form — not commonly found in food)';
+  if (n.includes('vitex') || n.includes('chaste')) return 'Vitex agnus-castus berries (supplement form — not commonly found in food)';
+  if (n.includes('tribulus')) return 'Tribulus terrestris (supplement form — not commonly found in food)';
+  if (n.includes('hyaluronic')) return 'Bone broth, chicken combs, soy-based foods, root vegetables (small amounts — supplement form most effective)';
+  if (n.includes('astaxanthin')) return 'Wild-caught salmon, shrimp, lobster, crab, trout, microalgae (Haematococcus pluvialis)';
+  if (n.includes('phosphatidylserine')) return 'Soy lecithin, white beans, egg yolks, chicken liver, Atlantic mackerel, herring';
+  if (n.includes('hmb') || n.includes('beta-hydroxy')) return 'Alfalfa, catfish, grapefruit, avocado (very small amounts — supplement form needed for therapeutic doses)';
+  if (n.includes('citrulline')) return 'Watermelon, cucumber, pumpkin, squash, bitter melon (citrulline is highest in watermelon rind)';
+  if (n.includes('beta-alanine')) return 'Chicken breast, turkey, beef, pork, fish (beta-alanine is found in animal muscle tissue)';
+  if (n.includes('whey') || (n.includes('protein') && n.includes('supplement'))) return 'Whey protein powder, Greek yogurt, cottage cheese, ricotta, milk (whey is a dairy byproduct)';
+  if (n.includes('5-htp')) return 'Griffonia simplicifolia seeds (supplement source — small amounts in turkey, chicken, milk, pumpkin seeds)';
+  if (n.includes('glycine')) return 'Bone broth, gelatin, pork skin, chicken skin, beef, fish, dairy, legumes';
+  if (n.includes('nattokinase')) return 'Natto (fermented soybeans) — the only significant food source of nattokinase';
+  if (n.includes('hawthorn')) return 'Hawthorn berries, hawthorn tea, hawthorn extract (supplement form most effective)';
+  return 'Obtain from a varied whole-food diet including lean proteins, leafy greens, legumes, nuts, seeds, and whole grains';
 }
 
 // Ã¢â€â‚¬Ã¢â€â‚¬ Helper: infer side effects Ã¢â€â‚¬Ã¢â€â‚¬
@@ -1169,7 +1274,53 @@ function inferSideEffects(name) {
   if (n.includes('coq10')) return 'Generally well tolerated. Mild GI upset possible. May lower blood pressure Ã¢â‚¬â€ monitor if on BP medications.';
   if (n.includes('curcumin')) return 'May cause GI upset at high doses. Avoid high doses in pregnancy or with blood thinners.';
   if (n.includes('berberine')) return 'May cause GI discomfort initially. Can lower blood sugar Ã¢â‚¬â€ monitor if diabetic. Avoid in pregnancy.';
-  return 'Generally well tolerated at recommended doses. Discontinue if adverse reactions occur.';
+  if (n.includes('vitamin c')) return 'GI upset and diarrhea at doses above 2000mg. Upper limit: 2000mg/day.';
+  if (n.includes('vitamin d')) return 'Toxicity possible above 4000 IU/day long-term. Symptoms: nausea, weakness, frequent urination. Get levels tested before high-dose use.';
+  if (n.includes('vitamin a') || n.includes('retinol')) return 'Toxicity at high doses (>10,000 IU/day). Avoid in pregnancy. Symptoms: nausea, headache, liver damage. Upper limit: 3000 mcg RAE/day.';
+  if (n.includes('vitamin e')) return 'High doses (>1000mg) may increase bleeding risk. Upper limit: 1000mg/day.';
+  if (n.includes('vitamin k')) return 'Interferes with warfarin (blood thinners) — consult doctor before use. Generally safe at food levels.';
+  if (n.includes('folate') || n.includes('folic')) return 'High doses may mask B12 deficiency. Upper limit: 1000mcg synthetic folic acid/day.';
+  if (n.includes('niacin')) return 'Flushing, itching, and redness at doses above 50mg. Extended-release forms reduce flushing. Upper limit: 35mg/day for flushing form.';
+  if (n.includes('calcium')) return 'Constipation, kidney stones at very high doses. Upper limit: 2500mg/day total from all sources.';
+  if (n.includes('selenium')) return 'Selenosis (toxicity) above 400mcg/day: hair loss, nail brittleness, GI issues. Upper limit: 400mcg/day.';
+  if (n.includes('iodine')) return 'Excess iodine can worsen thyroid conditions. Upper limit: 1100mcg/day. Avoid high doses with thyroid disease.';
+  if (n.includes('potassium')) return 'High-dose supplements can cause GI upset and dangerous heart rhythm changes. Do not exceed 99mg without medical supervision.';
+  if (n.includes('copper')) return 'Nausea, vomiting at high doses. Upper limit: 10mg/day. Long-term excess may cause liver damage.';
+  if (n.includes('manganese')) return 'Neurological symptoms at very high doses. Upper limit: 11mg/day. Generally safe at recommended doses.';
+  if (n.includes('chromium')) return 'Generally well tolerated. Rare: kidney and liver damage at very high doses. Avoid with kidney disease.';
+  if (n.includes('omega') || n.includes('fish oil') || n.includes('krill')) return 'Fishy aftertaste, mild GI upset. Take with meals. High doses (>3g) may thin blood. Upper limit: 3g/day without medical supervision.';
+  if (n.includes('rhodiola')) return 'Generally well tolerated. Mild insomnia or irritability if taken late in the day. Avoid in bipolar disorder.';
+  if (n.includes('ginseng') || n.includes('panax')) return 'Insomnia, headache, GI upset at high doses. Avoid with blood thinners and stimulants. Cycle use recommended.';
+  if (n.includes('maca')) return 'Generally well tolerated. Mild GI upset initially. Avoid in hormone-sensitive conditions without medical advice.';
+  if (n.includes('valerian')) return 'Drowsiness, dizziness. Do not drive after taking. Avoid with sedatives or alcohol.';
+  if (n.includes('elderberry')) return 'Generally safe. Raw elderberries are toxic — use only processed supplements. Avoid with immunosuppressants.';
+  if (n.includes('echinacea')) return 'Rare allergic reactions, especially in those allergic to ragweed. Avoid with autoimmune conditions.';
+  if (n.includes('milk thistle') || n.includes('silymarin')) return 'Generally well tolerated. Mild laxative effect. Rare: allergic reaction in those sensitive to ragweed family.';
+  if (n.includes('ginkgo')) return 'May increase bleeding risk. Avoid with blood thinners. Rare: headache, GI upset, dizziness.';
+  if (n.includes('bacopa')) return 'GI upset, nausea, dry mouth. Take with food. May slow heart rate — caution with bradycardia medications.';
+  if (n.includes('theanine') || n.includes('l-theanine')) return 'Generally very safe. Mild drowsiness at high doses. No known upper limit.';
+  if (n.includes('alpha-lipoic') || n.includes('lipoic')) return 'May lower blood sugar — monitor if diabetic. Rare: skin rash, GI upset. Avoid with thyroid medications.';
+  if (n.includes('resveratrol')) return 'Generally well tolerated. High doses may have mild blood-thinning effect. Avoid before surgery.';
+  if (n.includes('glucosamine')) return 'Mild GI upset. May affect blood sugar in diabetics. Shellfish allergy: use non-shellfish derived forms.';
+  if (n.includes('chondroitin')) return 'Generally well tolerated. Mild GI upset. May have mild blood-thinning effect at high doses.';
+  if (n.includes('collagen')) return 'Generally well tolerated. Rare: mild GI discomfort, allergic reaction in those sensitive to fish or eggs.';
+  if (n.includes('boswellia')) return 'Mild GI upset. Rare: skin rash. Generally well tolerated at recommended doses.';
+  if (n.includes('creatine')) return 'Water retention (intracellular), mild GI upset if taken without adequate water. Safe at 3-5g/day long-term.';
+  if (n.includes('melatonin')) return 'Drowsiness, headache, dizziness. Do not drive after taking. Start with lowest effective dose (0.5mg). Avoid long-term high doses.';
+  if (n.includes('5-htp')) return 'Nausea, GI upset especially at start. Do not combine with SSRIs or MAOIs (serotonin syndrome risk).';
+  if (n.includes('tart cherry')) return 'Generally very safe. High in natural sugars — monitor if diabetic. Mild GI upset at high doses.';
+  if (n.includes('garlic') || n.includes('allicin')) return 'Bad breath, GI upset, heartburn. May increase bleeding risk — avoid before surgery or with blood thinners.';
+  if (n.includes('saw palmetto')) return 'Mild GI upset, headache, dizziness. Rare: liver damage at high doses. Avoid in pregnancy.';
+  if (n.includes('vitex') || n.includes('chaste')) return 'Mild GI upset, headache, acne-like rash. Avoid with hormonal medications or in pregnancy.';
+  if (n.includes('tribulus')) return 'Mild GI upset. Rare: liver and kidney toxicity at very high doses. Avoid with diabetes medications.';
+  if (n.includes('hyaluronic')) return 'Generally very safe orally. Rare: mild GI upset. Avoid with active infections or cancer history.';
+  if (n.includes('astaxanthin')) return 'Generally very safe. Mild skin yellowing at very high doses. No established upper limit.';
+  if (n.includes('phosphatidylserine')) return 'Generally well tolerated. Mild GI upset at high doses. Avoid with blood thinners.';
+  if (n.includes('hmb') || n.includes('beta-hydroxy')) return 'Generally well tolerated. Mild GI upset. No significant adverse effects at recommended doses.';
+  if (n.includes('citrulline')) return 'Generally well tolerated. Mild GI upset at high doses. May lower blood pressure — monitor if on antihypertensives.';
+  if (n.includes('beta-alanine')) return 'Tingling/flushing sensation (paresthesia) — harmless and dose-dependent. Reduces with sustained-release forms.';
+  if (n.includes('whey') || (n.includes('protein') && n.includes('supplement'))) return 'GI upset in lactose-intolerant individuals. Use isolate form to minimize lactose. Avoid with kidney disease at high doses.';
+  return 'Generally well tolerated at recommended doses. Consult a healthcare provider if you experience adverse effects.';
 }
 
 // Ã¢â€â‚¬Ã¢â€â‚¬ Helper: build meal recommendations Ã¢â€â‚¬Ã¢â€â‚¬

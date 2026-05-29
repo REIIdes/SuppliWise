@@ -73,11 +73,11 @@ const DIET_INFO = {
 function DietTooltip({ diet, openDiet, onToggle }) {
   const visible = openDiet === diet;
   return (
-    <span className="diet-tooltip-wrap">
+    <span className="diet-tooltip-wrap" onClick={(e) => e.stopPropagation()}>
       <button
         type="button"
         className="diet-info-btn"
-        onClick={(e) => { e.preventDefault(); onToggle(visible ? null : diet); }}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggle(visible ? null : diet); }}
         aria-label={`Info about ${diet}`}
       >
         ?
@@ -88,7 +88,7 @@ function DietTooltip({ diet, openDiet, onToggle }) {
           <button
             type="button"
             className="diet-tooltip-close"
-            onClick={(e) => { e.preventDefault(); onToggle(null); }}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggle(null); }}
           >
             ✕
           </button>
@@ -320,6 +320,14 @@ function Step2({ data, onChange }) {
   const isChild = age > 0 && age < 13;
   const [openDiet, setOpenDiet] = useState(null);
 
+  // Close tooltip when clicking anywhere outside it
+  useEffect(() => {
+    if (!openDiet) return;
+    const handleClick = () => setOpenDiet(null);
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  }, [openDiet]);
+
   // 6 diet types for a balanced grid
   const diets = ['Omnivore', 'Vegan', 'Keto', 'Paleo', 'Mediterranean', 'Carnivore', 'DASH', 'Flexitarian', 'Pescatarian'];
 
@@ -520,7 +528,7 @@ const ALL_SYMPTOMS = [
   { name: 'Low Appetite',        genders: ['Male', 'Female', 'Prefer not to say'] },
   // Female-specific
   { name: 'Irregular Periods',   genders: ['Female'] },
-  { name: 'Low Libido',          genders: ['Male'] },
+  { name: 'Low Libido',          genders: ['Male', 'Prefer not to say'] },
 ];
 
 const SEVERITY_OPTIONS = ['Mild', 'Moderate', 'Severe'];
@@ -585,7 +593,12 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
   const selectedSymptoms = data.symptoms || [];
   const symptomSeverity = data.symptomSeverity || {};
   const gender = data.gender || '';
-  const visibleSymptoms = ALL_SYMPTOMS.filter(s => s.genders.includes(gender) || gender === '');
+  const isPregnantOrBreastfeeding = data.isPregnant === 'Yes' || data.isBreastfeeding === 'Yes';
+  const visibleSymptoms = ALL_SYMPTOMS.filter(s => {
+    if (!s.genders.includes(gender) && gender !== '') return false;
+    if (s.name === 'Low Libido' && isPregnantOrBreastfeeding) return false;
+    return true;
+  });
   const [severityErrors, setSeverityErrors] = useState([]);
 
   const toggleSymptom = (s) => {
@@ -1055,6 +1068,13 @@ function AssessmentPage() {
         if (pregnant === 'Yes') updated.pregnancyStatus = 'Pregnant';
         else if (breastfeeding === 'Yes') updated.pregnancyStatus = 'Breastfeeding';
         else updated.pregnancyStatus = 'Not applicable';
+
+        // Remove Low Libido from symptoms if pregnant or breastfeeding
+        if (pregnant === 'Yes' || breastfeeding === 'Yes') {
+          updated.symptoms = (updated.symptoms || []).filter(s => s !== 'Low Libido');
+          const { 'Low Libido': _removed, ...restSeverity } = updated.symptomSeverity || {};
+          updated.symptomSeverity = restSeverity;
+        }
       }
       return updated;
     });

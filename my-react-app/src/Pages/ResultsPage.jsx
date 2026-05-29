@@ -222,7 +222,7 @@ function SupplementCard({ rec, index = 0, expanded, onToggle }) {
         <div className="rec-expanded">
           {rec.evidence && (
             <div className="rec-expanded-section rec-expanded-evidence">
-              <span className="rec-expanded-label">📚 Evidence</span>
+              <span className="rec-expanded-label">📚 Evidence & References</span>
               <p>{rec.evidence}</p>
             </div>
           )}

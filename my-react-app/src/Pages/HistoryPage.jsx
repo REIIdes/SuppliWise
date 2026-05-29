@@ -8,10 +8,10 @@ import './HistoryPage.css';
 const priorityColor = { High: '#dc2626', Medium: '#d97706', Low: '#374151' };
 
 const ACTIVITY_LABELS = {
-  Sedentary: 'Sedentary',
-  Light:     'Light',
-  Moderate:  'Moderate',
-  Very:      'Very Active',
+  Sedentary: 'Sedentary / No Exercise',
+  Light:     'Light (1–3 days/week)',
+  Moderate:  'Moderate (3–5 days/week)',
+  Very:      'Very Active (6–7 days/week)',
 };
 
 // Map generic food category words to specific examples
@@ -54,7 +54,131 @@ function expandFoodText(text) {
   return cleaned;
 }
 
-// ── Delete Confirmation Modal ──────────────────────────────────────────────
+// ── Client-side evidence/foods/sideEffects fallback ───────────────────────
+// Mirrors the server-side inferEvidence/inferFoods/inferSideEffects so that
+// old DB records (saved before server enrichment was added) still show data.
+const EVIDENCE_MAP = {
+  magnesium:    'Supported by NIH studies on magnesium and sleep quality (PMID: 23853635) and multiple RCTs on magnesium deficiency.',
+  'vitamin d':  'Supported by NIH Vitamin D fact sheet and Endocrine Society guidelines on Vitamin D deficiency.',
+  'vitamin b12':'Supported by NIH B12 fact sheet; methylcobalamin shown superior in neurological studies (PMID: 15208835).',
+  b12:          'Supported by NIH B12 fact sheet; methylcobalamin shown superior in neurological studies (PMID: 15208835).',
+  omega:        'Supported by AHA guidelines and multiple RCTs on EPA+DHA for cardiovascular and cognitive health.',
+  'fish oil':   'Supported by AHA guidelines and multiple RCTs on EPA+DHA for cardiovascular and cognitive health.',
+  iron:         'Supported by WHO guidelines on iron deficiency anemia and NIH iron supplementation studies.',
+  zinc:         'Supported by NIH zinc fact sheet and Cochrane review on zinc for immune function (PMID: 11869635).',
+  'vitamin c':  'Supported by NIH Vitamin C fact sheet and Cochrane review on Vitamin C and immune function.',
+  calcium:      'Supported by NIH calcium fact sheet and NOF guidelines on bone health.',
+  coq10:        'Supported by multiple RCTs on CoQ10 for cardiovascular health and statin-induced myopathy.',
+  probiotic:    'Supported by Cochrane reviews on probiotics for gut health and immune modulation.',
+  ashwagandha:  'Supported by multiple RCTs on KSM-66 ashwagandha for cortisol reduction (PMID: 23439798).',
+  curcumin:     'Supported by meta-analyses on curcumin for inflammation and joint health (PMID: 29480523).',
+  berberine:    'Supported by RCTs showing berberine comparable to metformin for blood glucose (PMID: 20304560).',
+  selenium:     'Supported by NIH selenium fact sheet and studies on thyroid function and antioxidant defense.',
+  collagen:     'Supported by RCTs on collagen peptides for skin elasticity and joint health (PMID: 30681787).',
+  creatine:     'Supported by ISSN position stand on creatine monohydrate for muscle strength and power.',
+  melatonin:    'Supported by meta-analyses on melatonin for sleep onset latency (PMID: 17145415).',
+  'vitamin k':  'Supported by NIH Vitamin K fact sheet and studies on bone and cardiovascular health.',
+  folate:       'Supported by CDC and WHO guidelines on folate for neural tube defect prevention.',
+  'vitamin a':  'Supported by NIH Vitamin A fact sheet and WHO guidelines on Vitamin A deficiency.',
+  'vitamin e':  'Supported by NIH Vitamin E fact sheet and antioxidant research.',
+  iodine:       'Supported by WHO guidelines on iodine deficiency and thyroid function.',
+  potassium:    'Supported by NIH potassium fact sheet and AHA guidelines on blood pressure.',
+  resveratrol:  'Supported by studies on sirtuin activation and cardiovascular protection (PMID: 17086194).',
+  'alpha-lipoic': 'Supported by RCTs on ALA for insulin sensitivity and diabetic neuropathy (PMID: 11226285).',
+  'tart cherry': 'Supported by RCTs on tart cherry for uric acid reduction and gout prevention (PMID: 21671418).',
+};
+
+const FOODS_MAP = {
+  magnesium:    'Dark chocolate (70%+), almonds, pumpkin seeds, spinach, black beans, avocado, cashews',
+  'vitamin d':  'Fatty fish (salmon, tuna, mackerel), egg yolks, fortified milk, fortified orange juice, mushrooms',
+  'vitamin b12':'Beef liver, clams, sardines, tuna, salmon, fortified cereals, eggs, dairy',
+  b12:          'Beef liver, clams, sardines, tuna, salmon, fortified cereals, eggs, dairy',
+  omega:        'Fatty fish (salmon, tuna, sardines, mackerel), walnuts, chia seeds, flaxseeds, hemp seeds',
+  'fish oil':   'Fatty fish (salmon, tuna, sardines, mackerel), walnuts, chia seeds, flaxseeds',
+  iron:         'Red meat (beef, lamb, bison), spinach, beans, lentils, dark chocolate, tofu, pumpkin seeds',
+  zinc:         'Oysters, beef, pumpkin seeds, hemp seeds, lentils, chickpeas, cashews',
+  'vitamin c':  'Bell peppers, kiwi, strawberries, oranges, broccoli, Brussels sprouts, papaya',
+  calcium:      'Dairy (Greek yogurt, cheddar cheese, whole milk), sardines, kale, broccoli, fortified plant milk',
+  coq10:        'Beef heart, sardines, mackerel, pork, chicken, broccoli, cauliflower, spinach',
+  probiotic:    'Fermented foods (kefir, kimchi, sauerkraut, miso), Greek yogurt, tempeh, kombucha',
+  ashwagandha:  'Ashwagandha root (supplement only — not commonly found in food)',
+  curcumin:     'Turmeric, curry powder, golden milk, turmeric tea',
+  berberine:    'Barberries, goldenseal, Oregon grape (supplement form most effective)',
+  selenium:     'Brazil nuts, tuna, sardines, shrimp, beef, turkey, eggs, sunflower seeds',
+  collagen:     'Bone broth, chicken skin, fish skin, egg whites, citrus fruits (support collagen synthesis)',
+  creatine:     'Red meat (beef, pork), fish (herring, salmon, tuna), chicken',
+  melatonin:    'Tart cherries, walnuts, almonds, eggs, milk, fatty fish, rice, oats',
+  'vitamin k':  'Leafy greens (kale, spinach, Swiss chard), broccoli, Brussels sprouts, fermented foods',
+  folate:       'Leafy greens (spinach, kale), lentils, chickpeas, asparagus, avocado, fortified cereals',
+  iodine:       'Seaweed, cod, tuna, shrimp, dairy, eggs, iodized salt',
+  potassium:    'Bananas, sweet potatoes, spinach, avocado, beans, salmon, yogurt',
+};
+
+const SIDE_EFFECTS_MAP = {
+  magnesium:    'Loose stools at high doses (>400mg). Glycinate form minimizes this. Upper limit: 350mg supplemental.',
+  'vitamin d':  'Toxicity possible above 4000 IU/day long-term. Symptoms: nausea, weakness, kidney issues. Safe upper limit: 4000 IU/day.',
+  'vitamin b12':'Generally very safe. Rare: acne-like rash at very high doses. No established upper limit.',
+  b12:          'Generally very safe. Rare: acne-like rash at very high doses. No established upper limit.',
+  omega:        'Fishy aftertaste, mild GI upset. High doses (>3g) may thin blood. Upper limit: 3g/day without medical supervision.',
+  'fish oil':   'Fishy aftertaste, mild GI upset. High doses (>3g) may thin blood. Upper limit: 3g/day without medical supervision.',
+  iron:         'Nausea, constipation, dark stools. Take with food to reduce GI upset. Upper limit: 45mg/day.',
+  zinc:         'Nausea at high doses. Long-term high doses deplete copper. Upper limit: 40mg/day.',
+  'vitamin c':  'GI upset, diarrhea at doses >2g. Upper limit: 2000mg/day.',
+  calcium:      'Constipation, kidney stones at very high doses. Upper limit: 2500mg/day total.',
+  coq10:        'Mild GI upset, insomnia if taken late. Generally well tolerated. No established upper limit.',
+  probiotic:    'Mild bloating or gas initially (usually resolves in 1–2 weeks). Rare: infection risk in immunocompromised.',
+  ashwagandha:  'Mild GI upset, drowsiness. Avoid in pregnancy. Rare: liver injury at very high doses. Cycle use recommended.',
+  curcumin:     'GI upset at high doses. May thin blood. Avoid before surgery. Upper limit: 8g/day curcumin.',
+  berberine:    'GI upset, cramping, diarrhea especially at start. Lowers blood sugar — monitor if diabetic.',
+  selenium:     'Toxicity (selenosis) above 400mcg/day: hair loss, nail brittleness, GI issues. Upper limit: 400mcg/day.',
+  collagen:     'Generally well tolerated. Rare: mild GI discomfort, allergic reaction in those sensitive to fish/eggs.',
+  creatine:     'Water retention (intracellular), mild GI upset if taken without water. Safe at 3–5g/day long-term.',
+  melatonin:    'Drowsiness, headache, dizziness. Do not drive after taking. Start with lowest effective dose (0.5mg).',
+  'vitamin k':  'Interferes with warfarin (blood thinners) — consult doctor. Generally safe at food levels.',
+  folate:       'Generally very safe. High doses may mask B12 deficiency. Upper limit: 1000mcg synthetic folic acid/day.',
+};
+
+function inferClientEvidence(name) {
+  if (!name) return null;
+  const n = name.toLowerCase();
+  for (const [key, val] of Object.entries(EVIDENCE_MAP)) {
+    if (n.includes(key)) return val;
+  }
+  return 'Supported by peer-reviewed clinical nutrition research and NIH dietary supplement guidelines.';
+}
+
+function inferClientFoods(name) {
+  if (!name) return null;
+  const n = name.toLowerCase();
+  for (const [key, val] of Object.entries(FOODS_MAP)) {
+    if (n.includes(key)) return val;
+  }
+  return null;
+}
+
+function inferClientSideEffects(name) {
+  if (!name) return null;
+  const n = name.toLowerCase();
+  for (const [key, val] of Object.entries(SIDE_EFFECTS_MAP)) {
+    if (n.includes(key)) return val;
+  }
+  return 'Generally well tolerated at recommended doses. Consult a healthcare provider if you experience adverse effects.';
+}
+
+function enrichAiResults(aiResults) {
+  if (!aiResults) return aiResults;
+  return {
+    ...aiResults,
+    recommendations: (aiResults.recommendations || []).map(rec => ({
+      ...rec,
+      evidence:    rec.evidence    || inferClientEvidence(rec.name),
+      foods:       rec.foods       || inferClientFoods(rec.name),
+      sideEffects: rec.sideEffects || inferClientSideEffects(rec.name),
+    })),
+  };
+}
+
+
 function DeleteModal({ onConfirm, onCancel, loading }) {
   return (
     <div className="modal-overlay" onClick={onCancel}>
@@ -97,7 +221,12 @@ function HistoryPage() {
     const token = localStorage.getItem('token');
     if (!token) { navigate('/login'); return; }
     getHistory()
-      .then(setHistory)
+      .then(data => setHistory(
+        data.map(item => ({
+          ...item,
+          aiResults: enrichAiResults(item.aiResults),
+        }))
+      ))
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, [navigate]);
