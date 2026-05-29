@@ -5,7 +5,47 @@ import { getHistory, deleteAssessment } from '../api';
 import { exportResultsToPDF } from '../utils/exportPDF';
 import './HistoryPage.css';
 
-const priorityColor = { High: '#dc2626', Medium: '#d97706', Low: '#16a34a' };
+const priorityColor = { High: '#dc2626', Medium: '#d97706', Low: '#374151' };
+
+// Map generic food category words to specific examples
+const FOOD_SPECIFICS = {
+  'fatty fish':       'fatty fish (salmon, tuna, sardines, mackerel)',
+  'leafy greens':     'leafy greens (spinach, kale, Swiss chard)',
+  'leafy green':      'leafy greens (spinach, kale, Swiss chard)',
+  'nuts':             'nuts (almonds, cashews, walnuts, pumpkin seeds)',
+  'dairy':            'dairy (Greek yogurt, cheddar cheese, whole milk)',
+  'dairy products':   'dairy (Greek yogurt, cheddar cheese, whole milk)',
+  'citrus':           'citrus (oranges, grapefruit, kiwi)',
+  'citrus fruits':    'citrus (oranges, grapefruit, kiwi)',
+  'legumes':          'legumes (lentils, chickpeas, black beans)',
+  'whole grains':     'whole grains (oats, brown rice, quinoa)',
+  'lean meats':       'lean meats (chicken breast, turkey, lean beef)',
+  'lean meat':        'lean meats (chicken breast, turkey, lean beef)',
+  'red meat':         'red meat (beef, lamb, bison)',
+  'shellfish':        'shellfish (oysters, clams, crab, shrimp)',
+  'seeds':            'seeds (pumpkin seeds, sunflower seeds, chia seeds)',
+  'berries':          'berries (blueberries, strawberries, raspberries)',
+  'cruciferous vegetables': 'cruciferous vegetables (broccoli, Brussels sprouts, cauliflower)',
+  'organ meats':      'organ meats (beef liver, chicken liver)',
+  'fermented foods':  'fermented foods (kefir, kimchi, sauerkraut, miso)',
+};
+
+function expandFoodText(text) {
+  if (!text) return text;
+  // Strip sentence fragments first
+  let cleaned = text
+    .replace(/,?\s*(such as|which are|are naturally|naturally rich|found in|including)[^,;]*/gi, '')
+    .replace(/,?\s*are\s+[a-z].*$/gi, '')
+    .trim()
+    .replace(/,\s*$/, '');
+  cleaned = cleaned || text;
+  // Then expand generic category words
+  for (const [key, expanded] of Object.entries(FOOD_SPECIFICS)) {
+    const regex = new RegExp(`\\b${key}\\b`, 'gi');
+    cleaned = cleaned.replace(regex, expanded);
+  }
+  return cleaned;
+}
 
 // ── Delete Confirmation Modal ──────────────────────────────────────────────
 function DeleteModal({ onConfirm, onCancel, loading }) {
@@ -40,6 +80,14 @@ function HistoryPage() {
   const [deleting, setDeleting] = useState(false);
   const [activeTab, setActiveTab] = useState({});
   const [toast, setToast] = useState('');
+  const [expandedSupplements, setExpandedSupplements] = useState({}); // { "assessmentId-recIndex": true/false }
+
+  const toggleSupplement = (assessmentId, recIndex) => {
+    const key = `${assessmentId}-${recIndex}`;
+    setExpandedSupplements(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+  const isSupplementExpanded = (assessmentId, recIndex) =>
+    !!expandedSupplements[`${assessmentId}-${recIndex}`];
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -202,13 +250,11 @@ function HistoryPage() {
                         <button className={`history-tab ${getTab(item._id) === 'supplements' ? 'active' : ''}`}
                           onClick={() => setTab(item._id, 'supplements')}>💊 Supplements</button>
                         <button className={`history-tab ${getTab(item._id) === 'schedule' ? 'active' : ''}`}
-                          onClick={() => setTab(item._id, 'schedule')}>🕐 Schedule</button>
-                        <button className={`history-tab ${getTab(item._id) === 'lifestyle' ? 'active' : ''}`}
-                          onClick={() => setTab(item._id, 'lifestyle')}>🌿 Lifestyle</button>
+                          onClick={() => setTab(item._id, 'schedule')}>🗓️ Schedule & Recovery</button>
                         <button className={`history-tab ${getTab(item._id) === 'meals' ? 'active' : ''}`}
                           onClick={() => setTab(item._id, 'meals')}>🍽️ Meals</button>
-                        <button className={`history-tab ${getTab(item._id) === 'plan' ? 'active' : ''}`}
-                          onClick={() => setTab(item._id, 'plan')}>📅 Action Plan</button>
+                        <button className={`history-tab ${getTab(item._id) === 'lifestyle' ? 'active' : ''}`}
+                          onClick={() => setTab(item._id, 'lifestyle')}>🌿 Lifestyle</button>
                         {(item.aiResults.warnings?.length > 0 || item.aiResults.avoidList?.length > 0) && (
                           <button className={`history-tab history-tab-warn ${getTab(item._id) === 'warnings' ? 'active' : ''}`}
                             onClick={() => setTab(item._id, 'warnings')}>⚠️ Warnings</button>
@@ -262,28 +308,44 @@ function HistoryPage() {
 
                   {getTab(item._id) === 'supplements' && item.aiResults && (
                     <div className="tab-content">
-                      {item.aiResults.recommendations?.map((rec, ri) => (
-                        <div key={ri} className="history-rec-card">
-                          <div className="history-rec-top">
-                            <strong>{rec.name}</strong>
-                            <span className="rec-priority-small"
-                              style={{ background: priorityColor[rec.priority] + '20', color: priorityColor[rec.priority] }}>
-                              {rec.priority}
-                            </span>
+                      {item.aiResults.recommendations?.map((rec, ri) => {
+                        const suppExpanded = isSupplementExpanded(item._id, ri);
+                        return (
+                          <div key={ri} className="history-rec-card">
+                            <div className="history-rec-top">
+                              <strong>{rec.name}</strong>
+                              <span className="rec-priority-small"
+                                style={{ background: priorityColor[rec.priority] + '20', color: priorityColor[rec.priority] }}>
+                                {rec.priority} Priority
+                              </span>
+                              <button
+                                className="supp-toggle-btn"
+                                onClick={() => toggleSupplement(item._id, ri)}
+                              >
+                                {suppExpanded ? 'Show less ▲' : 'Show more ▼'}
+                              </button>
+                            </div>
+                            {suppExpanded && (
+                              <>
+                                <p className="history-rec-reason">{rec.reason}</p>
+                                <div className="history-rec-meta">
+                                  <span><b>Dosage:</b> {rec.dosage}</span>
+                                  <span><b>Timing:</b> {rec.timing}</span>
+                                </div>
+                                {rec.interactions && rec.interactions !== 'None identified' && (
+                                  <p className="history-rec-interaction">⚠ {rec.interactions}</p>
+                                )}
+                                {rec.evidence && (
+                                  <p className="history-rec-evidence">📚 <strong>Evidence:</strong> {rec.evidence}</p>
+                                )}
+                                {rec.foods && (
+                                  <p className="history-rec-evidence">🥗 <strong>Food Sources:</strong> {expandFoodText(rec.foods)}</p>
+                                )}
+                              </>
+                            )}
                           </div>
-                          <p className="history-rec-reason">{rec.reason}</p>
-                          <div className="history-rec-meta">
-                            <span><b>Dosage:</b> {rec.dosage}</span>
-                            <span><b>Timing:</b> {rec.timing}</span>
-                          </div>
-                          {rec.interactions && rec.interactions !== 'None identified' && (
-                            <p className="history-rec-interaction">⚠ {rec.interactions}</p>
-                          )}
-                          {rec.evidence && (
-                            <p className="history-rec-evidence">📚 {rec.evidence}</p>
-                          )}
-                        </div>
-                      ))}
+                        );
+                      })}
                       {item.aiResults.avoidList?.length > 0 && (
                         <div className="history-avoid">
                           <p className="history-section-label">🚫 Avoid</p>
@@ -301,21 +363,92 @@ function HistoryPage() {
 
                   {getTab(item._id) === 'schedule' && item.aiResults && (
                     <div className="tab-content">
-                      {item.aiResults.dailySchedule?.length > 0 ? (
-                        <div className="history-schedule">
-                          {item.aiResults.dailySchedule.map((slot, si) => (
-                            <div key={si} className="history-schedule-slot">
-                              <div className="history-schedule-time">{slot.time}</div>
-                              <div className="history-schedule-pills">
-                                {slot.supplements.map((s, sj) => (
-                                  <span key={sj} className="history-schedule-pill">{s}</span>
-                                ))}
+                      {/* Daily Schedule */}
+                      {item.aiResults.dailySchedule?.length > 0 ? (() => {
+                        const dosageMap = {};
+                        (item.aiResults.recommendations || []).forEach(rec => {
+                          if (rec.name && rec.dosage) dosageMap[rec.name.toLowerCase()] = rec.dosage;
+                        });
+                        const getDosage = (pillName) => {
+                          const pill = pillName.toLowerCase();
+                          if (dosageMap[pill]) return dosageMap[pill];
+                          for (const [recName, dosage] of Object.entries(dosageMap)) {
+                            if (pill.includes(recName) || recName.includes(pill)) return dosage;
+                            const pillWords = pill.split(/\s+/).filter(w => w.length > 3);
+                            const recWords = recName.split(/\s+/).filter(w => w.length > 3);
+                            if (pillWords.some(w => recWords.includes(w))) return dosage;
+                          }
+                          return null;
+                        };
+                        return (
+                          <div className="history-schedule">
+                            {item.aiResults.dailySchedule.map((slot, si) => (
+                              <div key={si} className="history-schedule-slot">
+                                <div className="history-schedule-time">{slot.time}</div>
+                                <div className="history-schedule-pills">
+                                  {slot.supplements.map((s, sj) => {
+                                    const dosage = getDosage(s);
+                                    return (
+                                      <span key={sj} className="history-schedule-pill">
+                                        {s}{dosage ? <span className="history-schedule-pill-dosage"> — {dosage}</span> : ''}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
                               </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
+                            ))}
+                          </div>
+                        );
+                      })() : (
                         <p style={{ color: '#6b7280', fontSize: '13px', padding: '8px 0' }}>No daily schedule recorded for this assessment.</p>
+                      )}
+
+                      {/* Recovery Plan */}
+                      {item.aiResults.actionPlan?.length > 0 && (
+                        <div className="history-recovery-plan" style={{ marginTop: item.aiResults.dailySchedule?.length > 0 ? '20px' : '0' }}>
+                          {item.aiResults.actionPlan.map((phase, si) => {
+                            if (typeof phase === 'string') {
+                              return (
+                                <div key={si} className="history-recovery-phase">
+                                  <div className="history-recovery-header">
+                                    <span className="history-recovery-num">{si + 1}</span>
+                                    <p className="history-recovery-title">{phase}</p>
+                                  </div>
+                                </div>
+                              );
+                            }
+                            const steps = phase.steps?.length > 0 ? phase.steps : [
+                              ...(phase.supplements || []),
+                              ...(phase.habits || []),
+                              ...(phase.activity || []),
+                            ];
+                            const expected = phase.expectedChanges || [];
+                            return (
+                              <div key={si} className="history-recovery-phase">
+                                <div className="history-recovery-header">
+                                  <span className="history-recovery-num">{si + 1}</span>
+                                  <div>
+                                    <p className="history-recovery-title">{phase.phase || phase.week}</p>
+                                    {phase.focus && <p className="history-recovery-focus">{phase.focus}</p>}
+                                  </div>
+                                </div>
+                                {steps.length > 0 && (
+                                  <ul className="history-recovery-steps">
+                                    {steps.map((step, ti) => <li key={ti}>{step}</li>)}
+                                  </ul>
+                                )}
+                                {expected.length > 0 && (
+                                  <div className="history-recovery-expected">
+                                    <span className="history-recovery-expected-label">✦ Expected Changes</span>
+                                    <ul>
+                                      {expected.map((e, ei) => <li key={ei}>{e}</li>)}
+                                    </ul>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       )}
                     </div>
                   )}
@@ -350,20 +483,7 @@ function HistoryPage() {
                     </div>
                   )}
 
-                  {getTab(item._id) === 'plan' && item.aiResults && (
-                    <div className="tab-content">
-                      {item.aiResults.actionPlan?.length > 0 ? (
-                        item.aiResults.actionPlan.map((step, si) => (
-                          <div key={si} className="history-action-step">
-                            <div className="action-step-num-small">{si + 1}</div>
-                            <p>{step}</p>
-                          </div>
-                        ))
-                      ) : (
-                        <p style={{ color: '#6b7280', fontSize: '13px', padding: '8px 0' }}>No action plan recorded for this assessment.</p>
-                      )}
-                    </div>
-                  )}
+
 
                   {getTab(item._id) === 'warnings' && item.aiResults && (
                     <div className="tab-content">
