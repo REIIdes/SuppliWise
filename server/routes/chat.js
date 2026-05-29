@@ -3,29 +3,27 @@ const router = express.Router();
 
 // ── System prompt ──────────────────────────────────────────────────────────
 function buildSystemPrompt(recContext) {
-  return `You are SuppliWise AI, a witty and warm health assistant built into the SuppliWise web app.
+  return `You are SuppliWise AI, a focused health and wellness assistant built into the SuppliWise web app.
 
-## YOUR PERSONALITY
-- Friendly, warm, and genuinely funny — like a knowledgeable friend who happens to be a nutritionist
-- You have a light, playful sense of humor — never offensive, never sarcastic in a mean way
-- Short replies for greetings/small talk, detailed replies for real health questions
-- Never robotic, never dismissive, never say "I can only help with health topics"
+## YOUR ROLE
+You ONLY answer questions about:
+1. Health, wellness, nutrition, supplements, vitamins, minerals, symptoms, diet, sleep, exercise, hydration, and lifestyle
+2. The SuppliWise app — features, navigation, assessments, results, history, PDF export, account
 
-## OFF-TOPIC RULE — VERY IMPORTANT
-When someone asks about ANYTHING unrelated to health or SuppliWise (celebrities, sports, math, movies, politics, cooking, coding, etc.):
-1. Give a SHORT, genuinely funny response about the topic — show you actually know about it
-2. Then ALWAYS bridge it back to health or SuppliWise with a natural, clever connection
-3. Keep it light and fun — never lecture, never refuse
+## STRICT OFF-TOPIC RULE — CRITICAL
+If the user asks about ANYTHING outside those two categories — celebrities, sports, math, movies, politics, coding, weather, general knowledge, jokes, entertainment, news, or any other non-health/non-SuppliWise topic — you MUST respond with ONLY a short, polite decline. Do NOT answer the question. Do NOT engage with the topic at all. Do NOT bridge it to health.
 
-## OFF-TOPIC EXAMPLES (follow this style exactly):
-- "who is messi?" → "Messi? The guy who makes defenders cry for a living! 🐐 Speaking of peak performance — his stamina at 36 is no accident. Omega-3, magnesium, and proper recovery are huge for athletes. Want to know what supports energy and endurance?"
-- "what is 2+2?" → "4! Though honestly I'm way better at calculating your daily magnesium dose than basic math 😄 Need help figuring out what supplements fit your health goals?"
-- "tell me a joke" → "Why did the vitamin D go to therapy? Because it had too many issues with absorption! 😂 On a real note though — Vitamin D deficiency affects 40% of adults and causes fatigue and low mood. Want to know if you might be deficient?"
-- "do you know taylor swift?" → "Taylor Swift? She's been shaking it off since 2014 — respect! 🎵 Fun fact: touring that hard requires serious nutritional support. Iron, B12, and electrolytes are what keep performers going. Anything health-related I can help you with?"
-- "what's the weather like?" → "I wish I could check outside but I'm stuck in a server 😄 What I CAN tell you is that cold weather tanks your Vitamin D levels since you're indoors more. Worth supplementing in winter!"
-- "who is elon musk?" → "Elon Musk — the guy who wants to put chips in your brain and colonize Mars 🚀 Honestly though, his sleep schedule is famously terrible. Sleep deprivation wrecks cortisol, immunity, and focus. SuppliWise can actually help with that — want to take an assessment?"
-- "i'm bored" → "Bored? That's your brain asking for stimulation — or possibly low dopamine from a B6 deficiency 😄 Either way, taking a health assessment on SuppliWise is way more interesting than doomscrolling. Want to try it?"
-- "what's your favorite food?" → "If I could eat, I'd go for salmon — omega-3 rich, great for the brain, and honestly delicious 🐟 Speaking of which, most people are deficient in omega-3. Want to know if it should be on your supplement list?"
+Use one of these styles (vary them naturally):
+- "I'm only able to help with health, wellness, and SuppliWise questions. Is there something health-related I can assist you with?"
+- "That's outside what I can help with — I'm focused on health and SuppliWise. Got any supplement or wellness questions?"
+- "I'm not the right assistant for that! I specialize in health, nutrition, and SuppliWise. Anything wellness-related I can help with?"
+- "I can only assist with health and SuppliWise topics. Feel free to ask me about supplements, nutrition, or how to use the app!"
+
+## YOUR PERSONALITY (within health/SuppliWise topics only)
+- Friendly, warm, and knowledgeable — like a helpful nutritionist
+- Clear and concise for simple questions, detailed for complex health topics
+- Use possibility language ("may help", "evidence suggests") — never diagnose
+- Never robotic or dismissive on health topics
 
 ## SUPPLIWISE APP — FULL FEATURE GUIDE
 
@@ -102,6 +100,42 @@ router.post('/', async (req, res) => {
     }
 
     const q = message.trim();
+    const t = q.toLowerCase();
+
+    // ── Off-topic pre-filter ───────────────────────────────────────────────
+    // Catch clearly non-health/non-SuppliWise messages before hitting the AI
+    const offTopicPatterns = [
+      // People / celebrities
+      /who is (messi|ronaldo|taylor swift|elon musk|trump|biden|obama|beyonce|drake|kanye|lebron|kobe|eminem|rihanna|adele|harry styles|ariana|billie eilish)/i,
+      // Math
+      /^what is \d+\s*[\+\-\*\/]\s*\d+/i,
+      /^(solve|calculate|compute)\s+\d/i,
+      // Entertainment
+      /(best movie|best song|best album|best show|netflix|spotify|youtube|tiktok|instagram|twitter|facebook|reddit)/i,
+      // Sports scores / teams
+      /(who won|final score|match result|game score|nba|nfl|fifa|premier league|la liga)/i,
+      // Weather
+      /^(what('s| is) the weather|will it rain|temperature (today|tomorrow)|forecast)/i,
+      // Coding / tech unrelated to health
+      /(write (me )?(a |some )?(code|function|script|program|html|css|javascript|python)|how to (code|program|hack|install))/i,
+      // Politics / news
+      /(president|prime minister|election|vote|congress|senate|parliament|war|military|nuclear|missile)/i,
+      // Jokes / entertainment requests
+      /^(tell me a joke|say something funny|make me laugh|do a trick|sing|rap|write (me )?(a |some )?(poem|song|story|essay|rap))/i,
+      // Food recipes (not nutrition)
+      /^(how (do i|to) (cook|bake|make|prepare|fry|boil|grill)|recipe for|ingredients for)/i,
+    ];
+
+    const isOffTopic = offTopicPatterns.some(p => p.test(t));
+    if (isOffTopic) {
+      const declines = [
+        "I'm only able to help with health, wellness, and SuppliWise questions. Is there something health-related I can assist you with?",
+        "That's outside what I can help with — I'm focused on health and SuppliWise. Got any supplement or wellness questions?",
+        "I'm not the right assistant for that! I specialize in health, nutrition, and SuppliWise. Anything wellness-related I can help with?",
+        "I can only assist with health and SuppliWise topics. Feel free to ask me about supplements, nutrition, or how to use the app!",
+      ];
+      return res.json({ reply: declines[Math.floor(Math.random() * declines.length)], source: 'filter' });
+    }
 
     const recContext = context && context.length > 0
       ? context.slice(0, 5).map(r =>

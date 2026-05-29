@@ -80,14 +80,11 @@ function HistoryPage() {
   const [deleting, setDeleting] = useState(false);
   const [activeTab, setActiveTab] = useState({});
   const [toast, setToast] = useState('');
-  const [expandedSupplements, setExpandedSupplements] = useState({}); // { "assessmentId-recIndex": true/false }
+  const [showAllSupplements, setShowAllSupplements] = useState({});
 
-  const toggleSupplement = (assessmentId, recIndex) => {
-    const key = `${assessmentId}-${recIndex}`;
-    setExpandedSupplements(prev => ({ ...prev, [key]: !prev[key] }));
+  const toggleShowAllSupplements = (assessmentId) => {
+    setShowAllSupplements(prev => ({ ...prev, [assessmentId]: !prev[assessmentId] }));
   };
-  const isSupplementExpanded = (assessmentId, recIndex) =>
-    !!expandedSupplements[`${assessmentId}-${recIndex}`];
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -308,25 +305,21 @@ function HistoryPage() {
 
                   {getTab(item._id) === 'supplements' && item.aiResults && (
                     <div className="tab-content">
-                      {item.aiResults.recommendations?.map((rec, ri) => {
-                        const suppExpanded = isSupplementExpanded(item._id, ri);
+                      {(() => {
+                        const recs = item.aiResults.recommendations || [];
+                        const showAll = !!showAllSupplements[item._id];
+                        const visible = showAll ? recs : recs.slice(0, 3);
                         return (
-                          <div key={ri} className="history-rec-card">
-                            <div className="history-rec-top">
-                              <strong>{rec.name}</strong>
-                              <span className="rec-priority-small"
-                                style={{ background: priorityColor[rec.priority] + '20', color: priorityColor[rec.priority] }}>
-                                {rec.priority} Priority
-                              </span>
-                              <button
-                                className="supp-toggle-btn"
-                                onClick={() => toggleSupplement(item._id, ri)}
-                              >
-                                {suppExpanded ? 'Show less ▲' : 'Show more ▼'}
-                              </button>
-                            </div>
-                            {suppExpanded && (
-                              <>
+                          <>
+                            {visible.map((rec, ri) => (
+                              <div key={ri} className="history-rec-card">
+                                <div className="history-rec-top">
+                                  <strong>{rec.name}</strong>
+                                  <span className="rec-priority-small"
+                                    style={{ background: priorityColor[rec.priority] + '20', color: priorityColor[rec.priority] }}>
+                                    {rec.priority} Priority
+                                  </span>
+                                </div>
                                 <p className="history-rec-reason">{rec.reason}</p>
                                 <div className="history-rec-meta">
                                   <span><b>Dosage:</b> {rec.dosage}</span>
@@ -341,11 +334,21 @@ function HistoryPage() {
                                 {rec.foods && (
                                   <p className="history-rec-evidence">🥗 <strong>Food Sources:</strong> {expandFoodText(rec.foods)}</p>
                                 )}
-                              </>
+                              </div>
+                            ))}
+                            {recs.length > 3 && (
+                              <button
+                                className="supp-toggle-btn"
+                                onClick={() => toggleShowAllSupplements(item._id)}
+                              >
+                                {showAll
+                                  ? 'Show less ▲'
+                                  : `Show more ▼  (${recs.length - 3} more supplement${recs.length - 3 > 1 ? 's' : ''})`}
+                              </button>
                             )}
-                          </div>
+                          </>
                         );
-                      })}
+                      })()}
                       {item.aiResults.avoidList?.length > 0 && (
                         <div className="history-avoid">
                           <p className="history-section-label">🚫 Avoid</p>

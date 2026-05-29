@@ -53,55 +53,74 @@ router.post('/', protect, async (req, res) => {
       ? processedDescription.trim()
       : '';
 
-    const prompt = `<s>[INST] You are an expert clinical nutritionist and integrative medicine specialist with 20 years of experience. A patient has completed a health assessment. Analyze ALL information holistically like a real doctor and provide a complete wellness plan.
+    // Build optional profile lines — only include fields the user actually answered
+    const optionalLines = [];
+    if (a.activityLevel) optionalLines.push(`- Activity Level: ${a.activityLevel}`);
+    if (a.dietType) optionalLines.push(`- Diet Type: ${a.dietType}`);
+    const _goals = a.healthGoals?.length ? a.healthGoals.join(', ') : null;
+    if (_goals) optionalLines.push(`- Health Goals: ${_goals}`);
+    const _activeSymptoms = (a.symptoms || []).filter(s => s !== 'No current symptoms');
+    if (_activeSymptoms.length > 0) {
+      const _symptomsStr = _activeSymptoms.map(s => {
+        const sev = a.symptomSeverity?.[s];
+        return sev ? `${s} (${sev})` : s;
+      }).join(', ');
+      optionalLines.push(`- Symptoms: ${_symptomsStr}`);
+    }
+    if (a.sleepQuality) optionalLines.push(`- Sleep Quality: ${a.sleepQuality}`);
+    if (a.waterIntake) optionalLines.push(`- Daily Water Intake: ${a.waterIntake}`);
+    const _activeHabits = (a.lifestyleHabits || []).filter(h => h !== 'None');
+    if (_activeHabits.length > 0) optionalLines.push(`- Lifestyle Habits: ${_activeHabits.join(', ')}`);
+    if (a.pregnancyStatus && a.pregnancyStatus !== 'Not applicable')
+      optionalLines.push(`- Pregnancy/Breastfeeding: ${a.pregnancyStatus}`);
+    if (a.takingSupplements === 'Yes') {
+      optionalLines.push(`- Currently Taking Supplements: Yes — ${supplementsText}`);
+    } else if (a.takingSupplements === 'No') {
+      optionalLines.push(`- Currently Taking Supplements: No`);
+    }
+    if (a.recentBloodTest === 'Yes' && a.bloodTestResults) {
+      optionalLines.push(`- Recent Blood Test Results: ${a.bloodTestResults}`);
+    } else if (a.recentBloodTest === 'Yes') {
+      optionalLines.push(`- Recent Blood Test: Yes (no results provided)`);
+    }
+    const _activeMedConditions = (a.medicalConditions || []).filter(c => c !== 'None');
+    if (_activeMedConditions.length > 0) optionalLines.push(`- Medical Conditions: ${_activeMedConditions.join(', ')}`);
+    if (medsText !== 'None reported') optionalLines.push(`- Current Medications: ${medsText}`);
+    if (allergiesText !== 'None known') optionalLines.push(`- Known Allergies: ${allergiesText}`);
+    if (a.sunExposure) optionalLines.push(`- Daily Sun Exposure: ${a.sunExposure}`);
+    if (a.fitnessFocus && a.fitnessFocus !== 'Not applicable') optionalLines.push(`- Primary Fitness Focus: ${a.fitnessFocus}`);
+    if (a.proteinIntake && a.proteinIntake !== 'Not sure') optionalLines.push(`- Daily Protein Intake: ${a.proteinIntake}`);
+    if (descriptionText) optionalLines.push(`- Clinical Presentation: ${descriptionText}`);
+
+    const prompt = `<s>[INST] You are an expert clinical nutritionist and integrative medicine specialist with 20 years of experience. A patient has completed a health assessment. Analyze ONLY the provided information holistically like a real doctor and provide a complete wellness plan.
 
 IMPORTANT MEDICAL SAFETY RULES:
-- Use possibility language, NOT diagnostic language. Say "may support", "some individuals find", "evidence suggests" Ã¢â‚¬â€ NOT "X causes Y" or "you have X deficiency"
+- Use possibility language, NOT diagnostic language. Say "may support", "some individuals find", "evidence suggests" — NOT "X causes Y" or "you have X deficiency"
 - NEVER diagnose conditions. Suggest possibilities only.
 - Always include safe upper limits in dosage warnings
 - Flag any supplement that may interact with medications or conditions
 - If symptoms suggest serious conditions (chest pain, severe depression, rapid weight loss), trigger a doctor consultation alert
 - Provide exactly 20 recommendations total, prioritized by clinical relevance
-
 CRITICAL RULES:
 1. Check medications for supplement interactions (warfarin+VitK/fish oil, statins+CoQ10, SSRIs+St.John's Wort/5-HTP, metformin+B12, thyroid meds+calcium/iron timing).
 2. Exclude supplements that conflict with allergies.
 3. Adjust for medical conditions (kidney disease: avoid high-dose minerals; diabetes: monitor blood sugar supplements; heart disease: prioritize CoQ10/omega-3).
-4. Consider the FULL picture Ã¢â‚¬â€ symptoms, severity, goals, diet, conditions, medications, stress, sleep, hydration, lifestyle habits, and how the patient describes feeling.
+4. Consider ONLY the information provided — do NOT assume or invent values for fields the patient did not answer.
 5. Use specific supplement forms (magnesium glycinate not oxide, methylcobalamin not cyanocobalamin).
 6. The patient's own description of how they feel is the most important clinical clue.
-7. Provide REAL lifestyle advice Ã¢â‚¬â€ sleep hygiene, diet changes, exercise, stress management, hydration.
+7. Provide REAL lifestyle advice — sleep hygiene, diet changes, exercise, stress management, hydration.
 8. AGE IS CRITICAL: Under 4 = pediatric only. 4-12 = pediatric doses. 13-17 = adolescent. 65+ = bone/B12/CoQ10 priority. NEVER adult doses for children.
 9. BMI matters: underweight = caloric density; obese = metabolic health.
-10. SEVERITY MATTERS: Severe fatigue Ã¢â€°Â  mild fatigue. Adjust dosage, priority, and urgency based on symptom severity.
+10. SEVERITY MATTERS: Severe fatigue is not the same as mild fatigue. Adjust dosage, priority, and urgency based on symptom severity.
 11. PREGNANCY/BREASTFEEDING: If pregnant or breastfeeding, avoid high-dose Vitamin A, avoid herbs (ashwagandha, St. John's Wort), prioritize folate, iron, DHA, and iodine.
 12. LIFESTYLE HABITS: Smoking depletes Vitamin C and antioxidants. Alcohol depletes B vitamins, magnesium, and zinc.
-13. INSUFFICIENT DATA: If critical fields are missing, note this in the summary and provide limited recommendations with lower confidence.
+13. OPTIONAL FIELDS NOT PROVIDED: If an optional field was not answered, do NOT mention it, do NOT say "not provided", and do NOT base recommendations on it. Only use what is explicitly listed in the patient profile below.
 14. EXPLAINABLE AI: For each recommendation, clearly state what symptom/condition/goal triggered it (triggeredBy field).
-15. RULE-BASED SAFEGUARDS: IF kidney disease Ã¢â€ â€™ avoid magnesium >200mg, avoid high-dose Vitamin C. IF on blood thinners Ã¢â€ â€™ avoid high-dose Vitamin K, fish oil >1g.
-
-PATIENT PROFILE:
-- Age: ${a.age || 'Not provided'}, Gender: ${a.gender || 'Not provided'}
-- Weight: ${a.weight ? a.weight + 'kg' : 'N/A'}, Height: ${a.height ? a.height + 'cm' : 'N/A'}${bmiNote ? ', ' + bmiNote : ''}
-- Activity Level: ${a.activityLevel || 'Not provided'}
-- Diet: ${a.dietType || 'Not provided'}
-- Health Goals: ${a.healthGoals?.length ? a.healthGoals.join(', ') : 'None'}
-- Symptoms: ${a.symptoms?.filter(s => s !== 'No current symptoms').length ? a.symptoms.filter(s => s !== 'No current symptoms').map(s => { const sev = a.symptomSeverity?.[s]; return sev ? `${s} (${sev})` : s; }).join(', ') : 'None reported'}
-- Stress Level: ${a.stressLevel || 'Not provided'}
-- Sleep Quality: ${a.sleepQuality || 'Not provided'}
-- Water Intake: ${a.waterIntake || 'Not provided'}
-- Lifestyle Habits: ${a.lifestyleHabits?.filter(h => h !== 'None').join(', ') || 'None reported'}
-- Pregnancy/Breastfeeding: ${a.pregnancyStatus || 'Not applicable'}
-- Currently Taking Supplements: ${a.takingSupplements || 'Not provided'}${a.takingSupplements === 'Yes' && a.currentSupplements ? ` Ã¢â‚¬â€ ${a.currentSupplements}` : ''}
-- Recent Blood Test: ${a.recentBloodTest || 'Not provided'}${a.recentBloodTest === 'Yes' && a.bloodTestResults ? (' â€” Results: ' + a.bloodTestResults) : ''}
-- Medical Conditions: ${a.medicalConditions?.filter(c => c !== 'None').join(', ') || 'None'}
-- Medications: ${medsText}
-- Allergies: ${allergiesText}
-- Sun Exposure: ${a.sunExposure || 'Not provided'}
-- Fitness Focus: ${a.fitnessFocus || 'Not provided'}
-- Daily Protein Intake: ${a.proteinIntake || 'Not provided'}
-${descriptionText ? `- Clinical Presentation: ${descriptionText}` : ''}
-
+15. RULE-BASED SAFEGUARDS: IF kidney disease — avoid magnesium >200mg, avoid high-dose Vitamin C. IF on blood thinners — avoid high-dose Vitamin K, fish oil >1g.
+PATIENT PROFILE (only answered fields are listed):
+- Age: ${a.age}, Gender: ${a.gender}
+- Weight: ${a.weight}kg, Height: ${a.height}cm${bmiNote ? ', ' + bmiNote : ''}
+${optionalLines.join('\n')}
 SUMMARY INSTRUCTIONS:
 Write a professional clinical summary (3-4 sentences) that maintains a clinical tone at all times. You MUST:
 

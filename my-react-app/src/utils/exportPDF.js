@@ -97,7 +97,7 @@ function pill(doc, text, x, y, rgb) {
 }
 
 // ── Footer on every page ───────────────────────────────────────────────────
-function drawFooters(doc) {
+function drawFooters(doc, userName) {
   const total = doc.internal.getNumberOfPages();
   for (let p = 1; p <= total; p++) {
     doc.setPage(p);
@@ -106,7 +106,10 @@ function drawFooters(doc) {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7);
     doc.setTextColor(...C.white);
-    doc.text('SuppliWise  |  Educational purposes only. Not medical advice.', ML, PAGE_H - 3.2);
+    const footerLeft = userName
+      ? `SuppliWise  |  ${userName}  |  Educational purposes only. Not medical advice.`
+      : 'SuppliWise  |  Educational purposes only. Not medical advice.';
+    doc.text(footerLeft, ML, PAGE_H - 3.2);
     doc.text(`Page ${p} / ${total}`, PAGE_W - MR, PAGE_H - 3.2, { align: 'right' });
   }
 }
@@ -115,6 +118,12 @@ function drawFooters(doc) {
 export function exportResultsToPDF(recommendations, assessment) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
   let y = 0;
+
+  // Resolve user name — from assessment object or localStorage fallback
+  const storedUser = (() => {
+    try { return JSON.parse(localStorage.getItem('user') || '{}'); } catch { return {}; }
+  })();
+  const userName = assessment?.userName || assessment?.name || storedUser?.name || null;
 
   // ── COVER HEADER ────────────────────────────────────────────────────────
   // Full-width green band
@@ -133,22 +142,19 @@ export function exportResultsToPDF(recommendations, assessment) {
   doc.setTextColor(220, 252, 231);
   doc.text('Personalized Supplement & Wellness Report', ML, 27);
 
-  // Patient name — prominently shown right below the title
-  const patientName = assessment?.userName || assessment?.name || null;
-  if (patientName) {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(13);
-    doc.setTextColor(...C.white);
-    doc.text(`Prepared for: ${patientName}`, ML, 38);
-  }
-
-  // Date — right aligned
+  // Patient name + date — same row, same size, same style
   const dateStr = new Date().toLocaleDateString('en-US', {
     year: 'numeric', month: 'long', day: 'numeric',
   });
-  doc.setFontSize(8.5);
-  doc.setTextColor(187, 247, 208);
-  doc.text(dateStr, PAGE_W - MR, patientName ? 44 : 36, { align: 'right' });
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  doc.setTextColor(220, 252, 231);
+  if (userName) {
+    doc.text(`Prepared for: ${userName}`, ML, 38);
+    doc.text(dateStr, PAGE_W - MR, 38, { align: 'right' });
+  } else {
+    doc.text(dateStr, PAGE_W - MR, 38, { align: 'right' });
+  }
 
   // Thin accent line below header
   doc.setFillColor(...C.greenDark);
@@ -209,6 +215,19 @@ export function exportResultsToPDF(recommendations, assessment) {
   if (assessment) {
     y = checkY(doc, y, 40);
     y = sectionHeading(doc, 'Patient Profile', y);
+
+    // Name row — full width if present
+    if (userName) {
+      y = checkY(doc, y, 7);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.setTextColor(...C.grayMid);
+      doc.text('Name', ML, y);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(...C.grayDark);
+      doc.text(userName, ML + 22, y);
+      y += 6;
+    }
 
     // Two-column grid layout
     const col1 = [
@@ -337,42 +356,153 @@ export function exportResultsToPDF(recommendations, assessment) {
     y = doc.lastAutoTable.finalY + 8;
   }
 
-  // ── DAILY SCHEDULE ───────────────────────────────────────────────────────
-  if (recommendations.dailySchedule?.length > 0) {
-    y = checkY(doc, y, 24);
-    y = sectionHeading(doc, 'Daily Schedule', y);
+  // ── DAILY SCHEDULE & RECOVERY PLAN ──────────────────────────────────────
+  const hasSchedule = recommendations.dailySchedule?.length > 0;
+  const hasActionPlan = recommendations.actionPlan?.length > 0;
 
-    autoTable(doc, {
-      startY: y,
-      head: [['Time of Day', 'Supplements to Take']],
-      body: recommendations.dailySchedule.map(slot => [
-        slot.time,
-        (slot.supplements || []).join(', '),
-      ]),
-      theme: 'striped',
-      headStyles: {
-        fillColor: C.greenDeep,
-        textColor: C.white,
-        fontSize: 8.5,
-        fontStyle: 'bold',
-        cellPadding: { top: 4, bottom: 4, left: 4, right: 4 },
-      },
-      bodyStyles: {
-        fontSize: 8.5,
-        cellPadding: { top: 3.5, bottom: 3.5, left: 4, right: 4 },
-        textColor: C.grayDark,
-        lineColor: C.grayBorder,
-        lineWidth: 0.2,
-      },
-      alternateRowStyles: { fillColor: C.greenLight },
-      columnStyles: {
-        0: { cellWidth: 42, fontStyle: 'bold', textColor: C.greenDark },
-        1: { cellWidth: CW - 42 },
-      },
-      margin: { left: ML, right: MR },
-      tableWidth: CW,
-    });
-    y = doc.lastAutoTable.finalY + 8;
+  if (hasSchedule || hasActionPlan) {
+    y = checkY(doc, y, 24);
+    y = sectionHeading(doc, 'Daily Schedule & Recovery Plan', y);
+
+    // ── Daily Schedule table ──
+    if (hasSchedule) {
+      // Build dosage lookup from recommendations
+      const dosageMap = {};
+      (recommendations.recommendations || []).forEach(rec => {
+        if (rec.name && rec.dosage) dosageMap[rec.name.toLowerCase()] = rec.dosage;
+      });
+      const getDosage = (pillName) => {
+        const pill = pillName.toLowerCase();
+        if (dosageMap[pill]) return dosageMap[pill];
+        for (const [recName, dosage] of Object.entries(dosageMap)) {
+          if (pill.includes(recName) || recName.includes(pill)) return dosage;
+          const pillWords = pill.split(/\s+/).filter(w => w.length > 3);
+          const recWords = recName.split(/\s+/).filter(w => w.length > 3);
+          if (pillWords.some(w => recWords.includes(w))) return dosage;
+        }
+        return null;
+      };
+
+      autoTable(doc, {
+        startY: y,
+        head: [['Time of Day', 'Supplements to Take']],
+        body: recommendations.dailySchedule.map(slot => [
+          slot.time,
+          (slot.supplements || []).map(s => {
+            const d = getDosage(s);
+            return d ? `${s} — ${d}` : s;
+          }).join('\n'),
+        ]),
+        theme: 'striped',
+        headStyles: {
+          fillColor: C.greenDeep,
+          textColor: C.white,
+          fontSize: 8.5,
+          fontStyle: 'bold',
+          cellPadding: { top: 4, bottom: 4, left: 4, right: 4 },
+        },
+        bodyStyles: {
+          fontSize: 8.5,
+          cellPadding: { top: 3.5, bottom: 3.5, left: 4, right: 4 },
+          textColor: C.grayDark,
+          lineColor: C.grayBorder,
+          lineWidth: 0.2,
+        },
+        alternateRowStyles: { fillColor: C.greenLight },
+        columnStyles: {
+          0: { cellWidth: 42, fontStyle: 'bold', textColor: C.greenDark },
+          1: { cellWidth: CW - 42 },
+        },
+        margin: { left: ML, right: MR },
+        tableWidth: CW,
+      });
+      y = doc.lastAutoTable.finalY + 10;
+    }
+
+    // ── Recovery Plan phases ──
+    if (hasActionPlan) {
+      recommendations.actionPlan.forEach((phase, i) => {
+        // Estimate height needed
+        const steps = typeof phase === 'string' ? [] :
+          (phase.steps?.length > 0 ? phase.steps : [
+            ...(phase.supplements || []),
+            ...(phase.habits || []),
+            ...(phase.activity || []),
+          ]);
+        const expected = typeof phase === 'string' ? [] : (phase.expectedChanges || []);
+        const estH = 12 + steps.length * 5 + (expected.length > 0 ? 6 + expected.length * 5 : 0) + 4;
+        y = checkY(doc, y, estH);
+
+        // Phase card background
+        doc.setFillColor(...C.white);
+        doc.setDrawColor(...C.grayBorder);
+        doc.setLineWidth(0.3);
+        doc.roundedRect(ML, y, CW, estH, 2, 2, 'FD');
+
+        // Left accent bar
+        doc.setFillColor(...C.greenDeep);
+        doc.rect(ML, y, 3, estH, 'F');
+
+        // Phase number circle
+        doc.setFillColor(...C.greenDeep);
+        doc.circle(ML + 11, y + 6, 4, 'F');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8);
+        doc.setTextColor(...C.white);
+        doc.text(String(i + 1), ML + 11, y + 7.2, { align: 'center' });
+
+        // Phase title
+        const title = typeof phase === 'string' ? phase : (phase.phase || phase.week || '');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.setTextColor(...C.grayDark);
+        const titleLines = doc.splitTextToSize(title, CW - 26);
+        doc.text(titleLines, ML + 18, y + 5.5);
+
+        let cy = y + 5.5 + titleLines.length * 5;
+
+        // Focus line
+        if (typeof phase !== 'string' && phase.focus) {
+          doc.setFont('helvetica', 'italic');
+          doc.setFontSize(8);
+          doc.setTextColor(...C.grayMid);
+          const focusLines = doc.splitTextToSize(phase.focus, CW - 22);
+          doc.text(focusLines, ML + 18, cy);
+          cy += focusLines.length * 4.5;
+        }
+
+        // Steps
+        if (steps.length > 0) {
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8);
+          doc.setTextColor(...C.grayDark);
+          steps.forEach(step => {
+            const sl = doc.splitTextToSize(`• ${step}`, CW - 22);
+            doc.text(sl, ML + 18, cy);
+            cy += sl.length * 4.5;
+          });
+        }
+
+        // Expected changes
+        if (expected.length > 0) {
+          cy += 2;
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(7.5);
+          doc.setTextColor(...C.greenDark);
+          doc.text('Expected Changes', ML + 18, cy);
+          cy += 4.5;
+          doc.setFont('helvetica', 'normal');
+          doc.setTextColor(22, 101, 52);
+          expected.forEach(e => {
+            const el = doc.splitTextToSize(`>> ${e}`, CW - 22);
+            doc.text(el, ML + 18, cy);
+            cy += el.length * 4.5;
+          });
+        }
+
+        y += estH + 4;
+      });
+    }
   }
 
   // ── LIFESTYLE ADVICE ─────────────────────────────────────────────────────
@@ -438,41 +568,6 @@ export function exportResultsToPDF(recommendations, assessment) {
       columnStyles: {
         0: { cellWidth: 28, fontStyle: 'bold', textColor: C.amberDark },
         1: { cellWidth: CW - 28 },
-      },
-      margin: { left: ML, right: MR },
-      tableWidth: CW,
-    });
-    y = doc.lastAutoTable.finalY + 8;
-  }
-
-  // ── ACTION PLAN ──────────────────────────────────────────────────────────
-  if (recommendations.actionPlan?.length > 0) {
-    y = checkY(doc, y, 24);
-    y = sectionHeading(doc, 'Action Plan', y);
-
-    autoTable(doc, {
-      startY: y,
-      head: [['#', 'Step']],
-      body: recommendations.actionPlan.map((step, i) => [`${i + 1}`, step]),
-      theme: 'plain',
-      headStyles: {
-        fillColor: C.greenDeep,
-        textColor: C.white,
-        fontSize: 8.5,
-        fontStyle: 'bold',
-        cellPadding: { top: 4, bottom: 4, left: 4, right: 4 },
-      },
-      bodyStyles: {
-        fontSize: 8.5,
-        cellPadding: { top: 4, bottom: 4, left: 4, right: 4 },
-        textColor: C.grayDark,
-        lineColor: C.grayBorder,
-        lineWidth: 0.2,
-      },
-      alternateRowStyles: { fillColor: C.grayLight },
-      columnStyles: {
-        0: { cellWidth: 10, halign: 'center', fontStyle: 'bold', textColor: C.greenDark },
-        1: { cellWidth: CW - 10 },
       },
       margin: { left: ML, right: MR },
       tableWidth: CW,
@@ -567,9 +662,11 @@ export function exportResultsToPDF(recommendations, assessment) {
   );
 
   // ── FOOTERS ───────────────────────────────────────────────────────────────
-  drawFooters(doc);
+  drawFooters(doc, userName);
 
   // ── SAVE ─────────────────────────────────────────────────────────────────
-  const filename = `SuppliWise_Report_${new Date().toISOString().slice(0, 10)}.pdf`;
+  const datePart = new Date().toISOString().slice(0, 10);
+  const namePart = userName ? `_${userName.replace(/\s+/g, '_')}` : '';
+  const filename = `SuppliWise_Report${namePart}_${datePart}.pdf`;
   doc.save(filename);
 }

@@ -138,7 +138,7 @@ export default function ChatAssistant({ recommendations }) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([{
     role: 'assistant',
-    text: "Hi! I'm **SuppliWise AI** — ask me anything about this app or your health.\n\nI can help with:\n- How to use any feature on SuppliWise\n- Your supplement recommendations and results\n- Supplements, nutrition, and wellness questions\n- Account, history, and navigation\n\nWhat would you like to know?",
+    text: "Hi! I'm **SuppliWise AI** — your health and wellness assistant.\n\nI can help with:\n- Your supplement recommendations and results\n- Supplements, nutrition, vitamins, and wellness questions\n- How to use any feature on SuppliWise\n- Symptoms, diet, sleep, and lifestyle advice\n\nWhat would you like to know?",
   }]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
