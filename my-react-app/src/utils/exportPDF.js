@@ -119,7 +119,7 @@ export function exportResultsToPDF(recommendations, assessment) {
   // ── COVER HEADER ────────────────────────────────────────────────────────
   // Full-width green band
   doc.setFillColor(...C.green);
-  doc.rect(0, 0, PAGE_W, 42, 'F');
+  doc.rect(0, 0, PAGE_W, 50, 'F');
 
   // Logo text
   doc.setFont('helvetica', 'bold');
@@ -133,19 +133,28 @@ export function exportResultsToPDF(recommendations, assessment) {
   doc.setTextColor(220, 252, 231);
   doc.text('Personalized Supplement & Wellness Report', ML, 27);
 
+  // Patient name — prominently shown right below the title
+  const patientName = assessment?.userName || assessment?.name || null;
+  if (patientName) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(13);
+    doc.setTextColor(...C.white);
+    doc.text(`Prepared for: ${patientName}`, ML, 38);
+  }
+
   // Date — right aligned
   const dateStr = new Date().toLocaleDateString('en-US', {
     year: 'numeric', month: 'long', day: 'numeric',
   });
   doc.setFontSize(8.5);
   doc.setTextColor(187, 247, 208);
-  doc.text(dateStr, PAGE_W - MR, 36, { align: 'right' });
+  doc.text(dateStr, PAGE_W - MR, patientName ? 44 : 36, { align: 'right' });
 
   // Thin accent line below header
   doc.setFillColor(...C.greenDark);
-  doc.rect(0, 42, PAGE_W, 1.5, 'F');
+  doc.rect(0, 50, PAGE_W, 1.5, 'F');
 
-  y = 52;
+  y = 60;
 
   // ── DISCLAIMER ──────────────────────────────────────────────────────────
   doc.setFillColor(...C.blueLight);
@@ -272,7 +281,7 @@ export function exportResultsToPDF(recommendations, assessment) {
 
     autoTable(doc, {
       startY: y,
-      head: [['Supplement', 'Priority', 'Match', 'Reason', 'Dosage', 'Timing', 'Interactions']],
+      head: [['Supplement', 'Priority', 'Match', 'Reason', 'Dosage', 'Timing', 'Duration', 'Interactions']],
       body: recommendations.recommendations.map(rec => [
         rec.name || '',
         rec.priority || '',
@@ -280,19 +289,20 @@ export function exportResultsToPDF(recommendations, assessment) {
         rec.reason || '',
         rec.dosage || '-',
         rec.timing || '-',
+        rec.duration || '-',
         (rec.interactions && rec.interactions !== 'None identified') ? rec.interactions : 'None',
       ]),
       theme: 'grid',
       headStyles: {
         fillColor: C.greenDeep,
         textColor: C.white,
-        fontSize: 8,
+        fontSize: 7.5,
         fontStyle: 'bold',
         cellPadding: { top: 4, bottom: 4, left: 3, right: 3 },
         halign: 'left',
       },
       bodyStyles: {
-        fontSize: 8,
+        fontSize: 7.5,
         cellPadding: { top: 3, bottom: 3, left: 3, right: 3 },
         textColor: C.grayDark,
         valign: 'top',
@@ -303,13 +313,14 @@ export function exportResultsToPDF(recommendations, assessment) {
         fillColor: C.greenLight,
       },
       columnStyles: {
-        0: { cellWidth: 32, fontStyle: 'bold' },
-        1: { cellWidth: 18, halign: 'center' },
-        2: { cellWidth: 14, halign: 'center' },
-        3: { cellWidth: 50 },
-        4: { cellWidth: 28 },
-        5: { cellWidth: 22 },
-        6: { cellWidth: 18 },
+        0: { cellWidth: 28, fontStyle: 'bold' },
+        1: { cellWidth: 16, halign: 'center' },
+        2: { cellWidth: 12, halign: 'center' },
+        3: { cellWidth: 44 },
+        4: { cellWidth: 24 },
+        5: { cellWidth: 20 },
+        6: { cellWidth: 20 },
+        7: { cellWidth: 18 },
       },
       margin: { left: ML, right: MR },
       tableWidth: CW,

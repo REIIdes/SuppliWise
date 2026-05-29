@@ -61,7 +61,7 @@ IMPORTANT MEDICAL SAFETY RULES:
 - Always include safe upper limits in dosage warnings
 - Flag any supplement that may interact with medications or conditions
 - If symptoms suggest serious conditions (chest pain, severe depression, rapid weight loss), trigger a doctor consultation alert
-- Maximum 3 HIGH priority supplements. Remaining are optional/medium/low.
+- Provide exactly 20 recommendations total, prioritized by clinical relevance
 
 CRITICAL RULES:
 1. Check medications for supplement interactions (warfarin+VitK/fish oil, statins+CoQ10, SSRIs+St.John's Wort/5-HTP, metformin+B12, thyroid meds+calcium/iron timing).
@@ -147,7 +147,7 @@ Write a professional clinical summary (3-4 sentences) that maintains a clinical 
 
 Respond with ONLY valid JSON, no markdown, no code fences:
 {
-  "summary": "Professional clinical summary 3-4 sentences. Use possibility language. Do not quote patient verbatim. Paraphrase naturally.",
+  "summary": "Professional clinical summary 3-4 sentences written in natural, grammatically correct prose. ALWAYS start the first sentence with the patient's age, gender, and BMI woven naturally into the sentence — for example: 'A 22-year-old male patient with a BMI of 23.4 (normal weight) reports...' or 'A 35-year-old female patient with a BMI of 27.1, indicating overweight status, presents with...'. Use possibility language throughout. Do not quote patient verbatim. Paraphrase naturally. Write as a clinical professional would document a patient case.",
   "consultDoctor": true or false Ã¢â‚¬â€ true if symptoms suggest serious conditions needing immediate medical attention,
   "consultReason": "Reason why doctor consultation is recommended, or null",
   "recommendations": [
@@ -162,7 +162,7 @@ Respond with ONLY valid JSON, no markdown, no code fences:
       "severityLevel": "Moderate",
       "interactions": "Known interactions or 'None identified'",
       "evidence": "Brief evidence reference e.g. 'Supported by NIH studies on magnesium and sleep quality'",
-      "foods": "Foods naturally rich in this nutrient",
+      "foods": "A clean comma-separated list of 4-6 specific food names only. NO sentences, NO 'such as', NO 'are naturally rich in', NO filler phrases. Just food names. If a category must be mentioned, immediately follow it with specific examples in parentheses. Examples of correct format: 'Atlantic salmon, canned tuna, sardines, mackerel, herring, anchovies' OR 'Fatty fish (salmon, tuna, sardines, mackerel), walnuts, chia seeds, flaxseeds'. NEVER write sentences like 'X are naturally rich in Y'.",
       "sideEffects": "Common side effects at recommended dose"
     }
   ],
@@ -185,17 +185,78 @@ Respond with ONLY valid JSON, no markdown, no code fences:
     }
   ],
   "actionPlan": [
-    "Week 1: specific step",
-    "Week 2: next step",
-    "Weeks 3-4: follow-up",
-    "Ongoing: long-term habit"
+    {
+      "phase": "Week 1 — Build Foundations",
+      "focus": "One sentence describing the overall focus for this week based on the patient's profile",
+      "steps": [
+        "Start [specific supplement] for [specific reason tied to their symptoms]",
+        "Specific diet or hydration action",
+        "Specific movement or lifestyle action"
+      ],
+      "expectedChanges": [
+        "Specific early improvement the patient may notice",
+        "Another expected early change"
+      ]
+    },
+    {
+      "phase": "Week 2 — Improve Energy & Recovery",
+      "focus": "One sentence describing the focus for week 2",
+      "steps": [
+        "Continue previous supplements",
+        "Add [next supplement] for [reason]",
+        "Specific activity or habit to add"
+      ],
+      "expectedChanges": [
+        "Expected improvement by end of week 2",
+        "Another expected change"
+      ]
+    },
+    {
+      "phase": "Weeks 3–4 — Build Sustainable Habits",
+      "focus": "One sentence describing the focus for weeks 3-4",
+      "steps": [
+        "Continue supplement routine",
+        "Specific habit or lifestyle improvement",
+        "Specific sleep, diet, or exercise action"
+      ],
+      "expectedChanges": [
+        "Expected improvement by end of week 4",
+        "Another expected change"
+      ]
+    },
+    {
+      "phase": "Month 2 — Assess & Strengthen",
+      "focus": "One sentence describing the month 2 focus",
+      "steps": [
+        "Maintain full supplement routine",
+        "Specific mid-term action or check-in",
+        "Consider lab work or doctor visit if symptoms persist"
+      ],
+      "expectedChanges": [
+        "Primary symptoms should show measurable improvement",
+        "What to do if improvement is not seen"
+      ]
+    },
+    {
+      "phase": "Month 3+ — Long-Term Recovery",
+      "focus": "One sentence on long-term maintenance",
+      "steps": [
+        "Reassess supplement stack with a healthcare provider",
+        "Maintain lifestyle habits established in previous weeks",
+        "Specific long-term goal tied to their health profile"
+      ],
+      "expectedChanges": [
+        "Full therapeutic effect expected by this point",
+        "Long-term outcome if plan is maintained"
+      ]
+    }
   ],
   "warnings": ["Specific warnings based on medications/conditions"],
   "avoidList": ["Supplements to avoid and why"],
   "disclaimer": "This information is for educational and wellness purposes only and does not diagnose, treat, or cure any disease. Always consult a licensed healthcare professional before starting any supplement regimen."
 }
 
-Provide max 3 High priority supplements, 2-4 Medium, rest Low. Be specific and use possibility language. [/INST]`;
+Provide exactly 20 supplement recommendations total. Assign priority based on clinical relevance: most critical get High, moderately relevant get Medium, supportive/preventive get Low. Be specific and use possibility language. [/INST]`;
 
     // â”€â”€ Groq API call (fast, Llama 3.3 70B) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let aiResult = null;
@@ -223,7 +284,7 @@ Provide max 3 High priority supplements, 2-4 Medium, rest Low. Be specific and u
               content: prompt,
             },
           ],
-          max_tokens: 4000,
+          max_tokens: 8000,
           temperature: 0.4,
           stream: false,
         }),
@@ -387,10 +448,10 @@ function generateClinicalFallback(a) {
     lifestyleAdvice.push({ category: 'Nutrition', advice: 'Ensure a balanced diet with fruits, vegetables, whole grains, lean protein, and dairy. Limit processed foods, sugary drinks, and excessive screen time during meals.' });
     lifestyleAdvice.push({ category: 'Exercise', advice: 'Children need at least 60 minutes of moderate-to-vigorous physical activity daily. Encourage outdoor play, sports, and active games to support healthy development.' });
     lifestyleAdvice.push({ category: 'Sleep', advice: 'Children aged 6-12 need 9-12 hours of sleep per night. Establish a consistent bedtime routine and limit screens at least 1 hour before bed.' });
-    actionPlan.push('Consult your child\'s pediatrician before starting any supplement.');
-    actionPlan.push('Start with a children\'s multivitamin and Vitamin D Ã¢â‚¬â€ the two most evidence-based supplements for children.');
-    actionPlan.push('Monitor for any reactions over the first 2 weeks before adding additional supplements.');
-    actionPlan.push('Schedule a well-child visit to check nutritional status and growth milestones.');
+  actionPlan.push({ phase: 'Week 1 — Start Safely', focus: 'Consult pediatrician and introduce the safest foundational supplements.', supplements: ['Children Multivitamin', 'Vitamin D3 (pediatric)'], habits: ['Establish consistent meal times', 'Limit sugary snacks and drinks'], activity: ['60 minutes of active play daily', 'Outdoor activities'], expectedChanges: ['Improved appetite', 'Better energy for play'] });
+  actionPlan.push({ phase: 'Week 2-3 — Monitor & Adjust', focus: 'Monitor tolerance and maintain consistent routine.', supplements: ['Continue multivitamin and Vitamin D'], habits: ['Consistent bedtime routine', 'Balanced meals with fruits and vegetables'], activity: ['Continue active play', 'Encourage sports or group activities'], expectedChanges: ['Improved sleep', 'Better mood and energy'] });
+  actionPlan.push({ phase: 'Month 2 — Assess Growth & Immunity', focus: 'Evaluate immunity and energy improvements.', supplements: ['Add Omega-3 DHA if approved by pediatrician'], habits: ['Maintain all established habits'], activity: ['Maintain 60 min/day active play'], expectedChanges: ['Fewer colds or faster recovery', 'Improved focus and learning'] });
+  actionPlan.push({ phase: 'Month 3+ — Long-Term Healthy Development', focus: 'Sustain healthy habits and schedule well-child visit.', supplements: ['Schedule well-child visit to check nutritional status and growth milestones'], habits: ['Annual nutritional review with pediatrician'], activity: ['Continue regular physical activity'], expectedChanges: ['Healthy growth milestones', 'Strong immune system', 'Good energy and focus for school'] });
     return buildResult(a, recs, lifestyleAdvice, actionPlan, warnings, avoidList, conditions, symptoms, goals);
   }
 
@@ -407,10 +468,10 @@ function generateClinicalFallback(a) {
     lifestyleAdvice.push({ category: 'Sleep', advice: 'Teenagers need 8-10 hours of sleep per night. Adolescent circadian rhythms naturally shift later, but consistent sleep schedules are critical for mental health, academic performance, and physical development.' });
     lifestyleAdvice.push({ category: 'Exercise', advice: 'Aim for 60 minutes of moderate-to-vigorous activity daily. Resistance training 2-3x/week supports bone density and healthy body composition during this critical growth period.' });
     lifestyleAdvice.push({ category: 'Nutrition', advice: 'Adolescents need increased calcium (1300mg/day), protein, and iron. Prioritize dairy or fortified alternatives, lean proteins, and iron-rich foods. Avoid skipping meals, especially breakfast.' });
-    actionPlan.push('Week 1: Start with Vitamin D3 and a quality multivitamin Ã¢â‚¬â€ the most impactful for adolescent health.');
-    actionPlan.push('Week 2: Add magnesium glycinate in the evening to support sleep and stress.');
-    actionPlan.push('Week 3-4: Assess energy, mood, and sleep improvements. Add targeted supplements based on specific symptoms.');
-    actionPlan.push('Ongoing: Maintain consistent sleep schedule, regular exercise, and balanced nutrition.');
+  actionPlan.push({ phase: 'Week 1 — Build Foundations', focus: 'Start with the most impactful supplements for adolescent health.', supplements: ['Vitamin D3', 'Magnesium Glycinate'], habits: ['Establish consistent meal times', 'Reduce screen time before bed'], activity: ['60 minutes of moderate activity daily', 'Outdoor play or sports'], expectedChanges: ['Slight improvement in sleep', 'Reduced muscle tension'] });
+  actionPlan.push({ phase: 'Week 2-3 — Support Energy & Focus', focus: 'Add targeted supplements and increase physical activity.', supplements: recs.filter(r => r.priority === 'Medium').map(r => r.name), habits: ['Increase calcium-rich foods', 'Prioritize breakfast daily'], activity: ['Add resistance training 2x/week', 'Active commuting or sports'], expectedChanges: ['Better focus and academic performance', 'Improved mood stability'] });
+  actionPlan.push({ phase: 'Month 2 — Assess Progress', focus: 'Evaluate energy, mood, and sleep improvements.', supplements: ['Continue full supplement routine'], habits: ['Maintain consistent sleep schedule', 'Balanced nutrition with lean proteins and vegetables'], activity: ['Maintain 60 min/day activity'], expectedChanges: ['Measurable improvement in energy and mood', 'Better sleep quality'] });
+  actionPlan.push({ phase: 'Month 3+ — Long-Term Health', focus: 'Sustain healthy habits and reassess with a healthcare provider.', supplements: ['Consult doctor to check Vitamin D and iron levels via blood test'], habits: ['Maintain all established habits', 'Annual nutritional check-up'], activity: ['Continue regular physical activity'], expectedChanges: ['Sustained energy and focus', 'Strong bone development', 'Healthy growth milestones'] });
     return buildResult(a, recs, lifestyleAdvice, actionPlan, warnings, avoidList, conditions, symptoms, goals);
   }
 
@@ -426,10 +487,10 @@ function generateClinicalFallback(a) {
     lifestyleAdvice.push({ category: 'Nutrition', advice: 'Protein needs increase with age to prevent muscle loss. Aim for 1.2-1.6g protein per kg body weight daily. Prioritize leucine-rich proteins (eggs, fish, dairy) which most effectively stimulate muscle synthesis.' });
     lifestyleAdvice.push({ category: 'Hydration', advice: 'Thirst sensation diminishes with age, making dehydration common and dangerous in seniors. Drink 6-8 glasses of water daily regardless of thirst. Dehydration worsens cognitive function, constipation, and fall risk.' });
     lifestyleAdvice.push({ category: 'Sleep', advice: 'Sleep architecture changes with age Ã¢â‚¬â€ less deep sleep, more frequent waking. Maintain consistent sleep/wake times, limit naps to 20 minutes before 3pm, and avoid alcohol which fragments sleep quality.' });
-    actionPlan.push('Week 1: Start with Vitamin D3+K2 and B12 Ã¢â‚¬â€ the two most critical for seniors. Have your doctor check baseline D and B12 levels if possible.');
-    actionPlan.push('Week 2: Add Calcium Citrate with meals and Omega-3 with dinner.');
-    actionPlan.push('Week 3-4: Begin or increase resistance exercise. Even chair-based exercises improve strength and balance significantly.');
-    actionPlan.push('Ongoing: Schedule quarterly check-ins with your doctor to review supplement needs, medication interactions, and lab values.');
+  actionPlan.push({ phase: 'Week 1 — Build Foundations', focus: 'Start with the most critical supplements for senior health.', supplements: ['Vitamin D3 + K2', 'Vitamin B12 (Methylcobalamin)'], habits: ['Drink 6-8 glasses of water daily', 'Establish consistent meal and sleep times'], activity: ['10-15 minute daily walks', 'Chair-based stretching exercises'], expectedChanges: ['Slight improvement in energy', 'Reduced fatigue'] });
+  actionPlan.push({ phase: 'Week 2-3 — Support Bone & Heart Health', focus: 'Add bone and cardiovascular support supplements.', supplements: ['Calcium Citrate', 'Omega-3 (EPA+DHA)'], habits: ['Increase calcium-rich foods', 'Reduce sodium intake'], activity: ['20-30 minutes of daily movement', 'Balance exercises to reduce fall risk'], expectedChanges: ['Reduced joint stiffness', 'Improved cardiovascular comfort'] });
+  actionPlan.push({ phase: 'Month 2 — Build Strength & Clarity', focus: 'Increase physical activity and assess cognitive and physical improvements.', supplements: ['Add CoQ10 if on statins', 'Continue full routine'], habits: ['Maintain consistent supplement schedule', 'Social engagement for cognitive health'], activity: ['Begin resistance training 2x/week', 'Even chair-based exercises improve strength significantly'], expectedChanges: ['Improved cognitive clarity', 'Better bone and cardiovascular health', 'Increased strength'] });
+  actionPlan.push({ phase: 'Month 3+ — Long-Term Maintenance', focus: 'Sustain progress with quarterly medical check-ins.', supplements: ['Schedule quarterly review with doctor', 'Check Vitamin D, B12, and bone density labs'], habits: ['Maintain all established habits', 'Annual comprehensive health review'], activity: ['Maintain regular exercise routine'], expectedChanges: ['Sustained bone density protection', 'Stable cognitive function', 'Reduced fall risk and improved quality of life'] });
     return buildResult(a, recs, lifestyleAdvice, actionPlan, warnings, avoidList, conditions, symptoms, goals);
   }
 
@@ -833,10 +894,11 @@ function generateClinicalFallback(a) {
   }
 
   // Ã¢â€â‚¬Ã¢â€â‚¬ Action plan Ã¢â€â‚¬Ã¢â€â‚¬
-  actionPlan.push('Week 1: Start with the highest-priority supplements only. Introduce one at a time to monitor tolerance. Begin tracking your symptoms daily.');
-  actionPlan.push('Week 2: Add the medium-priority supplements. Implement the most relevant lifestyle change (sleep schedule, hydration, or diet adjustment).');
-  actionPlan.push('Weeks 3-4: Assess how you feel. Note any improvements in energy, sleep, or symptoms. Adjust timing if needed based on how your body responds.');
-  actionPlan.push('Month 2+: Maintain consistency Ã¢â‚¬â€ supplements take 4-12 weeks for full effect. Schedule a check-in with your doctor to review progress and any lab work.');
+  actionPlan.push({ phase: 'Week 1 — Build Foundations', focus: 'Introduce the most critical supplements and establish basic healthy habits.', supplements: recs.filter(r => r.priority === 'High').slice(0,2).map(r => r.name), habits: ['Improve hydration (6-8 glasses of water daily)', 'Establish a consistent sleep schedule', 'Reduce sugary drinks and processed foods'], activity: ['10-15 minute daily walks', 'Light stretching or mobility exercises'], expectedChanges: ['Slight improvement in sleep quality', 'Reduced muscle tension', 'Small increase in energy'] });
+  actionPlan.push({ phase: 'Week 2 — Improve Energy & Recovery', focus: 'Add remaining high-priority supplements and increase daily movement.', supplements: recs.filter(r => r.priority === 'High').slice(2).map(r => r.name), habits: ['Increase protein and whole foods intake', 'Track symptoms daily to note improvements'], activity: ['20-30 minutes of daily movement', 'Light resistance or bodyweight exercises'], expectedChanges: ['Better daytime energy', 'Improved recovery and focus', 'Reduced sluggishness'] });
+  actionPlan.push({ phase: 'Weeks 3-4 — Build Sustainable Habits', focus: 'Add medium-priority supplements and focus on consistency.', supplements: recs.filter(r => r.priority === 'Medium').map(r => r.name), habits: ['Improve meal consistency and portion control', 'Prioritize sleep hygiene: less screen time before bed, regular bedtime'], activity: ['Maintain regular exercise routine', 'Add one new physical activity you enjoy'], expectedChanges: ['Better stamina', 'Improved sleep quality', 'Better mood and physical comfort'] });
+  actionPlan.push({ phase: 'Month 2 — Assess Progress', focus: 'Evaluate improvements and refine your routine based on how your body has responded.', supplements: ['Continue full supplement routine consistently'], habits: ['Review which habits are working and double down on them', 'Address any remaining symptoms with targeted changes'], activity: ['Increase exercise intensity or duration gradually'], expectedChanges: ['Noticeable improvement in primary symptoms', 'More stable energy throughout the day', 'Improved overall wellbeing'] });
+  actionPlan.push({ phase: 'Month 3+ — Long-Term Recovery', focus: 'Sustain progress and reassess with a healthcare provider for long-term optimization.', supplements: ['Reassess supplement stack with a healthcare provider', 'Check relevant lab values (Vitamin D, B12, iron if applicable)'], habits: ['Maintain all established healthy habits', 'Schedule a check-in with your doctor to review progress'], activity: ['Maintain consistent exercise routine', 'Consider adding strength training if not already included'], expectedChanges: ['Full therapeutic effect of supplements reached', 'Sustained symptom relief', 'Long-term health improvements consolidated'] });
 
   // Ã¢â€â‚¬Ã¢â€â‚¬ Minimum supplements Ã¢â€â‚¬Ã¢â€â‚¬
   if (recs.length < 4) {
@@ -858,16 +920,18 @@ function buildResult(a, recs, lifestyleAdvice, actionPlan, warnings, avoidList, 
   const hasAllergies = a.allergies && a.allergies.trim() && !noAllergyPhrases.test(a.allergies.trim());
 
   const agePart = a.age ? `${a.age}-year-old` : null;
-  const genderPart = a.gender || null;
-  let opening = [agePart, genderPart].filter(Boolean).join(' ') || 'Patient';
+  const genderPart = a.gender ? a.gender.toLowerCase() : null;
+  let opening = [agePart, genderPart].filter(Boolean).join(' ') || 'patient';
+  opening = `A ${opening} patient`;
 
   let bmiLine = '';
   if (a.weight && a.height) {
     const bmi = (a.weight / ((a.height / 100) ** 2)).toFixed(1);
-    const bmiCat = bmi < 18.5 ? 'underweight' : bmi < 25 ? 'normal weight range' : bmi < 30 ? 'overweight range' : 'obese range';
-    bmiLine = `presenting with a BMI of ${bmi} (${bmiCat})`;
+    const bmiCat = bmi < 18.5 ? 'underweight' : bmi < 25 ? 'normal weight' : bmi < 30 ? 'overweight' : 'obese';
+    const bmiStatus = bmi < 18.5 ? 'indicating underweight status' : bmi < 25 ? 'within the normal weight range' : bmi < 30 ? 'indicating overweight status' : 'indicating obesity';
+    bmiLine = `with a BMI of ${bmi}, ${bmiStatus},`;
   }
-  opening = bmiLine ? `${opening} ${bmiLine}.` : `${opening}.`;
+  opening = bmiLine ? `${opening} ${bmiLine}` : `${opening}`;
 
   // Partial data notice
   const hasBasics = a.age && a.gender && a.weight && a.height;
@@ -901,9 +965,9 @@ function buildResult(a, recs, lifestyleAdvice, actionPlan, warnings, avoidList, 
 
   let complaintSentence = '';
   const filteredSymptoms = symptoms.filter(s => s !== 'No current symptoms');
-  if (filteredSymptoms.length && goals.length) complaintSentence = `The primary concerns are ${filteredSymptoms.join(', ')}, with wellness goals focused on ${goals.join(', ')}.`;
-  else if (filteredSymptoms.length) complaintSentence = `The primary concerns are ${filteredSymptoms.join(', ')}.`;
-  else if (goals.length) complaintSentence = `Wellness goals include ${goals.join(', ')}.`;
+  if (filteredSymptoms.length && goals.length) complaintSentence = `reports ${filteredSymptoms.join(', ')}, with wellness goals focused on ${goals.join(', ')}.`;
+  else if (filteredSymptoms.length) complaintSentence = `reports ${filteredSymptoms.join(', ')}.`;
+  else if (goals.length) complaintSentence = `presents with wellness goals including ${goals.join(', ')}.`;
 
   let feelingSentence = '';
   if (a.feelingDescription && a.feelingDescription.trim() && !noMedPhrases.test(a.feelingDescription.trim())) {
@@ -921,9 +985,10 @@ function buildResult(a, recs, lifestyleAdvice, actionPlan, warnings, avoidList, 
 
   const summary = [
     partialNotice,
-    opening, conditionSentence, medSentence, allergySentence,
+    `${opening} ${complaintSentence}`,
+    conditionSentence, medSentence, allergySentence,
     stressSentence, sleepSentence, lifestyleSentence, pregnancySentence,
-    complaintSentence, feelingSentence,
+    feelingSentence,
     'The following evidence-based wellness plan addresses targeted supplementation alongside lifestyle modifications to support overall health improvement.'
   ].filter(Boolean).join(' ');
 
@@ -1047,17 +1112,29 @@ function inferEvidence(name) {
 // Ã¢â€â‚¬Ã¢â€â‚¬ Helper: infer food sources Ã¢â€â‚¬Ã¢â€â‚¬
 function inferFoods(name) {
   const n = name.toLowerCase();
-  if (n.includes('magnesium')) return 'Dark chocolate, almonds, spinach, pumpkin seeds, black beans, avocado';
-  if (n.includes('b12')) return 'Beef liver, clams, sardines, salmon, eggs, dairy (animal products only)';
-  if (n.includes('omega') || n.includes('fish oil')) return 'Salmon, mackerel, sardines, walnuts, flaxseeds, chia seeds';
-  if (n.includes('vitamin d')) return 'Fatty fish, egg yolks, fortified milk/OJ, mushrooms (UV-exposed), sunlight';
-  if (n.includes('zinc')) return 'Oysters, beef, pumpkin seeds, chickpeas, cashews, hemp seeds';
-  if (n.includes('iron')) return 'Red meat, spinach, lentils, tofu, pumpkin seeds, dark chocolate';
-  if (n.includes('vitamin c')) return 'Bell peppers, citrus fruits, strawberries, broccoli, kiwi';
-  if (n.includes('calcium')) return 'Dairy products, fortified plant milks, sardines, kale, broccoli, almonds';
-  if (n.includes('potassium')) return 'Bananas, sweet potatoes, avocado, spinach, beans, salmon';
-  if (n.includes('selenium')) return 'Brazil nuts (1-2/day), tuna, sardines, eggs, sunflower seeds';
-  return 'Obtain from a varied whole-food diet where possible';
+  if (n.includes('magnesium')) return 'Dark chocolate (70%+), almonds, pumpkin seeds, spinach, black beans, avocado, cashews';
+  if (n.includes('b12')) return 'Beef liver, clams, sardines, Atlantic salmon, hard-boiled eggs, Greek yogurt';
+  if (n.includes('omega') || n.includes('fish oil')) return 'Atlantic salmon, mackerel, sardines, herring, anchovies, walnuts, chia seeds, flaxseeds';
+  if (n.includes('vitamin d')) return 'Sockeye salmon, canned tuna, rainbow trout, UV-exposed portobello mushrooms, fortified whole milk, egg yolks';
+  if (n.includes('zinc')) return 'Oysters, beef chuck, pumpkin seeds, chickpeas, cashews, hemp seeds, crab';
+  if (n.includes('iron')) return 'Beef liver, grass-fed ground beef, lentils, tofu, pumpkin seeds, dark chocolate (85%+), spinach';
+  if (n.includes('vitamin c')) return 'Red bell peppers, guava, kiwi, strawberries, broccoli, papaya, orange juice';
+  if (n.includes('calcium')) return 'Plain Greek yogurt, canned sardines with bones, kale, bok choy, fortified oat milk, almonds, white beans';
+  if (n.includes('potassium')) return 'Sweet potatoes, avocado, spinach, white beans, bananas, Atlantic salmon, beet greens';
+  if (n.includes('selenium')) return 'Brazil nuts (1-2 per day), yellowfin tuna, sardines, hard-boiled eggs, sunflower seeds, chicken breast';
+  if (n.includes('vitamin k')) return 'Kale, Swiss chard, spinach, Brussels sprouts, broccoli, natto, parsley';
+  if (n.includes('vitamin b6') || n.includes('b6')) return 'Chickpeas, yellowfin tuna, chicken breast, potatoes, bananas, pistachio nuts';
+  if (n.includes('folate') || n.includes('folic')) return 'Beef liver, edamame, lentils, asparagus, spinach, avocado, black-eyed peas';
+  if (n.includes('iodine')) return 'Seaweed (nori, wakame), cod, plain yogurt, iodized salt, shrimp, eggs';
+  if (n.includes('coq10')) return 'Beef heart, herring, chicken liver, rainbow trout, peanuts, sesame seeds, broccoli';
+  if (n.includes('collagen')) return 'Bone broth, chicken skin, pork rinds, sardines, egg whites, citrus fruits (for Vitamin C to support collagen synthesis)';
+  if (n.includes('probiotic')) return 'Plain Greek yogurt, kefir, kimchi, sauerkraut, miso, tempeh, kombucha';
+  if (n.includes('curcumin') || n.includes('turmeric')) return 'Turmeric root, curry powder, golden milk, turmeric tea (pair with black pepper to enhance absorption)';
+  if (n.includes('ashwagandha')) return 'Ashwagandha root powder (supplement form — not widely available in common foods)';
+  if (n.includes('creatine')) return 'Beef, pork, herring, salmon, tuna, chicken breast (creatine is found almost exclusively in animal muscle tissue)';
+  if (n.includes('melatonin')) return 'Tart cherries, walnuts, almonds, oats, bananas, tomatoes, grapes';
+  if (n.includes('inositol')) return 'Cantaloupe, citrus fruits, beans, brown rice, corn, sesame seeds, wheat germ';
+  return 'Obtain from a varied whole-food diet including lean proteins, leafy greens, legumes, and whole grains';
 }
 
 // Ã¢â€â‚¬Ã¢â€â‚¬ Helper: infer side effects Ã¢â€â‚¬Ã¢â€â‚¬
@@ -1134,6 +1211,12 @@ function buildDailySchedule(recs) {
 }
 
 module.exports = router;
+
+
+
+
+
+
 
 
 

@@ -4,7 +4,7 @@ import Navbar from '../Components/Navbar/Navbar';
 import { exportResultsToPDF } from '../utils/exportPDF';
 import './ResultsPage.css';
 
-const priorityColor = { High: '#16a34a', Medium: '#d97706', Low: '#6b7280' };
+const priorityColor = { High: '#16a34a', Medium: '#d97706', Low: '#374151' };
 const priorityIcon = { High: '🔴', Medium: '🟡', Low: '🟢' };
 const severityColor = { Severe: '#dc2626', Moderate: '#d97706', 'Mild to Moderate': '#f59e0b', Mild: '#22c55e', Preventive: '#6b7280' };
 
@@ -72,36 +72,124 @@ function ConfidenceBar({ score, delay = 0 }) {
   );
 }
 
-function SupplementCard({ rec, index = 0 }) {
-  const [expanded, setExpanded] = useState(false);
+// Map generic food category words to specific examples
+const FOOD_SPECIFICS = {
+  'fatty fish':       'fatty fish (salmon, tuna, sardines, mackerel)',
+  'leafy greens':     'leafy greens (spinach, kale, Swiss chard)',
+  'leafy green':      'leafy greens (spinach, kale, Swiss chard)',
+  'nuts':             'nuts (almonds, cashews, walnuts, pumpkin seeds)',
+  'dairy':            'dairy (Greek yogurt, cheddar cheese, whole milk)',
+  'dairy products':   'dairy (Greek yogurt, cheddar cheese, whole milk)',
+  'citrus':           'citrus (oranges, grapefruit, kiwi)',
+  'citrus fruits':    'citrus (oranges, grapefruit, kiwi)',
+  'legumes':          'legumes (lentils, chickpeas, black beans)',
+  'whole grains':     'whole grains (oats, brown rice, quinoa)',
+  'lean meats':       'lean meats (chicken breast, turkey, lean beef)',
+  'lean meat':        'lean meats (chicken breast, turkey, lean beef)',
+  'red meat':         'red meat (beef, lamb, bison)',
+  'shellfish':        'shellfish (oysters, clams, crab, shrimp)',
+  'seeds':            'seeds (pumpkin seeds, sunflower seeds, chia seeds)',
+  'berries':          'berries (blueberries, strawberries, raspberries)',
+  'cruciferous vegetables': 'cruciferous vegetables (broccoli, Brussels sprouts, cauliflower)',
+  'organ meats':      'organ meats (beef liver, chicken liver)',
+  'fermented foods':  'fermented foods (kefir, kimchi, sauerkraut, miso)',
+};
+
+function expandFoodItem(item) {
+  const lower = item.toLowerCase().trim();
+  for (const [key, expanded] of Object.entries(FOOD_SPECIFICS)) {
+    if (lower === key || lower.startsWith(key + ' ') || lower.endsWith(' ' + key)) {
+      // Preserve original casing of first letter
+      return expanded.charAt(0).toUpperCase() + expanded.slice(1);
+    }
+  }
+  return item;
+}
+
+// Strip sentence-like fragments from food strings (AI sometimes returns prose)
+function sanitizeFoods(str) {
+  if (!str) return str;
+  // Remove trailing sentence fragments that start with connective words
+  // e.g. ", such as salmon and sardines, are naturally rich in omega-3 fatty acids"
+  let cleaned = str
+    .replace(/,?\s*(such as|which are|are naturally|naturally rich|found in|including)[^,;]*/gi, '')
+    .replace(/,?\s*are\s+[a-z].*$/gi, '')
+    .trim()
+    .replace(/,\s*$/, ''); // remove trailing comma
+  return cleaned || str; // fallback to original if cleaning removed everything
+}
+
+// Split food string on commas/semicolons that are NOT inside parentheses
+function splitFoods(str) {
+  const items = [];
+  let current = '';
+  let depth = 0;
+  for (const ch of str) {
+    if (ch === '(') { depth++; current += ch; }
+    else if (ch === ')') { depth--; current += ch; }
+    else if ((ch === ',' || ch === ';') && depth === 0) {
+      if (current.trim()) items.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim()) items.push(current.trim());
+  return items;
+}
+
+// Parse food string into individual examples for display
+function FoodExamples({ foods }) {
+  if (!foods) return null;
+  const cleaned = sanitizeFoods(foods);
+  const items = splitFoods(cleaned).map(f => expandFoodItem(f)).filter(Boolean);
+  const display = items.length > 0 ? items : [expandFoodItem(cleaned)];
+  return (
+    <div className="food-examples">
+      {display.map((item, i) => (
+        <span key={i} className="food-pill">{item}</span>
+      ))}
+    </div>
+  );
+}
+
+function SupplementCard({ rec, index = 0, expanded, onToggle }) {
   const icon = getSupplementIcon(rec.name);
   const pColor = priorityColor[rec.priority] || '#6b7280';
   const pIcon = priorityIcon[rec.priority] || '⚪';
 
   return (
     <div className="rec-card">
-      <div className="rec-card-top">
-        <div className="rec-icon-name">
-          <span className="rec-icon">{icon}</span>
-          <h3 className="rec-name">{rec.name}</h3>
-        </div>
-        <div className="rec-badges">
-          <span className="rec-priority" style={{ background: pColor + '15', color: pColor, border: `1px solid ${pColor}30` }}>
-            {pIcon} {rec.priority}
-          </span>
-          {rec.severityLevel && (
-            <span className="rec-severity" style={{ background: (severityColor[rec.severityLevel] || '#6b7280') + '15', color: severityColor[rec.severityLevel] || '#6b7280' }}>
-              {rec.severityLevel}
-            </span>
-          )}
-        </div>
+      {/* Priority badge — at the very top before the supplement name */}
+      <div className="rec-priority-top">
+        <span className="rec-priority-label" style={{ background: pColor + '15', color: pColor, border: `1px solid ${pColor}40` }}>
+          {pIcon} {rec.priority} Priority
+        </span>
       </div>
 
-      {rec.confidenceScore && <ConfidenceBar score={rec.confidenceScore} delay={index * 120} />}
+      {/* Supplement name below the priority */}
+      <div className="rec-name-row">
+        <span className="rec-icon-large">{icon}</span>
+        <h3 className="rec-name-large">{rec.name}</h3>
+      </div>
+
+      {/* Confidence bar — larger and more prominent */}
+      {rec.confidenceScore && (
+        <div className="rec-confidence-section">
+          <span className="rec-confidence-title">Recommendation Match</span>
+          <ConfidenceBar score={rec.confidenceScore} delay={index * 120} />
+        </div>
+      )}
 
       {rec.triggeredBy && (
         <div className="rec-triggered">
-          <span className="rec-triggered-label">Why recommended:</span> {rec.triggeredBy}
+          <span className="rec-triggered-label">Recommended for:</span>
+          {rec.severityLevel && (
+            <span className="rec-severity-inline" style={{ background: (severityColor[rec.severityLevel] || '#6b7280') + '15', color: severityColor[rec.severityLevel] || '#6b7280', border: `1px solid ${(severityColor[rec.severityLevel] || '#6b7280')}30` }}>
+              {rec.severityLevel}
+            </span>
+          )}
+          {rec.triggeredBy}
         </div>
       )}
 
@@ -116,6 +204,13 @@ function SupplementCard({ rec, index = 0 }) {
           <span className="rec-detail-label">⏰ Best Time</span>
           <span>{rec.timing}</span>
         </div>
+        {/* Duration — how long to take the supplement */}
+        {rec.duration && (
+          <div className="rec-detail">
+            <span className="rec-detail-label">📅 Duration</span>
+            <span>{rec.duration}</span>
+          </div>
+        )}
         {rec.interactions && rec.interactions !== 'None identified' && (
           <div className="rec-detail rec-interaction">
             <span className="rec-detail-label">⚠ Interactions</span>
@@ -124,27 +219,27 @@ function SupplementCard({ rec, index = 0 }) {
         )}
       </div>
 
-      <button className="rec-expand-btn" onClick={() => setExpanded(!expanded)}>
+      <button className="rec-expand-btn" onClick={() => onToggle()}>
         {expanded ? '▲ Less details' : '▼ More details'}
       </button>
 
       {expanded && (
         <div className="rec-expanded">
           {rec.evidence && (
-            <div className="rec-expanded-section">
+            <div className="rec-expanded-section rec-expanded-evidence">
               <span className="rec-expanded-label">📚 Evidence</span>
               <p>{rec.evidence}</p>
             </div>
           )}
           {rec.foods && (
-            <div className="rec-expanded-section">
+            <div className="rec-expanded-section rec-expanded-foods">
               <span className="rec-expanded-label">🥗 Food Sources</span>
-              <p>{rec.foods}</p>
+              <FoodExamples foods={rec.foods} />
             </div>
           )}
           {rec.sideEffects && (
-            <div className="rec-expanded-section">
-              <span className="rec-expanded-label">⚠ Side Effects & Safe Limits</span>
+            <div className="rec-expanded-section rec-expanded-sideeffects">
+              <span className="rec-expanded-label">⚠ Side Effects &amp; Safe Limits</span>
               <p>{rec.sideEffects}</p>
             </div>
           )}
@@ -159,6 +254,18 @@ function ResultsPage() {
   const location = useLocation();
   const { recommendations: r, assessment, garbageFields = [] } = location.state || {};
   const [exporting, setExporting] = useState(false);
+  const [expandedCards, setExpandedCards] = useState(new Set());
+  const [showAllRecs, setShowAllRecs] = useState(false);
+  const INITIAL_REC_COUNT = 6;
+
+  const handleToggleCard = (id) => {
+    setExpandedCards(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const handleExportPDF = async () => {
     setExporting(true);
@@ -186,8 +293,7 @@ function ResultsPage() {
     );
   }
 
-  const highPriority = r.recommendations?.filter(rec => rec.priority === 'High') || [];
-  const otherPriority = r.recommendations?.filter(rec => rec.priority !== 'High') || [];
+  const allRecommendations = r.recommendations || [];
 
   return (
     <div className="results-wrapper">
@@ -238,44 +344,138 @@ function ResultsPage() {
           </div>
         )}
 
-        {/* High Priority Supplements */}
-        {highPriority.length > 0 && (
+        {/* All Supplement Recommendations */}
+        {allRecommendations.length > 0 && (
           <>
-            <div className="results-section-title">💊 Priority Supplements</div>
-            <p className="results-section-sub">These are most relevant to your reported symptoms and health profile.</p>
+            <div className="results-section-title">💊 Supplement Recommendations</div>
+            <p className="results-section-sub">Personalized based on your symptoms, health goals, and profile.</p>
             <div className="results-grid">
-              {highPriority.map((rec, i) => <SupplementCard key={i} rec={rec} index={i} />)}
-            </div>
-          </>
-        )}
-
-        {/* Optional Supplements */}
-        {otherPriority.length > 0 && (
-          <>
-            <div className="results-section-title">✨ Optional Supplements</div>
-            <p className="results-section-sub">These may provide additional support based on your goals and lifestyle.</p>
-            <div className="results-grid">
-              {otherPriority.map((rec, i) => <SupplementCard key={i} rec={rec} index={highPriority.length + i} />)}
-            </div>
-          </>
-        )}
-
-        {/* Daily Schedule */}
-        {r.dailySchedule?.length > 0 && (
-          <>
-            <div className="results-section-title">🕐 Personalized Daily Schedule</div>
-            <div className="daily-schedule">
-              {r.dailySchedule.map((slot, i) => (
-                <div key={i} className="schedule-slot">
-                  <div className="schedule-time">{slot.time}</div>
-                  <div className="schedule-supplements">
-                    {slot.supplements.map((s, si) => (
-                      <span key={si} className="schedule-pill">{s}</span>
-                    ))}
-                  </div>
-                </div>
+              {(showAllRecs ? allRecommendations : allRecommendations.slice(0, INITIAL_REC_COUNT)).map((rec, i) => (
+                <SupplementCard
+                  key={i}
+                  rec={rec}
+                  index={i}
+                  expanded={expandedCards.has(`rec-${i}`)}
+                  onToggle={() => handleToggleCard(`rec-${i}`)}
+                />
               ))}
             </div>
+            {allRecommendations.length > INITIAL_REC_COUNT && (
+              <button className="btn-show-more" onClick={() => setShowAllRecs(v => !v)}>
+                {showAllRecs
+                  ? '▲ Show Less'
+                  : `▼ Show More (${allRecommendations.length - INITIAL_REC_COUNT} more)`}
+              </button>
+            )}
+          </>
+        )}
+
+        {/* Merged Daily Schedule + Action Plan */}
+        {(r.dailySchedule?.length > 0 || r.actionPlan?.length > 0) && (
+          <>
+            <div className="results-section-title">🗓️ Your Daily Schedule & Recovery Plan</div>
+
+            {/* Daily Schedule */}
+            {r.dailySchedule?.length > 0 && (
+              <div className="daily-schedule">
+                {(() => {
+                  // Build dosage lookup — fuzzy match supplement names
+                  const dosageMap = {};
+                  (r.recommendations || []).forEach(rec => {
+                    if (rec.name && rec.dosage) {
+                      dosageMap[rec.name.toLowerCase()] = rec.dosage;
+                    }
+                  });
+
+                  // Fuzzy lookup: find best matching rec dosage for a schedule pill name
+                  const getDosage = (pillName) => {
+                    const pill = pillName.toLowerCase();
+                    // Exact match first
+                    if (dosageMap[pill]) return dosageMap[pill];
+                    // Partial match: pill name contains rec name or rec name contains pill name
+                    for (const [recName, dosage] of Object.entries(dosageMap)) {
+                      if (pill.includes(recName) || recName.includes(pill)) return dosage;
+                      // Word-level overlap: share at least one meaningful word (>3 chars)
+                      const pillWords = pill.split(/\s+/).filter(w => w.length > 3);
+                      const recWords = recName.split(/\s+/).filter(w => w.length > 3);
+                      if (pillWords.some(w => recWords.includes(w))) return dosage;
+                    }
+                    return null;
+                  };
+
+                  return r.dailySchedule.map((slot, i) => (
+                    <div key={i} className="schedule-slot">
+                      <div className="schedule-time">{slot.time}</div>
+                      <div className="schedule-supplements">
+                        {slot.supplements.map((s, si) => {
+                          const dosage = getDosage(s);
+                          return (
+                            <span key={si} className="schedule-pill">
+                              {s}{dosage ? <span className="schedule-pill-dosage"> — {dosage}</span> : ''}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ));
+                })()}
+              </div>
+            )}
+
+            {/* Recovery Timeframe */}
+            {r.actionPlan?.length > 0 && (
+              <div className="recovery-plan" style={{ marginTop: r.dailySchedule?.length > 0 ? '20px' : '0' }}>
+                {r.actionPlan.map((phase, i) => {
+                  // Support both structured objects and legacy plain strings
+                  if (typeof phase === 'string') {
+                    return (
+                      <div key={i} className="recovery-phase">
+                        <div className="recovery-phase-header">
+                          <span className="recovery-phase-num">{i + 1}</span>
+                          <p className="recovery-phase-title">{phase}</p>
+                        </div>
+                      </div>
+                    );
+                  }
+                  const steps = phase.steps || [];
+                  const expected = phase.expectedChanges || [];
+                  // Merge supplements/habits/activity into steps if using old fallback shape
+                  const allSteps = steps.length > 0 ? steps : [
+                    ...(phase.supplements || []),
+                    ...(phase.habits || []),
+                    ...(phase.activity || []),
+                  ];
+                  return (
+                    <div key={i} className="recovery-phase">
+                      <div className="recovery-phase-header">
+                        <span className="recovery-phase-num">{i + 1}</span>
+                        <div>
+                          <p className="recovery-phase-title">{phase.phase || phase.week}</p>
+                          {phase.focus && <p className="recovery-phase-focus">{phase.focus}</p>}
+                        </div>
+                      </div>
+                      {allSteps.length > 0 && (
+                        <ul className="recovery-steps">
+                          {allSteps.map((step, si) => (
+                            <li key={si}>{step}</li>
+                          ))}
+                        </ul>
+                      )}
+                      {expected.length > 0 && (
+                        <div className="recovery-expected">
+                          <span className="recovery-expected-label">✦ Expected Changes</span>
+                          <ul>
+                            {expected.map((e, ei) => (
+                              <li key={ei}>{e}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </>
         )}
 
@@ -309,20 +509,7 @@ function ResultsPage() {
           </>
         )}
 
-        {/* Action Plan */}
-        {r.actionPlan?.length > 0 && (
-          <>
-            <div className="results-section-title">📋 Your Action Plan</div>
-            <div className="action-plan">
-              {r.actionPlan.map((step, i) => (
-                <div key={i} className="action-step">
-                  <div className="action-step-num">{i + 1}</div>
-                  <p>{step}</p>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
+
 
         {/* Avoid List */}
         {r.avoidList?.length > 0 && (
