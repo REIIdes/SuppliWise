@@ -7,6 +7,13 @@ import './HistoryPage.css';
 
 const priorityColor = { High: '#dc2626', Medium: '#d97706', Low: '#374151' };
 
+const ACTIVITY_LABELS = {
+  Sedentary: 'Sedentary',
+  Light:     'Light',
+  Moderate:  'Moderate',
+  Very:      'Very Active',
+};
+
 // Map generic food category words to specific examples
 const FOOD_SPECIFICS = {
   'fatty fish':       'fatty fish (salmon, tuna, sardines, mackerel)',
@@ -186,7 +193,7 @@ function HistoryPage() {
                   <div className="history-tags">
                     {item.age && <span className="tag tag-blue">Age {item.age}</span>}
                     {item.dietType && <span className="tag">{item.dietType}</span>}
-                    {item.activityLevel && <span className="tag">{item.activityLevel}</span>}
+                    {item.activityLevel && <span className="tag">{ACTIVITY_LABELS[item.activityLevel] || item.activityLevel}</span>}
                     {item.symptoms?.length > 0 && (
                       <span className="tag tag-red">{item.symptoms.length} symptom{item.symptoms.length > 1 ? 's' : ''}</span>
                     )}
@@ -267,7 +274,7 @@ function HistoryPage() {
                         {item.gender && <div className="history-item"><span>Gender</span><strong>{item.gender}</strong></div>}
                         {item.weight && <div className="history-item"><span>Weight</span><strong>{item.weight} kg</strong></div>}
                         {item.height && <div className="history-item"><span>Height</span><strong>{item.height} cm</strong></div>}
-                        {item.activityLevel && <div className="history-item"><span>Activity</span><strong>{item.activityLevel}</strong></div>}
+                        {item.activityLevel && <div className="history-item"><span>Physical Activity Level</span><strong>{ACTIVITY_LABELS[item.activityLevel] || item.activityLevel}</strong></div>}
                         {item.dietType && <div className="history-item"><span>Diet</span><strong>{item.dietType}</strong></div>}
                       </div>
                       {item.healthGoals?.length > 0 && (
@@ -329,10 +336,13 @@ function HistoryPage() {
                                   <p className="history-rec-interaction">⚠ {rec.interactions}</p>
                                 )}
                                 {rec.evidence && (
-                                  <p className="history-rec-evidence">📚 <strong>Evidence:</strong> {rec.evidence}</p>
+                                  <p className="history-rec-evidence history-rec-evidence-blue">📚 <strong>Evidence:</strong> {rec.evidence}</p>
                                 )}
                                 {rec.foods && (
-                                  <p className="history-rec-evidence">🥗 <strong>Food Sources:</strong> {expandFoodText(rec.foods)}</p>
+                                  <p className="history-rec-evidence history-rec-foods">🥗 <strong>Food Sources:</strong> {expandFoodText(rec.foods)}</p>
+                                )}
+                                {rec.sideEffects && (
+                                  <p className="history-rec-evidence history-rec-sideeffects">⚠ <strong>Side Effects &amp; Safe Limits:</strong> {rec.sideEffects}</p>
                                 )}
                               </div>
                             ))}

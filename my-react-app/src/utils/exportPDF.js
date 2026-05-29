@@ -300,7 +300,7 @@ export function exportResultsToPDF(recommendations, assessment) {
 
     autoTable(doc, {
       startY: y,
-      head: [['Supplement', 'Priority', 'Match', 'Reason', 'Dosage', 'Timing', 'Duration', 'Interactions']],
+      head: [['Supplement', 'Priority', 'Match', 'Reason', 'Dosage', 'Timing', 'Interactions']],
       body: recommendations.recommendations.map(rec => [
         rec.name || '',
         rec.priority || '',
@@ -308,7 +308,6 @@ export function exportResultsToPDF(recommendations, assessment) {
         rec.reason || '',
         rec.dosage || '-',
         rec.timing || '-',
-        rec.duration || '-',
         (rec.interactions && rec.interactions !== 'None identified') ? rec.interactions : 'None',
       ]),
       theme: 'grid',
@@ -332,14 +331,13 @@ export function exportResultsToPDF(recommendations, assessment) {
         fillColor: C.greenLight,
       },
       columnStyles: {
-        0: { cellWidth: 28, fontStyle: 'bold' },
-        1: { cellWidth: 16, halign: 'center' },
-        2: { cellWidth: 12, halign: 'center' },
-        3: { cellWidth: 44 },
-        4: { cellWidth: 24 },
-        5: { cellWidth: 20 },
-        6: { cellWidth: 20 },
-        7: { cellWidth: 18 },
+        0: { cellWidth: 30, fontStyle: 'bold' },  // Supplement
+        1: { cellWidth: 18, halign: 'center' },   // Priority
+        2: { cellWidth: 14, halign: 'center' },   // Match
+        3: { cellWidth: 50 },                     // Reason
+        4: { cellWidth: 28 },                     // Dosage
+        5: { cellWidth: 20 },                     // Timing
+        6: { cellWidth: 22 },                     // Interactions
       },
       margin: { left: ML, right: MR },
       tableWidth: CW,

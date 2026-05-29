@@ -750,6 +750,30 @@
   line-height: 1.5;
 }
 
+/* Evidence — blue tint (matches ResultsPage) */
+.history-rec-evidence-blue {
+  background: #eff6ff;
+  border-left: 3px solid #bfdbfe;
+  color: #1e40af;
+}
+.history-rec-evidence-blue strong { color: #1d4ed8; }
+
+/* Food Sources — green tint (matches ResultsPage) */
+.history-rec-foods {
+  background: #f0fdf4;
+  border-left: 3px solid #bbf7d0;
+  color: #166534;
+}
+.history-rec-foods strong { color: #15803d; }
+
+/* Side Effects — amber tint (matches ResultsPage) */
+.history-rec-sideeffects {
+  background: #fff7ed;
+  border-left: 3px solid #fed7aa;
+  color: #92400e;
+}
+.history-rec-sideeffects strong { color: #c2410c; }
+
 /* ── Error Box ── */
 .history-error-box {
   text-align: center;

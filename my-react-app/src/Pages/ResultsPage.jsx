@@ -184,11 +184,6 @@ function SupplementCard({ rec, index = 0, expanded, onToggle }) {
       {rec.triggeredBy && (
         <div className="rec-triggered">
           <span className="rec-triggered-label">Recommended for:</span>
-          {rec.severityLevel && (
-            <span className="rec-severity-inline" style={{ background: (severityColor[rec.severityLevel] || '#6b7280') + '15', color: severityColor[rec.severityLevel] || '#6b7280', border: `1px solid ${(severityColor[rec.severityLevel] || '#6b7280')}30` }}>
-              {rec.severityLevel}
-            </span>
-          )}
           {rec.triggeredBy}
         </div>
       )}

@@ -70,14 +70,14 @@ const DIET_INFO = {
 };
 
 // Small tooltip component for diet types
-function DietTooltip({ diet }) {
-  const [visible, setVisible] = useState(false);
+function DietTooltip({ diet, openDiet, onToggle }) {
+  const visible = openDiet === diet;
   return (
     <span className="diet-tooltip-wrap">
       <button
         type="button"
         className="diet-info-btn"
-        onClick={() => setVisible(v => !v)}
+        onClick={(e) => { e.preventDefault(); onToggle(visible ? null : diet); }}
         aria-label={`Info about ${diet}`}
       >
         ?
@@ -88,7 +88,7 @@ function DietTooltip({ diet }) {
           <button
             type="button"
             className="diet-tooltip-close"
-            onClick={() => setVisible(false)}
+            onClick={(e) => { e.preventDefault(); onToggle(null); }}
           >
             ✕
           </button>
@@ -285,7 +285,7 @@ function Step1({ data, onChange, errors }) {
 
       {showActivityLevel && (
         <div className="step-field">
-          <label>Activity Level</label>
+          <label>Physical Activity Level</label>
           <div className="checkbox-group">
             {activityOptions.map(({ value, label }) => (
               <label key={value} className="radio-label">
@@ -318,6 +318,7 @@ function Step1({ data, onChange, errors }) {
 function Step2({ data, onChange }) {
   const age = Number(data.age) || 0;
   const isChild = age > 0 && age < 13;
+  const [openDiet, setOpenDiet] = useState(null);
 
   // 6 diet types for a balanced grid
   const diets = ['Omnivore', 'Vegan', 'Keto', 'Paleo', 'Mediterranean', 'Carnivore', 'DASH', 'Flexitarian', 'Pescatarian'];
@@ -374,7 +375,7 @@ function Step2({ data, onChange }) {
                 onChange={() => onChange('dietType', d)}
               />
               {d}
-              <DietTooltip diet={d} />
+              <DietTooltip diet={d} openDiet={openDiet} onToggle={setOpenDiet} />
             </label>
           ))}
         </div>
@@ -585,11 +586,13 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
   const symptomSeverity = data.symptomSeverity || {};
   const gender = data.gender || '';
   const visibleSymptoms = ALL_SYMPTOMS.filter(s => s.genders.includes(gender) || gender === '');
+  const [severityErrors, setSeverityErrors] = useState([]);
 
   const toggleSymptom = (s) => {
     if (s === 'No current symptoms') {
       onChange('symptoms', selectedSymptoms.includes('No current symptoms') ? [] : ['No current symptoms']);
       onChange('symptomSeverity', {});
+      setSeverityErrors([]);
       return;
     }
     const filtered = selectedSymptoms.filter(x => x !== 'No current symptoms');
@@ -603,14 +606,8 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
         const firstMissing = missingSeverity[0];
         const el = symptomRowRefs.current[firstMissing];
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        // Trigger visual error on those rows by setting errors via a local state trick
-        // We reuse the errors prop pattern — set a temporary highlight via a ref flag
-        if (symptomRowRefs.current[firstMissing]) {
-          symptomRowRefs.current[firstMissing].classList.add('symptom-row-error');
-          setTimeout(() => {
-            symptomRowRefs.current[firstMissing]?.classList.remove('symptom-row-error');
-          }, 2500);
-        }
+        // Set React state so the warning message renders
+        setSeverityErrors(missingSeverity);
         return;
       }
     }
@@ -628,6 +625,8 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
 
   const setSeverity = (symptom, level) => {
     onChange('symptomSeverity', { ...symptomSeverity, [symptom]: level });
+    // Clear the error for this symptom once severity is selected
+    setSeverityErrors(prev => prev.filter(s => s !== symptom));
   };
 
   const noSymptoms = selectedSymptoms.includes('No current symptoms');
@@ -703,7 +702,7 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
           {visibleSymptoms.map(({ name: s }) => {
             const checked = selectedSymptoms.includes(s);
             const activeSeverity = symptomSeverity[s];
-            const missingSeverity = checked && !activeSeverity && (errors.symptomSeverity || []).includes(s);
+            const missingSeverity = checked && !activeSeverity && severityErrors.includes(s);
             return (
               <div
                 key={s}
