@@ -442,7 +442,13 @@ function HistoryPage() {
                   {getTab(item._id) === 'supplements' && item.aiResults && (
                     <div className="tab-content">
                       {(() => {
-                        const recs = item.aiResults.recommendations || [];
+                        const PRIORITY_ORDER = { High: 0, Medium: 1, Low: 2 };
+                        const recs = [...(item.aiResults.recommendations || [])].sort((a, b) => {
+                          const pa = PRIORITY_ORDER[a.priority] ?? 3;
+                          const pb = PRIORITY_ORDER[b.priority] ?? 3;
+                          if (pa !== pb) return pa - pb;
+                          return (b.confidenceScore || 0) - (a.confidenceScore || 0);
+                        });
                         const showAll = !!showAllSupplements[item._id];
                         const visible = showAll ? recs : recs.slice(0, 3);
                         return (

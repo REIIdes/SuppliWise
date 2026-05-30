@@ -470,6 +470,15 @@ export function exportResultsToPDF(recommendations, assessment) {
     y += 4;
   }
 
+  // Sort recommendations: High → Medium → Low, then by confidenceScore descending
+  const PRIORITY_ORDER = { High: 0, Medium: 1, Low: 2 };
+  const sortedRecs = [...(recommendations.recommendations || [])].sort((a, b) => {
+    const pa = PRIORITY_ORDER[a.priority] ?? 3;
+    const pb = PRIORITY_ORDER[b.priority] ?? 3;
+    if (pa !== pb) return pa - pb;
+    return (b.confidenceScore || 0) - (a.confidenceScore || 0);
+  });
+
   // ── SUPPLEMENT RECOMMENDATIONS ───────────────────────────────────────────
   if (recommendations.recommendations?.length > 0) {
     y = checkY(doc, y, 24);
@@ -479,7 +488,7 @@ export function exportResultsToPDF(recommendations, assessment) {
     autoTable(doc, {
       startY: y,
       head: [['Supplement', 'Priority', 'Match', 'Reason', 'Dosage', 'Timing', 'Interactions']],
-      body: recommendations.recommendations.map(rec => [
+      body: sortedRecs.map(rec => [
         rec.name || '',
         rec.priority || '',
         rec.confidenceScore ? `${rec.confidenceScore}%` : '-',
@@ -531,9 +540,8 @@ export function exportResultsToPDF(recommendations, assessment) {
     });
     y = doc.lastAutoTable.finalY + 6;
 
-    // Table 2 — evidence, food sources, side effects
-    // Keep ALL recs in the same order as the main table (no filtering) so row numbers match
-    const detailRows = recommendations.recommendations.map(rec => [
+    // Table 2 — evidence, food sources, side effects (same sort order as main table)
+    const detailRows = sortedRecs.map(rec => [
       rec.name || '',
       rec.evidence || '—',
       expandFoods(rec.foods) || '—',
@@ -591,7 +599,7 @@ export function exportResultsToPDF(recommendations, assessment) {
     if (hasSchedule) {
       // Build dosage lookup from recommendations
       const dosageMap = {};
-      (recommendations.recommendations || []).forEach(rec => {
+      (sortedRecs || []).forEach(rec => {
         if (rec.name && rec.dosage) dosageMap[rec.name.toLowerCase()] = rec.dosage;
       });
       const getDosage = (pillName) => {

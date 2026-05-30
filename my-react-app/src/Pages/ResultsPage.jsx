@@ -432,7 +432,14 @@ function ResultsPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { recommendations: r, assessment, garbageFields = [] } = location.state || {};
+
+  // Get current user email from localStorage for cache scoping (unique per account)
+  const currentUserId = (() => {
+    try { return JSON.parse(localStorage.getItem('user') || '{}').email || 'guest'; } catch { return 'guest'; }
+  })();
   const assessmentId = assessment?._id || assessment?.id || 'unknown';
+  // Cache key includes userId so different accounts never share cached details
+  const cacheScope = `${currentUserId}_${assessmentId}`;
   const [exporting, setExporting] = useState(false);
   const [expandedCards, setExpandedCards] = useState(new Set());
   const [showAllRecs, setShowAllRecs] = useState(false);
@@ -511,7 +518,7 @@ function ResultsPage() {
         {detailSupplement && (
           <SupplementDetailModal
             supplementName={detailSupplement.name}
-            assessmentId={assessmentId}
+            assessmentId={cacheScope}
             context={detailSupplement.context}
             cache={detailCache}
             onClose={() => setDetailSupplement(null)}
