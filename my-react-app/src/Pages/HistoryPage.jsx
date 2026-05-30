@@ -403,6 +403,11 @@ function HistoryPage() {
                         {item.gender && <div className="history-item"><span>Gender</span><strong>{item.gender}</strong></div>}
                         {item.weight && <div className="history-item"><span>Weight</span><strong>{item.weight} kg</strong></div>}
                         {item.height && <div className="history-item"><span>Height</span><strong>{item.height} cm</strong></div>}
+                        {item.weight && item.height && (() => {
+                          const bmi = (item.weight / ((item.height / 100) ** 2)).toFixed(1);
+                          const cat = bmi < 18.5 ? 'Underweight' : bmi < 25 ? 'Normal weight' : bmi < 30 ? 'Overweight' : 'Obese';
+                          return <div className="history-item"><span>BMI</span><strong>{bmi} <span style={{ fontWeight: 400, color: '#6b7280' }}>({cat})</span></strong></div>;
+                        })()}
                         {item.activityLevel && <div className="history-item"><span>Physical Activity Level</span><strong>{ACTIVITY_LABELS[item.activityLevel] || item.activityLevel}</strong></div>}
                         {item.dietType && <div className="history-item"><span>Diet</span><strong>{item.dietType}</strong></div>}
                       </div>

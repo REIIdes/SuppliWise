@@ -316,6 +316,11 @@ export function exportResultsToPDF(recommendations, assessment) {
         'Weight', assessment.weight ? `${assessment.weight} kg` : '—',
         'Height', assessment.height ? `${assessment.height} cm` : '—',
       ] : null,
+      (assessment.weight && assessment.height) ? (() => {
+        const bmi = (assessment.weight / ((assessment.height / 100) ** 2)).toFixed(1);
+        const cat = bmi < 18.5 ? 'Underweight' : bmi < 25 ? 'Normal weight' : bmi < 30 ? 'Overweight' : 'Obese';
+        return ['BMI', `${bmi} (${cat})`, '', ''];
+      })() : null,
       (assessment.activityLevel || assessment.dietType) ? [
         'Physical Activity Level', ACTIVITY_LABELS[assessment.activityLevel] || assessment.activityLevel || '—',
         'Diet Type',               assessment.dietType || '—',
