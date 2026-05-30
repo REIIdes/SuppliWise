@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import { exportResultsToPDF } from '../utils/exportPDF';
+import { getSupplementDetail } from '../api';
 import './ResultsPage.css';
 
 const priorityColor = { High: '#16a34a', Medium: '#d97706', Low: '#374151' };
@@ -153,7 +154,187 @@ function FoodExamples({ foods }) {
   );
 }
 
-function SupplementCard({ rec, index = 0, expanded, onToggle }) {
+// ── Supplement Detail Modal ──────────────────────────────────────────────
+function SupplementDetailModal({ supplementName, assessmentId, context, cache, onClose }) {
+  const [detail, setDetail] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const overlayRef = useRef(null);
+
+  // localStorage key — scoped to assessment ID so new assessments always fetch fresh from Groq
+  const storageKey = `sdm_${assessmentId}_${supplementName.toLowerCase().trim()}`;
+  const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+  // Helpers: read/write localStorage with expiry
+  const readCache = (key) => {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      const { data, expiresAt } = JSON.parse(raw);
+      if (Date.now() > expiresAt) { localStorage.removeItem(key); return null; } // expired
+      return data;
+    } catch { return null; }
+  };
+
+  const writeCache = (key, data) => {
+    try {
+      localStorage.setItem(key, JSON.stringify({ data, expiresAt: Date.now() + CACHE_TTL_MS }));
+    } catch { /* storage full — skip silently */ }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    // 1. Check in-memory cache first (fastest — same page session)
+    if (cache.current[storageKey]) {
+      setDetail(cache.current[storageKey]);
+      setLoading(false);
+      return;
+    }
+
+    // 2. Check localStorage (persists across browser restarts, expires after 30 days)
+    const stored = readCache(storageKey);
+    if (stored) {
+      cache.current[storageKey] = stored; // warm in-memory cache too
+      setDetail(stored);
+      setLoading(false);
+      return;
+    }
+
+    // 3. Cache miss — call Groq
+    setLoading(true);
+    setError('');
+    getSupplementDetail(supplementName, context)
+      .then(data => {
+        if (!cancelled) {
+          cache.current[storageKey] = data;
+          writeCache(storageKey, data);
+          setDetail(data);
+          setLoading(false);
+        }
+      })
+      .catch(err => {
+        if (!cancelled) {
+          setError(err.message || 'Could not load details.');
+          setLoading(false);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [supplementName, assessmentId, storageKey, context, cache]);
+
+  // Close on overlay click
+  const handleOverlayClick = (e) => {
+    if (e.target === overlayRef.current) onClose();
+  };
+
+  // Close on Escape key
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  // Prevent body scroll while modal is open
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = ''; };
+  }, []);
+
+  return (
+    <div className="sdm-overlay" ref={overlayRef} onClick={handleOverlayClick}>
+      <div className="sdm-panel" role="dialog" aria-modal="true" aria-label={`Details for ${supplementName}`}>
+        {/* Header */}
+        <div className="sdm-header">
+          <div className="sdm-header-left">
+            <span className="sdm-header-icon">{getSupplementIcon(supplementName)}</span>
+            <h2 className="sdm-title">{detail?.name || supplementName}</h2>
+          </div>
+          <button className="sdm-close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+
+        <div className="sdm-body">
+          {loading && (
+            <div className="sdm-loading">
+              <div className="sdm-spinner" />
+              <p>Loading supplement details…</p>
+            </div>
+          )}
+
+          {error && !loading && (
+            <div className="sdm-error">
+              <span>⚠️</span>
+              <p>{error}</p>
+            </div>
+          )}
+
+          {detail && !loading && (
+            <>
+              {/* Overview */}
+              {detail.overview && (
+                <p className="sdm-overview">{detail.overview}</p>
+              )}
+
+              {/* Key Benefits */}
+              {detail.keyBenefits?.length > 0 && (
+                <div className="sdm-section">
+                  <h3 className="sdm-section-title">Key Benefits &amp; Use Cases</h3>
+                  <div className="sdm-benefits">
+                    {detail.keyBenefits.map((b, i) => (
+                      <div key={i} className="sdm-benefit-item">
+                        <span className="sdm-benefit-title">{b.title}</span>
+                        <p className="sdm-benefit-desc">{b.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* How to Take */}
+              {detail.howToTake?.length > 0 && (
+                <div className="sdm-section">
+                  <h3 className="sdm-section-title">How to Take It</h3>
+                  <div className="sdm-howtotake">
+                    {detail.howToTake.map((h, i) => (
+                      <div key={i} className="sdm-howtotake-item">
+                        <span className="sdm-howtotake-label">{h.title}</span>
+                        <p className="sdm-howtotake-desc">{h.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Considerations & Safety */}
+              {detail.considerations?.length > 0 && (
+                <div className="sdm-section">
+                  <h3 className="sdm-section-title">Considerations &amp; Safety</h3>
+                  <ul className="sdm-considerations">
+                    {detail.considerations.map((c, i) => (
+                      <li key={i}>{c}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Availability */}
+              {detail.availability && (
+                <div className="sdm-section sdm-availability">
+                  <h3 className="sdm-section-title">Availability</h3>
+                  <p>{detail.availability}</p>
+                </div>
+              )}
+
+              {/* Disclaimer */}
+              <p className="sdm-disclaimer">{detail.disclaimer}</p>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SupplementCard({ rec, index = 0, expanded, onToggle, onOpenDetail }) {
   const icon = getSupplementIcon(rec.name);
   const pColor = priorityColor[rec.priority] || '#6b7280';
   const pIcon = priorityIcon[rec.priority] || '⚪';
@@ -167,10 +348,13 @@ function SupplementCard({ rec, index = 0, expanded, onToggle }) {
         </span>
       </div>
 
-      {/* Supplement name below the priority */}
-      <div className="rec-name-row">
+      {/* Supplement name — clickable to open detail modal */}
+      <div className="rec-name-row rec-name-clickable" onClick={onOpenDetail} title="Click for detailed info" role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && onOpenDetail()}>
         <span className="rec-icon-large">{icon}</span>
-        <h3 className="rec-name-large">{rec.name}</h3>
+        <div className="rec-name-text-wrap">
+          <h3 className="rec-name-large">{rec.name}</h3>
+          <span className="rec-name-hint">Tap for details ›</span>
+        </div>
       </div>
 
       {/* Confidence bar — larger and more prominent */}
@@ -248,11 +432,30 @@ function ResultsPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { recommendations: r, assessment, garbageFields = [] } = location.state || {};
+  const assessmentId = assessment?._id || assessment?.id || 'unknown';
   const [exporting, setExporting] = useState(false);
   const [expandedCards, setExpandedCards] = useState(new Set());
   const [showAllRecs, setShowAllRecs] = useState(false);
+  const [detailSupplement, setDetailSupplement] = useState(null);
+  const detailCache = useRef({});  // cache: { [supplementName]: detailObject }
   const INITIAL_REC_COUNT = 6;
 
+  // Build slim assessment context for supplement detail personalization
+  const buildDetailContext = (rec) => {
+    if (!assessment) return null;
+    return {
+      age: assessment.age,
+      gender: assessment.gender,
+      symptoms: (assessment.symptoms || []).filter(s => s !== 'No current symptoms'),
+      goals: assessment.healthGoals || [],
+      conditions: (assessment.medicalConditions || []).filter(c => c !== 'None'),
+      allergies: assessment.allergies || null,
+      lifestyle: (assessment.lifestyleHabits || []).filter(h => h !== 'None'),
+      diet: assessment.dietType || null,
+      pregnancyStatus: assessment.pregnancyStatus || null,
+      recommendationReason: rec?.reason || null,
+    };
+  };
   const handleToggleCard = (id) => {
     setExpandedCards(prev => {
       const next = new Set(prev);
@@ -290,10 +493,30 @@ function ResultsPage() {
 
   const allRecommendations = r.recommendations || [];
 
+  // Sort: High → Medium → Low, then by confidenceScore descending within each group
+  const PRIORITY_ORDER = { High: 0, Medium: 1, Low: 2 };
+  const sortedRecommendations = [...allRecommendations].sort((a, b) => {
+    const pa = PRIORITY_ORDER[a.priority] ?? 3;
+    const pb = PRIORITY_ORDER[b.priority] ?? 3;
+    if (pa !== pb) return pa - pb;
+    return (b.confidenceScore || 0) - (a.confidenceScore || 0);
+  });
+
   return (
     <div className="results-wrapper">
       <Navbar />
       <div className="results-container">
+
+        {/* Supplement Detail Modal */}
+        {detailSupplement && (
+          <SupplementDetailModal
+            supplementName={detailSupplement.name}
+            assessmentId={assessmentId}
+            context={detailSupplement.context}
+            cache={detailCache}
+            onClose={() => setDetailSupplement(null)}
+          />
+        )}
 
         {/* Medical Disclaimer Banner */}
         <div className="results-disclaimer-banner">
@@ -340,26 +563,27 @@ function ResultsPage() {
         )}
 
         {/* All Supplement Recommendations */}
-        {allRecommendations.length > 0 && (
+        {sortedRecommendations.length > 0 && (
           <>
             <div className="results-section-title">💊 Supplement Recommendations</div>
             <p className="results-section-sub">Personalized based on your symptoms, health goals, and profile.</p>
             <div className="results-grid">
-              {(showAllRecs ? allRecommendations : allRecommendations.slice(0, INITIAL_REC_COUNT)).map((rec, i) => (
+              {(showAllRecs ? sortedRecommendations : sortedRecommendations.slice(0, INITIAL_REC_COUNT)).map((rec, i) => (
                 <SupplementCard
                   key={i}
                   rec={rec}
                   index={i}
                   expanded={expandedCards.has(`rec-${i}`)}
                   onToggle={() => handleToggleCard(`rec-${i}`)}
+                  onOpenDetail={() => setDetailSupplement({ name: rec.name, context: buildDetailContext(rec) })}
                 />
               ))}
             </div>
-            {allRecommendations.length > INITIAL_REC_COUNT && (
+            {sortedRecommendations.length > INITIAL_REC_COUNT && (
               <button className="btn-show-more" onClick={() => setShowAllRecs(v => !v)}>
                 {showAllRecs
                   ? '▲ Show Less'
-                  : `▼ Show More (${allRecommendations.length - INITIAL_REC_COUNT} more)`}
+                  : `▼ Show More (${sortedRecommendations.length - INITIAL_REC_COUNT} more)`}
               </button>
             )}
           </>

@@ -10,6 +10,7 @@ const assessmentRoutes = require('./routes/assessment');
 const recommendRoutes = require('./routes/recommend');
 const chatRoutes = require('./routes/chat');
 const polishRoutes = require('./routes/polish');
+const supplementDetailRoutes = require('./routes/supplement_detail');
 
 const app = express();
 
@@ -48,6 +49,7 @@ app.use('/api/assessment', assessmentRoutes);
 app.use('/api/recommend', recommendLimiter, recommendRoutes);
 app.use('/api/chat', chatRoutes);       // no rate limit — chat needs to feel instant
 app.use('/api/polish', polishRoutes);
+app.use('/api/supplement-detail', supplementDetailRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

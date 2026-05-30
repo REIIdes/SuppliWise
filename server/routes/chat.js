@@ -42,7 +42,7 @@ Use one of these styles (vary them naturally):
 - Progress auto-saves — if you log in mid-assessment your data is preserved
 
 ### Results Page
-- Personalized supplement recommendations powered by Groq AI (Llama 3.3 70B)
+- Personalized supplement recommendations powered by Groq AI (Llama 4 Maverick)
 - Each card: name, priority (High/Medium/Low), confidence score (animated % bar), dosage, timing, interactions, why it was recommended
 - Sections: Priority Supplements, Optional Supplements, Daily Schedule, Lifestyle Advice, Meal Recommendations, Action Plan, Warnings, Avoid List
 - Export PDF button at the bottom
@@ -170,7 +170,7 @@ router.post('/', async (req, res) => {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            model: 'llama-3.3-70b-versatile',
+            model: 'meta-llama/llama-4-scout-17b-16e-instruct',
             messages,
             max_tokens: 700,
             temperature: 0.7,

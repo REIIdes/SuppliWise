@@ -148,3 +148,15 @@ export const polishDescription = async (text) => {
   if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
   return data;
 };
+
+// Fetch detailed supplement information (assessment-aware)
+export const getSupplementDetail = async (supplementName, context = null) => {
+  const res = await fetch(`${BASE_URL}/supplement-detail`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify({ supplementName, context }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};

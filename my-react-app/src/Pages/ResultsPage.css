@@ -665,3 +665,285 @@
   color: #92400e;
   word-break: break-all;
 }
+
+/* ── Supplement name clickable ── */
+.rec-name-clickable {
+  cursor: pointer;
+  border-radius: 10px;
+  padding: 6px 8px;
+  margin: -6px -8px;
+  transition: background 0.15s;
+}
+.rec-name-clickable:hover {
+  background: #f0fdf4;
+}
+.rec-name-text-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rec-name-hint {
+  font-size: 11px;
+  color: #22c55e;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* ── Supplement Detail Modal ── */
+.sdm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 1000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
+  animation: sdm-fade-in 0.18s ease;
+}
+
+@keyframes sdm-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.sdm-panel {
+  background: #fff;
+  width: 100%;
+  max-width: 680px;
+  max-height: 88vh;
+  border-radius: 20px 20px 0 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: sdm-slide-up 0.22s cubic-bezier(0.25, 1, 0.5, 1);
+  box-shadow: 0 -4px 32px rgba(0,0,0,0.15);
+}
+
+@keyframes sdm-slide-up {
+  from { transform: translateY(60px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+/* On wider screens, show as a centered modal instead of bottom sheet */
+@media (min-width: 700px) {
+  .sdm-overlay {
+    align-items: center;
+    padding: 24px;
+  }
+  .sdm-panel {
+    border-radius: 16px;
+    max-height: 85vh;
+  }
+}
+
+.sdm-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid #f3f4f6;
+  flex-shrink: 0;
+  background: #fff;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.sdm-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.sdm-header-icon { font-size: 28px; flex-shrink: 0; }
+.sdm-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #111827;
+  margin: 0;
+  line-height: 1.3;
+}
+.sdm-close {
+  background: #f3f4f6;
+  border: none;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  font-size: 14px;
+  color: #6b7280;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+  font-family: sans-serif;
+}
+.sdm-close:hover { background: #e5e7eb; color: #111827; }
+
+.sdm-body {
+  overflow-y: auto;
+  padding: 20px 24px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Loading */
+.sdm-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 40px 0;
+  color: #6b7280;
+  font-size: 14px;
+}
+.sdm-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid #e5e7eb;
+  border-top-color: #22c55e;
+  border-radius: 50%;
+  animation: sdm-spin 0.7s linear infinite;
+}
+@keyframes sdm-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Error */
+.sdm-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  border-radius: 10px;
+  padding: 14px 16px;
+  font-size: 13px;
+  color: #991b1b;
+}
+
+/* Overview */
+.sdm-overview {
+  font-size: 14px;
+  color: #374151;
+  line-height: 1.75;
+  margin: 0;
+  padding: 14px 16px;
+  background: #f9fafb;
+  border-radius: 10px;
+  border-left: 3px solid #22c55e;
+}
+
+/* Section */
+.sdm-section { display: flex; flex-direction: column; gap: 10px; }
+.sdm-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #111827;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+/* Key Benefits */
+.sdm-benefits { display: flex; flex-direction: column; gap: 10px; }
+.sdm-benefit-item {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.sdm-benefit-title {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  color: #15803d;
+  margin-bottom: 4px;
+}
+.sdm-benefit-desc {
+  font-size: 13px;
+  color: #374151;
+  line-height: 1.65;
+  margin: 0;
+}
+
+/* How to Take */
+.sdm-howtotake { display: flex; flex-direction: column; gap: 8px; }
+.sdm-howtotake-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 14px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+}
+.sdm-howtotake-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1d4ed8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.sdm-howtotake-desc {
+  font-size: 13px;
+  color: #1e3a8a;
+  line-height: 1.65;
+  margin: 0;
+}
+
+/* Considerations */
+.sdm-considerations {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sdm-considerations li {
+  font-size: 13px;
+  color: #78350f;
+  line-height: 1.65;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 10px;
+  padding: 10px 14px;
+  padding-left: 36px;
+  position: relative;
+}
+.sdm-considerations li::before {
+  content: '⚠';
+  position: absolute;
+  left: 12px;
+  top: 10px;
+  font-size: 13px;
+}
+
+/* Availability */
+.sdm-availability p {
+  font-size: 13px;
+  color: #374151;
+  line-height: 1.65;
+  margin: 0;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+/* Disclaimer */
+.sdm-disclaimer {
+  font-size: 11px;
+  color: #9ca3af;
+  font-style: italic;
+  line-height: 1.6;
+  margin: 0;
+  text-align: center;
+  padding-top: 4px;
+  border-top: 1px solid #f3f4f6;
+}

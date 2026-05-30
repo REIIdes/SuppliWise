@@ -109,10 +109,26 @@ function Step1({ data, onChange, errors }) {
   const heightUnit = data.heightUnit || 'cm';
 
   const activityOptions = [
-    { value: 'Sedentary', label: 'Sedentary / No Exercise' },
-    { value: 'Light',     label: 'Light (1–3 days/week)' },
-    { value: 'Moderate',  label: 'Moderate (3–5 days/week)' },
-    { value: 'Very',      label: 'Very Active (6–7 days/week)' },
+    {
+      value: 'Sedentary',
+      label: 'Sedentary / No Exercise',
+      description: 'Little to no physical activity. Mostly sitting or lying down throughout the day — typical of desk jobs with no structured exercise routine.',
+    },
+    {
+      value: 'Light',
+      label: 'Light (1–3 days/week)',
+      description: 'Light activity 1–3 days per week. Includes casual walking, light stretching, or easy household chores. Not intense enough to cause significant sweating or elevated heart rate.',
+    },
+    {
+      value: 'Moderate',
+      label: 'Moderate (3–5 days/week)',
+      description: 'Moderate exercise 3–5 days per week. Includes brisk walking, cycling, swimming, or gym workouts at a comfortable pace. Causes noticeable breathing and some sweating.',
+    },
+    {
+      value: 'Very',
+      label: 'Very Active (6–7 days/week)',
+      description: 'Intense physical activity 6–7 days per week. Includes heavy gym training, competitive sports, running, or physically demanding work. High energy expenditure daily.',
+    },
   ];
 
   // When user switches weight unit, convert the stored value
@@ -287,17 +303,22 @@ function Step1({ data, onChange, errors }) {
         <div className="step-field">
           <label>Physical Activity Level</label>
           <div className="checkbox-group">
-            {activityOptions.map(({ value, label }) => (
-              <label key={value} className="radio-label">
-                <input
-                  type="radio"
-                  name="activityLevel"
-                  value={value}
-                  checked={data.activityLevel === value}
-                  onChange={() => onChange('activityLevel', value)}
-                />
-                {label}
-              </label>
+            {activityOptions.map(({ value, label, description }) => (
+              <div key={value} className="activity-option-wrap">
+                <label className="radio-label">
+                  <input
+                    type="radio"
+                    name="activityLevel"
+                    value={value}
+                    checked={data.activityLevel === value}
+                    onChange={() => onChange('activityLevel', value)}
+                  />
+                  {label}
+                </label>
+                {data.activityLevel === value && (
+                  <p className="activity-desc">{description}</p>
+                )}
+              </div>
             ))}
           </div>
         </div>

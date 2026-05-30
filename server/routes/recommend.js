@@ -3,7 +3,7 @@ const router = express.Router();
 const { protect } = require('../middleware/auth');
 const { preprocessUserInput, sanitizeMedicalField } = require('../utils/sanitize');
 
-const GROQ_MODEL = 'llama-3.3-70b-versatile';
+const GROQ_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
 
 router.post('/', protect, async (req, res) => {
   try {
