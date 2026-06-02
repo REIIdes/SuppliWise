@@ -36,6 +36,49 @@ const ML = 14;   // margin left
 const MR = 14;   // margin right
 const CW = PAGE_W - ML - MR;  // content width = 182mm
 
+// ── Clean text: replace special/unicode chars that jsPDF/helvetica can't render ──
+function cleanText(str) {
+  if (!str) return str;
+  return String(str)
+    // Smart quotes → straight quotes
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    // Em dash, en dash → hyphen
+    .replace(/[\u2013\u2014]/g, '-')
+    // Ellipsis
+    .replace(/\u2026/g, '...')
+    // Common accented characters → ASCII
+    .replace(/[àáâãäå]/gi, 'a')
+    .replace(/[èéêë]/gi, 'e')
+    .replace(/[ìíîï]/gi, 'i')
+    .replace(/[òóôõö]/gi, 'o')
+    .replace(/[ùúûü]/gi, 'u')
+    .replace(/[ýÿ]/gi, 'y')
+    .replace(/[ñ]/gi, 'n')
+    .replace(/[ç]/gi, 'c')
+    .replace(/[ß]/g, 'ss')
+    .replace(/[œ]/gi, 'oe')
+    .replace(/[æ]/gi, 'ae')
+    // Bullet / special symbols
+    .replace(/•/g, '-')
+    .replace(/·/g, '-')
+    .replace(/→/g, '->')
+    .replace(/←/g, '<-')
+    .replace(/×/g, 'x')
+    .replace(/÷/g, '/')
+    .replace(/°/g, ' degrees')
+    .replace(/±/g, '+/-')
+    .replace(/©/g, '(c)')
+    .replace(/®/g, '(R)')
+    .replace(/™/g, '(TM)')
+    // Fraction characters
+    .replace(/½/g, '1/2')
+    .replace(/¼/g, '1/4')
+    .replace(/¾/g, '3/4')
+    // Strip any remaining non-ASCII
+    .replace(/[^\x00-\x7F]/g, '');
+}
+
 function addPage(doc) {
   doc.addPage();
   return 18;
@@ -73,11 +116,11 @@ function kvRow(doc, key, value, y, keyW = 42) {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
   doc.setTextColor(...C.grayMid);
-  doc.text(key, ML, y);
+  doc.text(cleanText(key), ML, y);
 
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(...C.grayDark);
-  const lines = doc.splitTextToSize(String(value || ''), CW - keyW);
+  const lines = doc.splitTextToSize(cleanText(String(value || '')), CW - keyW);
   doc.text(lines, ML + keyW, y);
   return y + lines.length * 5 + 1.5;
 }
@@ -274,7 +317,7 @@ export function exportResultsToPDF(recommendations, assessment) {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
     doc.setTextColor(...C.grayMid);
-    const lines = doc.splitTextToSize(recommendations.summary, CW);
+    const lines = doc.splitTextToSize(cleanText(recommendations.summary), CW);
     doc.text(lines, ML, y);
     y += lines.length * 5 + 6;
   }
@@ -295,7 +338,7 @@ export function exportResultsToPDF(recommendations, assessment) {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8.5);
     doc.setTextColor(127, 29, 29);
-    const rLines = doc.splitTextToSize(recommendations.consultReason, CW - 10);
+    const rLines = doc.splitTextToSize(cleanText(recommendations.consultReason), CW - 10);
     doc.text(rLines, ML + 6, y + 12);
     y += 16 + rLines.length * 4.5 + 4;
   }
@@ -494,13 +537,13 @@ export function exportResultsToPDF(recommendations, assessment) {
       startY: y,
       head: [['Supplement', 'Priority', 'Match', 'Reason', 'Dosage', 'Timing', 'Interactions']],
       body: sortedRecs.map(rec => [
-        rec.name || '',
-        rec.priority || '',
+        cleanText(rec.name || ''),
+        cleanText(rec.priority || ''),
         rec.confidenceScore ? `${rec.confidenceScore}%` : '-',
-        rec.reason || '',
-        rec.dosage || '-',
-        rec.timing || '-',
-        (rec.interactions && rec.interactions !== 'None identified') ? rec.interactions : 'None',
+        cleanText(rec.reason || ''),
+        cleanText(rec.dosage || '-'),
+        cleanText(rec.timing || '-'),
+        cleanText((rec.interactions && rec.interactions !== 'None identified') ? rec.interactions : 'None'),
       ]),
       theme: 'grid',
       headStyles: {
@@ -547,10 +590,10 @@ export function exportResultsToPDF(recommendations, assessment) {
 
     // Table 2 — evidence, food sources, side effects (same sort order as main table)
     const detailRows = sortedRecs.map(rec => [
-      rec.name || '',
-      rec.evidence || '—',
-      expandFoods(rec.foods) || '—',
-      rec.sideEffects || '—',
+      cleanText(rec.name || ''),
+      cleanText(rec.evidence || '-'),
+      cleanText(expandFoods(rec.foods) || '-'),
+      cleanText(rec.sideEffects || '-'),
     ]);
 
     y = checkY(doc, y, 24);
@@ -623,10 +666,10 @@ export function exportResultsToPDF(recommendations, assessment) {
         startY: y,
         head: [['Time of Day', 'Supplements to Take']],
         body: recommendations.dailySchedule.map(slot => [
-          slot.time,
+          cleanText(slot.time),
           (slot.supplements || []).map(s => {
             const d = getDosage(s);
-            return d ? `${s} — ${d}` : s;
+            return d ? `${cleanText(s)} - ${cleanText(d)}` : cleanText(s);
           }).join('\n'),
         ]),
         theme: 'striped',
@@ -749,7 +792,7 @@ export function exportResultsToPDF(recommendations, assessment) {
     autoTable(doc, {
       startY: y,
       head: [['Category', 'Advice']],
-      body: recommendations.lifestyleAdvice.map(item => [item.category, item.advice]),
+      body: recommendations.lifestyleAdvice.map(item => [cleanText(item.category), cleanText(item.advice)]),
       theme: 'striped',
       headStyles: {
         fillColor: C.greenDeep,
@@ -784,7 +827,7 @@ export function exportResultsToPDF(recommendations, assessment) {
     autoTable(doc, {
       startY: y,
       head: [['Meal', 'Suggestion']],
-      body: recommendations.mealRecommendations.map(m => [m.meal, m.suggestion]),
+      body: recommendations.mealRecommendations.map(m => [cleanText(m.meal), cleanText(m.suggestion)]),
       theme: 'striped',
       headStyles: {
         fillColor: [180, 83, 9],
@@ -821,7 +864,7 @@ export function exportResultsToPDF(recommendations, assessment) {
 
     if (hasWarnings) {
       const wTextLines = recommendations.warnings.flatMap(w =>
-        doc.splitTextToSize(`• ${w}`, CW - 14)
+        doc.splitTextToSize(cleanText(`- ${w}`), CW - 14)
       );
       const blockH = 10 + wTextLines.length * 5.5 + 6;
       y = checkY(doc, y, blockH);

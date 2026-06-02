@@ -622,6 +622,13 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
   });
   const [severityErrors, setSeverityErrors] = useState([]);
 
+  // Sync parent-level errors (from clicking Next) into local severityErrors state
+  useEffect(() => {
+    if (errors.symptomSeverity && errors.symptomSeverity.length > 0) {
+      setSeverityErrors(errors.symptomSeverity);
+    }
+  }, [errors.symptomSeverity]);
+
   const toggleSymptom = (s) => {
     if (s === 'No current symptoms') {
       onChange('symptoms', selectedSymptoms.includes('No current symptoms') ? [] : ['No current symptoms']);
@@ -654,6 +661,8 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
       const newSev = { ...symptomSeverity };
       delete newSev[s];
       onChange('symptomSeverity', newSev);
+      // Clear error for this symptom when it's unchecked
+      setSeverityErrors(prev => prev.filter(e => e !== s));
     }
   };
 
