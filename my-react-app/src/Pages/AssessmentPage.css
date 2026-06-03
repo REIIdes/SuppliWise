@@ -731,3 +731,129 @@
   line-height: 1.6;
   display: block;
 }
+
+/* ── Health Goal descriptions & subgroups ── */
+.goal-option-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.goal-desc {
+  font-size: 12px;
+  color: #374151;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 6px;
+  padding: 7px 12px;
+  margin: 4px 0 4px 26px;
+  line-height: 1.6;
+  display: block;
+}
+
+.goal-subgroup {
+  margin-bottom: 12px;
+}
+
+.goal-subgroup-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 8px 0 6px 0;
+}
+
+/* ── Medical Condition groups ── */
+.condition-group {
+  margin-bottom: 16px;
+}
+
+.condition-group-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #374151;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 8px 0;
+  padding-bottom: 4px;
+}
+
+.condition-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ── Symptoms locked until conditions selected ── */
+.symptoms-no-conditions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  background: #f9fafb;
+  border: 1px dashed #d1d5db;
+  border-radius: 10px;
+  padding: 16px 20px;
+  margin-top: 8px;
+}
+.symptoms-no-conditions-icon {
+  font-size: 20px;
+}
+.symptoms-no-conditions p {
+  font-size: 13px;
+  color: #6b7280;
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* ── Symptom condition group headers ── */
+.symptom-condition-group {
+  margin-bottom: 20px;
+}
+
+.symptom-condition-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #15803d;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 8px 0;
+  padding: 5px 10px;
+  background: #f0fdf4;
+  border-left: 3px solid #22c55e;
+  border-radius: 0 6px 6px 0;
+  display: block;
+}
+
+/* ── Per-condition no symptoms checkbox ── */
+.no-symptoms-for-condition {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #6b7280;
+  font-style: italic;
+  padding: 6px 0 0 4px;
+  border-top: 1px dashed #e5e7eb;
+}
+
+/* ── Step 4 layout improvements ── */
+
+/* Stack radio/checkbox options vertically in Step 4 */
+.step-body .radio-group.flex-wrap {
+  flex-direction: column;
+  gap: 10px;
+  flex-wrap: nowrap;
+}
+
+/* Add more breathing room between step fields in Step 4 */
+.step-body .step-field + .step-field {
+  margin-top: 8px;
+}
+
+/* Section divider between logical groups in Step 4 */
+.step4-divider {
+  border: none;
+  border-top: 1px solid #f0f0f0;
+  margin: 20px 0 8px 0;
+}

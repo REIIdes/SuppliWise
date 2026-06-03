@@ -98,7 +98,59 @@ function DietTooltip({ diet, openDiet, onToggle }) {
   );
 }
 
-// ── Step 1: Basic Information ──────────────────────────────────────────────
+// ── Condition info tooltips ──────────────────────────────────────────────
+const CONDITION_INFO = {
+  'Hypertension (High Blood Pressure)': 'Blood pressure consistently above 130/80 mmHg. The heart works harder than normal to pump blood, which can strain blood vessels and organs over time.',
+  'High Cholesterol': 'Elevated levels of LDL ("bad") cholesterol or total cholesterol in the blood, which can increase the risk of plaque buildup in arteries.',
+  'Diabetes': 'Type 1: The body produces little to no insulin (autoimmune). Type 2: The body does not use insulin effectively, leading to high blood sugar. Prediabetes: Blood sugar is elevated but not yet diabetic range.',
+  'Heart Disease / Cardiovascular Disease': 'A broad term covering conditions affecting the heart and blood vessels, including coronary artery disease, heart failure, and arrhythmia.',
+  'Obesity': 'A BMI of 30 or higher, associated with excess body fat that increases risk for diabetes, heart disease, joint problems, and other conditions.',
+  'Arthritis': 'Inflammation of one or more joints causing pain and stiffness. Osteoarthritis is wear-and-tear; Rheumatoid arthritis is autoimmune.',
+  'Osteoporosis': 'A condition where bones become weak and brittle due to reduced bone density, increasing the risk of fractures especially in the hip, spine, and wrist.',
+  'Gout': 'A form of arthritis caused by a buildup of uric acid crystals in joints, most commonly the big toe, causing sudden severe pain and swelling.',
+  'Irritable Bowel Syndrome (IBS)': 'A common gut disorder causing recurring abdominal pain, bloating, and changes in bowel habits (diarrhea, constipation, or both) without visible damage to the digestive tract.',
+  'Celiac Disease / Gluten Sensitivity': 'Celiac disease: An autoimmune condition where gluten damages the small intestine. Non-celiac gluten sensitivity: Similar symptoms without the autoimmune response.',
+  'Asthma': 'A chronic respiratory condition where airways become inflamed and narrowed, causing episodes of wheezing, shortness of breath, chest tightness, and coughing.',
+  'Autoimmune Disorders': 'Conditions where the immune system mistakenly attacks the body\'s own tissues. Examples include lupus, rheumatoid arthritis, multiple sclerosis, and psoriasis.',
+  'Anxiety Disorder': 'Persistent, excessive worry or fear that interferes with daily activities. Includes generalized anxiety, panic disorder, and social anxiety.',
+  'Depression': 'A mood disorder causing persistent sadness, loss of interest, fatigue, and other symptoms that significantly affect daily functioning.',
+  'Thyroid Disorders': 'Hypothyroidism: Underactive thyroid — causes fatigue, weight gain, and cold sensitivity. Hyperthyroidism: Overactive thyroid — causes weight loss, rapid heartbeat, and anxiety.',
+  'Anemia': 'A deficiency in red blood cells or hemoglobin resulting in reduced oxygen delivery to tissues. Most commonly caused by iron, B12, or folate deficiency.',
+  'Chronic Kidney Disease': 'Gradual loss of kidney function over time. Affects the kidneys\' ability to filter waste and regulate minerals, requiring careful management of supplements and diet.',
+  'Liver Disease': 'Damage or dysfunction of the liver affecting its ability to process nutrients, filter toxins, and produce proteins. Includes fatty liver, hepatitis, and cirrhosis.',
+  'Migraine': 'A neurological condition characterized by recurring moderate to severe headaches, often with nausea, light sensitivity, and visual disturbances.',
+  'PCOS': 'Polycystic Ovary Syndrome — a hormonal disorder in people with ovaries causing irregular periods, elevated androgens, and often small cysts on the ovaries. Linked to insulin resistance.',
+};
+
+// Reusable condition tooltip component
+function ConditionTooltip({ condition, openCondition, onToggle }) {
+  const visible = openCondition === condition;
+  if (!CONDITION_INFO[condition]) return null;
+  return (
+    <span className="diet-tooltip-wrap" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        className="diet-info-btn"
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggle(visible ? null : condition); }}
+        aria-label={`Info about ${condition}`}
+      >
+        ?
+      </button>
+      {visible && (
+        <span className="diet-tooltip-box">
+          {CONDITION_INFO[condition]}
+          <button
+            type="button"
+            className="diet-tooltip-close"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggle(null); }}
+          >
+            ✕
+          </button>
+        </span>
+      )}
+    </span>
+  );
+}
 function Step1({ data, onChange, errors }) {
   const age = Number(data.age) || 0;
   const showActivityLevel = age === 0 || age >= 13;
@@ -352,21 +404,27 @@ function Step2({ data, onChange }) {
   // 6 diet types for a balanced grid
   const diets = ['Omnivore', 'Vegan', 'Keto', 'Paleo', 'Mediterranean', 'Carnivore', 'DASH', 'Flexitarian', 'Pescatarian'];
 
-  // Health goals — removed "Management" and "Anti-Aging" options
-  // Weight, Bone, Stress, Hormonal are kept but renamed to be clearer
+  // Health goals with descriptions — grouped by General, Fitness (Physical/Mental), Wellness
   const adultGoals = [
-    { label: 'Increase Energy',        group: 'General' },
-    { label: 'Improve Sleep',          group: 'General' },
-    { label: 'Boost Immunity',         group: 'General' },
-    { label: 'Support Heart Health',   group: 'General' },
-    { label: 'Digestive Health',       group: 'General' },
-    { label: 'Muscle Gain',            group: 'Fitness' },
-    { label: 'Athletic Performance',   group: 'Fitness' },
-    { label: 'Lose Weight',            group: 'Fitness' },
-    { label: 'Skin & Hair Health',     group: 'Wellness' },
-    { label: 'Hormonal Balance',       group: 'Wellness' },
-    { label: 'Bone & Joint Health',    group: 'Wellness' },
-    { label: 'Physical Recovery',       group: 'Wellness' },
+    // General
+    { label: 'Increase Energy',       group: 'General',           subgroup: null, description: 'Reduce fatigue and support sustained energy levels throughout the day.' },
+    { label: 'Improve Sleep',         group: 'General',           subgroup: null, description: 'Support healthy sleep onset, quality, and duration for better rest.' },
+    { label: 'Boost Immunity',        group: 'General',           subgroup: null, description: 'Strengthen the immune system to help the body resist illness and recover faster.' },
+    { label: 'Support Heart Health',  group: 'General',           subgroup: null, description: 'Promote healthy cardiovascular function, circulation, and cholesterol balance.' },
+    { label: 'Digestive Health',      group: 'General',           subgroup: null, description: 'Improve gut health, digestion, bloating, and regularity.' },
+    // Fitness - Physical
+    { label: 'Muscle Gain',           group: 'Fitness',           subgroup: 'Physical', description: 'Support muscle growth, protein synthesis, and strength development.' },
+    { label: 'Fat Loss',              group: 'Fitness',           subgroup: 'Physical', description: 'Aid in body fat reduction while preserving lean muscle mass.' },
+    { label: 'Improve Strength',      group: 'Fitness',           subgroup: 'Physical', description: 'Enhance physical power, muscular endurance, and workout performance.' },
+    { label: 'Improve Endurance',     group: 'Fitness',           subgroup: 'Physical', description: 'Build stamina and aerobic capacity for sustained physical activity.' },
+    // Fitness - Mental
+    { label: 'Mental Focus',          group: 'Fitness',           subgroup: 'Mental', description: 'Sharpen concentration, alertness, and cognitive performance during tasks.' },
+    { label: 'Stress Reduction',      group: 'Fitness',           subgroup: 'Mental', description: 'Lower cortisol levels and support a calm, balanced stress response.' },
+    // Wellness
+    { label: 'Skin & Hair Health',    group: 'Wellness',          subgroup: null, description: 'Nourish skin hydration, elasticity, and hair strength from within.' },
+    { label: 'Bone & Joint Health',   group: 'Wellness',          subgroup: null, description: 'Support bone density, joint flexibility, and reduce stiffness or discomfort.' },
+    { label: 'Eye & Vision Health',   group: 'Wellness',          subgroup: null, description: 'Protect eyesight and support visual acuity, especially with screen exposure.' },
+    { label: 'Brain & Mental Health', group: 'Wellness',          subgroup: null, description: 'Support cognitive function, mood stability, and overall mental well-being.' },
   ];
 
   const childGoals = [
@@ -374,7 +432,7 @@ function Step2({ data, onChange }) {
     'Digestive Health', 'Bone & Joint Health',
   ];
 
-  const goals = isChild ? childGoals.map(l => ({ label: l, group: '' })) : adultGoals;
+  const goals = isChild ? childGoals.map(l => ({ label: l, group: '', subgroup: null, description: '' })) : adultGoals;
 
   // Group adult goals by category for display
   const groups = isChild ? [''] : ['General', 'Fitness', 'Wellness'];
@@ -413,32 +471,106 @@ function Step2({ data, onChange }) {
       {/* Health goals grouped by category */}
       <div className="step-field" style={{ marginTop: '24px' }}>
         <label>Health Goals <span className="field-hint">(select all that apply)</span></label>
-        {groups.map((group) => {
-          const groupGoals = goals.filter(g => g.group === group || group === '');
-          return (
-            <div key={group} className="goal-group">
-              {group && <p className="goal-group-label">{group}</p>}
-              <div className="checkbox-grid-2">
-                {groupGoals.map(({ label }) => (
-                  <label key={label} className="checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={(data.healthGoals || []).includes(label)}
-                      onChange={() => toggleGoal(label)}
-                    />
-                    {label}
-                  </label>
-                ))}
+        {isChild ? (
+          <div className="checkbox-grid-2">
+            {goals.map(({ label }) => (
+              <label key={label} className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={(data.healthGoals || []).includes(label)}
+                  onChange={() => toggleGoal(label)}
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+        ) : (
+          groups.map((group) => {
+            const groupGoals = adultGoals.filter(g => g.group === group);
+            // Check if this group has subgroups
+            const subgroups = [...new Set(groupGoals.map(g => g.subgroup).filter(Boolean))];
+            const hasSubgroups = subgroups.length > 0;
+
+            return (
+              <div key={group} className="goal-group">
+                <p className="goal-group-label">{group}</p>
+                {hasSubgroups ? (
+                  subgroups.map(sub => (
+                    <div key={sub} className="goal-subgroup">
+                      <p className="goal-subgroup-label">{sub}</p>
+                      <div className="checkbox-grid-2">
+                        {groupGoals.filter(g => g.subgroup === sub).map(({ label, description }) => {
+                          const checked = (data.healthGoals || []).includes(label);
+                          return (
+                            <div key={label} className="goal-option-wrap">
+                              <label className="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleGoal(label)}
+                                />
+                                {label}
+                              </label>
+                              {checked && description && (
+                                <p className="goal-desc">{description}</p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="checkbox-grid-2">
+                    {groupGoals.filter(g => !g.subgroup).map(({ label, description }) => {
+                      const checked = (data.healthGoals || []).includes(label);
+                      return (
+                        <div key={label} className="goal-option-wrap">
+                          <label className="checkbox-label">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleGoal(label)}
+                            />
+                            {label}
+                          </label>
+                          {checked && description && (
+                            <p className="goal-desc">{description}</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            </div>
-          );
-        })}
+            );
+          })
+        )}
       </div>
     </div>
   );
 }
 
 // ── Shared symptom/severity constants (used by Step3Combined) ─────────────
+
+// General symptoms shown when user selects None for medical conditions
+const GENERAL_SYMPTOMS = [
+  'Fatigue',
+  'Frequent Headaches',
+  'Brain Fog',
+  'Anxiety / Stress',
+  'Difficulty Sleeping',
+  'Low Energy',
+  'Digestive Discomfort',
+  'Muscle Weakness',
+  'Hair Thinning',
+  'Dry Skin',
+  'Low Mood',
+  'Frequent Colds / Low Immunity',
+  'Joint Stiffness',
+  'Low Appetite',
+  'Low Libido',
+];
 
 // Per-symptom severity descriptions — shown when a severity button is selected
 const SEVERITY_DESCRIPTIONS = {
@@ -447,57 +579,177 @@ const SEVERITY_DESCRIPTIONS = {
     Moderate: 'Noticeable tiredness that slows you down during the day.',
     Severe:   'Exhausted most of the time, hard to get out of bed or function.',
   },
-  'Digestive Issue': {
-    Mild:     'Occasional discomfort or bloating after meals.',
-    Moderate: 'Frequent stomach pain, bloating, or irregular bowel movements.',
-    Severe:   'Daily digestive pain that disrupts eating and daily activities.',
+  'Shortness of Breath': {
+    Mild:     'Occasional breathlessness during physical activity, resolves quickly with rest.',
+    Moderate: 'Breathlessness with minimal exertion such as walking or climbing stairs.',
+    Severe:   'Difficulty breathing even at rest, significantly limits daily activities.',
   },
-  'Frequent Colds': {
-    Mild:     'Getting sick once or twice a year, recovers quickly.',
-    Moderate: 'Gets sick 3–4 times a year, takes longer to recover.',
-    Severe:   'Constantly catching colds, rarely feels fully well.',
+  'Chest Tightness': {
+    Mild:     'Occasional mild pressure or squeezing sensation in the chest.',
+    Moderate: 'Frequent chest tightness that is distracting and affects concentration.',
+    Severe:   'Persistent or intense chest tightness — seek immediate medical attention.',
   },
-  'Brain Fog': {
-    Mild:     'Occasional difficulty concentrating or mild forgetfulness.',
-    Moderate: 'Regularly struggles to focus, forgets things mid-task.',
-    Severe:   'Often forgetful, cannot concentrate, feels mentally cloudy most of the day.',
+  'Rapid or Irregular Heartbeat': {
+    Mild:     'Occasional brief episodes of faster or skipped heartbeats.',
+    Moderate: 'Frequent palpitations that cause concern or mild dizziness.',
+    Severe:   'Persistent racing or irregular heartbeat with dizziness or chest pain.',
   },
-  'Anxiety/Stress': {
-    Mild:     'Feels stressed occasionally but can manage it.',
-    Moderate: 'Frequent worry or tension that affects sleep or focus.',
-    Severe:   'Persistent anxiety that interferes with daily life and relationships.',
-  },
-  'Joint Pain': {
-    Mild:     'Mild stiffness or aching, especially in the morning.',
-    Moderate: 'Regular joint pain that limits some physical activities.',
-    Severe:   'Constant joint pain that makes movement difficult.',
-  },
-  'Hair Loss': {
-    Mild:     'Slightly more hair than usual in the shower or brush.',
-    Moderate: 'Noticeable thinning or patches of hair loss.',
-    Severe:   'Significant hair loss visible to others, affecting confidence.',
-  },
-  'Muscle Weakness': {
-    Mild:     'Muscles tire a little faster than expected during activity.',
-    Moderate: 'Noticeable weakness when lifting or climbing stairs.',
-    Severe:   'Difficulty performing basic tasks like carrying groceries or standing long.',
-  },
-  'Dry Skin': {
-    Mild:     'Skin feels slightly dry or tight, especially after washing.',
-    Moderate: 'Persistent dryness with flaking or itching in some areas.',
-    Severe:   'Severely dry, cracked, or irritated skin that causes discomfort.',
-  },
-  'Acne/Skin Issues': {
-    Mild:     'Occasional pimples or minor breakouts.',
-    Moderate: 'Regular breakouts that are hard to control.',
-    Severe:   'Persistent, painful acne covering large areas of the face or body.',
+  'Dizziness / Lightheadedness': {
+    Mild:     'Brief lightheadedness when standing up quickly.',
+    Moderate: 'Frequent dizziness that affects balance or causes concern.',
+    Severe:   'Severe dizziness causing loss of balance or near-fainting episodes.',
   },
   'Frequent Headaches': {
     Mild:     'Occasional mild headaches, usually relieved by rest or water.',
     Moderate: 'Headaches several times a week that affect concentration.',
     Severe:   'Daily or near-daily headaches that are debilitating.',
   },
-  'Numbness/Tingling': {
+  'Excessive Thirst': {
+    Mild:     'Slightly more thirsty than usual despite normal fluid intake.',
+    Moderate: 'Persistent thirst throughout the day even after drinking regularly.',
+    Severe:   'Unrelenting thirst that cannot be satisfied, accompanied by dry mouth.',
+  },
+  'Frequent Urination': {
+    Mild:     'Slightly more trips to the bathroom than usual.',
+    Moderate: 'Urinating 8 or more times a day, disrupting daily routine.',
+    Severe:   'Very frequent urination including multiple times at night, significantly disruptive.',
+  },
+  'Blurred Vision': {
+    Mild:     'Occasional blurring that resolves on its own.',
+    Moderate: 'Frequent blurring that makes reading or screen use difficult.',
+    Severe:   'Persistent blurred vision significantly affecting daily activities.',
+  },
+  'Unexplained Weight Gain': {
+    Mild:     'Slight weight gain (1-2 kg) without changes in diet or exercise.',
+    Moderate: 'Noticeable weight gain (3-5 kg) despite maintaining usual habits.',
+    Severe:   'Significant unexplained weight gain causing physical discomfort or concern.',
+  },
+  'Unexplained Weight Loss': {
+    Mild:     'Slight weight loss (1-2 kg) without intentional dietary changes.',
+    Moderate: 'Noticeable weight loss (3-5 kg) without trying.',
+    Severe:   'Significant unintentional weight loss raising serious health concerns.',
+  },
+  'Joint Pain': {
+    Mild:     'Mild stiffness or aching, especially in the morning.',
+    Moderate: 'Regular joint pain that limits some physical activities.',
+    Severe:   'Constant joint pain that makes movement difficult.',
+  },
+  'Joint Swelling': {
+    Mild:     'Slight puffiness around a joint, minimal pain.',
+    Moderate: 'Visible swelling with tenderness that limits movement.',
+    Severe:   'Significant swelling causing warmth, redness, and inability to use the joint.',
+  },
+  'Morning Stiffness': {
+    Mild:     'Brief stiffness in the morning lasting less than 30 minutes.',
+    Moderate: 'Stiffness lasting 30 minutes to an hour, affecting morning routine.',
+    Severe:   'Prolonged stiffness lasting over an hour, making it difficult to start the day.',
+  },
+  'Muscle Weakness': {
+    Mild:     'Muscles tire a little faster than expected during activity.',
+    Moderate: 'Noticeable weakness when lifting or climbing stairs.',
+    Severe:   'Difficulty performing basic tasks like carrying groceries or standing long.',
+  },
+  'Back / Bone Pain': {
+    Mild:     'Occasional mild aching in the back or bones, manageable with rest.',
+    Moderate: 'Frequent pain that interferes with daily tasks or sleep.',
+    Severe:   'Persistent severe pain limiting movement and requiring pain management.',
+  },
+  'Bloating': {
+    Mild:     'Occasional bloating after certain foods.',
+    Moderate: 'Bloating most days, feels uncomfortable after meals.',
+    Severe:   'Severe, painful bloating that makes it hard to eat normally.',
+  },
+  'Digestive Issue': {
+    Mild:     'Occasional discomfort or bloating after meals.',
+    Moderate: 'Frequent stomach pain, bloating, or irregular bowel movements.',
+    Severe:   'Daily digestive pain that disrupts eating and daily activities.',
+  },
+  Nausea: {
+    Mild:     'Mild queasiness that passes quickly without vomiting.',
+    Moderate: 'Frequent nausea that affects appetite and daily comfort.',
+    Severe:   'Persistent nausea with vomiting that prevents normal eating.',
+  },
+  'Abdominal Pain / Cramps': {
+    Mild:     'Occasional mild cramping, usually relieved by rest or heat.',
+    Moderate: 'Frequent cramping that disrupts daily activities.',
+    Severe:   'Intense, persistent abdominal pain requiring medical attention.',
+  },
+  'Wheezing / Breathing Difficulty': {
+    Mild:     'Occasional mild wheeze or tightness, especially during exercise.',
+    Moderate: 'Frequent wheezing that requires use of a reliever inhaler.',
+    Severe:   'Persistent breathing difficulty at rest, significantly limiting activity.',
+  },
+  'Frequent Colds': {
+    Mild:     'Getting sick once or twice a year, recovers quickly.',
+    Moderate: 'Gets sick 3-4 times a year, takes longer to recover.',
+    Severe:   'Constantly catching colds, rarely feels fully well.',
+  },
+  'Skin Rashes / Flare-ups': {
+    Mild:     'Occasional mild redness or rash that resolves quickly.',
+    Moderate: 'Recurring rashes causing itching or discomfort.',
+    Severe:   'Persistent widespread rashes causing significant pain or irritation.',
+  },
+  'Acne / Skin Issues': {
+    Mild:     'Occasional pimples or minor breakouts.',
+    Moderate: 'Regular breakouts that are hard to control.',
+    Severe:   'Persistent, painful acne covering large areas of the face or body.',
+  },
+  'Dry Skin': {
+    Mild:     'Skin feels slightly dry or tight, especially after washing.',
+    Moderate: 'Persistent dryness with flaking or itching in some areas.',
+    Severe:   'Severely dry, cracked, or irritated skin that causes discomfort.',
+  },
+  'Persistent Sadness / Low Mood': {
+    Mild:     'Occasional low mood or sadness that passes with time.',
+    Moderate: 'Frequent low mood that affects motivation and daily enjoyment.',
+    Severe:   'Persistent deep sadness that significantly impairs daily functioning.',
+  },
+  'Panic Attacks': {
+    Mild:     'Rare episodes of sudden anxiety with mild physical symptoms.',
+    Moderate: 'Occasional panic attacks causing significant distress and avoidance.',
+    Severe:   'Frequent, debilitating panic attacks disrupting daily life.',
+  },
+  'Anxiety / Excessive Worry': {
+    Mild:     'Occasional worry that is manageable and short-lived.',
+    Moderate: 'Frequent worry or tension that affects sleep or focus.',
+    Severe:   'Persistent anxiety that interferes with daily life and relationships.',
+  },
+  'Sleep Disturbances': {
+    Mild:     'Occasional trouble falling or staying asleep.',
+    Moderate: 'Frequent sleep disruptions leaving you feeling tired most days.',
+    Severe:   'Chronic insomnia significantly affecting energy, mood, and function.',
+  },
+  'Loss of Interest': {
+    Mild:     'Reduced interest in hobbies or activities you usually enjoy.',
+    Moderate: 'Noticeable withdrawal from social activities and previous interests.',
+    Severe:   'Complete loss of interest in nearly all activities, including basic self-care.',
+  },
+  'Brain Fog': {
+    Mild:     'Occasional difficulty concentrating or mild forgetfulness.',
+    Moderate: 'Regularly struggles to focus, forgets things mid-task.',
+    Severe:   'Often forgetful, cannot concentrate, feels mentally cloudy most of the day.',
+  },
+  'Cold Sensitivity': {
+    Mild:     'Feeling slightly colder than others in the same environment.',
+    Moderate: 'Frequently cold even in warm conditions, needing extra layers.',
+    Severe:   'Extreme cold sensitivity significantly affecting comfort and daily activities.',
+  },
+  'Hair Loss': {
+    Mild:     'Slightly more hair than usual in the shower or brush.',
+    Moderate: 'Noticeable thinning or patches of hair loss.',
+    Severe:   'Significant hair loss visible to others, affecting confidence.',
+  },
+  'Swollen Neck / Goiter': {
+    Mild:     'Slight visible swelling at the base of the throat, no discomfort.',
+    Moderate: 'Noticeable swelling causing mild pressure or difficulty swallowing.',
+    Severe:   'Large visible goiter causing pain, swallowing difficulty, or breathing issues.',
+  },
+  'Pale Skin / Pallor': {
+    Mild:     'Slightly paler skin tone than usual, especially around the face.',
+    Moderate: 'Noticeably pale skin with reduced color in lips and gums.',
+    Severe:   'Extreme pallor with fatigue and breathlessness indicating significant anemia.',
+  },
+  'Numbness / Tingling': {
     Mild:     'Occasional pins-and-needles in hands or feet.',
     Moderate: 'Regular numbness or tingling that comes and goes.',
     Severe:   'Persistent numbness or tingling that affects grip or movement.',
@@ -507,49 +759,161 @@ const SEVERITY_DESCRIPTIONS = {
     Moderate: 'Muscles stay sore for several days, feels run-down after activity.',
     Severe:   'Barely recovers between workouts or illnesses, always feeling depleted.',
   },
-  Bloating: {
-    Mild:     'Occasional bloating after certain foods.',
-    Moderate: 'Bloating most days, feels uncomfortable after meals.',
-    Severe:   'Severe, painful bloating that makes it hard to eat normally.',
+  'Swelling (Edema)': {
+    Mild:     'Slight puffiness in the ankles or feet by end of day.',
+    Moderate: 'Noticeable swelling in legs or feet that persists through the day.',
+    Severe:   'Significant swelling causing discomfort, skin tightness, or difficulty walking.',
+  },
+  'Jaundice / Yellow Skin': {
+    Mild:     'Slight yellowing of the whites of the eyes.',
+    Moderate: 'Visible yellowing of skin and eyes with mild fatigue.',
+    Severe:   'Pronounced yellow discoloration with dark urine and significant fatigue.',
+  },
+  'Light / Sound Sensitivity': {
+    Mild:     'Mild discomfort in bright light or loud environments.',
+    Moderate: 'Significant sensitivity requiring sunglasses or avoiding loud spaces.',
+    Severe:   'Extreme sensitivity making it impossible to function in normal environments.',
+  },
+  'Visual Aura': {
+    Mild:     'Brief flashing lights or blind spots lasting a few minutes before a headache.',
+    Moderate: 'Visual disturbances lasting 20-30 minutes causing concern.',
+    Severe:   'Prolonged or complex aura significantly impairing vision before or during a migraine.',
   },
   'Low Appetite': {
     Mild:     'Slightly less hungry than usual, skips a meal occasionally.',
     Moderate: 'Regularly not hungry, eating less than needed.',
     Severe:   'Rarely feels hungry, significant reduction in food intake.',
   },
+  'Low Libido': {
+    Mild:     'Slightly reduced interest in intimacy compared to before.',
+    Moderate: 'Noticeably lower drive that affects relationships.',
+    Severe:   'Little to no interest in intimacy, causing personal concern.',
+  },
   'Irregular Periods': {
     Mild:     'Cycle is slightly irregular (a few days off) occasionally.',
     Moderate: 'Periods are frequently late, early, or skipped.',
     Severe:   'Very unpredictable cycle or periods missing for months.',
   },
-  'Low Libido': {
-    Mild:     'Slightly reduced interest in intimacy compared to before.',
-    Moderate: 'Noticeably lower drive that affects relationships.',
-    Severe:   'Little to no interest in intimacy, causing personal concern.',
+  'Hormonal Acne': {
+    Mild:     'Occasional breakouts around the chin or jawline before periods.',
+    Moderate: 'Recurring hormonal breakouts that are difficult to manage.',
+    Severe:   'Persistent cystic acne on chin, jaw, or cheeks significantly affecting confidence.',
+  },
+  'Excessive Hair Growth': {
+    Mild:     'Slightly more facial or body hair than usual.',
+    Moderate: 'Noticeable unwanted hair growth on face, chest, or abdomen.',
+    Severe:   'Significant excess hair growth causing significant distress.',
+  },
+  'Pelvic Pain': {
+    Mild:     'Occasional mild pelvic discomfort, especially during periods.',
+    Moderate: 'Frequent pelvic pain that interferes with daily activities.',
+    Severe:   'Persistent, severe pelvic pain significantly affecting quality of life.',
+  },
+
+  'Anxiety / Stress': {
+    Mild:     'Feels stressed occasionally but can manage it.',
+    Moderate: 'Frequent worry or tension that affects sleep or focus.',
+    Severe:   'Persistent anxiety that interferes with daily life and relationships.',
+  },
+  'Difficulty Sleeping': {
+    Mild:     'Occasional trouble falling asleep or waking up once during the night.',
+    Moderate: 'Frequently takes a long time to fall asleep or wakes up multiple times.',
+    Severe:   'Chronic inability to sleep, leaving you exhausted most days.',
+  },
+  'Low Energy': {
+    Mild:     'Slightly less energetic than usual by midday.',
+    Moderate: 'Regularly feels drained before the day is done.',
+    Severe:   'Constantly exhausted with little energy for daily tasks.',
+  },
+  'Digestive Discomfort': {
+    Mild:     'Occasional mild bloating or stomach discomfort.',
+    Moderate: 'Frequent digestive upset affecting eating habits.',
+    Severe:   'Daily digestive pain or discomfort significantly disrupting normal activities.',
+  },
+  'Hair Thinning': {
+    Mild:     'Slightly more hair than usual in the shower or brush.',
+    Moderate: 'Noticeable thinning or reduced hair density.',
+    Severe:   'Significant hair thinning visible to others.',
+  },
+  'Frequent Colds / Low Immunity': {
+    Mild:     'Getting sick once or twice a year with quick recovery.',
+    Moderate: 'Gets sick 3–4 times a year, takes longer to recover.',
+    Severe:   'Constantly catching illnesses, rarely feels fully well.',
+  },
+  'Joint Stiffness': {
+    Mild:     'Brief stiffness in the morning, resolves within 30 minutes.',
+    Moderate: 'Stiffness lasting over 30 minutes affecting morning routine.',
+    Severe:   'Prolonged stiffness throughout the day limiting movement.',
   },
 };
 
 // Symptom list — removed "Mood Swings" (psychological) and "Low Libido"
 // Gender-specific symptoms are filtered in the component
 const ALL_SYMPTOMS = [
-  { name: 'Fatigue',             genders: ['Male', 'Female', 'Prefer not to say'] },
-  { name: 'Digestive Issue',     genders: ['Male', 'Female', 'Prefer not to say'] },
-  { name: 'Frequent Colds',      genders: ['Male', 'Female', 'Prefer not to say'] },
-  { name: 'Brain Fog',           genders: ['Male', 'Female', 'Prefer not to say'] },
-  { name: 'Anxiety/Stress',      genders: ['Male', 'Female', 'Prefer not to say'] },
-  { name: 'Joint Pain',          genders: ['Male', 'Female', 'Prefer not to say'] },
-  { name: 'Hair Loss',           genders: ['Male', 'Female', 'Prefer not to say'] },
-  { name: 'Muscle Weakness',     genders: ['Male', 'Female', 'Prefer not to say'] },
-  { name: 'Dry Skin',            genders: ['Male', 'Female', 'Prefer not to say'] },
-  { name: 'Acne/Skin Issues',    genders: ['Male', 'Female', 'Prefer not to say'] },
-  { name: 'Frequent Headaches',  genders: ['Male', 'Female', 'Prefer not to say'] },
-  { name: 'Numbness/Tingling',   genders: ['Male', 'Female', 'Prefer not to say'] },
-  { name: 'Slow Recovery',       genders: ['Male', 'Female', 'Prefer not to say'] },
-  { name: 'Bloating',            genders: ['Male', 'Female', 'Prefer not to say'] },
-  { name: 'Low Appetite',        genders: ['Male', 'Female', 'Prefer not to say'] },
-  // Female-specific
-  { name: 'Irregular Periods',   genders: ['Female'] },
-  { name: 'Low Libido',          genders: ['Male', 'Prefer not to say'] },
+  // ── Cardiovascular & Metabolic ──────────────────────────────────────────
+  { name: 'Fatigue',                       genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Hypertension (High Blood Pressure)', 'High Cholesterol', 'Diabetes', 'Heart Disease / Cardiovascular Disease', 'Obesity', 'Anemia', 'Thyroid Disorders', 'Chronic Kidney Disease', 'Liver Disease', 'Anxiety Disorder', 'Depression'] },
+  { name: 'Shortness of Breath',           genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Heart Disease / Cardiovascular Disease', 'Asthma', 'Obesity'] },
+  { name: 'Chest Tightness',               genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Heart Disease / Cardiovascular Disease', 'Asthma', 'Hypertension (High Blood Pressure)'] },
+  { name: 'Rapid or Irregular Heartbeat',  genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Heart Disease / Cardiovascular Disease', 'Hypertension (High Blood Pressure)', 'Anxiety Disorder', 'Thyroid Disorders'] },
+  { name: 'Dizziness / Lightheadedness',   genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Hypertension (High Blood Pressure)', 'Anemia', 'Diabetes', 'Heart Disease / Cardiovascular Disease'] },
+  { name: 'Frequent Headaches',            genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Hypertension (High Blood Pressure)', 'Migraine', 'Anxiety Disorder', 'Depression'] },
+  { name: 'Excessive Thirst',              genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Diabetes'] },
+  { name: 'Frequent Urination',            genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Diabetes', 'Chronic Kidney Disease'] },
+  { name: 'Blurred Vision',               genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Diabetes', 'Hypertension (High Blood Pressure)'] },
+  { name: 'Unexplained Weight Gain',       genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Thyroid Disorders', 'Obesity', 'Diabetes'] },
+  { name: 'Unexplained Weight Loss',       genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Thyroid Disorders', 'Diabetes'] },
+
+  // ── Bone & Joint ─────────────────────────────────────────────────────────
+  { name: 'Joint Pain',                    genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Arthritis', 'Gout', 'Osteoporosis', 'Autoimmune Disorders'] },
+  { name: 'Joint Swelling',               genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Arthritis', 'Gout'] },
+  { name: 'Morning Stiffness',             genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Arthritis', 'Autoimmune Disorders'] },
+  { name: 'Muscle Weakness',              genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Arthritis', 'Autoimmune Disorders', 'Thyroid Disorders', 'Anemia', 'Chronic Kidney Disease'] },
+  { name: 'Back / Bone Pain',             genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Osteoporosis', 'Arthritis'] },
+
+  // ── Digestive ─────────────────────────────────────────────────────────────
+  { name: 'Bloating',                      genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Irritable Bowel Syndrome (IBS)', 'Celiac Disease / Gluten Sensitivity'] },
+  { name: 'Digestive Issue',               genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Irritable Bowel Syndrome (IBS)', 'Celiac Disease / Gluten Sensitivity', 'Liver Disease'] },
+  { name: 'Nausea',                        genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Irritable Bowel Syndrome (IBS)', 'Migraine', 'Chronic Kidney Disease', 'Liver Disease'] },
+  { name: 'Abdominal Pain / Cramps',       genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Irritable Bowel Syndrome (IBS)', 'Celiac Disease / Gluten Sensitivity'] },
+  { name: 'Low Appetite',                  genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Liver Disease', 'Chronic Kidney Disease', 'Depression', 'Irritable Bowel Syndrome (IBS)'] },
+
+  // ── Respiratory & Immune ─────────────────────────────────────────────────
+  { name: 'Wheezing / Breathing Difficulty', genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Asthma'] },
+  { name: 'Frequent Colds',               genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Autoimmune Disorders', 'Asthma'] },
+  { name: 'Skin Rashes / Flare-ups',      genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Autoimmune Disorders', 'Celiac Disease / Gluten Sensitivity'] },
+  { name: 'Acne / Skin Issues',            genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Autoimmune Disorders'] },
+  { name: 'Dry Skin',                      genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Thyroid Disorders', 'Autoimmune Disorders', 'Diabetes'] },
+
+  // ── Mental Health ─────────────────────────────────────────────────────────
+  { name: 'Persistent Sadness / Low Mood', genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Depression', 'Thyroid Disorders'] },
+  { name: 'Panic Attacks',                 genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Anxiety Disorder'] },
+  { name: 'Anxiety / Excessive Worry',     genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Anxiety Disorder', 'Thyroid Disorders'] },
+  { name: 'Sleep Disturbances',            genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Anxiety Disorder', 'Depression', 'Thyroid Disorders'] },
+  { name: 'Loss of Interest',              genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Depression'] },
+  { name: 'Brain Fog',                     genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Depression', 'Anxiety Disorder', 'Thyroid Disorders', 'Anemia', 'Chronic Kidney Disease', 'Celiac Disease / Gluten Sensitivity'] },
+
+  // ── Thyroid / Anemia / Kidney / Liver ────────────────────────────────────
+  { name: 'Cold Sensitivity',              genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Thyroid Disorders', 'Anemia'] },
+  { name: 'Hair Loss',                     genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Thyroid Disorders', 'Anemia', 'Autoimmune Disorders'] },
+  { name: 'Swollen Neck / Goiter',         genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Thyroid Disorders'] },
+  { name: 'Pale Skin / Pallor',            genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Anemia'] },
+  { name: 'Numbness / Tingling',           genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Diabetes', 'Anemia', 'Chronic Kidney Disease'] },
+  { name: 'Slow Recovery',                 genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Anemia', 'Autoimmune Disorders', 'Diabetes', 'Heart Disease / Cardiovascular Disease'] },
+  { name: 'Swelling (Edema)',              genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Chronic Kidney Disease', 'Heart Disease / Cardiovascular Disease', 'Liver Disease'] },
+  { name: 'Jaundice / Yellow Skin',        genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Liver Disease'] },
+
+  // ── Migraine ─────────────────────────────────────────────────────────────
+  { name: 'Light / Sound Sensitivity',     genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Migraine'] },
+  { name: 'Visual Aura',                   genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Migraine'] },
+
+  // ── Female-specific ──────────────────────────────────────────────────────
+  { name: 'Irregular Periods',             genders: ['Female'],                              conditions: ['PCOS'] },
+  { name: 'Hormonal Acne',                 genders: ['Female'],                              conditions: ['PCOS'] },
+  { name: 'Excessive Hair Growth',         genders: ['Female'],                              conditions: ['PCOS'] },
+  { name: 'Pelvic Pain',                   genders: ['Female'],                              conditions: ['PCOS'] },
+
+  // ── Male / Neutral ────────────────────────────────────────────────────────
+  { name: 'Low Libido',                    genders: ['Male', 'Prefer not to say'],           conditions: ['Diabetes', 'Hypertension (High Blood Pressure)', 'Depression', 'Thyroid Disorders'] },
 ];
 
 const SEVERITY_OPTIONS = ['Mild', 'Moderate', 'Severe'];
@@ -573,31 +937,74 @@ const WATER_OPTIONS = [
 
 function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current: {} } }) {
   // ── Medical conditions ──
-  const allConditions = [
-    'Hypertension',              'Asthma',
-    'Diabetes',                  'Kidney Disease',
-    'High Blood Pressure',       'Liver Disease',
-    'Heart Disease',             'Auto Immune Disorder',
-    'Thyroid Disease',           'Anemia',
-    'PCOS',                      'Osteoporosis',
-    'Celiac/Gluten Sensitivity', 'Gout',
-    'None',
+  const conditionGroups = [
+    {
+      group: 'Cardiovascular & Metabolic',
+      items: ['Hypertension (High Blood Pressure)', 'High Cholesterol', 'Diabetes', 'Heart Disease / Cardiovascular Disease', 'Obesity'],
+    },
+    {
+      group: 'Bone & Joint',
+      items: ['Arthritis', 'Osteoporosis', 'Gout'],
+    },
+    {
+      group: 'Digestive',
+      items: ['Irritable Bowel Syndrome (IBS)', 'Celiac Disease / Gluten Sensitivity'],
+    },
+    {
+      group: 'Respiratory & Immune',
+      items: ['Asthma', 'Autoimmune Disorders'],
+    },
+    {
+      group: 'Mental Health',
+      items: ['Anxiety Disorder', 'Depression'],
+    },
+    {
+      group: 'Other',
+      items: [
+        'Thyroid Disorders', 'Anemia', 'Chronic Kidney Disease',
+        'Liver Disease', 'Migraine',
+        ...(data.gender === 'Female' || data.gender === 'Prefer not to say' ? ['PCOS'] : []),
+      ],
+    },
   ];
 
-  // PCOS only shown for Female or Prefer not to say
-  const showPCOS = data.gender === 'Female' || data.gender === 'Prefer not to say';
-  const conditions = allConditions.filter(c => c !== 'PCOS' || showPCOS);
+  const [openCondition, setOpenCondition] = useState(null);
+
+  // Close condition tooltip on outside click
+  useEffect(() => {
+    if (!openCondition) return;
+    const handler = () => setOpenCondition(null);
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, [openCondition]);
 
   const toggleCondition = (c) => {
     const current = data.medicalConditions || [];
     if (c === 'None') {
       onChange('medicalConditions', current.includes('None') ? [] : ['None']);
+      // Clear all symptoms and severities when None is toggled
+      onChange('symptoms', []);
+      onChange('symptomSeverity', {});
+      onChange('noSymptomsForConditions', []);
       return;
     }
     const filtered = current.filter((x) => x !== 'None');
-    onChange('medicalConditions', filtered.includes(c)
+    const isRemoving = filtered.includes(c);
+    onChange('medicalConditions', isRemoving
       ? filtered.filter((x) => x !== c)
       : [...filtered, c]);
+
+    if (isRemoving) {
+      // Clear all symptoms and severities keyed to this condition
+      const updatedSymptoms = (data.symptoms || []).filter(s => !s.startsWith(c + '::'));
+      const updatedSeverity = Object.fromEntries(
+        Object.entries(data.symptomSeverity || {}).filter(([key]) => !key.startsWith(c + '::'))
+      );
+      const updatedNoSymptoms = (data.noSymptomsForConditions || []).filter(x => x !== c);
+      onChange('symptoms', updatedSymptoms);
+      onChange('symptomSeverity', updatedSeverity);
+      onChange('noSymptomsForConditions', updatedNoSymptoms);
+    }
   };
 
   // If gender switches to Male, remove PCOS from selected conditions
@@ -616,9 +1023,15 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
   const gender = data.gender || '';
   const isPregnantOrBreastfeeding = data.isPregnant === 'Yes' || data.isBreastfeeding === 'Yes';
   const visibleSymptoms = ALL_SYMPTOMS.filter(s => {
-    if (!s.genders.includes(gender) && gender !== '') return false;
+    // Gender filter
+    if (s.genders.length > 0 && !s.genders.includes(gender) && gender !== '') return false;
     if (s.name === 'Low Libido' && isPregnantOrBreastfeeding) return false;
-    return true;
+    // Condition-specific: only show if no conditions restriction OR if user selected a matching condition
+    if (s.conditions && s.conditions.length > 0) {
+      const selectedConditions = (data.medicalConditions || []).filter(c => c !== 'None');
+      return s.conditions.some(c => selectedConditions.includes(c));
+    }
+    return true; // general symptom — always show
   });
   const [severityErrors, setSeverityErrors] = useState([]);
 
@@ -629,15 +1042,16 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
     }
   }, [errors.symptomSeverity]);
 
-  const toggleSymptom = (s) => {
-    if (s === 'No current symptoms') {
+  // symptomKey = "ConditionName::SymptomName"
+  const toggleSymptom = (symptomKey) => {
+    if (symptomKey === 'No current symptoms') {
       onChange('symptoms', selectedSymptoms.includes('No current symptoms') ? [] : ['No current symptoms']);
       onChange('symptomSeverity', {});
       setSeverityErrors([]);
       return;
     }
     const filtered = selectedSymptoms.filter(x => x !== 'No current symptoms');
-    const isChecked = filtered.includes(s);
+    const isChecked = filtered.includes(symptomKey);
 
     // If trying to CHECK a new symptom, block if any existing symptom is missing severity
     if (!isChecked) {
@@ -654,8 +1068,8 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
     }
 
     const next = isChecked
-      ? filtered.filter((x) => x !== s)
-      : [...filtered, s];
+      ? filtered.filter((x) => x !== symptomKey)
+      : [...filtered, symptomKey];
     onChange('symptoms', next);
     if (isChecked) {
       const newSev = { ...symptomSeverity };
@@ -666,10 +1080,10 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
     }
   };
 
-  const setSeverity = (symptom, level) => {
-    onChange('symptomSeverity', { ...symptomSeverity, [symptom]: level });
+  const setSeverity = (symptomKey, level) => {
+    onChange('symptomSeverity', { ...symptomSeverity, [symptomKey]: level });
     // Clear the error for this symptom once severity is selected
-    setSeverityErrors(prev => prev.filter(s => s !== symptom));
+    setSeverityErrors(prev => prev.filter(s => s !== symptomKey));
   };
 
   const noSymptoms = selectedSymptoms.includes('No current symptoms');
@@ -680,18 +1094,34 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
       {/* ── Medical Information ── */}
       <h3 className="step-section-title">Medical Information</h3>
       <p className="step-hint">Medical Conditions <span className="field-hint">(select all that apply)</span></p>
-      <div className="checkbox-grid-2">
-        {conditions.map((c) => (
-          <label key={c} className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={(data.medicalConditions || []).includes(c)}
-              onChange={() => toggleCondition(c)}
-            />
-            {c}
-          </label>
-        ))}
-      </div>
+
+      {conditionGroups.map(({ group, items }) => (
+        <div key={group} className="condition-group">
+          <p className="condition-group-label">{group}</p>
+          <div className="checkbox-grid-2">
+            {items.map((c) => (
+              <label key={c} className="checkbox-label condition-label">
+                <input
+                  type="checkbox"
+                  checked={(data.medicalConditions || []).includes(c)}
+                  onChange={() => toggleCondition(c)}
+                />
+                {c}
+                <ConditionTooltip condition={c} openCondition={openCondition} onToggle={setOpenCondition} />
+              </label>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      <label className="checkbox-label" style={{ marginTop: '8px' }}>
+        <input
+          type="checkbox"
+          checked={(data.medicalConditions || []).includes('None')}
+          onChange={() => toggleCondition('None')}
+        />
+        None
+      </label>
 
       {showPregnancy && (
         <div className="step-field" style={{ marginTop: '20px' }}>
@@ -730,90 +1160,184 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
       {/* ── Divider ── */}
       <div className="step-section-divider" />
 
-      {/* ── Current Symptoms ── */}
+      {/* Current Symptoms */}
       <h3 className="step-section-title">Current Symptoms</h3>
-      <p className="step-hint">Select any symptoms you're currently experiencing</p>
 
-      <label className="checkbox-label no-symptoms-label">
-        <input type="checkbox" checked={noSymptoms}
-          onChange={() => toggleSymptom('No current symptoms')} />
-        No current symptoms
-      </label>
+      {(() => {
+        const selectedConditions = (data.medicalConditions || []).filter(c => c !== 'None');
+        const hasConditions = selectedConditions.length > 0;
 
-      {!noSymptoms && (
-        <div className="symptoms-list">
-          {visibleSymptoms.map(({ name: s }) => {
-            const checked = selectedSymptoms.includes(s);
-            const activeSeverity = symptomSeverity[s];
-            const missingSeverity = checked && !activeSeverity && severityErrors.includes(s);
-            return (
-              <div
-                key={s}
-                ref={el => { symptomRowRefs.current[s] = el; }}
-                className={`symptom-row ${checked ? 'symptom-row-active' : ''} ${missingSeverity ? 'symptom-row-error' : ''}`}
-              >
-                <label className="checkbox-label">
-                  <input type="checkbox" checked={checked}
-                    onChange={() => toggleSymptom(s)} />
-                  <span className="symptom-name">{s}</span>
-                </label>
-                {missingSeverity && (
-                  <span className="severity-required-inline">⚠ Please select a severity level to proceed</span>
-                )}
-                {checked && (
-                  <div className="severity-wrap">
-                    <div className="severity-group">
-                      {SEVERITY_OPTIONS.map((level) => (
-                        <button key={level} type="button"
-                          className={`severity-btn severity-${level.toLowerCase()} ${activeSeverity === level ? 'severity-active' : ''}`}
-                          onClick={() => setSeverity(s, level)}>
-                          {level}
-                        </button>
-                      ))}
-                    </div>
-                    {activeSeverity && (
-                      <p className="severity-desc">
-                        <strong>{s} – {activeSeverity}:</strong>{' '}
-                        {SEVERITY_DESCRIPTIONS[s]?.[activeSeverity] || ''}
-                      </p>
-                    )}
-                  </div>
-                )}
+        const noneSelected = (data.medicalConditions || []).includes('None');
+
+        if (!hasConditions && !noneSelected) {
+          return (
+            <div className="symptoms-no-conditions">
+              <span className="symptoms-no-conditions-icon">&#128161;</span>
+              <p>Select your medical conditions above to see relevant symptoms.</p>
+            </div>
+          );
+        }
+
+        if (!hasConditions && noneSelected) {
+          return (
+            <>
+              <p className="step-hint">
+                Select any general symptoms you are currently experiencing.
+              </p>
+              <div className="symptoms-list">
+                <div className="symptom-condition-group">
+                  <p className="symptom-condition-label">General Symptoms</p>
+                  {GENERAL_SYMPTOMS.map((s) => {
+                    const symptomKey = `General::${s}`;
+                    const checked = selectedSymptoms.includes(symptomKey);
+                    const activeSeverity = symptomSeverity[symptomKey];
+                    const missingSeverity = checked && !activeSeverity && severityErrors.includes(symptomKey);
+                    return (
+                      <div
+                        key={symptomKey}
+                        ref={el => { symptomRowRefs.current[symptomKey] = el; }}
+                        className={`symptom-row ${checked ? 'symptom-row-active' : ''} ${missingSeverity ? 'symptom-row-error' : ''}`}
+                      >
+                        <label className="checkbox-label">
+                          <input type="checkbox" checked={checked}
+                            onChange={() => toggleSymptom(symptomKey)} />
+                          <span className="symptom-name">{s}</span>
+                        </label>
+                        {missingSeverity && (
+                          <span className="severity-required-inline">Please select a severity level to proceed</span>
+                        )}
+                        {checked && (
+                          <div className="severity-wrap">
+                            <div className="severity-group">
+                              {SEVERITY_OPTIONS.map((level) => (
+                                <button key={`${symptomKey}-${level}`} type="button"
+                                  className={`severity-btn severity-${level.toLowerCase()} ${activeSeverity === level ? 'severity-active' : ''}`}
+                                  onClick={() => setSeverity(symptomKey, level)}>
+                                  {level}
+                                </button>
+                              ))}
+                            </div>
+                            {activeSeverity && (
+                              <p className="severity-desc">
+                                <strong>{s} &mdash; {activeSeverity}:</strong>{' '}
+                                {SEVERITY_DESCRIPTIONS[s]?.[activeSeverity] || ''}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  <label className="checkbox-label no-symptoms-for-condition" style={{ marginTop: '10px' }}>
+                    <input type="checkbox" checked={noSymptoms}
+                      onChange={() => toggleSymptom('No current symptoms')} />
+                    None — I have no current symptoms
+                  </label>
+                </div>
               </div>
+            </>
+          );
+        }
+
+        const noSymptomsPerCondition = data.noSymptomsForConditions || [];
+
+        const toggleNoSymptomsForCondition = (condition) => {
+          const current = noSymptomsPerCondition;
+          const isChecking = !current.includes(condition);
+          const updated = isChecking
+            ? [...current, condition]
+            : current.filter(c => c !== condition);
+          onChange('noSymptomsForConditions', updated);
+
+          if (isChecking) {
+            // Clear all symptoms AND their severities for this condition
+            const updatedSymptoms = (data.symptoms || []).filter(s => !s.startsWith(condition + '::'));
+            const updatedSeverity = Object.fromEntries(
+              Object.entries(data.symptomSeverity || {}).filter(([key]) => !key.startsWith(condition + '::'))
             );
-          })}
-        </div>
-      )}
+            onChange('symptoms', updatedSymptoms);
+            onChange('symptomSeverity', updatedSeverity);
+          }
+        };
 
-      {/* Sleep Quality */}
-      <div className="step-field" style={{ marginTop: '20px' }}>
-        <label>Sleep Quality</label>
-        <div className="radio-group flex-wrap">
-          {SLEEP_OPTIONS.map(({ value, label }) => (
-            <label key={value} className="radio-label">
-              <input type="radio" name="sleepQuality" value={value}
-                checked={data.sleepQuality === value}
-                onChange={() => onChange('sleepQuality', value)} />
-              {label}
-            </label>
-          ))}
-        </div>
-      </div>
+        return (
+          <>
+            <p className="step-hint">
+              Showing symptoms for your selected conditions. Select all that apply.
+            </p>
 
-      {/* Water Intake */}
-      <div className="step-field">
-        <label>Daily Water Intake <span className="field-hint">(optional)</span></label>
-        <div className="radio-group flex-wrap">
-          {WATER_OPTIONS.map(({ value, label }) => (
-            <label key={value} className="radio-label">
-              <input type="radio" name="waterIntake" value={value}
-                checked={data.waterIntake === value}
-                onChange={() => onChange('waterIntake', value)} />
-              {label}
-            </label>
-          ))}
-        </div>
-      </div>
+            <div className="symptoms-list">
+              {selectedConditions.map((condition) => {
+                const conditionSymptoms = ALL_SYMPTOMS.filter(s => {
+                  if (s.conditions.length === 0) return false;
+                  if (!s.conditions.includes(condition)) return false;
+                  if (s.genders.length > 0 && !s.genders.includes(gender) && gender !== '') return false;
+                  if (s.name === 'Low Libido' && isPregnantOrBreastfeeding) return false;
+                  return true;
+                });
+
+                if (conditionSymptoms.length === 0) return null;
+
+                const noSymptomsChecked = noSymptomsPerCondition.includes(condition);
+
+                return (
+                  <div key={condition} className="symptom-condition-group">
+                    <p className="symptom-condition-label">For {condition}</p>
+
+                    {!noSymptomsChecked && conditionSymptoms.map(({ name: s }) => {
+                      const symptomKey = `${condition}::${s}`;
+                      const checked = selectedSymptoms.includes(symptomKey);
+                      const activeSeverity = symptomSeverity[symptomKey];
+                      const missingSeverity = checked && !activeSeverity && severityErrors.includes(symptomKey);
+                      return (
+                        <div
+                          key={symptomKey}
+                          ref={el => { symptomRowRefs.current[symptomKey] = el; }}
+                          className={`symptom-row ${checked ? 'symptom-row-active' : ''} ${missingSeverity ? 'symptom-row-error' : ''}`}
+                        >
+                          <label className="checkbox-label">
+                            <input type="checkbox" checked={checked}
+                              onChange={() => toggleSymptom(symptomKey)} />
+                            <span className="symptom-name">{s}</span>
+                          </label>
+                          {missingSeverity && (
+                            <span className="severity-required-inline">Please select a severity level to proceed</span>
+                          )}
+                          {checked && (
+                            <div className="severity-wrap">
+                              <div className="severity-group">
+                                {SEVERITY_OPTIONS.map((level) => (<button key={`${symptomKey}-${level}`} type="button"
+                                    className={`severity-btn severity-${level.toLowerCase()} ${activeSeverity === level ? 'severity-active' : ''}`}
+                                    onClick={() => setSeverity(symptomKey, level)}>
+                                    {level}
+                                  </button>
+                                ))}
+                              </div>
+                              {activeSeverity && (
+                                <p className="severity-desc">
+                                  <strong>{s} &mdash; {activeSeverity}:</strong>{' '}
+                                  {SEVERITY_DESCRIPTIONS[s]?.[activeSeverity] || ''}
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    <label className="checkbox-label no-symptoms-for-condition">
+                      <input type="checkbox"
+                        checked={noSymptomsChecked}
+                        onChange={() => toggleNoSymptomsForCondition(condition)} />
+                      No symptoms for {condition}
+                    </label>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        );
+      })()}
     </div>
   );
 }
@@ -836,6 +1360,36 @@ function Step4Lifestyle({ data, onChange, errors }) {
     <div className="step-body">
       <h3 className="step-section-title">Lifestyle &amp; Additional Details</h3>
 
+      {/* Sleep Quality */}
+      <div className="step-field">
+        <label>Sleep Quality</label>
+        <div className="radio-group flex-wrap">
+          {SLEEP_OPTIONS.map(({ value, label }) => (
+            <label key={value} className="radio-label">
+              <input type="radio" name="sleepQuality" value={value}
+                checked={data.sleepQuality === value}
+                onChange={() => onChange('sleepQuality', value)} />
+              {label}
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {/* Daily Water Intake */}
+      <div className="step-field">
+        <label>Daily Water Intake <span className="field-hint">(optional)</span></label>
+        <div className="radio-group flex-wrap">
+          {WATER_OPTIONS.map(({ value, label }) => (
+            <label key={value} className="radio-label">
+              <input type="radio" name="waterIntake" value={value}
+                checked={data.waterIntake === value}
+                onChange={() => onChange('waterIntake', value)} />
+              {label}
+            </label>
+          ))}
+        </div>
+      </div>
+
       {/* Lifestyle Habits */}
       <div className="step-field">
         <label>Lifestyle Habits <span className="field-hint">(optional)</span></label>
@@ -852,6 +1406,7 @@ function Step4Lifestyle({ data, onChange, errors }) {
       </div>
 
       {/* Current Supplement Usage */}
+      <hr className="step4-divider" />
       <div className="step-field">
         <label>Are you currently taking any supplements?</label>
         <div className="radio-group">
@@ -919,6 +1474,7 @@ function Step4Lifestyle({ data, onChange, errors }) {
       </div>
 
       {/* Sun Exposure */}
+      <hr className="step4-divider" />
       <div className="step-field">
         <label>Daily Sun Exposure <span className="field-hint">(optional)</span></label>
         <div className="radio-group flex-wrap">
@@ -927,21 +1483,6 @@ function Step4Lifestyle({ data, onChange, errors }) {
               <input type="radio" name="sunExposure" value={opt}
                 checked={data.sunExposure === opt}
                 onChange={() => onChange('sunExposure', opt)} />
-              {opt}
-            </label>
-          ))}
-        </div>
-      </div>
-
-      {/* Fitness Focus */}
-      <div className="step-field">
-        <label>Primary Fitness Focus <span className="field-hint">(optional)</span></label>
-        <div className="checkbox-grid-2">
-          {['Muscle Gain', 'Fat Loss', 'Endurance / Cardio', 'Flexibility / Mobility', 'General Fitness', 'Not applicable'].map((opt) => (
-            <label key={opt} className="radio-label">
-              <input type="radio" name="fitnessFocus" value={opt}
-                checked={data.fitnessFocus === opt}
-                onChange={() => onChange('fitnessFocus', opt)} />
               {opt}
             </label>
           ))}
@@ -1051,6 +1592,7 @@ const EMPTY_FORM = {
   activityLevel: '',
   dietType: '', healthGoals: [],
   symptoms: [], symptomSeverity: {},
+  noSymptomsForConditions: [],
   stressLevel: '', sleepQuality: '', waterIntake: '',
   medicalConditions: [], currentMedications: '', allergies: '',
   lifestyleHabits: [],
@@ -1061,7 +1603,6 @@ const EMPTY_FORM = {
   recentBloodTest: '',
   feelingDescription: '',
   sunExposure: '',
-  fitnessFocus: '',
   proteinIntake: '',
   bloodTestResults: '',
 };
@@ -1165,7 +1706,24 @@ function AssessmentPage() {
       ? lbsToKg(formData.weight)
       : Number(formData.weight);
 
-    const payload = { ...formData, weight: normalizedWeight };
+    // Strip "ConditionName::" prefix before sending to backend
+    const rawSymptoms = formData.symptoms || [];
+    const strippedSymptoms = rawSymptoms
+      .filter(s => s !== 'No current symptoms')
+      .map(s => s.includes('::') ? s.split('::')[1] : s);
+    const uniqueSymptoms = [...new Set(strippedSymptoms)];
+
+    const rawSeverity = formData.symptomSeverity || {};
+    const strippedSeverity = {};
+    const severityRank = { Mild: 1, Moderate: 2, Severe: 3 };
+    Object.entries(rawSeverity).forEach(([key, val]) => {
+      const symptomName = key.includes('::') ? key.split('::')[1] : key;
+      if (!strippedSeverity[symptomName] || (severityRank[val] || 0) > (severityRank[strippedSeverity[symptomName]] || 0)) {
+        strippedSeverity[symptomName] = val;
+      }
+    });
+
+    const payload = { ...formData, weight: normalizedWeight, symptoms: uniqueSymptoms, symptomSeverity: strippedSeverity };
 
     setSubmitting(true);
     try {
