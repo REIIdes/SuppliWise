@@ -38,6 +38,8 @@ function isPlaceholderEvidence(text) {
   );
 }
 
+const priorityColor = { High: '#16a34a', Medium: '#d97706', Low: '#374151' };
+
 const ACTIVITY_LABELS = {
   Sedentary: 'Sedentary / No Exercise',
   Light:     'Light (1–3 days/week)',
@@ -70,26 +72,19 @@ const FOOD_SPECIFICS = {
 
 function expandFoodText(text) {
   if (!text) return text;
-  try {
-    // Skip expansion if already has parenthesised examples
-    if (text.includes('(') && text.includes(')')) return fixChars(text);
-    // Strip sentence fragments first
-    let cleaned = text
-      .replace(/,?\s*(such as|which are|are naturally|naturally rich|found in|including)[^,;]*/gi, '')
-      .replace(/,?\s*are\s+[a-z].*$/gi, '')
-      .trim()
-      .replace(/,\s*$/, '');
-    cleaned = cleaned || text;
-    // Expand generic category words — escape special regex chars in keys
-    for (const [key, expanded] of Object.entries(FOOD_SPECIFICS)) {
-      const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const regex = new RegExp(`\\b${escaped}\\b`, 'gi');
-      cleaned = cleaned.replace(regex, expanded);
-    }
-    return fixChars(cleaned);
-  } catch {
-    return fixChars(text);
+  // Strip sentence fragments first
+  let cleaned = text
+    .replace(/,?\s*(such as|which are|are naturally|naturally rich|found in|including)[^,;]*/gi, '')
+    .replace(/,?\s*are\s+[a-z].*$/gi, '')
+    .trim()
+    .replace(/,\s*$/, '');
+  cleaned = cleaned || text;
+  // Then expand generic category words
+  for (const [key, expanded] of Object.entries(FOOD_SPECIFICS)) {
+    const regex = new RegExp(`\\b${key}\\b`, 'gi');
+    cleaned = cleaned.replace(regex, expanded);
   }
+  return cleaned;
 }
 
 // ── Client-side evidence/foods/sideEffects fallback ───────────────────────
@@ -479,7 +474,6 @@ function HistoryPage() {
                   {getTab(item._id) === 'supplements' && item.aiResults && (
                     <div className="tab-content">
                       {(() => {
-                        try {
                         const PRIORITY_ORDER = { High: 0, Medium: 1, Low: 2 };
                         const recs = [...(item.aiResults.recommendations || [])].sort((a, b) => {
                           const pa = PRIORITY_ORDER[a.priority] ?? 3;
@@ -531,10 +525,6 @@ function HistoryPage() {
                             )}
                           </>
                         );
-                        } catch (e) {
-                          console.error('[HistoryPage supplements tab]', e);
-                          return <p style={{ color: '#6b7280', fontSize: '13px', padding: '8px 0' }}>Could not display supplements for this assessment.</p>;
-                        }
                       })()}
                       {item.aiResults.avoidList?.length > 0 && (
                         <div className="history-avoid">
