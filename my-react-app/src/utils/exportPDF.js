@@ -32,9 +32,9 @@ const PRIORITY_COLORS = {
 // ── Utilities ──────────────────────────────────────────────────────────────
 const PAGE_W = 210;
 const PAGE_H = 297;
-const ML = 14;   // margin left
-const MR = 14;   // margin right
-const CW = PAGE_W - ML - MR;  // content width = 182mm
+const ML = 16;   // margin left
+const MR = 16;   // margin right
+const CW = PAGE_W - ML - MR;  // content width = 178mm
 
 // ── Clean text: replace special/unicode chars that jsPDF/helvetica can't render ──
 function cleanText(str) {
@@ -315,32 +315,33 @@ export function exportResultsToPDF(recommendations, assessment) {
   if (recommendations.summary) {
     y = sectionHeading(doc, 'Clinical Summary', y);
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
+    doc.setFontSize(9.5);
     doc.setTextColor(...C.grayMid);
     const lines = doc.splitTextToSize(cleanText(recommendations.summary), CW);
-    doc.text(lines, ML, y);
-    y += lines.length * 5 + 6;
+    doc.text(lines, ML, y, { lineHeightFactor: 1.5 });
+    y += lines.length * 5.8 + 8;
   }
 
   // ── CONSULT DOCTOR ALERT ─────────────────────────────────────────────────
   if (recommendations.consultDoctor && recommendations.consultReason) {
-    y = checkY(doc, y, 20);
+    const rLines = doc.splitTextToSize(cleanText(recommendations.consultReason), CW - 12);
+    const blockH = 10 + rLines.length * 5.5 + 6;
+    y = checkY(doc, y, blockH);
     doc.setFillColor(...C.redLight);
     doc.setDrawColor(...C.redBorder);
     doc.setLineWidth(0.4);
-    doc.roundedRect(ML, y, CW, 16, 2, 2, 'FD');
+    doc.roundedRect(ML, y, CW, blockH, 2, 2, 'FD');
     doc.setFillColor(...C.redMid);
-    doc.rect(ML, y, 3, 16, 'F');
+    doc.rect(ML, y, 3, blockH, 'F');
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
+    doc.setFontSize(9.5);
     doc.setTextColor(...C.redMid);
-    doc.text('Medical Consultation Recommended', ML + 6, y + 6);
+    doc.text('Medical Consultation Recommended', ML + 7, y + 7);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8.5);
     doc.setTextColor(127, 29, 29);
-    const rLines = doc.splitTextToSize(cleanText(recommendations.consultReason), CW - 10);
-    doc.text(rLines, ML + 6, y + 12);
-    y += 16 + rLines.length * 4.5 + 4;
+    doc.text(rLines, ML + 7, y + 14);
+    y += blockH + 8;
   }
 
   // ── PATIENT PROFILE ──────────────────────────────────────────────────────
@@ -388,8 +389,8 @@ export function exportResultsToPDF(recommendations, assessment) {
       body: tableBody,
       theme: 'plain',
       styles: {
-        fontSize: 8.5,
-        cellPadding: { top: 3.5, bottom: 3.5, left: 4, right: 4 },
+        fontSize: 9,
+        cellPadding: { top: 4.5, bottom: 4.5, left: 5, right: 5 },
         valign: 'middle',
         lineColor: C.grayBorder,
         lineWidth: 0,
@@ -480,8 +481,8 @@ export function exportResultsToPDF(recommendations, assessment) {
         body: extraRows,
         theme: 'plain',
         styles: {
-          fontSize: 8.5,
-          cellPadding: { top: 3.5, bottom: 3.5, left: 4, right: 4 },
+          fontSize: 9,
+          cellPadding: { top: 4.5, bottom: 4.5, left: 5, right: 5 },
           valign: 'top',
           lineColor: C.grayBorder,
           lineWidth: 0,
@@ -549,14 +550,14 @@ export function exportResultsToPDF(recommendations, assessment) {
       headStyles: {
         fillColor: C.greenDeep,
         textColor: C.white,
-        fontSize: 7.5,
+        fontSize: 8,
         fontStyle: 'bold',
-        cellPadding: { top: 4, bottom: 4, left: 3, right: 3 },
+        cellPadding: { top: 5, bottom: 5, left: 4, right: 4 },
         halign: 'left',
       },
       bodyStyles: {
-        fontSize: 7.5,
-        cellPadding: { top: 3, bottom: 3, left: 3, right: 3 },
+        fontSize: 8,
+        cellPadding: { top: 4, bottom: 4, left: 4, right: 4 },
         textColor: C.grayDark,
         valign: 'top',
         lineColor: C.grayBorder,
@@ -566,13 +567,13 @@ export function exportResultsToPDF(recommendations, assessment) {
         fillColor: C.greenLight,
       },
       columnStyles: {
-        0: { cellWidth: 30, fontStyle: 'bold' },  // Supplement
-        1: { cellWidth: 18, halign: 'center' },   // Priority
-        2: { cellWidth: 14, halign: 'center' },   // Match
-        3: { cellWidth: 50 },                     // Reason
-        4: { cellWidth: 28 },                     // Dosage
-        5: { cellWidth: 20 },                     // Timing
-        6: { cellWidth: 22 },                     // Interactions
+        0: { cellWidth: 28, fontStyle: 'bold' },
+        1: { cellWidth: 18, halign: 'center' },
+        2: { cellWidth: 14, halign: 'center' },
+        3: { cellWidth: 52 },
+        4: { cellWidth: 28 },
+        5: { cellWidth: 20 },
+        6: { cellWidth: 18 },
       },
       margin: { left: ML, right: MR },
       tableWidth: CW,
@@ -586,7 +587,7 @@ export function exportResultsToPDF(recommendations, assessment) {
         }
       },
     });
-    y = doc.lastAutoTable.finalY + 6;
+    y = doc.lastAutoTable.finalY + 8;
 
     // Table 2 — evidence, food sources, side effects (same sort order as main table)
     const detailRows = sortedRecs.map(rec => [
@@ -607,14 +608,14 @@ export function exportResultsToPDF(recommendations, assessment) {
       headStyles: {
         fillColor: C.greenDeep,
         textColor: C.white,
-        fontSize: 7.5,
+        fontSize: 8,
         fontStyle: 'bold',
-        cellPadding: { top: 4, bottom: 4, left: 3, right: 3 },
+        cellPadding: { top: 5, bottom: 5, left: 4, right: 4 },
         halign: 'left',
       },
       bodyStyles: {
-        fontSize: 7.5,
-        cellPadding: { top: 3, bottom: 3, left: 3, right: 3 },
+        fontSize: 8,
+        cellPadding: { top: 4, bottom: 4, left: 4, right: 4 },
         textColor: C.grayDark,
         valign: 'top',
         lineColor: C.grayBorder,
@@ -624,10 +625,10 @@ export function exportResultsToPDF(recommendations, assessment) {
         fillColor: C.greenLight,
       },
       columnStyles: {
-        0: { cellWidth: 30, fontStyle: 'bold' },  // Supplement
-        1: { cellWidth: 56 },                     // Evidence
-        2: { cellWidth: 52 },                     // Food Sources
-        3: { cellWidth: 44 },                     // Side Effects
+        0: { cellWidth: 28, fontStyle: 'bold' },
+        1: { cellWidth: 54 },
+        2: { cellWidth: 52 },
+        3: { cellWidth: 44 },
       },
       margin: { left: ML, right: MR },
       tableWidth: CW,
@@ -676,26 +677,26 @@ export function exportResultsToPDF(recommendations, assessment) {
         headStyles: {
           fillColor: C.greenDeep,
           textColor: C.white,
-          fontSize: 8.5,
+          fontSize: 9,
           fontStyle: 'bold',
-          cellPadding: { top: 4, bottom: 4, left: 4, right: 4 },
+          cellPadding: { top: 5, bottom: 5, left: 5, right: 5 },
         },
         bodyStyles: {
-          fontSize: 8.5,
-          cellPadding: { top: 3.5, bottom: 3.5, left: 4, right: 4 },
+          fontSize: 9,
+          cellPadding: { top: 4.5, bottom: 4.5, left: 5, right: 5 },
           textColor: C.grayDark,
           lineColor: C.grayBorder,
           lineWidth: 0.2,
         },
         alternateRowStyles: { fillColor: C.greenLight },
         columnStyles: {
-          0: { cellWidth: 42, fontStyle: 'bold', textColor: C.greenDark },
-          1: { cellWidth: CW - 42 },
+          0: { cellWidth: 44, fontStyle: 'bold', textColor: C.greenDark },
+          1: { cellWidth: CW - 44 },
         },
         margin: { left: ML, right: MR },
         tableWidth: CW,
       });
-      y = doc.lastAutoTable.finalY + 10;
+      y = doc.lastAutoTable.finalY + 12;
     }
 
     // ── Recovery Plan phases ──
@@ -786,7 +787,8 @@ export function exportResultsToPDF(recommendations, assessment) {
 
   // ── LIFESTYLE ADVICE ─────────────────────────────────────────────────────
   if (recommendations.lifestyleAdvice?.length > 0) {
-    y = checkY(doc, y, 24);
+    const lifestyleMinH = 12 + 10 + recommendations.lifestyleAdvice.length * 9;
+    y = checkY(doc, y, Math.min(lifestyleMinH, 60));
     y = sectionHeading(doc, 'Lifestyle Recommendations', y);
 
     autoTable(doc, {
@@ -797,31 +799,33 @@ export function exportResultsToPDF(recommendations, assessment) {
       headStyles: {
         fillColor: C.greenDeep,
         textColor: C.white,
-        fontSize: 8.5,
+        fontSize: 9,
         fontStyle: 'bold',
-        cellPadding: { top: 4, bottom: 4, left: 4, right: 4 },
+        cellPadding: { top: 5, bottom: 5, left: 5, right: 5 },
       },
       bodyStyles: {
-        fontSize: 8.5,
-        cellPadding: { top: 3.5, bottom: 3.5, left: 4, right: 4 },
+        fontSize: 9,
+        cellPadding: { top: 4.5, bottom: 4.5, left: 5, right: 5 },
         textColor: C.grayDark,
         lineColor: C.grayBorder,
         lineWidth: 0.2,
       },
       alternateRowStyles: { fillColor: C.greenLight },
       columnStyles: {
-        0: { cellWidth: 36, fontStyle: 'bold', textColor: C.greenDark },
-        1: { cellWidth: CW - 36 },
+        0: { cellWidth: 38, fontStyle: 'bold', textColor: C.greenDark },
+        1: { cellWidth: CW - 38 },
       },
       margin: { left: ML, right: MR },
       tableWidth: CW,
     });
-    y = doc.lastAutoTable.finalY + 8;
+    y = doc.lastAutoTable.finalY + 10;
   }
 
   // ── MEAL RECOMMENDATIONS ─────────────────────────────────────────────────
   if (recommendations.mealRecommendations?.length > 0) {
-    y = checkY(doc, y, 24);
+    // Estimate minimum height: section heading (~12) + table header (~10) + at least one row (~9)
+    const mealMinH = 12 + 10 + recommendations.mealRecommendations.length * 9;
+    y = checkY(doc, y, Math.min(mealMinH, 60));
     y = sectionHeading(doc, 'Meal Recommendations', y);
 
     autoTable(doc, {
@@ -832,26 +836,26 @@ export function exportResultsToPDF(recommendations, assessment) {
       headStyles: {
         fillColor: [180, 83, 9],
         textColor: C.white,
-        fontSize: 8.5,
+        fontSize: 9,
         fontStyle: 'bold',
-        cellPadding: { top: 4, bottom: 4, left: 4, right: 4 },
+        cellPadding: { top: 5, bottom: 5, left: 5, right: 5 },
       },
       bodyStyles: {
-        fontSize: 8.5,
-        cellPadding: { top: 3.5, bottom: 3.5, left: 4, right: 4 },
+        fontSize: 9,
+        cellPadding: { top: 4.5, bottom: 4.5, left: 5, right: 5 },
         textColor: C.grayDark,
         lineColor: C.grayBorder,
         lineWidth: 0.2,
       },
       alternateRowStyles: { fillColor: C.amberLight },
       columnStyles: {
-        0: { cellWidth: 28, fontStyle: 'bold', textColor: C.amberDark },
-        1: { cellWidth: CW - 28 },
+        0: { cellWidth: 30, fontStyle: 'bold', textColor: C.amberDark },
+        1: { cellWidth: CW - 30 },
       },
       margin: { left: ML, right: MR },
       tableWidth: CW,
     });
-    y = doc.lastAutoTable.finalY + 8;
+    y = doc.lastAutoTable.finalY + 10;
   }
 
   // ── WARNINGS & AVOID LIST ────────────────────────────────────────────────
@@ -859,89 +863,152 @@ export function exportResultsToPDF(recommendations, assessment) {
   const hasAvoid    = recommendations.avoidList?.length > 0;
 
   if (hasWarnings || hasAvoid) {
-    y = checkY(doc, y, 24);
+    y = checkY(doc, y, 28);
     y = sectionHeading(doc, 'Warnings & Supplements to Avoid', y);
 
     if (hasWarnings) {
       const wTextLines = recommendations.warnings.flatMap(w =>
-        doc.splitTextToSize(cleanText(`- ${w}`), CW - 14)
+        doc.splitTextToSize(cleanText(`• ${w}`), CW - 16)
       );
-      const blockH = 10 + wTextLines.length * 5.5 + 6;
+      const blockH = 12 + wTextLines.length * 6 + 8;
       y = checkY(doc, y, blockH);
 
       doc.setFillColor(...C.redLight);
       doc.setDrawColor(...C.redBorder);
       doc.setLineWidth(0.3);
-      doc.roundedRect(ML, y, CW, blockH, 2, 2, 'FD');
+      doc.roundedRect(ML, y, CW, blockH, 3, 3, 'FD');
       doc.setFillColor(...C.redMid);
-      doc.rect(ML, y, 3, blockH, 'F');
+      doc.rect(ML, y, 4, blockH, 'F');
 
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
+      doc.setFontSize(9.5);
       doc.setTextColor(...C.redMid);
-      doc.text('Important Warnings', ML + 7, y + 7);
+      doc.text('Important Warnings', ML + 9, y + 8.5);
 
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8.5);
+      doc.setFontSize(9);
       doc.setTextColor(127, 29, 29);
-      let wy = y + 14;
+      let wy = y + 17;
       recommendations.warnings.forEach(w => {
-        const wl = doc.splitTextToSize(`• ${w}`, CW - 14);
-        doc.text(wl, ML + 7, wy);
-        wy += wl.length * 5.5;
+        const wl = doc.splitTextToSize(`• ${w}`, CW - 16);
+        doc.text(wl, ML + 9, wy);
+        wy += wl.length * 6;
       });
-      y += blockH + 7;
+      y += blockH + 8;
     }
 
     if (hasAvoid) {
       const aTextLines = recommendations.avoidList.flatMap(a =>
-        doc.splitTextToSize(`• ${a}`, CW - 14)
+        doc.splitTextToSize(cleanText(`• ${a}`), CW - 16)
       );
-      const blockH = 10 + aTextLines.length * 5.5 + 6;
+      const blockH = 12 + aTextLines.length * 6 + 8;
       y = checkY(doc, y, blockH);
 
       doc.setFillColor(255, 247, 237);
       doc.setDrawColor(253, 186, 116);
       doc.setLineWidth(0.3);
-      doc.roundedRect(ML, y, CW, blockH, 2, 2, 'FD');
+      doc.roundedRect(ML, y, CW, blockH, 3, 3, 'FD');
       doc.setFillColor(...C.amberDark);
-      doc.rect(ML, y, 3, blockH, 'F');
+      doc.rect(ML, y, 4, blockH, 'F');
 
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
+      doc.setFontSize(9.5);
       doc.setTextColor(...C.amberDark);
-      doc.text('Supplements to Avoid', ML + 7, y + 7);
+      doc.text('Supplements to Avoid', ML + 9, y + 8.5);
 
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8.5);
+      doc.setFontSize(9);
       doc.setTextColor(120, 53, 15);
-      let ay = y + 14;
+      let ay = y + 17;
       recommendations.avoidList.forEach(a => {
-        const al = doc.splitTextToSize(`• ${a}`, CW - 14);
-        doc.text(al, ML + 7, ay);
-        ay += al.length * 5.5;
+        const al = doc.splitTextToSize(`• ${a}`, CW - 16);
+        doc.text(al, ML + 9, ay);
+        ay += al.length * 6;
       });
-      y += blockH + 7;
+      y += blockH + 8;
     }
   }
 
+  // ── SEEKING SUPPORT ───────────────────────────────────────────────────────
+  const ss = recommendations.seekingSupport;
+  if (ss?.include) {
+    y = checkY(doc, y, 32);
+    y = sectionHeading(doc, 'Seeking Support', y);
+
+    const introLines = doc.splitTextToSize(cleanText(ss.intro || ''), CW - 16);
+    const introH = 12 + introLines.length * 6 + 8;
+    y = checkY(doc, y, introH);
+
+    doc.setFillColor(...C.blueLight);
+    doc.setDrawColor(...C.blueBorder);
+    doc.setLineWidth(0.3);
+    doc.roundedRect(ML, y, CW, introH, 3, 3, 'FD');
+    doc.setFillColor(...C.blueDark);
+    doc.rect(ML, y, 4, introH, 'F');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9.5);
+    doc.setTextColor(...C.blueDark);
+    doc.text('Important Notice', ML + 9, y + 8.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(30, 58, 138);
+    let iy = y + 17;
+    introLines.forEach(line => { doc.text(line, ML + 9, iy); iy += 6; });
+    y += introH + 7;
+
+    if (ss.resources?.length > 0) {
+      y = checkY(doc, y, 16);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(...C.blueDark);
+      doc.text('Philippine Support Resources:', ML, y);
+      y += 8;
+
+      ss.resources.forEach(res => {
+        const nameLines = doc.splitTextToSize(cleanText(`${res.label}: ${res.name}`), CW - 8);
+        const descLines = doc.splitTextToSize(cleanText(`   ${res.description}`), CW - 12);
+        const urlLines  = doc.splitTextToSize(cleanText(`   ${res.url}`), CW - 12);
+        const rH = (nameLines.length + descLines.length + urlLines.length) * 5.8 + 10;
+        y = checkY(doc, y, rH);
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8.5);
+        doc.setTextColor(...C.blueDark);
+        doc.text(nameLines, ML + 4, y);
+        y += nameLines.length * 5.8;
+
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(71, 85, 105);
+        doc.text(descLines, ML + 4, y);
+        y += descLines.length * 5.5;
+
+        doc.setTextColor(...C.blueDark);
+        doc.text(urlLines, ML + 4, y);
+        y += urlLines.length * 5.5 + 5;
+      });
+    }
+    y += 6;
+  }
+
   // ── EVIDENCE SOURCES ─────────────────────────────────────────────────────
-  y = checkY(doc, y, 20);
+  y = checkY(doc, y, 22);
   doc.setFillColor(...C.grayLight);
   doc.setDrawColor(...C.grayBorder);
   doc.setLineWidth(0.3);
-  doc.roundedRect(ML, y, CW, 14, 2, 2, 'FD');
+  doc.roundedRect(ML, y, CW, 18, 2, 2, 'FD');
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
+  doc.setFontSize(8);
   doc.setTextColor(...C.grayMid);
-  doc.text('Evidence Sources', ML + 4, y + 5);
+  doc.text('Evidence Sources', ML + 5, y + 6.5);
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7);
+  doc.setFontSize(7.5);
   doc.setTextColor(...C.grayMid);
   doc.text(
     'NIH Office of Dietary Supplements  |  PubMed clinical studies  |  Mayo Clinic guidelines  |  WHO nutrition guidelines  |  Peer-reviewed clinical nutrition research',
-    ML + 4, y + 10,
-    { maxWidth: CW - 8 }
+    ML + 5, y + 13,
+    { maxWidth: CW - 10 }
   );
 
   // ── FOOTERS ───────────────────────────────────────────────────────────────

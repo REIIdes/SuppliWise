@@ -715,6 +715,66 @@
   line-height: 1;
 }
 
+/* ── Seeking Support (History) ── */
+.history-seeking-support {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-top: 14px;
+}
+.history-seeking-support-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #1e40af;
+  margin-bottom: 8px;
+}
+.history-seeking-support-intro {
+  font-size: 12px;
+  color: #1e3a8a;
+  line-height: 1.65;
+  margin: 0 0 12px 0;
+}
+.history-seeking-support-resources {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px;
+}
+.history-seeking-support-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: #fff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 10px 12px;
+  text-decoration: none;
+  transition: box-shadow 0.15s;
+}
+.history-seeking-support-card:hover { box-shadow: 0 3px 10px rgba(59,130,246,0.15); }
+.history-seeking-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #3b82f6;
+}
+.history-seeking-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1e3a8a;
+  line-height: 1.35;
+}
+.history-seeking-desc {
+  font-size: 11px;
+  color: #475569;
+  line-height: 1.5;
+  margin: 2px 0 0 0;
+}
+
 /* ── Supplement Show More/Less Toggle ── */
 .supp-toggle-btn {
   display: block;

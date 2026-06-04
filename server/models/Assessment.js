@@ -39,6 +39,7 @@ const assessmentSchema = new mongoose.Schema(
     fitnessFocus: { type: String },
     proteinIntake: { type: String },
     bloodTestResults: { type: String },
+    recreationalDrugTypes: { type: String },
     // User info snapshot (for easy identification in DB)
     userEmail: { type: String },
     userName: { type: String },

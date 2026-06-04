@@ -189,6 +189,30 @@
 }
 .rec-triggered-label { font-weight: 700; color: #374151; }
 
+/* Condition context callout */
+.rec-condition-context {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: #f0fdf4;
+  border-left: 3px solid #22c55e;
+  border-radius: 0 8px 8px 0;
+  padding: 10px 12px;
+  margin-top: 2px;
+}
+.rec-condition-context-icon {
+  font-size: 15px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.rec-condition-context p {
+  font-size: 13px;
+  color: #15803d;
+  line-height: 1.6;
+  margin: 0;
+  font-style: italic;
+}
+
 /* Severity badge inline inside "Recommended for" */
 .rec-severity-inline {
   font-size: 11px;
@@ -496,6 +520,80 @@
 .results-warnings h4 { font-size: 14px; font-weight: 700; color: #92400e; margin: 0 0 10px 0; }
 .results-warnings ul { margin: 0; padding-left: 18px; }
 .results-warnings li { font-size: 13px; color: #78350f; line-height: 1.6; margin-bottom: 4px; }
+
+/* ── Seeking Support ── */
+.results-seeking-support {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  padding: 20px 22px;
+  margin-bottom: 16px;
+}
+.seeking-support-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.seeking-support-icon { font-size: 22px; flex-shrink: 0; }
+.seeking-support-header h4 {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1e40af;
+  margin: 0;
+}
+.seeking-support-intro {
+  font-size: 13px;
+  color: #1e3a8a;
+  line-height: 1.7;
+  margin: 0 0 16px 0;
+}
+.seeking-support-resources {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+.seeking-support-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: #fff;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  padding: 14px 16px;
+  text-decoration: none;
+  transition: box-shadow 0.18s, border-color 0.18s;
+}
+.seeking-support-card:hover {
+  box-shadow: 0 4px 14px rgba(59, 130, 246, 0.15);
+  border-color: #93c5fd;
+}
+.seeking-support-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #3b82f6;
+}
+.seeking-support-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e3a8a;
+  line-height: 1.4;
+}
+.seeking-support-desc {
+  font-size: 12px;
+  color: #475569;
+  line-height: 1.55;
+  margin: 2px 0 6px 0;
+  flex: 1;
+}
+.seeking-support-link {
+  font-size: 12px;
+  font-weight: 600;
+  color: #2563eb;
+  margin-top: auto;
+}
 
 /* ── Sources ── */
 .results-sources {

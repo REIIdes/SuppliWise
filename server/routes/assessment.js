@@ -2,74 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Assessment = require('../models/Assessment');
 const { protect } = require('../middleware/auth');
-const { sanitizeTextField, sanitizeShortField, isGarbage } = require('../utils/sanitize');
-
-// ── AI rewrite using Groq ──────────────────────────────────────────────────
-// Rewrites a health description: fixes spelling/grammar, converts slang to
-// clinical language. Returns null if the text is garbage/unrelated to health.
-async function aiPolishText(text) {
-  const GROQ_API_KEY = process.env.GROQ_API_KEY;
-  if (!GROQ_API_KEY || GROQ_API_KEY === 'your_groq_api_key_here') return null;
-  if (!text || !text.trim() || text.trim().length < 5) return null;
-
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
-
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${GROQ_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        messages: [
-          {
-            role: 'system',
-            content: `You are a clinical documentation assistant. Your job is to clean up a patient's free-text health description.
-
-RULES:
-1. If the input is ANY of the following, output exactly the word GARBAGE and nothing else:
-   - Random letters mixed with numbers (e.g. "sad12312asd", "abc123xyz", "hello456world")
-   - Keyboard mashing (e.g. "asdfghjkl", "qwertyuiop", "zxcvbnm")
-   - Repeated characters (e.g. "aaaaaaa", "hahahahaha")
-   - Symbols or punctuation only
-   - Completely unrelated to health, body, feelings, or medical topics
-   - Single made-up words with no meaning
-   - Any text that a doctor could not interpret as a health complaint
-
-2. If the input IS a valid health description (even with typos, slang, or informal language):
-   - Fix spelling and grammar errors minimally — only correct clear mistakes
-   - Do NOT rephrase or rewrite — keep the patient's own words as much as possible
-   - Only convert obvious slang to plain English if needed (e.g. "super tired" → "very tired")
-   - Do NOT add clinical jargon or medical terms
-   - Output ONLY the lightly corrected text — no explanations, no quotes
-
-The goal is accuracy: preserve the patient's meaning exactly, just fix typos.`,
-          },
-          {
-            role: 'user',
-            content: text.trim(),
-          },
-        ],
-        max_tokens: 300,
-        temperature: 0.1,
-        stream: false,
-      }),
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-
-    if (!response.ok) return null;
-    const data = await response.json();
-    const result = data.choices?.[0]?.message?.content?.trim();
-    if (!result || result === 'GARBAGE') return result === 'GARBAGE' ? '__GARBAGE__' : null;
-    return result;
-  } catch {
-    return null; // timeout or network error — fall back to basic sanitize
-  }
-}
+const { sanitizeTextField, sanitizeShortField } = require('../utils/sanitize');
 
 // @route   POST /api/assessment
 // @desc    Save a completed health assessment
@@ -81,9 +14,10 @@ router.post('/', protect, async (req, res) => {
       age, gender, weight, height, activityLevel,
       dietType, healthGoals,
       symptoms, symptomSeverity, stressLevel, sleepQuality, waterIntake,
-      medicalConditions, currentMedications, allergies, feelingDescription,
+      medicalConditions, currentMedications, allergies,
       lifestyleHabits, pregnancyStatus,
       takingSupplements, currentSupplements, recentBloodTest,
+      recreationalDrugTypes,
     } = req.body;
 
     // Validate numeric ranges
@@ -98,8 +32,6 @@ router.post('/', protect, async (req, res) => {
       return res.status(400).json({ message: `Current medications must be ${TEXT_MAX} characters or fewer.` });
     if (allergies && allergies.length > SHORT_MAX)
       return res.status(400).json({ message: `Allergies must be ${SHORT_MAX} characters or fewer.` });
-    if (feelingDescription && feelingDescription.length > TEXT_MAX)
-      return res.status(400).json({ message: `Health description must be ${TEXT_MAX} characters or fewer.` });
     if (req.body.bloodTestResults && req.body.bloodTestResults.length > TEXT_MAX)
       return res.status(400).json({ message: `Blood test results must be ${TEXT_MAX} characters or fewer.` });
     if (currentSupplements && currentSupplements.length > SHORT_MAX)
@@ -111,34 +43,12 @@ router.post('/', protect, async (req, res) => {
     const suppsResult     = sanitizeShortField(currentSupplements);
     const bloodResult     = sanitizeTextField(req.body.bloodTestResults);
 
-    // ── AI-polish the health description ────────────────────────────────
+    // ── Sanitize fields (rule-based) ─────────────────────────────────────
     const garbageFields = [];
     if (medsResult.garbage)      garbageFields.push({ field: 'currentMedications',  label: 'Current Medications',  value: currentMedications });
     if (allergiesResult.garbage) garbageFields.push({ field: 'allergies',            label: 'Allergies',            value: allergies });
     if (suppsResult.garbage)     garbageFields.push({ field: 'currentSupplements',   label: 'Current Supplements',  value: currentSupplements });
     if (bloodResult.garbage)     garbageFields.push({ field: 'bloodTestResults',     label: 'Blood Test Results',   value: req.body.bloodTestResults });
-
-    let cleanedDescription = '';
-    if (feelingDescription && feelingDescription.trim()) {
-      if (isGarbage(feelingDescription)) {
-        garbageFields.push({ field: 'feelingDescription', label: 'Health Concerns', value: feelingDescription });
-        cleanedDescription = '';
-      } else {
-        // Try AI polish first; fall back to rule-based if Groq is unavailable
-        const aiResult = await aiPolishText(feelingDescription);
-        if (aiResult === '__GARBAGE__') {
-          garbageFields.push({ field: 'feelingDescription', label: 'Health Concerns', value: feelingDescription });
-          cleanedDescription = '';
-        } else if (aiResult) {
-          cleanedDescription = aiResult;
-        } else {
-          // Groq unavailable — use rule-based sanitize
-          const fallback = sanitizeTextField(feelingDescription);
-          cleanedDescription = fallback.value;
-          if (fallback.garbage) garbageFields.push({ field: 'feelingDescription', label: 'Health Concerns', value: feelingDescription });
-        }
-      }
-    }
 
     const assessment = await Assessment.create({
       user: req.user._id,
@@ -150,7 +60,6 @@ router.post('/', protect, async (req, res) => {
       medicalConditions,
       currentMedications: medsResult.value,
       allergies: allergiesResult.value,
-      feelingDescription: cleanedDescription,
       lifestyleHabits, pregnancyStatus,
       takingSupplements,
       currentSupplements: suppsResult.value,
@@ -159,6 +68,7 @@ router.post('/', protect, async (req, res) => {
       sunExposure: req.body.sunExposure,
       fitnessFocus: req.body.fitnessFocus,
       proteinIntake: req.body.proteinIntake,
+      recreationalDrugTypes: recreationalDrugTypes || '',
     });
 
     console.log('Assessment saved to DB, id:', assessment._id);

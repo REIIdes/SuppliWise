@@ -228,7 +228,7 @@ function Step1({ data, onChange, errors }) {
 
       <div className="step-row">
         {/* Age — no upper limit hint shown */}
-        <div className={`step-field ${errors.age ? 'field-error' : ''}`}>
+        <div id="field-age" className={`step-field ${errors.age ? 'field-error' : ''}`}>
           <label>Age <span className="required-star">*</span></label>
           <input
             type="number"
@@ -242,7 +242,7 @@ function Step1({ data, onChange, errors }) {
         </div>
 
         {/* Gender — pill button style */}
-        <div className={`step-field ${errors.gender ? 'field-error' : ''}`}>
+        <div id="field-gender" className={`step-field ${errors.gender ? 'field-error' : ''}`}>
           <label>Gender <span className="required-star">*</span></label>
           <div className="gender-pill-group">
             {['Male', 'Female', 'Prefer not to say'].map((g) => (
@@ -269,7 +269,7 @@ function Step1({ data, onChange, errors }) {
       {/* Weight and Height side by side */}
       <div className="step-row">
         {/* Weight with unit toggle */}
-        <div className={`step-field ${errors.weight ? 'field-error' : ''}`}>
+        <div id="field-weight" className={`step-field ${errors.weight ? 'field-error' : ''}`}>
           <label>
             Weight <span className="required-star">*</span>
             <span className="unit-toggle-inline">
@@ -300,7 +300,7 @@ function Step1({ data, onChange, errors }) {
         </div>
 
         {/* Height with unit toggle */}
-        <div className={`step-field ${errors.height ? 'field-error' : ''}`}>
+        <div id="field-height" className={`step-field ${errors.height ? 'field-error' : ''}`}>
           <label>
             Height <span className="required-star">*</span>
             <span className="unit-toggle-inline">
@@ -352,7 +352,7 @@ function Step1({ data, onChange, errors }) {
       </div>
 
       {showActivityLevel && (
-        <div className="step-field">
+        <div id="field-activityLevel" className="step-field">
           <label>Physical Activity Level</label>
           <div className="checkbox-group">
             {activityOptions.map(({ value, label, description }) => (
@@ -373,6 +373,7 @@ function Step1({ data, onChange, errors }) {
               </div>
             ))}
           </div>
+          {errors.activityLevel && <span className="field-error-msg">{errors.activityLevel}</span>}
         </div>
       )}
 
@@ -388,7 +389,7 @@ function Step1({ data, onChange, errors }) {
 }
 
 // ── Step 2: Diet & Health Goals ────────────────────────────────────────────
-function Step2({ data, onChange }) {
+function Step2({ data, onChange, errors = {} }) {
   const age = Number(data.age) || 0;
   const isChild = age > 0 && age < 13;
   const [openDiet, setOpenDiet] = useState(null);
@@ -449,7 +450,7 @@ function Step2({ data, onChange }) {
       <h3 className="step-section-title">Diet &amp; Health Goals</h3>
 
       {/* Diet type — 6 options in a 3-col grid with info tooltips */}
-      <div className="step-field">
+      <div id="field-dietType" className="step-field">
         <label>Diet Type</label>
         <div className="checkbox-grid-3">
           {diets.map((d) => (
@@ -466,10 +467,11 @@ function Step2({ data, onChange }) {
             </label>
           ))}
         </div>
+        {errors.dietType && <span className="field-error-msg">{errors.dietType}</span>}
       </div>
 
       {/* Health goals grouped by category */}
-      <div className="step-field" style={{ marginTop: '24px' }}>
+      <div id="field-healthGoals" className="step-field" style={{ marginTop: '24px' }}>
         <label>Health Goals <span className="field-hint">(select all that apply)</span></label>
         {isChild ? (
           <div className="checkbox-grid-2">
@@ -546,6 +548,7 @@ function Step2({ data, onChange }) {
             );
           })
         )}
+        {errors.healthGoals && <span className="field-error-msg">{errors.healthGoals}</span>}
       </div>
     </div>
   );
@@ -1093,7 +1096,7 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
 
       {/* ── Medical Information ── */}
       <h3 className="step-section-title">Medical Information</h3>
-      <p className="step-hint">Medical Conditions <span className="field-hint">(select all that apply)</span></p>
+      <p id="field-medicalConditions" className="step-hint">Medical Conditions <span className="field-hint">(select all that apply)</span></p>
 
       {conditionGroups.map(({ group, items }) => (
         <div key={group} className="condition-group">
@@ -1122,40 +1125,7 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
         />
         None
       </label>
-
-      {showPregnancy && (
-        <div className="step-field" style={{ marginTop: '20px' }}>
-          <label>Pregnancy &amp; Breastfeeding</label>
-          <div className="pregnancy-grid">
-            <div className="pregnancy-row">
-              <span className="pregnancy-label">Are you currently pregnant?</span>
-              <div className="radio-group">
-                {['Yes', 'No'].map(opt => (
-                  <label key={opt} className="radio-label">
-                    <input type="radio" name="isPregnant" value={opt}
-                      checked={data.isPregnant === opt}
-                      onChange={() => onChange('isPregnant', opt)} />
-                    {opt}
-                  </label>
-                ))}
-              </div>
-            </div>
-            <div className="pregnancy-row">
-              <span className="pregnancy-label">Are you currently breastfeeding?</span>
-              <div className="radio-group">
-                {['Yes', 'No'].map(opt => (
-                  <label key={opt} className="radio-label">
-                    <input type="radio" name="isBreastfeeding" value={opt}
-                      checked={data.isBreastfeeding === opt}
-                      onChange={() => onChange('isBreastfeeding', opt)} />
-                    {opt}
-                  </label>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {errors.medicalConditions && <span className="field-error-msg">{errors.medicalConditions}</span>}
 
       {/* ── Divider ── */}
       <div className="step-section-divider" />
@@ -1184,6 +1154,8 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
               <p className="step-hint">
                 Select any general symptoms you are currently experiencing.
               </p>
+              <span id="field-generalSymptoms"></span>
+              {errors.generalSymptoms && <span className="field-error-msg">{errors.generalSymptoms}</span>}
               <div className="symptoms-list">
                 <div className="symptom-condition-group">
                   <p className="symptom-condition-label">General Symptoms</p>
@@ -1281,8 +1253,11 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
                 const noSymptomsChecked = noSymptomsPerCondition.includes(condition);
 
                 return (
-                  <div key={condition} className="symptom-condition-group">
+                  <div key={condition} id={`field-condition-${condition}`} className="symptom-condition-group">
                     <p className="symptom-condition-label">For {condition}</p>
+                    {errors.symptomsRequired?.includes(condition) && (
+                      <span className="field-error-msg" style={{ display: 'block', marginBottom: '8px' }}>Please select symptoms or mark 'No symptoms for {condition}'.</span>
+                    )}
 
                     {!noSymptomsChecked && conditionSymptoms.map(({ name: s }) => {
                       const symptomKey = `${condition}::${s}`;
@@ -1351,9 +1326,13 @@ function Step4Lifestyle({ data, onChange, errors }) {
       return;
     }
     const filtered = current.filter(x => x !== 'None');
-    onChange('lifestyleHabits', filtered.includes(habit)
+    const isRemoving = filtered.includes(habit);
+    onChange('lifestyleHabits', isRemoving
       ? filtered.filter(x => x !== habit)
       : [...filtered, habit]);
+    if (habit === 'Recreational Drugs' && isRemoving) {
+      onChange('recreationalDrugTypes', '');
+    }
   };
 
   return (
@@ -1361,8 +1340,8 @@ function Step4Lifestyle({ data, onChange, errors }) {
       <h3 className="step-section-title">Lifestyle &amp; Additional Details</h3>
 
       {/* Sleep Quality */}
-      <div className="step-field">
-        <label>Sleep Quality</label>
+      <div id="field-sleepQuality" className="step-field">
+        <label>Sleep Quality <span className="field-hint">(optional)</span></label>
         <div className="radio-group flex-wrap">
           {SLEEP_OPTIONS.map(({ value, label }) => (
             <label key={value} className="radio-label">
@@ -1373,6 +1352,7 @@ function Step4Lifestyle({ data, onChange, errors }) {
             </label>
           ))}
         </div>
+        {errors.sleepQuality && <span className="field-error-msg">{errors.sleepQuality}</span>}
       </div>
 
       {/* Daily Water Intake */}
@@ -1394,7 +1374,7 @@ function Step4Lifestyle({ data, onChange, errors }) {
       <div className="step-field">
         <label>Lifestyle Habits <span className="field-hint">(optional)</span></label>
         <div className="radio-group flex-wrap">
-          {['Smoking', 'Alcohol', 'None'].map((habit) => (
+          {['Smoking', 'Alcohol', 'Recreational Drugs'].map((habit) => (
             <label key={habit} className="checkbox-label">
               <input type="checkbox"
                 checked={(data.lifestyleHabits || []).includes(habit)}
@@ -1403,12 +1383,29 @@ function Step4Lifestyle({ data, onChange, errors }) {
             </label>
           ))}
         </div>
+        {(data.lifestyleHabits || []).includes('Recreational Drugs') && (
+          <textarea
+            placeholder="e.g. Cannabis, MDMA, Cocaine — list any recreational drugs you use"
+            value={data.recreationalDrugTypes || ''}
+            onChange={(e) => onChange('recreationalDrugTypes', e.target.value)}
+            rows={2}
+            style={{ marginTop: '10px' }}
+          />
+        )}
+        <div className="radio-group flex-wrap" style={{ marginTop: '10px' }}>
+          <label className="checkbox-label">
+            <input type="checkbox"
+              checked={(data.lifestyleHabits || []).includes('None')}
+              onChange={() => toggleLifestyle('None')} />
+            None
+          </label>
+        </div>
       </div>
 
       {/* Current Supplement Usage */}
       <hr className="step4-divider" />
       <div className="step-field">
-        <label>Are you currently taking any supplements?</label>
+        <label>Are you currently taking any supplements? <span className="field-hint">(optional)</span></label>
         <div className="radio-group">
           {['Yes', 'No'].map((opt) => (
             <label key={opt} className="radio-label">
@@ -1431,7 +1428,7 @@ function Step4Lifestyle({ data, onChange, errors }) {
 
       {/* Recent Blood Test */}
       <div className="step-field">
-        <label>Have you had a recent blood test?</label>
+        <label>Have you had a recent blood test? <span className="field-hint">(optional)</span></label>
         <div className="radio-group">
           {['Yes', 'No'].map((opt) => (
             <label key={opt} className="radio-label">
@@ -1453,7 +1450,7 @@ function Step4Lifestyle({ data, onChange, errors }) {
       </div>
 
       <div className="step-row">
-        <div className={`step-field ${errors.currentMedications ? 'field-error' : ''}`}>
+        <div id="field-currentMedications" className={`step-field ${errors.currentMedications ? 'field-error' : ''}`}>
           <label>Current Medications <span className="field-hint">(optional)</span></label>
           <textarea
             placeholder="List any medications you're currently taking"
@@ -1462,7 +1459,7 @@ function Step4Lifestyle({ data, onChange, errors }) {
             rows={3} />
           {errors.currentMedications && <span className="field-error-msg">{errors.currentMedications}</span>}
         </div>
-        <div className={`step-field ${errors.allergies ? 'field-error' : ''}`}>
+        <div id="field-allergies" className={`step-field ${errors.allergies ? 'field-error' : ''}`}>
           <label>Known Allergies <span className="field-hint">(optional)</span></label>
           <textarea
             placeholder="List any known allergies (food, medication, etc.)"
@@ -1504,19 +1501,44 @@ function Step4Lifestyle({ data, onChange, errors }) {
         </div>
       </div>
 
-      {/* Health Description */}
-      <div className="step-field">
-        <label>Describe Your Current Health Concerns <span className="field-hint">(optional)</span></label>
-        <textarea
-          placeholder="Describe how you've been feeling lately in your own words — e.g. 'I've been feeling exhausted even after 8 hours of sleep, my joints ache in the morning, and I feel foggy at work...'"
-          value={data.feelingDescription || ''}
-          onChange={(e) => onChange('feelingDescription', e.target.value)}
-          rows={4} style={{ resize: 'vertical' }}
-        />
-        <span className="field-hint" style={{ marginTop: '4px', display: 'block' }}>
-          The more detail you provide, the more personalized your recommendations will be.
-        </span>
-      </div>
+      {/* Pregnancy & Breastfeeding — only for Female / Prefer not to say */}
+      {(data.gender === 'Female' || data.gender === 'Prefer not to say') && (
+        <>
+          <hr className="step4-divider" />
+          <div className="step-field">
+            <label>Pregnancy &amp; Breastfeeding <span className="field-hint">(optional)</span></label>
+            <div className="pregnancy-grid">
+              <div className="pregnancy-row">
+                <span className="pregnancy-label">Are you currently pregnant?</span>
+                <div className="radio-group">
+                  {['Yes', 'No'].map(opt => (
+                    <label key={opt} className="radio-label">
+                      <input type="radio" name="isPregnant" value={opt}
+                        checked={data.isPregnant === opt}
+                        onChange={() => onChange('isPregnant', opt)} />
+                      {opt}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="pregnancy-row">
+                <span className="pregnancy-label">Are you currently breastfeeding?</span>
+                <div className="radio-group">
+                  {['Yes', 'No'].map(opt => (
+                    <label key={opt} className="radio-label">
+                      <input type="radio" name="isBreastfeeding" value={opt}
+                        checked={data.isBreastfeeding === opt}
+                        onChange={() => onChange('isBreastfeeding', opt)} />
+                      {opt}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
     </div>
   );
 }
@@ -1543,28 +1565,66 @@ function validateStep(step, formData) {
     const heightUnit = formData.heightUnit || 'cm';
     if (heightUnit === 'cm') {
       if (!formData.height || Number(formData.height) < 30 || Number(formData.height) > 300)
-        errors.height = 'Please enter a valid height (30–300 cm).';
+        errors.height = 'Please enter a valid height (30–00 cm).';
     } else {
       if (!formData.heightFt || Number(formData.heightFt) < 1)
         errors.height = 'Please enter a valid height.';
     }
 
-    // BMI sanity check (always uses stored cm/kg values)
     if (formData.weight && formData.height) {
       const weightKg = weightUnit === 'lbs' ? lbsToKg(formData.weight) : Number(formData.weight);
       const bmi = weightKg / ((Number(formData.height) / 100) ** 2);
       if (bmi < 5 || bmi > 80)
         errors.weight = 'The height/weight combination seems impossible. Please check your values.';
     }
+
+    // Physical Activity Level required for users 13+
+    const age = Number(formData.age) || 0;
+    if (age >= 13 && !formData.activityLevel)
+      errors.activityLevel = 'Please select your physical activity level.';
+  }
+
+  if (step === 2) {
+    if (!formData.dietType)
+      errors.dietType = 'Please select a diet type.';
+    if (!formData.healthGoals || formData.healthGoals.length === 0)
+      errors.healthGoals = 'Please select at least one health goal.';
   }
 
   if (step === 3) {
+    // Must select at least one condition (including None)
+    if (!formData.medicalConditions || formData.medicalConditions.length === 0)
+      errors.medicalConditions = 'Please select your medical conditions, or select None.';
+
+    const noneSelected = (formData.medicalConditions || []).includes('None');
+    const selectedConditions = (formData.medicalConditions || []).filter(c => c !== 'None');
+
+    // If None selected — must either select a general symptom OR check "None — no symptoms"
+    if (noneSelected) {
+      const hasGeneralSymptom = (formData.symptoms || []).some(s => s.startsWith('General::'));
+      const markedNoSymptoms = (formData.symptoms || []).includes('No current symptoms');
+      if (!hasGeneralSymptom && !markedNoSymptoms)
+        errors.generalSymptoms = 'Please select your current symptoms, or mark that you have none.';
+    }
+
+    // If specific conditions selected — must either select symptoms or mark no symptoms for each
+    if (selectedConditions.length > 0) {
+      const noSymptomsFor = formData.noSymptomsForConditions || [];
+      const conditionsWithoutAnswer = selectedConditions.filter(c => {
+        const hasSymptom = (formData.symptoms || []).some(s => s.startsWith(c + '::'));
+        const markedNoSymptoms = noSymptomsFor.includes(c);
+        return !hasSymptom && !markedNoSymptoms;
+      });
+      if (conditionsWithoutAnswer.length > 0)
+        errors.symptomsRequired = conditionsWithoutAnswer;
+    }
+
+    // All checked symptoms must have a severity
     const symptoms = (formData.symptoms || []).filter(s => s !== 'No current symptoms');
     const severity = formData.symptomSeverity || {};
     const missing = symptoms.filter(s => !severity[s]);
-    if (missing.length > 0) {
-      errors.symptomSeverity = missing; // array of symptom names missing severity
-    }
+    if (missing.length > 0)
+      errors.symptomSeverity = missing;
   }
 
   if (step === 4) {
@@ -1596,16 +1656,32 @@ const EMPTY_FORM = {
   stressLevel: '', sleepQuality: '', waterIntake: '',
   medicalConditions: [], currentMedications: '', allergies: '',
   lifestyleHabits: [],
+  recreationalDrugTypes: '',
   isPregnant: '', isBreastfeeding: '',
   // Keep pregnancyStatus for backward compat with backend
   pregnancyStatus: '',
   takingSupplements: '', currentSupplements: '',
   recentBloodTest: '',
-  feelingDescription: '',
   sunExposure: '',
   proteinIntake: '',
   bloodTestResults: '',
 };
+
+// ── AI Loading Step item (animated check-in) ──────────────────────────────
+function AILoadingStep({ icon, label, delay }) {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setVisible(true), delay);
+    return () => clearTimeout(t);
+  }, [delay]);
+  return (
+    <div className={`ai-loading-step ${visible ? 'ai-loading-step-visible' : ''}`}>
+      <span className="ai-loading-step-icon">{icon}</span>
+      <span className="ai-loading-step-label">{label}</span>
+      {visible && <span className="ai-loading-step-check">✓</span>}
+    </div>
+  );
+}
 
 function AssessmentPage() {
   const navigate = useNavigate();
@@ -1656,14 +1732,29 @@ function AssessmentPage() {
     const stepErrors = validateStep(step, formData);
     if (Object.keys(stepErrors).length > 0) {
       setErrors(stepErrors);
-      // Scroll to first symptom missing severity
-      if (stepErrors.symptomSeverity?.length > 0) {
+
+      // Scroll to the first error so the user sees what's missing
+      const scrollToId = (id) => {
+        const el = document.getElementById(id);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      };
+
+      if (stepErrors.age)               scrollToId('field-age');
+      else if (stepErrors.gender)        scrollToId('field-gender');
+      else if (stepErrors.weight)        scrollToId('field-weight');
+      else if (stepErrors.height)        scrollToId('field-height');
+      else if (stepErrors.activityLevel) scrollToId('field-activityLevel');
+      else if (stepErrors.dietType)      scrollToId('field-dietType');
+      else if (stepErrors.healthGoals)   scrollToId('field-healthGoals');
+      else if (stepErrors.medicalConditions) scrollToId('field-medicalConditions');
+      else if (stepErrors.generalSymptoms)   scrollToId('field-generalSymptoms');
+      else if (stepErrors.symptomsRequired?.length > 0) scrollToId(`field-condition-${stepErrors.symptomsRequired[0]}`);
+      else if (stepErrors.symptomSeverity?.length > 0) {
         const firstMissing = stepErrors.symptomSeverity[0];
         const el = symptomRowRefs.current[firstMissing];
-        if (el) {
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
+
       return;
     }
     setErrors({});
@@ -1685,6 +1776,14 @@ function AssessmentPage() {
     const stepErrors = validateStep(step, formData);
     if (Object.keys(stepErrors).length > 0) {
       setErrors(stepErrors);
+      // Scroll to the first error field in step 4
+      const scrollToId = (id) => {
+        const el = document.getElementById(id);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      };
+      if (stepErrors.currentMedications)   scrollToId('field-currentMedications');
+      else if (stepErrors.allergies)        scrollToId('field-allergies');
+      else cardTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
     }
     if (!hasMinimumData(formData)) {
@@ -1780,7 +1879,28 @@ function AssessmentPage() {
           <span className="step-counter">Step {step} of {TOTAL_STEPS}</span>
         </div>
 
-        <div className="assessment-card" ref={cardTopRef}>
+        {/* ── AI Loading Screen ── */}
+        {submitting && (
+          <div className="ai-loading-screen">
+            <div className="ai-loading-card">
+              <div className="ai-loading-spinner">
+                <div className="ai-spinner-ring" />
+                <span className="ai-spinner-icon">🧬</span>
+              </div>
+              <h3 className="ai-loading-title">Analyzing Your Health Profile</h3>
+              <p className="ai-loading-sub">Our AI is building your personalized supplement plan...</p>
+              <div className="ai-loading-steps">
+                <AILoadingStep icon="🔍" label="Reading your symptoms & goals" delay={0} />
+                <AILoadingStep icon="💊" label="Matching supplements to your profile" delay={600} />
+                <AILoadingStep icon="⚗️" label="Checking interactions & dosages" delay={1200} />
+                <AILoadingStep icon="📋" label="Generating your wellness plan" delay={1800} />
+              </div>
+              <p className="ai-loading-note">This usually takes 10–20 seconds</p>
+            </div>
+          </div>
+        )}
+
+        <div className="assessment-card" ref={cardTopRef} style={{ display: submitting ? 'none' : undefined }}>
           {submitError && <p className="auth-error">{submitError}</p>}
 
           {step === 1 && <Step1 data={formData} onChange={handleChange} errors={errors} />}
@@ -1796,7 +1916,7 @@ function AssessmentPage() {
               <button className="btn-next" onClick={handleNext}>Next →</button>
             ) : (
               <button className="btn-next" onClick={handleSubmit} disabled={submitting}>
-                {submitting ? 'Analyzing...' : 'Get Recommendations →'}
+                Get Recommendations →
               </button>
             )}
           </div>

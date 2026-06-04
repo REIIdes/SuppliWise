@@ -5,8 +5,55 @@ import { exportResultsToPDF } from '../utils/exportPDF';
 import { getSupplementDetail } from '../api';
 import './ResultsPage.css';
 
-const priorityColor = { High: '#16a34a', Medium: '#d97706', Low: '#374151' };
-const priorityIcon = { High: '🔴', Medium: '🟡', Low: '🟢' };
+// Normalize special characters that may render as ? in some environments
+function fixChars(str) {
+  if (!str) return str;
+  return String(str)
+    // Fix corrupted em/en dash stored as literal '?' in DB (e.g. "Week 1 ? Build", "Hotline ? Call")
+    .replace(/([a-zA-Z0-9])\s?\?\s?([a-zA-Z0-9])/g, '$1 - $2')
+    // Standard Unicode em/en dash
+    .replace(/[\u2013\u2014]/g, ' - ')
+    // Smart quotes
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    // Ellipsis
+    .replace(/\u2026/g, '...')
+    // Strip remaining non-ASCII that aren't safe latin chars
+    .replace(/[^\x00-\xFF]/g, '');
+}
+
+// Detect placeholder/template evidence text the AI failed to fill in
+function isPlaceholderEvidence(text) {
+  if (!text) return true;
+  const t = text.toLowerCase();
+  return (
+    t.includes('author et al') ||
+    t.includes('(year)') ||
+    t.includes('xxxxxxx') ||
+    t.includes('source 2 if applicable') ||
+    t.includes('brief finding') ||
+    t.includes('journal name') ||
+    t.includes('cite 1-2') ||
+    t.length < 15
+  );
+}
+
+// Sanitize triggeredBy — normalize severity labels in parentheses to only Mild/Moderate/Severe
+function cleanTriggeredBy(str) {
+  if (!str) return str;
+  // Replace any parenthetical severity that isn't Mild/Moderate/Severe with just the word
+  return fixChars(str).replace(/\(([^)]+)\)/g, (match, inner) => {
+    const normalized = inner.trim();
+    if (/^(Mild|Moderate|Severe)$/i.test(normalized)) return `(${normalized})`;
+    // Map common AI paraphrases back to proper labels
+    if (/significant|severe|critical|extreme/i.test(normalized)) return '(Severe)';
+    if (/moderate|medium|notable|marked/i.test(normalized)) return '(Moderate)';
+    if (/mild|slight|minor|low/i.test(normalized)) return '(Mild)';
+    // If not a severity label, keep as-is but run fixChars
+    return `(${fixChars(normalized)})`;
+  });
+}
+const priorityColor = { High: '#16a34a', Medium: '#d97706', Low: '#374151' };const priorityIcon = { High: '🔴', Medium: '🟡', Low: '🟢' };
 const severityColor = { Severe: '#dc2626', Moderate: '#d97706', 'Mild to Moderate': '#f59e0b', Mild: '#22c55e', Preventive: '#6b7280' };
 
 const SUPPLEMENT_ICONS = {
@@ -98,6 +145,8 @@ const FOOD_SPECIFICS = {
 
 function expandFoodItem(item) {
   const lower = item.toLowerCase().trim();
+  // If already expanded (has parentheses with examples), don't double-expand
+  if (item.includes('(') && item.includes(')')) return item;
   for (const [key, expanded] of Object.entries(FOOD_SPECIFICS)) {
     if (lower === key || lower.startsWith(key + ' ') || lower.endsWith(' ' + key)) {
       // Preserve original casing of first letter
@@ -368,11 +417,18 @@ function SupplementCard({ rec, index = 0, expanded, onToggle, onOpenDetail }) {
       {rec.triggeredBy && (
         <div className="rec-triggered">
           <span className="rec-triggered-label">Recommended for:</span>
-          {rec.triggeredBy}
+          {cleanTriggeredBy(rec.triggeredBy)}
         </div>
       )}
 
-      <p className="rec-reason">{rec.reason}</p>
+      {rec.conditionContext && (
+        <div className="rec-condition-context">
+          <span className="rec-condition-context-icon">🩺</span>
+          <p>{fixChars(rec.conditionContext)}</p>
+        </div>
+      )}
+
+      <p className="rec-reason">{fixChars(rec.reason)}</p>
 
       <div className="rec-details">
         <div className="rec-detail">
@@ -404,10 +460,10 @@ function SupplementCard({ rec, index = 0, expanded, onToggle, onOpenDetail }) {
 
       {expanded && (
         <div className="rec-expanded">
-          {rec.evidence && (
+          {rec.evidence && !isPlaceholderEvidence(rec.evidence) && (
             <div className="rec-expanded-section rec-expanded-evidence">
               <span className="rec-expanded-label">📚 Evidence & References</span>
-              <p>{rec.evidence}</p>
+              <p>{fixChars(rec.evidence)}</p>
             </div>
           )}
           {rec.foods && (
@@ -419,7 +475,7 @@ function SupplementCard({ rec, index = 0, expanded, onToggle, onOpenDetail }) {
           {rec.sideEffects && (
             <div className="rec-expanded-section rec-expanded-sideeffects">
               <span className="rec-expanded-label">⚠ Side Effects &amp; Safe Limits</span>
-              <p>{rec.sideEffects}</p>
+              <p>{fixChars(rec.sideEffects)}</p>
             </div>
           )}
         </div>
@@ -432,6 +488,11 @@ function ResultsPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { recommendations: r, assessment, garbageFields = [] } = location.state || {};
+
+  // Scroll to top when results page mounts
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }, []);
 
   // Get current user email from localStorage for cache scoping (unique per account)
   const currentUserId = (() => {
@@ -545,7 +606,7 @@ function ResultsPage() {
         {/* Summary */}
         <div className="results-header">
           <h2>Your Personalized Health Plan</h2>
-          <p className="results-summary">{r.summary}</p>
+          <p className="results-summary">{fixChars(r.summary)}</p>
         </div>
 
         {/* Garbage input warning */}
@@ -631,13 +692,13 @@ function ResultsPage() {
 
                   return r.dailySchedule.map((slot, i) => (
                     <div key={i} className="schedule-slot">
-                      <div className="schedule-time">{slot.time}</div>
+                      <div className="schedule-time">{fixChars(slot.time)}</div>
                       <div className="schedule-supplements">
                         {slot.supplements.map((s, si) => {
                           const dosage = getDosage(s);
                           return (
                             <span key={si} className="schedule-pill">
-                              {s}{dosage ? <span className="schedule-pill-dosage"> — {dosage}</span> : ''}
+                              {fixChars(s)}{dosage ? <span className="schedule-pill-dosage"> - {fixChars(dosage)}</span> : ''}
                             </span>
                           );
                         })}
@@ -658,7 +719,7 @@ function ResultsPage() {
                       <div key={i} className="recovery-phase">
                         <div className="recovery-phase-header">
                           <span className="recovery-phase-num">{i + 1}</span>
-                          <p className="recovery-phase-title">{phase}</p>
+                          <p className="recovery-phase-title">{fixChars(phase)}</p>
                         </div>
                       </div>
                     );
@@ -676,14 +737,14 @@ function ResultsPage() {
                       <div className="recovery-phase-header">
                         <span className="recovery-phase-num">{i + 1}</span>
                         <div>
-                          <p className="recovery-phase-title">{phase.phase || phase.week}</p>
-                          {phase.focus && <p className="recovery-phase-focus">{phase.focus}</p>}
+                          <p className="recovery-phase-title">{fixChars(phase.phase || phase.week)}</p>
+                          {phase.focus && <p className="recovery-phase-focus">{fixChars(phase.focus)}</p>}
                         </div>
                       </div>
                       {allSteps.length > 0 && (
                         <ul className="recovery-steps">
                           {allSteps.map((step, si) => (
-                            <li key={si}>{step}</li>
+                            <li key={si}>{fixChars(step)}</li>
                           ))}
                         </ul>
                       )}
@@ -692,7 +753,7 @@ function ResultsPage() {
                           <span className="recovery-expected-label">✦ Expected Changes</span>
                           <ul>
                             {expected.map((e, ei) => (
-                              <li key={ei}>{e}</li>
+                              <li key={ei}>{fixChars(e)}</li>
                             ))}
                           </ul>
                         </div>
@@ -750,6 +811,33 @@ function ResultsPage() {
           <div className="results-warnings">
             <h4>⚠️ Important Warnings</h4>
             <ul>{r.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
+          </div>
+        )}
+
+        {/* Seeking Support — shown only when recreational drugs are reported */}
+        {r.seekingSupport?.include && (
+          <div className="results-seeking-support">
+            <div className="seeking-support-header">
+              <span className="seeking-support-icon">💙</span>
+              <h4>{fixChars(r.seekingSupport.title)}</h4>
+            </div>
+            <p className="seeking-support-intro">{fixChars(r.seekingSupport.intro)}</p>
+            <div className="seeking-support-resources">
+              {(r.seekingSupport.resources || []).map((res, i) => (
+                <a
+                  key={i}
+                  href={res.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="seeking-support-card"
+                >
+                  <span className="seeking-support-label">{fixChars(res.label)}</span>
+                  <span className="seeking-support-name">{fixChars(res.name)}</span>
+                  <p className="seeking-support-desc">{fixChars(res.description)}</p>
+                  <span className="seeking-support-link">Visit resource →</span>
+                </a>
+              ))}
+            </div>
           </div>
         )}
 

@@ -137,18 +137,6 @@ export const sendChatMessage = async (message, context = [], history = []) => {
   return data;
 };
 
-// Polish a free-text health description using AI
-export const polishDescription = async (text) => {
-  const res = await fetch(`${BASE_URL}/polish`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
-  });
-  const data = await parseJSON(res);
-  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
-  return data;
-};
-
 // Fetch detailed supplement information (assessment-aware)
 export const getSupplementDetail = async (supplementName, context = null) => {
   const res = await fetch(`${BASE_URL}/supplement-detail`, {

@@ -5,7 +5,38 @@ import { getHistory, deleteAssessment } from '../api';
 import { exportResultsToPDF } from '../utils/exportPDF';
 import './HistoryPage.css';
 
-const priorityColor = { High: '#dc2626', Medium: '#d97706', Low: '#374151' };
+// Normalize special characters that may render as ? in some environments
+function fixChars(str) {
+  if (!str) return str;
+  return String(str)
+    // Fix corrupted em/en dash stored as literal '?' in DB (e.g. "Week 1 ? Build", "Hotline ? Call")
+    .replace(/([a-zA-Z0-9])\s?\?\s?([a-zA-Z0-9])/g, '$1 - $2')
+    // Standard Unicode em/en dash
+    .replace(/[\u2013\u2014]/g, ' - ')
+    // Smart quotes
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    // Ellipsis
+    .replace(/\u2026/g, '...')
+    // Strip remaining unsafe non-ASCII
+    .replace(/[^\x00-\xFF]/g, '');
+}
+
+// Detect placeholder/template evidence text the AI failed to fill in
+function isPlaceholderEvidence(text) {
+  if (!text) return true;
+  const t = text.toLowerCase();
+  return (
+    t.includes('author et al') ||
+    t.includes('(year)') ||
+    t.includes('xxxxxxx') ||
+    t.includes('source 2 if applicable') ||
+    t.includes('brief finding') ||
+    t.includes('journal name') ||
+    t.includes('cite 1-2') ||
+    t.length < 15
+  );
+}
 
 const ACTIVITY_LABELS = {
   Sedentary: 'Sedentary / No Exercise',
@@ -388,7 +419,7 @@ function HistoryPage() {
                           onClick={() => setTab(item._id, 'meals')}>🍽️ Meals</button>
                         <button className={`history-tab ${getTab(item._id) === 'lifestyle' ? 'active' : ''}`}
                           onClick={() => setTab(item._id, 'lifestyle')}>🌿 Lifestyle</button>
-                        {(item.aiResults.warnings?.length > 0 || item.aiResults.avoidList?.length > 0) && (
+                        {(item.aiResults.warnings?.length > 0 || item.aiResults.avoidList?.length > 0 || item.aiResults.seekingSupport?.include) && (
                           <button className={`history-tab history-tab-warn ${getTab(item._id) === 'warnings' ? 'active' : ''}`}
                             onClick={() => setTab(item._id, 'warnings')}>⚠️ Warnings</button>
                         )}
@@ -429,12 +460,6 @@ function HistoryPage() {
                           <div className="tag-list">{item.medicalConditions.map(c => <span key={c} className="tag tag-orange">{c}</span>)}</div>
                         </div>
                       )}
-                      {item.feelingDescription && (
-                        <div className="history-section">
-                          <p className="history-section-label">How they felt</p>
-                          <p className="history-feeling">"{item.feelingDescription}"</p>
-                        </div>
-                      )}
                       {item.aiResults?.summary && (
                         <div className="history-section">
                           <p className="history-section-label">AI Summary</p>
@@ -467,7 +492,7 @@ function HistoryPage() {
                                     {rec.priority} Priority
                                   </span>
                                 </div>
-                                <p className="history-rec-reason">{rec.reason}</p>
+                                <p className="history-rec-reason">{fixChars(rec.reason)}</p>
                                 <div className="history-rec-meta">
                                   <span><b>Dosage:</b> {rec.dosage}</span>
                                   <span><b>Timing:</b> {rec.timing}</span>
@@ -475,14 +500,14 @@ function HistoryPage() {
                                 {rec.interactions && rec.interactions !== 'None identified' && (
                                   <p className="history-rec-interaction">⚠ {rec.interactions}</p>
                                 )}
-                                {rec.evidence && (
-                                  <p className="history-rec-evidence history-rec-evidence-blue">📚 <strong>Evidence:</strong> {rec.evidence}</p>
+                                {rec.evidence && !isPlaceholderEvidence(rec.evidence) && (
+                                  <p className="history-rec-evidence history-rec-evidence-blue">📚 <strong>Evidence:</strong> {fixChars(rec.evidence)}</p>
                                 )}
                                 {rec.foods && (
                                   <p className="history-rec-evidence history-rec-foods">🥗 <strong>Food Sources:</strong> {expandFoodText(rec.foods)}</p>
                                 )}
                                 {rec.sideEffects && (
-                                  <p className="history-rec-evidence history-rec-sideeffects">⚠ <strong>Side Effects &amp; Safe Limits:</strong> {rec.sideEffects}</p>
+                                  <p className="history-rec-evidence history-rec-sideeffects">⚠ <strong>Side Effects &amp; Safe Limits:</strong> {fixChars(rec.sideEffects)}</p>
                                 )}
                               </div>
                             ))}
@@ -537,13 +562,13 @@ function HistoryPage() {
                           <div className="history-schedule">
                             {item.aiResults.dailySchedule.map((slot, si) => (
                               <div key={si} className="history-schedule-slot">
-                                <div className="history-schedule-time">{slot.time}</div>
+                                <div className="history-schedule-time">{fixChars(slot.time)}</div>
                                 <div className="history-schedule-pills">
                                   {slot.supplements.map((s, sj) => {
                                     const dosage = getDosage(s);
                                     return (
                                       <span key={sj} className="history-schedule-pill">
-                                        {s}{dosage ? <span className="history-schedule-pill-dosage"> — {dosage}</span> : ''}
+                                        {fixChars(s)}{dosage ? <span className="history-schedule-pill-dosage"> - {fixChars(dosage)}</span> : ''}
                                       </span>
                                     );
                                   })}
@@ -565,7 +590,7 @@ function HistoryPage() {
                                 <div key={si} className="history-recovery-phase">
                                   <div className="history-recovery-header">
                                     <span className="history-recovery-num">{si + 1}</span>
-                                    <p className="history-recovery-title">{phase}</p>
+                                    <p className="history-recovery-title">{fixChars(phase)}</p>
                                   </div>
                                 </div>
                               );
@@ -581,20 +606,20 @@ function HistoryPage() {
                                 <div className="history-recovery-header">
                                   <span className="history-recovery-num">{si + 1}</span>
                                   <div>
-                                    <p className="history-recovery-title">{phase.phase || phase.week}</p>
-                                    {phase.focus && <p className="history-recovery-focus">{phase.focus}</p>}
+                                    <p className="history-recovery-title">{fixChars(phase.phase || phase.week)}</p>
+                                    {phase.focus && <p className="history-recovery-focus">{fixChars(phase.focus)}</p>}
                                   </div>
                                 </div>
                                 {steps.length > 0 && (
                                   <ul className="history-recovery-steps">
-                                    {steps.map((step, ti) => <li key={ti}>{step}</li>)}
+                                    {steps.map((step, ti) => <li key={ti}>{fixChars(step)}</li>)}
                                   </ul>
                                 )}
                                 {expected.length > 0 && (
                                   <div className="history-recovery-expected">
                                     <span className="history-recovery-expected-label">✦ Expected Changes</span>
                                     <ul>
-                                      {expected.map((e, ei) => <li key={ei}>{e}</li>)}
+                                      {expected.map((e, ei) => <li key={ei}>{fixChars(e)}</li>)}
                                     </ul>
                                   </div>
                                 )}
@@ -668,6 +693,24 @@ function HistoryPage() {
                       )}
                       {!item.aiResults.warnings?.length && !item.aiResults.avoidList?.length && (
                         <p style={{ color: '#6b7280', fontSize: '13px', padding: '8px 0' }}>No warnings or supplements to avoid for this assessment.</p>
+                      )}
+                      {item.aiResults.seekingSupport?.include && (
+                        <div className="history-seeking-support">
+                          <div className="history-seeking-support-header">
+                            <span>💙</span>
+                            <span>{fixChars(item.aiResults.seekingSupport.title)}</span>
+                          </div>
+                          <p className="history-seeking-support-intro">{fixChars(item.aiResults.seekingSupport.intro)}</p>
+                          <div className="history-seeking-support-resources">
+                            {(item.aiResults.seekingSupport.resources || []).map((res, ri) => (
+                              <a key={ri} href={res.url} target="_blank" rel="noopener noreferrer" className="history-seeking-support-card">
+                                <span className="history-seeking-label">{fixChars(res.label)}</span>
+                                <span className="history-seeking-name">{fixChars(res.name)}</span>
+                                <p className="history-seeking-desc">{fixChars(res.description)}</p>
+                              </a>
+                            ))}
+                          </div>
+                        </div>
                       )}
                     </div>
                   )}
