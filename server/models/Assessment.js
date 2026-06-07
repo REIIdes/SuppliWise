@@ -9,7 +9,7 @@ const assessmentSchema = new mongoose.Schema(
     },
     // Step 1 - Basic Information
     age: { type: Number },
-    gender: { type: String, enum: ['Male', 'Female', 'Other'] },
+    gender: { type: String, enum: ['Male', 'Female'] },
     weight: { type: Number },
     height: { type: Number },
     activityLevel: { type: String },

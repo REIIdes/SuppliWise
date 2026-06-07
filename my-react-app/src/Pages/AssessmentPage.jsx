@@ -98,6 +98,35 @@ function DietTooltip({ diet, openDiet, onToggle }) {
   );
 }
 
+// Generic info tooltip — same style as DietTooltip, used for activity levels and health goals
+function InfoTooltip({ id, text, openId, onToggle }) {
+  const visible = openId === id;
+  return (
+    <span className="diet-tooltip-wrap" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        className="diet-info-btn"
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggle(visible ? null : id); }}
+        aria-label="More info"
+      >
+        ?
+      </button>
+      {visible && (
+        <span className="diet-tooltip-box">
+          {text}
+          <button
+            type="button"
+            className="diet-tooltip-close"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggle(null); }}
+          >
+            ✕
+          </button>
+        </span>
+      )}
+    </span>
+  );
+}
+
 // ── Condition info tooltips ──────────────────────────────────────────────
 const CONDITION_INFO = {
   'Hypertension (High Blood Pressure)': 'Blood pressure consistently above 130/80 mmHg. The heart works harder than normal to pump blood, which can strain blood vessels and organs over time.',
@@ -154,6 +183,14 @@ function ConditionTooltip({ condition, openCondition, onToggle }) {
 function Step1({ data, onChange, errors }) {
   const age = Number(data.age) || 0;
   const showActivityLevel = age === 0 || age >= 13;
+  const [openActivity, setOpenActivity] = useState(null);
+
+  useEffect(() => {
+    if (!openActivity) return;
+    const handleClick = () => setOpenActivity(null);
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  }, [openActivity]);
 
   // Weight unit toggle — default kg
   const weightUnit = data.weightUnit || 'kg';
@@ -245,7 +282,7 @@ function Step1({ data, onChange, errors }) {
         <div id="field-gender" className={`step-field ${errors.gender ? 'field-error' : ''}`}>
           <label>Gender <span className="required-star">*</span></label>
           <div className="gender-pill-group">
-            {['Male', 'Female', 'Prefer not to say'].map((g) => (
+            {['Male', 'Female'].map((g) => (
               <button
                 key={g}
                 type="button"
@@ -366,10 +403,8 @@ function Step1({ data, onChange, errors }) {
                     onChange={() => onChange('activityLevel', value)}
                   />
                   {label}
+                  <InfoTooltip id={value} text={description} openId={openActivity} onToggle={setOpenActivity} />
                 </label>
-                {data.activityLevel === value && (
-                  <p className="activity-desc">{description}</p>
-                )}
               </div>
             ))}
           </div>
@@ -392,6 +427,7 @@ function Step1({ data, onChange, errors }) {
 function Step2({ data, onChange, errors = {} }) {
   const age = Number(data.age) || 0;
   const isChild = age > 0 && age < 13;
+  const [openGoal, setOpenGoal] = useState(null);
   const [openDiet, setOpenDiet] = useState(null);
 
   // Close tooltip when clicking anywhere outside it
@@ -401,6 +437,13 @@ function Step2({ data, onChange, errors = {} }) {
     document.addEventListener('click', handleClick);
     return () => document.removeEventListener('click', handleClick);
   }, [openDiet]);
+
+  useEffect(() => {
+    if (!openGoal) return;
+    const handleClick = () => setOpenGoal(null);
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  }, [openGoal]);
 
   // 6 diet types for a balanced grid
   const diets = ['Omnivore', 'Vegan', 'Keto', 'Paleo', 'Mediterranean', 'Carnivore', 'DASH', 'Flexitarian', 'Pescatarian'];
@@ -512,10 +555,8 @@ function Step2({ data, onChange, errors = {} }) {
                                   onChange={() => toggleGoal(label)}
                                 />
                                 {label}
+                                {description && <InfoTooltip id={label} text={description} openId={openGoal} onToggle={setOpenGoal} />}
                               </label>
-                              {checked && description && (
-                                <p className="goal-desc">{description}</p>
-                              )}
                             </div>
                           );
                         })}
@@ -535,10 +576,8 @@ function Step2({ data, onChange, errors = {} }) {
                               onChange={() => toggleGoal(label)}
                             />
                             {label}
+                            {description && <InfoTooltip id={label} text={description} openId={openGoal} onToggle={setOpenGoal} />}
                           </label>
-                          {checked && description && (
-                            <p className="goal-desc">{description}</p>
-                          )}
                         </div>
                       );
                     })}
@@ -916,7 +955,7 @@ const ALL_SYMPTOMS = [
   { name: 'Pelvic Pain',                   genders: ['Female'],                              conditions: ['PCOS'] },
 
   // ── Male / Neutral ────────────────────────────────────────────────────────
-  { name: 'Low Libido',                    genders: ['Male', 'Prefer not to say'],           conditions: ['Diabetes', 'Hypertension (High Blood Pressure)', 'Depression', 'Thyroid Disorders'] },
+  { name: 'Low Libido',                    genders: ['Male'],           conditions: ['Diabetes', 'Hypertension (High Blood Pressure)', 'Depression', 'Thyroid Disorders'] },
 ];
 
 const SEVERITY_OPTIONS = ['Mild', 'Moderate', 'Severe'];
@@ -966,7 +1005,7 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
       items: [
         'Thyroid Disorders', 'Anemia', 'Chronic Kidney Disease',
         'Liver Disease', 'Migraine',
-        ...(data.gender === 'Female' || data.gender === 'Prefer not to say' ? ['PCOS'] : []),
+        ...(data.gender === 'Female' ? ['PCOS'] : []),
       ],
     },
   ];
@@ -1018,7 +1057,7 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.gender]);
 
-  const showPregnancy = data.gender === 'Female' || data.gender === 'Prefer not to say';
+  const showPregnancy = data.gender === 'Female';
 
   // ── Symptoms ──
   const selectedSymptoms = data.symptoms || [];
@@ -1501,8 +1540,8 @@ function Step4Lifestyle({ data, onChange, errors }) {
         </div>
       </div>
 
-      {/* Pregnancy & Breastfeeding — only for Female / Prefer not to say */}
-      {(data.gender === 'Female' || data.gender === 'Prefer not to say') && (
+      {/* Pregnancy & Breastfeeding — only for Female */}
+      {data.gender === 'Female' && (
         <>
           <hr className="step4-divider" />
           <div className="step-field">
