@@ -57,6 +57,7 @@ const friendlyError = (status, serverMessage, isLoginAttempt = false) => {
   switch (status) {
     case 403: return 'You do not have permission to do that.';
     case 404: return 'The requested resource was not found.';
+    case 413: return 'File is too large. Please use a smaller image (profile picture: max 2MB, banner: max 3MB).';
     case 429: return 'Too many requests. Please wait a moment and try again.';
     case 500:
     case 502:

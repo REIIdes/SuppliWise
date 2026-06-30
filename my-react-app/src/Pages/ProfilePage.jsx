@@ -6,6 +6,7 @@ import './ProfilePage.css';
 function ProfilePage() {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
+  const bannerInputRef = useRef(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -16,6 +17,8 @@ function ProfilePage() {
   const [pendingEmailChange, setPendingEmailChange] = useState('');
   const [profilePicture, setProfilePicture] = useState('');
   const [profilePicturePreview, setProfilePicturePreview] = useState('');
+  const [bannerPicture, setBannerPicture] = useState('');
+  const [bannerPicturePreview, setBannerPicturePreview] = useState('');
   const [resendCooldown, setResendCooldown] = useState(0);
   const [resendTimer, setResendTimer] = useState(null);
   const [otpTimeLeft, setOtpTimeLeft] = useState(600); // 10 minutes in seconds
@@ -56,6 +59,8 @@ function ProfilePage() {
       }));
       setProfilePicture(user.profilePicture || '');
       setProfilePicturePreview(user.profilePicture || '');
+      setBannerPicture(user.bannerPicture || '');
+      setBannerPicturePreview(user.bannerPicture || '');
     }
 
     // Cleanup timer on unmount
@@ -140,6 +145,45 @@ function ProfilePage() {
     setProfilePicturePreview('');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
+    }
+  };
+
+  const handleBannerPictureChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      setError('Please select an image file.');
+      return;
+    }
+
+    // Validate file size (max 3MB for banner)
+    if (file.size > 3 * 1024 * 1024) {
+      setError('Banner image size must be less than 3MB.');
+      return;
+    }
+
+    // Create preview
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setBannerPicturePreview(reader.result);
+    };
+    reader.readAsDataURL(file);
+
+    setError('');
+  };
+
+  const handleBannerPictureClick = () => {
+    if (isEditing) {
+      bannerInputRef.current?.click();
+    }
+  };
+
+  const handleRemoveBannerPicture = () => {
+    setBannerPicturePreview('');
+    if (bannerInputRef.current) {
+      bannerInputRef.current.value = '';
     }
   };
 
@@ -320,6 +364,15 @@ function ProfilePage() {
         }
       }
 
+      // Add banner picture if changed
+      if (bannerPicturePreview !== bannerPicture) {
+        if (bannerInputRef.current?.files[0]) {
+          updateData.bannerPicture = bannerPicturePreview;
+        } else if (bannerPicturePreview === '') {
+          updateData.bannerPicture = '';
+        }
+      }
+
       // Add password fields only if user wants to change password
       if (formData.newPassword) {
         if (formData.newPassword !== formData.confirmPassword) {
@@ -360,6 +413,11 @@ function ProfilePage() {
         body: JSON.stringify(updateData),
       });
 
+      // Handle payload too large error
+      if (response.status === 413) {
+        throw new Error('File is too large. Please use a smaller image (profile picture: max 2MB, banner: max 3MB).');
+      }
+
       const data = await response.json();
 
       if (!response.ok) {
@@ -377,9 +435,11 @@ function ProfilePage() {
         age: data.age,
         gender: data.gender,
         profilePicture: data.profilePicture || '',
+        bannerPicture: data.bannerPicture || '',
       }));
 
       setProfilePicture(data.profilePicture || '');
+      setBannerPicture(data.bannerPicture || '');
 
       // Clear password fields
       setFormData(prev => ({
@@ -449,7 +509,34 @@ function ProfilePage() {
       <Navbar />
       <div className="profile-page">
         <div className="profile-container">
-          <div className="profile-header">
+          <div 
+            className="profile-header"
+            style={{
+              backgroundImage: bannerPicturePreview ? `url(${bannerPicturePreview})` : 'linear-gradient(135deg, #22c55e, #16a34a)',
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+            }}
+          >
+            {isEditing && (
+              <button
+                type="button"
+                className="banner-edit-btn"
+                onClick={handleBannerPictureClick}
+                title="Change banner"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                </svg>
+              </button>
+            )}
+            <input
+              ref={bannerInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleBannerPictureChange}
+              style={{ display: 'none' }}
+            />
             <div 
               className="profile-avatar-large" 
               onClick={handleProfilePictureClick}
@@ -480,6 +567,15 @@ function ProfilePage() {
                 Remove Picture
               </button>
             )}
+            {isEditing && bannerPicturePreview && (
+              <button 
+                type="button"
+                className="profile-remove-banner"
+                onClick={handleRemoveBannerPicture}
+              >
+                Remove Banner
+              </button>
+            )}
             <input
               ref={fileInputRef}
               type="file"
@@ -492,18 +588,20 @@ function ProfilePage() {
           </div>
 
           <form onSubmit={handleSubmit} className="profile-form">
-            <div className="profile-info-notice">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="16" x2="12" y2="12" />
-                <line x1="12" y1="8" x2="12.01" y2="8" />
-              </svg>
-              <div>
-                <strong>Important:</strong> Changes to Date of Birth and Gender will only apply to future assessments. 
-                Previously completed assessments and their AI recommendations will remain unchanged to preserve 
-                the accuracy and history of past assessment records.
+            {isEditing && (
+              <div className="profile-info-notice">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="16" x2="12" y2="12" />
+                  <line x1="12" y1="8" x2="12.01" y2="8" />
+                </svg>
+                <div>
+                  <strong>Important:</strong> Changes to Date of Birth and Gender will only apply to future assessments. 
+                  Previously completed assessments and their AI recommendations will remain unchanged to preserve 
+                  the accuracy and history of past assessment records.
+                </div>
               </div>
-            </div>
+            )}
 
             {error && (
               <div className="profile-alert profile-alert-error">

@@ -132,6 +132,7 @@ router.post('/register', async (req, res) => {
       age: user.age,
       gender: user.gender,
       profilePicture: user.profilePicture,
+      bannerPicture: user.bannerPicture,
       token: generateToken(user._id),
     });
   } catch (error) {
@@ -253,6 +254,7 @@ router.post('/verify-login-otp', async (req, res) => {
       age: user.age,
       gender: user.gender,
       profilePicture: user.profilePicture,
+      bannerPicture: user.bannerPicture,
       token: generateToken(user._id),
     });
   } catch (error) {
@@ -480,7 +482,7 @@ router.put('/profile', async (req, res) => {
       return res.status(401).json({ message: 'Not authorized, user not found' });
     }
 
-    const { firstName, lastName, email, dateOfBirth, gender, currentPassword, newPassword, profilePicture, emailVerified } = req.body;
+    const { firstName, lastName, email, dateOfBirth, gender, currentPassword, newPassword, profilePicture, bannerPicture, emailVerified } = req.body;
 
     // Validate required fields
     if (!firstName || !lastName || !email || !dateOfBirth || !gender) {
@@ -578,6 +580,11 @@ router.put('/profile', async (req, res) => {
       user.profilePicture = profilePicture;
     }
 
+    // Update banner picture if provided
+    if (bannerPicture !== undefined) {
+      user.bannerPicture = bannerPicture;
+    }
+
     await user.save();
 
     res.json({
@@ -590,6 +597,7 @@ router.put('/profile', async (req, res) => {
       age: user.age,
       gender: user.gender,
       profilePicture: user.profilePicture,
+      bannerPicture: user.bannerPicture,
     });
   } catch (error) {
     console.error('[profile update]', error.message);

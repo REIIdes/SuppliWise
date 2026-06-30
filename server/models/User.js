@@ -59,6 +59,10 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    bannerPicture: {
+      type: String,
+      default: '',
+    },
   },
   { timestamps: true }
 );

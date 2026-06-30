@@ -146,6 +146,8 @@ export default function ChatAssistant({ recommendations }) {
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
   const messagesContainerRef = useRef(null);
+  const chatWindowRef = useRef(null);
+  const fabRef = useRef(null);
 
   const getRecs = () => {
     if (recommendations && recommendations.length) return recommendations;
@@ -161,18 +163,24 @@ export default function ChatAssistant({ recommendations }) {
     }
   }, [recommendations]);
 
-  // Scroll to top when chat opens
+  // Scroll behavior when chat opens
   useEffect(() => {
     if (open && messagesContainerRef.current) {
       // Use setTimeout to ensure DOM is fully rendered
       setTimeout(() => {
         if (messagesContainerRef.current) {
-          messagesContainerRef.current.scrollTop = 0;
+          // If only welcome message exists (first time), scroll to top
+          // If there are conversations (subsequent times), scroll to bottom
+          if (messages.length === 1) {
+            messagesContainerRef.current.scrollTop = 0;
+          } else {
+            messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+          }
           setShowScrollButton(false);
         }
       }, 0);
     }
-  }, [open]);
+  }, [open, messages.length]);
 
   // Detect if user has scrolled up
   useEffect(() => {
@@ -187,6 +195,25 @@ export default function ChatAssistant({ recommendations }) {
 
     container.addEventListener('scroll', handleScroll);
     return () => container.removeEventListener('scroll', handleScroll);
+  }, [open]);
+
+  // Close chat when clicking outside
+  useEffect(() => {
+    if (!open) return;
+
+    const handleClickOutside = (e) => {
+      if (
+        chatWindowRef.current &&
+        fabRef.current &&
+        !chatWindowRef.current.contains(e.target) &&
+        !fabRef.current.contains(e.target)
+      ) {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [open]);
 
   const scrollToBottom = () => {
@@ -248,6 +275,7 @@ export default function ChatAssistant({ recommendations }) {
   return (
     <>
       <button
+        ref={fabRef}
         className="chat-fab"
         onClick={handleOpen}
         aria-label={open ? 'Close chat' : 'Open SuppliWise AI assistant'}
@@ -271,7 +299,7 @@ export default function ChatAssistant({ recommendations }) {
       </button>
 
       {open && (
-        <div className="chat-window" role="dialog" aria-label="SuppliWise AI Assistant">
+        <div ref={chatWindowRef} className="chat-window" role="dialog" aria-label="SuppliWise AI Assistant">
           <div className="chat-header">
             <div className="chat-header-info">
               <div className="chat-header-avatar">
