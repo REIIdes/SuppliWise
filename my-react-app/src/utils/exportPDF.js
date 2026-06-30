@@ -2,31 +2,26 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 // ── Palette ────────────────────────────────────────────────────────────────
+// Minimal 3-color palette: Black, White, Green
 const C = {
-  green:       [34, 197, 94],
-  greenDark:   [22, 163, 74],
-  greenDeep:   [20, 83, 45],
-  greenLight:  [240, 253, 244],
-  greenBorder: [187, 247, 208],
-  white:       [255, 255, 255],
-  grayDark:    [17, 24, 39],
-  grayMid:     [107, 114, 128],
-  grayLight:   [249, 250, 251],
-  grayBorder:  [229, 231, 235],
-  redLight:    [254, 242, 242],
-  redMid:      [185, 28, 28],
-  redBorder:   [252, 165, 165],
-  amberDark:   [180, 83, 9],
-  amberLight:  [255, 251, 235],
-  blueDark:    [30, 64, 175],
-  blueLight:   [239, 246, 255],
-  blueBorder:  [191, 219, 254],
+  green:       [34, 197, 94],      // Primary brand color
+  greenDark:   [22, 163, 74],      // Darker green for accents
+  greenDeep:   [20, 83, 45],       // Deep green for headers
+  greenLight:  [240, 253, 244],    // Very light green for backgrounds
+  greenBorder: [187, 247, 208],    // Light green for borders
+  white:       [255, 255, 255],    // Pure white
+  black:       [0, 0, 0],          // Pure black
+  grayDark:    [17, 24, 39],       // Almost black (for text)
+  grayMid:     [107, 114, 128],    // Mid gray (for labels)
+  grayLight:   [249, 250, 251],    // Very light gray (for backgrounds)
+  grayBorder:  [229, 231, 235],    // Light gray (for borders)
 };
 
+// Priority colors - all shades of green for consistency
 const PRIORITY_COLORS = {
-  High:   [220, 38, 38],
-  Medium: [217, 119, 6],
-  Low:    [107, 114, 128],
+  High:   [22, 163, 74],   // Dark green (was red)
+  Medium: [34, 197, 94],   // Medium green (was orange)
+  Low:    [107, 114, 128], // Gray (keeping as is)
 };
 
 // ── Utilities ──────────────────────────────────────────────────────────────
@@ -295,15 +290,15 @@ export function exportResultsToPDF(recommendations, assessment) {
   y = 60;
 
   // ── DISCLAIMER ──────────────────────────────────────────────────────────
-  doc.setFillColor(...C.blueLight);
-  doc.setDrawColor(...C.blueBorder);
+  doc.setFillColor(...C.greenLight);
+  doc.setDrawColor(...C.greenBorder);
   doc.setLineWidth(0.3);
   doc.roundedRect(ML, y, CW, 11, 2, 2, 'FD');
-  doc.setFillColor(...C.blueDark);
+  doc.setFillColor(...C.greenDark);
   doc.rect(ML, y, 2.5, 11, 'F');
   doc.setFont('helvetica', 'italic');
   doc.setFontSize(7.8);
-  doc.setTextColor(...C.blueDark);
+  doc.setTextColor(...C.grayDark);
   doc.text(
     'For educational and wellness purposes only. This report does not diagnose, treat, or cure any disease. Always consult a licensed healthcare professional before starting any supplement regimen.',
     ML + 5, y + 4,
@@ -327,19 +322,19 @@ export function exportResultsToPDF(recommendations, assessment) {
     const rLines = doc.splitTextToSize(cleanText(recommendations.consultReason), CW - 12);
     const blockH = 10 + rLines.length * 5.5 + 6;
     y = checkY(doc, y, blockH);
-    doc.setFillColor(...C.redLight);
-    doc.setDrawColor(...C.redBorder);
+    doc.setFillColor(...C.grayLight);
+    doc.setDrawColor(...C.grayBorder);
     doc.setLineWidth(0.4);
     doc.roundedRect(ML, y, CW, blockH, 2, 2, 'FD');
-    doc.setFillColor(...C.redMid);
+    doc.setFillColor(...C.black);
     doc.rect(ML, y, 3, blockH, 'F');
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9.5);
-    doc.setTextColor(...C.redMid);
+    doc.setTextColor(...C.black);
     doc.text('Medical Consultation Recommended', ML + 7, y + 7);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8.5);
-    doc.setTextColor(127, 29, 29);
+    doc.setTextColor(...C.grayDark);
     doc.text(rLines, ML + 7, y + 14);
     y += blockH + 8;
   }
@@ -834,7 +829,7 @@ export function exportResultsToPDF(recommendations, assessment) {
       body: recommendations.mealRecommendations.map(m => [cleanText(m.meal), cleanText(m.suggestion)]),
       theme: 'striped',
       headStyles: {
-        fillColor: [180, 83, 9],
+        fillColor: C.greenDeep,
         textColor: C.white,
         fontSize: 9,
         fontStyle: 'bold',
@@ -847,9 +842,9 @@ export function exportResultsToPDF(recommendations, assessment) {
         lineColor: C.grayBorder,
         lineWidth: 0.2,
       },
-      alternateRowStyles: { fillColor: C.amberLight },
+      alternateRowStyles: { fillColor: C.greenLight },
       columnStyles: {
-        0: { cellWidth: 30, fontStyle: 'bold', textColor: C.amberDark },
+        0: { cellWidth: 30, fontStyle: 'bold', textColor: C.greenDark },
         1: { cellWidth: CW - 30 },
       },
       margin: { left: ML, right: MR },
@@ -873,21 +868,21 @@ export function exportResultsToPDF(recommendations, assessment) {
       const blockH = 12 + wTextLines.length * 6 + 8;
       y = checkY(doc, y, blockH);
 
-      doc.setFillColor(...C.redLight);
-      doc.setDrawColor(...C.redBorder);
+      doc.setFillColor(...C.grayLight);
+      doc.setDrawColor(...C.grayBorder);
       doc.setLineWidth(0.3);
       doc.roundedRect(ML, y, CW, blockH, 3, 3, 'FD');
-      doc.setFillColor(...C.redMid);
+      doc.setFillColor(...C.black);
       doc.rect(ML, y, 4, blockH, 'F');
 
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(9.5);
-      doc.setTextColor(...C.redMid);
+      doc.setTextColor(...C.black);
       doc.text('Important Warnings', ML + 9, y + 8.5);
 
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
-      doc.setTextColor(127, 29, 29);
+      doc.setTextColor(...C.grayDark);
       let wy = y + 17;
       recommendations.warnings.forEach(w => {
         const wl = doc.splitTextToSize(`• ${w}`, CW - 16);
@@ -904,21 +899,21 @@ export function exportResultsToPDF(recommendations, assessment) {
       const blockH = 12 + aTextLines.length * 6 + 8;
       y = checkY(doc, y, blockH);
 
-      doc.setFillColor(255, 247, 237);
-      doc.setDrawColor(253, 186, 116);
+      doc.setFillColor(...C.grayLight);
+      doc.setDrawColor(...C.grayBorder);
       doc.setLineWidth(0.3);
       doc.roundedRect(ML, y, CW, blockH, 3, 3, 'FD');
-      doc.setFillColor(...C.amberDark);
+      doc.setFillColor(...C.greenDark);
       doc.rect(ML, y, 4, blockH, 'F');
 
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(9.5);
-      doc.setTextColor(...C.amberDark);
+      doc.setTextColor(...C.greenDark);
       doc.text('Supplements to Avoid', ML + 9, y + 8.5);
 
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
-      doc.setTextColor(120, 53, 15);
+      doc.setTextColor(...C.grayDark);
       let ay = y + 17;
       recommendations.avoidList.forEach(a => {
         const al = doc.splitTextToSize(`• ${a}`, CW - 16);
@@ -939,20 +934,20 @@ export function exportResultsToPDF(recommendations, assessment) {
     const introH = 12 + introLines.length * 6 + 8;
     y = checkY(doc, y, introH);
 
-    doc.setFillColor(...C.blueLight);
-    doc.setDrawColor(...C.blueBorder);
+    doc.setFillColor(...C.greenLight);
+    doc.setDrawColor(...C.greenBorder);
     doc.setLineWidth(0.3);
     doc.roundedRect(ML, y, CW, introH, 3, 3, 'FD');
-    doc.setFillColor(...C.blueDark);
+    doc.setFillColor(...C.greenDark);
     doc.rect(ML, y, 4, introH, 'F');
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9.5);
-    doc.setTextColor(...C.blueDark);
+    doc.setTextColor(...C.greenDark);
     doc.text('Important Notice', ML + 9, y + 8.5);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
-    doc.setTextColor(30, 58, 138);
+    doc.setTextColor(...C.grayDark);
     let iy = y + 17;
     introLines.forEach(line => { doc.text(line, ML + 9, iy); iy += 6; });
     y += introH + 7;
@@ -961,7 +956,7 @@ export function exportResultsToPDF(recommendations, assessment) {
       y = checkY(doc, y, 16);
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(9);
-      doc.setTextColor(...C.blueDark);
+      doc.setTextColor(...C.greenDark);
       doc.text('Philippine Support Resources:', ML, y);
       y += 8;
 
@@ -974,17 +969,17 @@ export function exportResultsToPDF(recommendations, assessment) {
 
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(8.5);
-        doc.setTextColor(...C.blueDark);
+        doc.setTextColor(...C.greenDark);
         doc.text(nameLines, ML + 4, y);
         y += nameLines.length * 5.8;
 
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(8);
-        doc.setTextColor(71, 85, 105);
+        doc.setTextColor(...C.grayDark);
         doc.text(descLines, ML + 4, y);
         y += descLines.length * 5.5;
 
-        doc.setTextColor(...C.blueDark);
+        doc.setTextColor(...C.greenDark);
         doc.text(urlLines, ML + 4, y);
         y += urlLines.length * 5.5 + 5;
       });

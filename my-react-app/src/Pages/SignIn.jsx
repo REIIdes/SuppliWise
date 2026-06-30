@@ -32,7 +32,12 @@ function validatePassword(password) {
 }
 
 function SignIn() {
-  const [name, setName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [gender, setGender] = useState('');
+  const [birthMonth, setBirthMonth] = useState('');
+  const [birthDay, setBirthDay] = useState('');
+  const [birthYear, setBirthYear] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -46,17 +51,88 @@ function SignIn() {
 
   const fromAssessment = location.state?.fromAssessment;
 
+  // Generate years array (current year down to 100 years ago)
+  const currentYear = new Date().getFullYear();
+  const years = Array.from({ length: 100 }, (_, i) => currentYear - i);
+  
+  // Generate days array (1-31)
+  const days = Array.from({ length: 31 }, (_, i) => i + 1);
+  
+  // Months array
+  const months = [
+    { value: '01', label: 'January' },
+    { value: '02', label: 'February' },
+    { value: '03', label: 'March' },
+    { value: '04', label: 'April' },
+    { value: '05', label: 'May' },
+    { value: '06', label: 'June' },
+    { value: '07', label: 'July' },
+    { value: '08', label: 'August' },
+    { value: '09', label: 'September' },
+    { value: '10', label: 'October' },
+    { value: '11', label: 'November' },
+    { value: '12', label: 'December' },
+  ];
+
   // Validate a single field and update fieldErrors
   const validateField = (field, value) => {
     let msg = '';
-    if (field === 'name') {
-      if (!value.trim()) msg = 'Please enter your name.';
-      else if (value.trim().length < 2) msg = 'Name must be at least 2 characters.';
-      else if (value.trim().length > 50) msg = 'Name must be 50 characters or fewer.';
-    }
-    if (field === 'email') msg = validateEmail(value);
-    if (field === 'password') msg = validatePassword(value);
-    if (field === 'confirmPassword') {
+    if (field === 'firstName') {
+      if (!value.trim()) msg = 'Please enter your first name.';
+      else if (value.trim().length < 2) msg = 'First name must be at least 2 characters.';
+      else if (value.trim().length > 50) msg = 'First name must be 50 characters or fewer.';
+    } else if (field === 'lastName') {
+      if (!value.trim()) msg = 'Please enter your last name.';
+      else if (value.trim().length < 2) msg = 'Last name must be at least 2 characters.';
+      else if (value.trim().length > 50) msg = 'Last name must be 50 characters or fewer.';
+    } else if (field === 'gender') {
+      if (!value) msg = 'Please select your gender.';
+    } else if (field === 'dateOfBirth') {
+      if (!birthMonth || !birthDay || !birthYear) {
+        msg = 'Please select your complete date of birth.';
+      } else {
+        // Check year range (current year to 120 years ago)
+        const year = parseInt(birthYear);
+        const currentYear = new Date().getFullYear();
+        const minYear = currentYear - 120;
+        if (year < minYear || year > currentYear) {
+          msg = `Year must be between ${minYear} and ${currentYear}.`;
+        }
+        // Check day range
+        else if (parseInt(birthDay) < 1 || parseInt(birthDay) > 31) {
+          msg = 'Day must be between 1 and 31.';
+        }
+        // Validate actual calendar date
+        else {
+          const dateOfBirth = `${birthYear}-${birthMonth}-${birthDay.toString().padStart(2, '0')}`;
+          const birthDate = new Date(dateOfBirth);
+          
+          // Check if date is valid (e.g., Feb 30 would be invalid)
+          if (isNaN(birthDate.getTime()) || 
+              birthDate.getMonth() !== parseInt(birthMonth) - 1 ||
+              birthDate.getDate() !== parseInt(birthDay)) {
+            msg = 'Please enter a valid calendar date (e.g., February cannot have 30 days).';
+          } else {
+            // Check age
+            const today = new Date();
+            let age = today.getFullYear() - birthDate.getFullYear();
+            const monthDiff = today.getMonth() - birthDate.getMonth();
+            if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+              age--;
+            }
+            if (age < 1) {
+              msg = 'You must be at least 1 year old.';
+            } else if (age > 120) {
+              msg = 'Age must be 120 years or less.';
+            }
+          }
+        }
+      }
+    } else if (field === 'email') {
+      msg = validateEmail(value);
+    } else if (field === 'password') {
+      msg = validatePassword(value);
+    } else if (field === 'confirmPassword') {
       if (!value) msg = 'Please confirm your password.';
       else if (value !== password) msg = 'Passwords do not match.';
     }
@@ -68,24 +144,81 @@ function SignIn() {
     setError('');
 
     // Run all validations
-    const nameErr = !name.trim() ? 'Please enter your name.'
-      : name.trim().length < 2 ? 'Name must be at least 2 characters.'
-      : name.trim().length > 50 ? 'Name must be 50 characters or fewer.' : '';
+    const firstNameErr = !firstName.trim() ? 'Please enter your first name.'
+      : firstName.trim().length < 2 ? 'First name must be at least 2 characters.'
+      : firstName.trim().length > 50 ? 'First name must be 50 characters or fewer.' : '';
+    const lastNameErr = !lastName.trim() ? 'Please enter your last name.'
+      : lastName.trim().length < 2 ? 'Last name must be at least 2 characters.'
+      : lastName.trim().length > 50 ? 'Last name must be 50 characters or fewer.' : '';
+    const genderErr = !gender ? 'Please select your gender.' : '';
+    
+    let dateOfBirthErr = '';
+    if (!birthMonth || !birthDay || !birthYear) {
+      dateOfBirthErr = 'Please select your complete date of birth.';
+    } else {
+      // Check year range (current year to 120 years ago)
+      const year = parseInt(birthYear);
+      const currentYear = new Date().getFullYear();
+      const minYear = currentYear - 120;
+      if (year < minYear || year > currentYear) {
+        dateOfBirthErr = `Year must be between ${minYear} and ${currentYear}.`;
+      }
+      // Check day range
+      else if (parseInt(birthDay) < 1 || parseInt(birthDay) > 31) {
+        dateOfBirthErr = 'Day must be between 1 and 31.';
+      }
+      // Validate actual calendar date
+      else {
+        const dateOfBirth = `${birthYear}-${birthMonth}-${birthDay.toString().padStart(2, '0')}`;
+        const birthDate = new Date(dateOfBirth);
+        
+        // Check if date is valid (e.g., Feb 30 would be invalid)
+        if (isNaN(birthDate.getTime()) || 
+            birthDate.getMonth() !== parseInt(birthMonth) - 1 ||
+            birthDate.getDate() !== parseInt(birthDay)) {
+          dateOfBirthErr = 'Please enter a valid calendar date (e.g., February cannot have 30 days).';
+        } else {
+          // Check age
+          const today = new Date();
+          let age = today.getFullYear() - birthDate.getFullYear();
+          const monthDiff = today.getMonth() - birthDate.getMonth();
+          if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+            age--;
+          }
+          if (age < 1) {
+            dateOfBirthErr = 'You must be at least 1 year old.';
+          } else if (age > 120) {
+            dateOfBirthErr = 'Age must be 120 years or less.';
+          }
+        }
+      }
+    }
+
     const emailErr = validateEmail(email);
     const passwordErr = validatePassword(password);
     const confirmErr = !confirmPassword ? 'Please confirm your password.'
       : confirmPassword !== password ? 'Passwords do not match.' : '';
 
-    const newErrors = { name: nameErr, email: emailErr, password: passwordErr, confirmPassword: confirmErr };
+    const newErrors = { firstName: firstNameErr, lastName: lastNameErr, gender: genderErr, dateOfBirth: dateOfBirthErr, email: emailErr, password: passwordErr, confirmPassword: confirmErr };
     setFieldErrors(newErrors);
 
     if (Object.values(newErrors).some(Boolean)) return;
 
     setLoading(true);
     try {
-      const data = await registerUser(name, email, password);
+      const dateOfBirth = `${birthYear}-${birthMonth}-${birthDay.toString().padStart(2, '0')}`;
+      const data = await registerUser(firstName, lastName, gender, dateOfBirth, email, password);
       localStorage.setItem('token', data.token);
-      localStorage.setItem('user', JSON.stringify({ name: data.name, email: data.email }));
+      localStorage.setItem('user', JSON.stringify({ 
+        firstName: data.firstName, 
+        lastName: data.lastName, 
+        name: data.name, 
+        email: data.email,
+        gender: data.gender,
+        dateOfBirth: data.dateOfBirth,
+        age: data.age,
+        profilePicture: data.profilePicture || ''
+      }));
 
       const pending = sessionStorage.getItem(SESSION_KEY);
       if (pending) {
@@ -127,17 +260,102 @@ function SignIn() {
 
           {error && <p className="auth-error">{error}</p>}
 
-          <div className={`auth-field ${fieldErrors.name ? 'field-has-error' : ''}`}>
-            <label>Name</label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => { setName(e.target.value); if (fieldErrors.name) validateField('name', e.target.value); }}
-              onBlur={(e) => validateField('name', e.target.value)}
-              placeholder="Enter your Name"
-              required
-            />
-            {fieldErrors.name && <span className="auth-field-error">{fieldErrors.name}</span>}
+          <div className="name-row">
+            <div className={`auth-field ${fieldErrors.firstName ? 'field-has-error' : ''}`}>
+              <label>First Name</label>
+              <input
+                type="text"
+                value={firstName}
+                onChange={(e) => { setFirstName(e.target.value); if (fieldErrors.firstName) validateField('firstName', e.target.value); }}
+                onBlur={(e) => validateField('firstName', e.target.value)}
+                placeholder="Enter your first name"
+                required
+              />
+              {fieldErrors.firstName && <span className="auth-field-error">{fieldErrors.firstName}</span>}
+            </div>
+
+            <div className={`auth-field ${fieldErrors.lastName ? 'field-has-error' : ''}`}>
+              <label>Last Name</label>
+              <input
+                type="text"
+                value={lastName}
+                onChange={(e) => { setLastName(e.target.value); if (fieldErrors.lastName) validateField('lastName', e.target.value); }}
+                onBlur={(e) => validateField('lastName', e.target.value)}
+                placeholder="Enter your last name"
+                required
+              />
+              {fieldErrors.lastName && <span className="auth-field-error">{fieldErrors.lastName}</span>}
+            </div>
+          </div>
+
+          <div className={`auth-field ${fieldErrors.dateOfBirth ? 'field-has-error' : ''}`}>
+            <label>Date of Birth</label>
+            <div className="birthday-row-inline">
+              <div className="birthday-field-wrapper">
+                <select
+                  value={birthMonth}
+                  onChange={(e) => { setBirthMonth(e.target.value); if (fieldErrors.dateOfBirth) validateField('dateOfBirth', e.target.value); }}
+                  onBlur={() => validateField('dateOfBirth', birthMonth)}
+                  className="birthday-select-inline"
+                  required
+                >
+                  <option value="" disabled>Month</option>
+                  {months.map(m => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
+                </select>
+              </div>
+              
+              <div className="birthday-field-wrapper">
+                <input
+                  type="number"
+                  value={birthDay}
+                  onChange={(e) => { setBirthDay(e.target.value); if (fieldErrors.dateOfBirth) validateField('dateOfBirth', e.target.value); }}
+                  onBlur={() => validateField('dateOfBirth', birthDay)}
+                  className="birthday-input-inline"
+                  placeholder="DD"
+                  min="1"
+                  max="31"
+                  required
+                />
+              </div>
+              
+              <div className="birthday-field-wrapper">
+                <input
+                  type="number"
+                  value={birthYear}
+                  onChange={(e) => { setBirthYear(e.target.value); if (fieldErrors.dateOfBirth) validateField('dateOfBirth', e.target.value); }}
+                  onBlur={() => validateField('dateOfBirth', birthYear)}
+                  className="birthday-input-inline"
+                  placeholder="YYYY"
+                  min={new Date().getFullYear() - 120}
+                  max={new Date().getFullYear()}
+                  required
+                />
+              </div>
+            </div>
+            {fieldErrors.dateOfBirth && <span className="auth-field-error">{fieldErrors.dateOfBirth}</span>}
+          </div>
+
+          <div className={`auth-field ${fieldErrors.gender ? 'field-has-error' : ''}`}>
+            <label>Gender</label>
+            <div className="gender-pill-group">
+              <button
+                type="button"
+                className={`gender-pill ${gender === 'Male' ? 'gender-pill-active' : ''}`}
+                onClick={() => { setGender('Male'); if (fieldErrors.gender) validateField('gender', 'Male'); }}
+              >
+                Male
+              </button>
+              <button
+                type="button"
+                className={`gender-pill ${gender === 'Female' ? 'gender-pill-active' : ''}`}
+                onClick={() => { setGender('Female'); if (fieldErrors.gender) validateField('gender', 'Female'); }}
+              >
+                Female
+              </button>
+            </div>
+            {fieldErrors.gender && <span className="auth-field-error">{fieldErrors.gender}</span>}
           </div>
 
           <div className={`auth-field ${fieldErrors.email ? 'field-has-error' : ''}`}>

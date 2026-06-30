@@ -203,6 +203,74 @@ function FoodExamples({ foods }) {
   );
 }
 
+// ── Evidence Info Modal ──────────────────────────────────────────────────
+function EvidenceInfoModal({ onClose }) {
+  const overlayRef = useRef(null);
+
+  // Close on overlay click
+  const handleOverlayClick = (e) => {
+    if (e.target === overlayRef.current) onClose();
+  };
+
+  // Close on Escape key
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  // Prevent body scroll while modal is open
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = ''; };
+  }, []);
+
+  return (
+    <div className="evidence-info-overlay" ref={overlayRef} onClick={handleOverlayClick}>
+      <div className="evidence-info-panel" role="dialog" aria-modal="true" aria-label="About Our Evidence">
+        <div className="evidence-info-header">
+          <h3 className="evidence-info-title">About Our Evidence</h3>
+          <button className="evidence-info-close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+
+        <div className="evidence-info-body">
+          <p className="evidence-info-intro">
+            To provide reliable and up-to-date recommendations, this system prioritizes:
+          </p>
+
+          <div className="evidence-info-checklist">
+            <div className="evidence-info-item">
+              <span className="evidence-info-check">✅</span>
+              <span>Recent peer-reviewed research published within the last 3 years</span>
+            </div>
+            <div className="evidence-info-item">
+              <span className="evidence-info-check">✅</span>
+              <span>Supporting evidence from the last 5 years when relevant</span>
+            </div>
+            <div className="evidence-info-item">
+              <span className="evidence-info-check">✅</span>
+              <span>High-quality medical evidence, including systematic reviews, meta-analyses, and clinical practice guidelines whenever available</span>
+            </div>
+            <div className="evidence-info-item">
+              <span className="evidence-info-check">✅</span>
+              <span>Proper APA-formatted references for all cited sources</span>
+            </div>
+          </div>
+
+          <div className="evidence-info-disclaimer">
+            <span className="evidence-info-warning-icon">⚠️</span>
+            <p>
+              <strong>Important:</strong> Recommendations are AI-assisted and intended for informational purposes only. 
+              They should not replace professional medical advice, diagnosis, or treatment. Always consult a qualified 
+              healthcare professional before starting, stopping, or changing any supplement regimen.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Supplement Detail Modal ──────────────────────────────────────────────
 function SupplementDetailModal({ supplementName, assessmentId, context, cache, onClose }) {
   const [detail, setDetail] = useState(null);
@@ -383,11 +451,61 @@ function SupplementDetailModal({ supplementName, assessmentId, context, cache, o
   );
 }
 
-function SupplementCard({ rec, index = 0, expanded, onToggle, onOpenDetail }) {
+function SupplementCard({ rec, index = 0, expanded, onToggle, onOpenDetail, detailMode = 'simplified', setShowEvidenceInfo }) {
   const icon = getSupplementIcon(rec.name);
   const pColor = priorityColor[rec.priority] || '#6b7280';
   const pIcon = priorityIcon[rec.priority] || '⚪';
 
+  // Choose which version of the text to display based on mode
+  const displayReason = detailMode === 'detailed' ? rec.reason : (rec.simplifiedReason || rec.reason);
+  const displayEvidence = detailMode === 'detailed' ? rec.evidence : (rec.simplifiedEvidence || rec.evidence);
+
+  // Simplified mode: cleaner, bigger, friendlier UI
+  if (detailMode === 'simplified') {
+    return (
+      <div className="rec-card rec-card-simple">
+        {/* Large icon at top */}
+        <div className="rec-simple-icon">{icon}</div>
+        
+        {/* Supplement name - larger, more prominent */}
+        <h3 className="rec-simple-name">{rec.name}</h3>
+        
+        {/* What it does - large, easy to read */}
+        <p className="rec-simple-benefit">{fixChars(displayReason)}</p>
+        
+        {/* Dosage - simplified display */}
+        <div className="rec-simple-dosage">
+          <div className="rec-simple-dosage-item">
+            <span className="rec-simple-label">💊 Take</span>
+            <span className="rec-simple-value">{rec.dosage}</span>
+          </div>
+          <div className="rec-simple-dosage-item">
+            <span className="rec-simple-label">⏰ When</span>
+            <span className="rec-simple-value">{rec.timing}</span>
+          </div>
+        </div>
+
+        {/* Simple expand button */}
+        {rec.foods && (
+          <button className="rec-simple-expand" onClick={() => onToggle()}>
+            {expanded ? '▲ Show Less' : '▼ See Food Sources'}
+          </button>
+        )}
+
+        {/* Expanded content - just food sources */}
+        {expanded && rec.foods && (
+          <div className="rec-simple-expanded">
+            <div className="rec-simple-foods">
+              <span className="rec-simple-foods-label">🥗 Also found in:</span>
+              <FoodExamples foods={rec.foods} />
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Detailed mode: original detailed UI
   return (
     <div className="rec-card">
       {/* Priority badge — at the very top before the supplement name */}
@@ -414,21 +532,21 @@ function SupplementCard({ rec, index = 0, expanded, onToggle, onOpenDetail }) {
         </div>
       )}
 
-      {rec.triggeredBy && (
+      {rec.triggeredBy && detailMode === 'detailed' && (
         <div className="rec-triggered">
           <span className="rec-triggered-label">Recommended for:</span>
           {cleanTriggeredBy(rec.triggeredBy)}
         </div>
       )}
 
-      {rec.conditionContext && (
+      {rec.conditionContext && detailMode === 'detailed' && (
         <div className="rec-condition-context">
           <span className="rec-condition-context-icon">🩺</span>
           <p>{fixChars(rec.conditionContext)}</p>
         </div>
       )}
 
-      <p className="rec-reason">{fixChars(rec.reason)}</p>
+      <p className="rec-reason">{fixChars(displayReason)}</p>
 
       <div className="rec-details">
         <div className="rec-detail">
@@ -460,10 +578,25 @@ function SupplementCard({ rec, index = 0, expanded, onToggle, onOpenDetail }) {
 
       {expanded && (
         <div className="rec-expanded">
-          {rec.evidence && !isPlaceholderEvidence(rec.evidence) && (
-            <div className="rec-expanded-section rec-expanded-evidence">
-              <span className="rec-expanded-label">📚 Evidence & References</span>
-              <p>{fixChars(rec.evidence)}</p>
+          {displayEvidence && !isPlaceholderEvidence(displayEvidence) && (
+            <div className={`rec-expanded-section ${detailMode === 'simplified' ? 'rec-expanded-simple-evidence' : 'rec-expanded-evidence'}`}>
+              <span className="rec-expanded-label">
+                {detailMode === 'simplified' ? '✓ Backed by Research' : '📚 Evidence & References'}
+                {detailMode === 'detailed' && (
+                  <button
+                    className="evidence-info-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowEvidenceInfo(true);
+                    }}
+                    aria-label="About our evidence"
+                    title="Learn about our evidence sources"
+                  >
+                    ⓘ
+                  </button>
+                )}
+              </span>
+              <p>{fixChars(displayEvidence)}</p>
             </div>
           )}
           {rec.foods && (
@@ -472,7 +605,7 @@ function SupplementCard({ rec, index = 0, expanded, onToggle, onOpenDetail }) {
               <FoodExamples foods={rec.foods} />
             </div>
           )}
-          {rec.sideEffects && (
+          {rec.sideEffects && detailMode === 'detailed' && (
             <div className="rec-expanded-section rec-expanded-sideeffects">
               <span className="rec-expanded-label">⚠ Side Effects &amp; Safe Limits</span>
               <p>{fixChars(rec.sideEffects)}</p>
@@ -501,12 +634,37 @@ function ResultsPage() {
   const assessmentId = assessment?._id || assessment?.id || 'unknown';
   // Cache key includes userId so different accounts never share cached details
   const cacheScope = `${currentUserId}_${assessmentId}`;
+  
+  // Detail mode toggle: 'detailed' (technical/medical) or 'simplified' (friendly)
+  const [detailMode, setDetailMode] = useState(() => {
+    try {
+      return localStorage.getItem('suppliwise_detail_mode') || 'simplified';
+    } catch {
+      return 'simplified';
+    }
+  });
+  
   const [exporting, setExporting] = useState(false);
-  const [expandedCards, setExpandedCards] = useState(new Set());
+  const [expandedCardsSimplified, setExpandedCardsSimplified] = useState(new Set());
+  const [expandedCardsDetailed, setExpandedCardsDetailed] = useState(new Set());
   const [showAllRecs, setShowAllRecs] = useState(false);
   const [detailSupplement, setDetailSupplement] = useState(null);
+  const [showEvidenceInfo, setShowEvidenceInfo] = useState(false);
   const detailCache = useRef({});  // cache: { [supplementName]: detailObject }
   const INITIAL_REC_COUNT = 6;
+  
+  // Use the appropriate expanded cards set based on current mode
+  const expandedCards = detailMode === 'simplified' ? expandedCardsSimplified : expandedCardsDetailed;
+  const setExpandedCards = detailMode === 'simplified' ? setExpandedCardsSimplified : setExpandedCardsDetailed;
+
+  // Save preference to localStorage when changed
+  useEffect(() => {
+    try {
+      localStorage.setItem('suppliwise_detail_mode', detailMode);
+    } catch {
+      // Storage full — skip silently
+    }
+  }, [detailMode]);
 
   // Build slim assessment context for supplement detail personalization
   const buildDetailContext = (rec) => {
@@ -575,6 +733,11 @@ function ResultsPage() {
       <Navbar />
       <div className="results-container">
 
+        {/* Evidence Info Modal */}
+        {showEvidenceInfo && (
+          <EvidenceInfoModal onClose={() => setShowEvidenceInfo(false)} />
+        )}
+
         {/* Supplement Detail Modal */}
         {detailSupplement && (
           <SupplementDetailModal
@@ -605,8 +768,27 @@ function ResultsPage() {
 
         {/* Summary */}
         <div className="results-header">
-          <h2>Your Personalized Health Plan</h2>
-          <p className="results-summary">{fixChars(r.summary)}</p>
+          <div className="results-header-top">
+            <h2>Your Personalized Health Plan</h2>
+            {/* Detail Mode Toggle */}
+            <div className="detail-mode-toggle">
+              <button
+                className={`detail-mode-btn ${detailMode === 'simplified' ? 'active' : ''}`}
+                onClick={() => setDetailMode('simplified')}
+                title="Friendly, easy-to-understand recommendations"
+              >
+                Simplified
+              </button>
+              <button
+                className={`detail-mode-btn ${detailMode === 'detailed' ? 'active' : ''}`}
+                onClick={() => setDetailMode('detailed')}
+                title="Technical, medical-grade information"
+              >
+                Detailed
+              </button>
+            </div>
+          </div>
+          <p className="results-summary">{fixChars(detailMode === 'detailed' ? r.summary : r.simplifiedSummary || r.summary)}</p>
         </div>
 
         {/* Garbage input warning */}
@@ -635,7 +817,7 @@ function ResultsPage() {
           <>
             <div className="results-section-title">💊 Supplement Recommendations</div>
             <p className="results-section-sub">Personalized based on your symptoms, health goals, and profile.</p>
-            <div className="results-grid">
+            <div className={`results-grid ${detailMode === 'simplified' ? 'results-grid-simple' : ''}`}>
               {(showAllRecs ? sortedRecommendations : sortedRecommendations.slice(0, INITIAL_REC_COUNT)).map((rec, i) => (
                 <SupplementCard
                   key={i}
@@ -644,6 +826,8 @@ function ResultsPage() {
                   expanded={expandedCards.has(`rec-${i}`)}
                   onToggle={() => handleToggleCard(`rec-${i}`)}
                   onOpenDetail={() => setDetailSupplement({ name: rec.name, context: buildDetailContext(rec) })}
+                  detailMode={detailMode}
+                  setShowEvidenceInfo={setShowEvidenceInfo}
                 />
               ))}
             </div>

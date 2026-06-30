@@ -7,6 +7,7 @@ import SignIn from './Pages/SignIn';
 import AssessmentPage from './Pages/AssessmentPage';
 import ResultsPage from './Pages/ResultsPage';
 import HistoryPage from './Pages/HistoryPage';
+import ProfilePage from './Pages/ProfilePage';
 import ChatAssistant from './Pages/ChatAssistant';
 
 // ── Global Error Boundary — prevents white screens ─────────────────────────
@@ -79,6 +80,7 @@ function App() {
           <Route path="/assessment" element={<AssessmentPage />} />
           <Route path="/results" element={<ResultsPage />} />
           <Route path="/history" element={<HistoryPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
         </Routes>
         <GlobalChat />
       </BrowserRouter>

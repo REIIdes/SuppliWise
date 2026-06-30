@@ -133,11 +133,11 @@ CRITICAL RULES:
 6. Provide REAL lifestyle advice ? sleep hygiene, diet changes, exercise, stress management, hydration.
 7. AGE IS CRITICAL: Under 4 = pediatric only. 4-12 = pediatric doses. 13-17 = adolescent. 65+ = bone/B12/CoQ10 priority. NEVER adult doses for children.
 8. BMI matters: underweight = caloric density; obese = metabolic health.
-9. SEVERITY MATTERS — but ONLY for symptoms the patient actually reported. If no symptoms were reported, do NOT reference any severity. The triggeredBy field must ONLY contain what the patient explicitly selected.
+9. SEVERITY MATTERS ï¿½ but ONLY for symptoms the patient actually reported. If no symptoms were reported, do NOT reference any severity. The triggeredBy field must ONLY contain what the patient explicitly selected.
 10. PREGNANCY/BREASTFEEDING: If pregnant or breastfeeding, avoid high-dose Vitamin A, avoid herbs (ashwagandha, St. John's Wort), prioritize folate, iron, DHA, and iodine.
 11. LIFESTYLE HABITS: Smoking depletes Vitamin C and antioxidants. Alcohol depletes B vitamins, magnesium, and zinc.
 12. OPTIONAL FIELDS NOT PROVIDED: If an optional field was not answered, do NOT mention it, do NOT say "not provided", and do NOT base recommendations on it. Only use what is explicitly listed in the patient profile below.
-13. EXPLAINABLE AI: For triggeredBy, ONLY list conditions, symptoms, and goals that the patient actually reported. If the patient reported no symptoms and no conditions, triggeredBy must reference only their health goals or age/diet factors — NEVER invent symptoms. If no relevant trigger exists, write "General wellness".
+13. EXPLAINABLE AI: For triggeredBy, ONLY list conditions, symptoms, and goals that the patient actually reported. If the patient reported no symptoms and no conditions, triggeredBy must reference only their health goals or age/diet factors ï¿½ NEVER invent symptoms. If no relevant trigger exists, write "General wellness".
 14. RULE-BASED SAFEGUARDS: IF kidney disease ? avoid magnesium >200mg, avoid high-dose Vitamin C. IF on blood thinners ? avoid high-dose Vitamin K, fish oil >1g.
 PATIENT PROFILE (only answered fields are listed):
 - Age: ${a.age}, Gender: ${a.gender}
@@ -189,14 +189,16 @@ Write a professional clinical summary (3-4 sentences) that maintains a clinical 
 Respond with ONLY valid JSON, no markdown, no code fences:
 {
   "summary": "Professional clinical summary 3-4 sentences written in natural, grammatically correct prose. ALWAYS start the first sentence with the patient's age, gender, and BMI woven naturally into the sentence ? for example: 'A 22-year-old male patient with a BMI of 23.4 (normal weight) reports...' or 'A 35-year-old female patient with a BMI of 27.1, indicating overweight status, presents with...'. Use possibility language throughout. Do not quote patient verbatim. Paraphrase naturally. Write as a clinical professional would document a patient case.",
-  "consultDoctor": true or false — true if symptoms suggest serious conditions needing immediate medical attention,
+  "simplifiedSummary": "ULTRA-SIMPLE summary in 1-2 short sentences. Use ONLY everyday words (5th grade reading level). NO medical terms. NO conditions mentioned. NO explanations. Just tell them what the plan will do for them. Examples: 'This plan can help you feel more energized and sleep better.' OR 'These supplements may help reduce your tiredness and improve your focus.' OR 'This routine is designed to support your overall wellness and boost your energy levels.'",
+  "consultDoctor": true or false ï¿½ true if symptoms suggest serious conditions needing immediate medical attention,
   "consultReason": "Reason why doctor consultation is recommended, or null",
   "recommendations": [
     {
       "name": "Specific supplement name and form",
       "reason": "Write this in a direct, personalized style that connects the supplement to the patient's specific condition AND symptom(s). Format: 'Because you reported [condition] with [specific symptom(s)], [supplement] may help by [mechanism]. [1-2 sentences on how it addresses their situation specifically].' Always use possibility language ('may', 'suggests', 'some individuals find'). Make it feel like a real clinician is speaking directly to this patient.",
-      "triggeredBy": "Comma-separated list of the exact conditions, symptoms, or goals that triggered this. For symptoms with severity, append ONLY the exact severity word in parentheses — use ONLY Mild, Moderate, or Severe (no other words). Do NOT invent or rephrase severity. Example: 'Diabetes, Fatigue (Moderate), Muscle Weakness' or 'Improve Sleep, Anxiety'.",
-      "conditionContext": "One sentence callout in plain conversational language. ONLY reference things the patient actually reported — conditions, symptoms, or goals. If none were reported, base it only on their age, gender, or health goals. NEVER invent symptoms or severity. Start with 'Based on your [goal/age/profile]...' when no symptoms exist. Keep it concise and warm. If there is truly nothing to reference, return null.",
+      "simplifiedReason": "ULTRA-SIMPLE explanation (1 sentence max, 10-15 words). NO medical jargon. NO 'Based on...' NO conditions/symptoms mentioned. Just say what it does in plain everyday language. Examples: 'Helps you feel less tired and more energized.' OR 'Supports better sleep and relaxation.' OR 'Boosts your immune system and overall health.' OR 'Helps reduce stress and improve mood.' Keep it short and direct like talking to a friend.",
+      "triggeredBy": "Comma-separated list of the exact conditions, symptoms, or goals that triggered this. For symptoms with severity, append ONLY the exact severity word in parentheses ï¿½ use ONLY Mild, Moderate, or Severe (no other words). Do NOT invent or rephrase severity. Example: 'Diabetes, Fatigue (Moderate), Muscle Weakness' or 'Improve Sleep, Anxiety'.",
+      "conditionContext": "One sentence callout in plain conversational language. ONLY reference things the patient actually reported ï¿½ conditions, symptoms, or goals. If none were reported, base it only on their age, gender, or health goals. NEVER invent symptoms or severity. Start with 'Based on your [goal/age/profile]...' when no symptoms exist. Keep it concise and warm. If there is truly nothing to reference, return null.",
       "dosage": "Specific dosage with units and safe upper limit note",
       "timing": "Specific timing instructions",
       "priority": "High",
@@ -204,6 +206,7 @@ Respond with ONLY valid JSON, no markdown, no code fences:
       "severityLevel": "Moderate",
       "interactions": "Known interactions or 'None identified'",
       "evidence": "Cite 1-2 specific peer-reviewed studies or authoritative guidelines with journal name, author(s), year, and PMID where available. Format: 'Author et al. (Year) Journal ? brief finding (PMID: XXXXXXX); Source 2 if applicable.' Examples: 'Ferracioli-Oda et al. (2013) PLOS ONE meta-analysis ? melatonin reduces sleep onset latency (PMID: 23691095)' or 'NIH Office of Dietary Supplements Vitamin D Fact Sheet; Holick et al. (2011) Journal of Clinical Endocrinology & Metabolism ? Vitamin D deficiency guidelines (PMID: 21646368)'. NEVER write vague phrases like 'Supported by studies on X'. Always name the source.",
+      "simplifiedEvidence": "ULTRA-SIMPLE one-liner (under 10 words). NO study names, NO citations, NO technical terms. Just say it works. Examples: 'Research shows this helps most people.' OR 'Proven to support your health.' OR 'Studies confirm this is effective.' OR 'Scientifically backed and safe.' Keep it short and reassuring.",
       "foods": "A clean comma-separated list of 4-6 specific food names only. NO sentences, NO 'such as', NO 'are naturally rich in', NO filler phrases. Just food names. If a category must be mentioned, immediately follow it with specific examples in parentheses. Examples of correct format: 'Atlantic salmon, canned tuna, sardines, mackerel, herring, anchovies' OR 'Fatty fish (salmon, tuna, sardines, mackerel), walnuts, chia seeds, flaxseeds'. NEVER write sentences like 'X are naturally rich in Y'.",
       "sideEffects": "Common side effects at recommended dose"
     }
@@ -533,7 +536,7 @@ function generateClinicalFallback(a) {
         'Follow age-appropriate feeding guidelines from your healthcare provider.'
       ],
       warnings: ['Children under 4 years old should NOT receive adult supplement doses. Always consult a pediatrician.'],
-      avoidList: ['All adult-dose supplements — dosages are unsafe for infants and toddlers'],
+      avoidList: ['All adult-dose supplements ï¿½ dosages are unsafe for infants and toddlers'],
       disclaimer: 'These recommendations are for informational purposes only. For children under 4, all supplementation must be supervised by a licensed pediatrician.'
     };
   }
@@ -545,7 +548,7 @@ function generateClinicalFallback(a) {
     recs.push({ name: 'Vitamin D3 (pediatric)', reason: 'Vitamin D deficiency is common in children and critical for bone development, immune function, and mood regulation. Most children do not get adequate sun exposure.', dosage: '600-1000 IU daily (pediatric)', timing: 'With a meal containing fat', priority: 'High', interactions: 'None identified at pediatric doses' });
     recs.push({ name: 'Omega-3 (children\'s DHA)', reason: 'DHA is essential for brain development and cognitive function in growing children. Supports focus, learning, and mood stability.', dosage: '250-500mg DHA daily (children\'s formulation)', timing: 'With meals', priority: 'Medium', interactions: 'None identified at pediatric doses' });
     if (symptoms.includes('Frequent Colds') || goals.includes('Boost Immunity'))
-      recs.push({ name: 'Zinc (pediatric)', reason: 'Zinc supports immune function and reduces the duration of colds in children. Essential for growth and wound healing.', dosage: '5-10mg daily (pediatric dose)', timing: 'With meals', priority: 'Medium', interactions: 'Use pediatric dose only — adult doses are too high for children' });
+      recs.push({ name: 'Zinc (pediatric)', reason: 'Zinc supports immune function and reduces the duration of colds in children. Essential for growth and wound healing.', dosage: '5-10mg daily (pediatric dose)', timing: 'With meals', priority: 'Medium', interactions: 'Use pediatric dose only ï¿½ adult doses are too high for children' });
     lifestyleAdvice.push({ category: 'Nutrition', advice: 'Ensure a balanced diet with fruits, vegetables, whole grains, lean protein, and dairy. Limit processed foods, sugary drinks, and excessive screen time during meals.' });
     lifestyleAdvice.push({ category: 'Exercise', advice: 'Children need at least 60 minutes of moderate-to-vigorous physical activity daily. Encourage outdoor play, sports, and active games to support healthy development.' });
     lifestyleAdvice.push({ category: 'Sleep', advice: 'Children aged 6-12 need 9-12 hours of sleep per night. Establish a consistent bedtime routine and limit screens at least 1 hour before bed.' });
@@ -563,7 +566,7 @@ function generateClinicalFallback(a) {
     recs.push({ name: 'Vitamin D3', reason: 'Adolescence is a critical period for bone density development. Vitamin D deficiency is extremely common in teenagers due to indoor lifestyles and is linked to poor mood, fatigue, and weakened immunity.', dosage: '1000-2000 IU daily', timing: 'With a meal containing fat', priority: 'High', interactions: 'None identified' });
     if (a.gender === 'Female')
       recs.push({ name: 'Iron (as Iron Bisglycinate)', reason: 'Adolescent females have significantly increased iron requirements due to menstruation. Iron deficiency is the most common nutritional deficiency in teenage girls and causes fatigue, poor concentration, and reduced athletic performance.', dosage: '18mg daily', timing: 'Morning with Vitamin C on empty stomach', priority: 'High', interactions: 'None identified' });
-    recs.push({ name: 'Magnesium Glycinate', reason: 'Magnesium is critical during adolescent growth spurts and is commonly deficient. Supports bone development, muscle function, sleep quality, and stress management — all key concerns for teenagers.', dosage: '200-300mg daily', timing: 'Evening with dinner', priority: 'Medium', interactions: 'None identified' });
+    recs.push({ name: 'Magnesium Glycinate', reason: 'Magnesium is critical during adolescent growth spurts and is commonly deficient. Supports bone development, muscle function, sleep quality, and stress management ï¿½ all key concerns for teenagers.', dosage: '200-300mg daily', timing: 'Evening with dinner', priority: 'Medium', interactions: 'None identified' });
     if (symptoms.includes('Anxiety/Stress') || symptoms.includes('Brain Fog'))
       recs.push({ name: 'Omega-3 (Fish Oil or Algae)', reason: 'DHA supports brain development which continues through age 25. Particularly important for academic performance, mood stability, and reducing anxiety in adolescents.', dosage: '500-1000mg DHA+EPA daily', timing: 'With meals', priority: 'Medium', interactions: 'None identified' });
     lifestyleAdvice.push({ category: 'Sleep', advice: 'Teenagers need 8-10 hours of sleep per night. Adolescent circadian rhythms naturally shift later, but consistent sleep schedules are critical for mental health, academic performance, and physical development.' });
@@ -579,15 +582,15 @@ function generateClinicalFallback(a) {
   // -- Senior (65+): Age-adjusted priorities --
   if (isSenior) {
     warnings.push('Adults over 65 should consult their physician before starting supplements, as absorption, metabolism, and drug interactions change significantly with age.');
-    recs.push({ name: 'Vitamin D3 + K2', reason: 'Vitamin D deficiency affects over 70% of adults over 65 and is directly linked to falls, fractures, cognitive decline, and immune dysfunction. K2 (MK-7) directs calcium to bones rather than arteries, critical for cardiovascular health in older adults.', dosage: '2000-4000 IU D3 + 100-200mcg K2 daily', timing: 'With largest meal', priority: 'High', interactions: onBloodThinner ? 'K2 may interact with warfarin — consult doctor' : 'None identified' });
+    recs.push({ name: 'Vitamin D3 + K2', reason: 'Vitamin D deficiency affects over 70% of adults over 65 and is directly linked to falls, fractures, cognitive decline, and immune dysfunction. K2 (MK-7) directs calcium to bones rather than arteries, critical for cardiovascular health in older adults.', dosage: '2000-4000 IU D3 + 100-200mcg K2 daily', timing: 'With largest meal', priority: 'High', interactions: onBloodThinner ? 'K2 may interact with warfarin ï¿½ consult doctor' : 'None identified' });
     recs.push({ name: 'Calcium Citrate', reason: 'Bone density declines accelerate after 65. Calcium citrate is better absorbed than carbonate in older adults with reduced stomach acid. Essential for fracture prevention.', dosage: '500mg twice daily (do not exceed 1200mg total)', timing: 'With meals, split into two doses', priority: 'High', interactions: onThyroid ? 'Take 4+ hours away from thyroid medication' : 'None identified' });
-    recs.push({ name: 'Vitamin B12 (Methylcobalamin)', reason: 'Gastric acid production declines with age, significantly reducing B12 absorption from food. Deficiency in seniors causes cognitive decline, neuropathy, and anemia — often misdiagnosed as dementia.', dosage: '1000mcg daily (sublingual preferred)', timing: 'Morning, sublingual for best absorption', priority: 'High', interactions: onMetformin ? 'Critical — metformin further depletes B12' : 'None identified' });
-    recs.push({ name: 'Omega-3 (EPA+DHA)', reason: 'Strong evidence for reducing cardiovascular risk, inflammation, cognitive decline, and depression in older adults. EPA reduces inflammation while DHA protects brain structure.', dosage: '1000-2000mg EPA+DHA daily', timing: 'With meals', priority: 'High', interactions: onBloodThinner ? 'Use 1g max on blood thinners — monitor INR' : 'None identified' });
-    recs.push({ name: 'CoQ10 (Ubiquinol)', reason: 'CoQ10 production declines by up to 50% by age 70. Ubiquinol (active form) supports heart function, energy production, and reduces oxidative stress. Particularly important for seniors on statins.', dosage: '100-200mg daily', timing: 'With fat-containing meal', priority: 'Medium', interactions: onStatin ? 'Essential — statins further deplete CoQ10' : 'None identified' });
-    lifestyleAdvice.push({ category: 'Exercise', advice: 'Resistance training 2-3x/week is the single most important intervention for healthy aging — prevents muscle loss (sarcopenia), maintains bone density, and reduces fall risk. Balance exercises like tai chi reduce falls by 45%.' });
+    recs.push({ name: 'Vitamin B12 (Methylcobalamin)', reason: 'Gastric acid production declines with age, significantly reducing B12 absorption from food. Deficiency in seniors causes cognitive decline, neuropathy, and anemia ï¿½ often misdiagnosed as dementia.', dosage: '1000mcg daily (sublingual preferred)', timing: 'Morning, sublingual for best absorption', priority: 'High', interactions: onMetformin ? 'Critical ï¿½ metformin further depletes B12' : 'None identified' });
+    recs.push({ name: 'Omega-3 (EPA+DHA)', reason: 'Strong evidence for reducing cardiovascular risk, inflammation, cognitive decline, and depression in older adults. EPA reduces inflammation while DHA protects brain structure.', dosage: '1000-2000mg EPA+DHA daily', timing: 'With meals', priority: 'High', interactions: onBloodThinner ? 'Use 1g max on blood thinners ï¿½ monitor INR' : 'None identified' });
+    recs.push({ name: 'CoQ10 (Ubiquinol)', reason: 'CoQ10 production declines by up to 50% by age 70. Ubiquinol (active form) supports heart function, energy production, and reduces oxidative stress. Particularly important for seniors on statins.', dosage: '100-200mg daily', timing: 'With fat-containing meal', priority: 'Medium', interactions: onStatin ? 'Essential ï¿½ statins further deplete CoQ10' : 'None identified' });
+    lifestyleAdvice.push({ category: 'Exercise', advice: 'Resistance training 2-3x/week is the single most important intervention for healthy aging ï¿½ prevents muscle loss (sarcopenia), maintains bone density, and reduces fall risk. Balance exercises like tai chi reduce falls by 45%.' });
     lifestyleAdvice.push({ category: 'Nutrition', advice: 'Protein needs increase with age to prevent muscle loss. Aim for 1.2-1.6g protein per kg body weight daily. Prioritize leucine-rich proteins (eggs, fish, dairy) which most effectively stimulate muscle synthesis.' });
     lifestyleAdvice.push({ category: 'Hydration', advice: 'Thirst sensation diminishes with age, making dehydration common and dangerous in seniors. Drink 6-8 glasses of water daily regardless of thirst. Dehydration worsens cognitive function, constipation, and fall risk.' });
-    lifestyleAdvice.push({ category: 'Sleep', advice: 'Sleep architecture changes with age — less deep sleep, more frequent waking. Maintain consistent sleep/wake times, limit naps to 20 minutes before 3pm, and avoid alcohol which fragments sleep quality.' });
+    lifestyleAdvice.push({ category: 'Sleep', advice: 'Sleep architecture changes with age ï¿½ less deep sleep, more frequent waking. Maintain consistent sleep/wake times, limit naps to 20 minutes before 3pm, and avoid alcohol which fragments sleep quality.' });
   actionPlan.push({ phase: 'Week 1 -- Build Foundations', focus: 'Start with the most critical supplements for senior health.', supplements: ['Vitamin D3 + K2', 'Vitamin B12 (Methylcobalamin)'], habits: ['Drink 6-8 glasses of water daily', 'Establish consistent meal and sleep times'], activity: ['10-15 minute daily walks', 'Chair-based stretching exercises'], expectedChanges: ['Slight improvement in energy', 'Reduced fatigue'] });
   actionPlan.push({ phase: 'Week 2-3 -- Support Bone & Heart Health', focus: 'Add bone and cardiovascular support supplements.', supplements: ['Calcium Citrate', 'Omega-3 (EPA+DHA)'], habits: ['Increase calcium-rich foods', 'Reduce sodium intake'], activity: ['20-30 minutes of daily movement', 'Balance exercises to reduce fall risk'], expectedChanges: ['Reduced joint stiffness', 'Improved cardiovascular comfort'] });
   actionPlan.push({ phase: 'Month 2 -- Build Strength & Clarity', focus: 'Increase physical activity and assess cognitive and physical improvements.', supplements: ['Add CoQ10 if on statins', 'Continue full routine'], habits: ['Maintain consistent supplement schedule', 'Social engagement for cognitive health'], activity: ['Begin resistance training 2x/week', 'Even chair-based exercises improve strength significantly'], expectedChanges: ['Improved cognitive clarity', 'Better bone and cardiovascular health', 'Increased strength'] });
@@ -598,16 +601,16 @@ function generateClinicalFallback(a) {
   // -- Medication flags --
   if (isPregnant || isBreastfeeding) {
     warnings.push(`${isPregnant ? 'Pregnancy' : 'Breastfeeding'}: Supplement needs are significantly different. Prioritize prenatal vitamins with folate (400-800mcg), iron, DHA, and iodine. Avoid high-dose Vitamin A (>10,000 IU), herbal supplements (ashwagandha, St. John's Wort, valerian), and high-dose Vitamin D without medical supervision.`);
-    avoidList.push('Ashwagandha — avoid during pregnancy/breastfeeding');
-    avoidList.push('St. John\'s Wort — avoid during pregnancy/breastfeeding');
-    avoidList.push('High-dose Vitamin A (>10,000 IU) — teratogenic risk');
+    avoidList.push('Ashwagandha ï¿½ avoid during pregnancy/breastfeeding');
+    avoidList.push('St. John\'s Wort ï¿½ avoid during pregnancy/breastfeeding');
+    avoidList.push('High-dose Vitamin A (>10,000 IU) ï¿½ teratogenic risk');
     recs.push({ name: 'Prenatal Multivitamin with Methylfolate', reason: `${isPregnant ? 'Pregnancy' : 'Breastfeeding'} significantly increases requirements for folate, iron, iodine, and DHA. A comprehensive prenatal multivitamin covers these critical needs.`, dosage: '1 serving daily per label', timing: 'With food to reduce nausea', priority: 'High', interactions: 'Use prenatal-specific formulation only' });
     recs.push({ name: 'Algae-based DHA (prenatal)', reason: 'DHA is critical for fetal brain and eye development. Algae-based DHA is the safest form during pregnancy, avoiding mercury concerns from fish oil.', dosage: '200-300mg DHA daily', timing: 'With meals', priority: 'High', interactions: 'None identified at recommended doses' });
   }
 
   // -- Lifestyle habit safeguards --
   if (lifestyleHabits.includes('Smoking')) {
-    warnings.push('Smoking significantly depletes Vitamin C, Vitamin E, and antioxidants. Higher doses of antioxidants are recommended. Smoking also increases cardiovascular risk — prioritize heart-protective supplements.');
+    warnings.push('Smoking significantly depletes Vitamin C, Vitamin E, and antioxidants. Higher doses of antioxidants are recommended. Smoking also increases cardiovascular risk ï¿½ prioritize heart-protective supplements.');
     recs.push({ name: 'Vitamin C (as Ascorbic Acid)', reason: 'Smokers require 35mg more Vitamin C daily than non-smokers per NIH guidelines. Smoking depletes antioxidant reserves rapidly, increasing oxidative stress and cardiovascular risk.', dosage: '500-1000mg daily', timing: 'With meals, split into 2 doses', priority: 'High', interactions: 'None identified' });
     recs.push({ name: 'N-Acetyl Cysteine (NAC)', reason: 'NAC is a precursor to glutathione, the body\'s master antioxidant. Smoking depletes glutathione significantly. NAC also supports lung health and mucus clearance.', dosage: '600mg twice daily', timing: 'With meals', priority: 'Medium', interactions: 'None identified' });
   }
@@ -632,15 +635,15 @@ function generateClinicalFallback(a) {
   if (sleepQuality === 'Very Poor' || sleepQuality === 'Poor') {
     if (!recs.find(r => r.name.includes('Magnesium')))
       recs.push({ name: 'Magnesium Glycinate', reason: `${sleepQuality} sleep quality detected. Magnesium glycinate activates GABA receptors to quiet the nervous system. It is the most clinically studied supplement for sleep quality improvement.`, dosage: sleepQuality === 'Very Poor' ? '400mg daily' : '300-400mg daily', timing: '30-60 minutes before bed', priority: sleepQuality === 'Very Poor' ? 'High' : 'High', interactions: 'None identified', triggeredBy: `${sleepQuality} sleep quality reported` });
-    recs.push({ name: 'Melatonin (low dose)', reason: `${sleepQuality} sleep quality reported. Low-dose melatonin helps reset the circadian rhythm and reduce sleep onset time. Lower doses (0.5-1mg) are more physiologically appropriate than high doses.`, dosage: '0.5–1mg', timing: '30 minutes before target bedtime', priority: 'Medium', interactions: 'Avoid with sedatives or alcohol', triggeredBy: `${sleepQuality} sleep quality reported` });
-    lifestyleAdvice.push({ category: 'Sleep', advice: sleepQuality === 'Very Poor' ? 'Very poor sleep requires a structured sleep hygiene protocol: strict consistent bedtime/wake time (even weekends), bedroom temperature 65-68°F/18-20°C, complete darkness, no screens 1 hour before bed, no caffeine after 1pm, and no alcohol (it fragments sleep architecture). Consider a sleep study if this persists.' : 'Improve sleep quality: consistent sleep schedule, dark and cool bedroom, avoid screens 1 hour before bed, limit caffeine after 2pm. Try 4-7-8 breathing to fall asleep faster.' });
+    recs.push({ name: 'Melatonin (low dose)', reason: `${sleepQuality} sleep quality reported. Low-dose melatonin helps reset the circadian rhythm and reduce sleep onset time. Lower doses (0.5-1mg) are more physiologically appropriate than high doses.`, dosage: '0.5ï¿½1mg', timing: '30 minutes before target bedtime', priority: 'Medium', interactions: 'Avoid with sedatives or alcohol', triggeredBy: `${sleepQuality} sleep quality reported` });
+    lifestyleAdvice.push({ category: 'Sleep', advice: sleepQuality === 'Very Poor' ? 'Very poor sleep requires a structured sleep hygiene protocol: strict consistent bedtime/wake time (even weekends), bedroom temperature 65-68ï¿½F/18-20ï¿½C, complete darkness, no screens 1 hour before bed, no caffeine after 1pm, and no alcohol (it fragments sleep architecture). Consider a sleep study if this persists.' : 'Improve sleep quality: consistent sleep schedule, dark and cool bedroom, avoid screens 1 hour before bed, limit caffeine after 2pm. Try 4-7-8 breathing to fall asleep faster.' });
   }
 
   // -- Water intake logic --
   if (waterIntake === '<1L') {
     warnings.push('Very low water intake (<1L/day) detected. Chronic dehydration causes fatigue, brain fog, headaches, poor digestion, and impaired kidney function. Aim for at least 2L daily.');
-    lifestyleAdvice.push({ category: 'Hydration', advice: 'Critical: You are significantly under-hydrated. Start each morning with 500ml of water before coffee. Set hourly reminders to drink. Aim for 2-3L daily. Dehydration mimics fatigue, brain fog, and hunger — many symptoms may improve with adequate hydration alone.' });
-  } else if (waterIntake === '1–2L') {
+    lifestyleAdvice.push({ category: 'Hydration', advice: 'Critical: You are significantly under-hydrated. Start each morning with 500ml of water before coffee. Set hourly reminders to drink. Aim for 2-3L daily. Dehydration mimics fatigue, brain fog, and hunger ï¿½ many symptoms may improve with adequate hydration alone.' });
+  } else if (waterIntake === '1ï¿½2L') {
     lifestyleAdvice.push({ category: 'Hydration', advice: 'Your water intake is below optimal. Aim for 2-3L daily. Carry a 1L water bottle and refill it twice. Add electrolytes (sodium, potassium, magnesium) if you exercise or sweat heavily.' });
   }
 
@@ -662,13 +665,13 @@ function generateClinicalFallback(a) {
     recs.push({ name: 'Vitamin B12 (Methylcobalamin)', reason: 'Metformin blocks B12 gut absorption. Long-term deficiency causes neuropathy, fatigue, and cognitive decline. Methylcobalamin is the neurologically active form.', dosage: '1000mcg daily', timing: 'Morning with breakfast', priority: 'High', interactions: 'Counteracts metformin-induced B12 depletion' });
   }
   if (onAntidepressant) {
-    warnings.push('On SSRI antidepressant: Avoid St. John\'s Wort and 5-HTP — serotonin syndrome risk. Magnesium and omega-3 are safe and beneficial.');
+    warnings.push('On SSRI antidepressant: Avoid St. John\'s Wort and 5-HTP ï¿½ serotonin syndrome risk. Magnesium and omega-3 are safe and beneficial.');
     avoidList.push('St. John\'s Wort (serotonin syndrome risk with SSRIs)');
     avoidList.push('5-HTP (serotonin syndrome risk with SSRIs)');
   }
 
   // -- Allergy checks --
-  if (/fish|seafood/.test(allergies)) avoidList.push('Fish oil / krill oil — use algae-based omega-3 instead');
+  if (/fish|seafood/.test(allergies)) avoidList.push('Fish oil / krill oil ï¿½ use algae-based omega-3 instead');
   if (allergies.includes('soy')) avoidList.push('Soy-based supplements and protein powders');
   if (/gluten|celiac/.test(allergies)) warnings.push('Celiac/gluten sensitivity: Always verify supplements are certified gluten-free.');
 
@@ -680,21 +683,21 @@ function generateClinicalFallback(a) {
     avoidList.push('Vitamin C >500mg (oxalate buildup risk)');
   }
   if (conditions.includes('Diabetes')) {
-    recs.push({ name: 'Berberine', reason: 'Clinical evidence shows berberine improves insulin sensitivity comparable to metformin. Particularly beneficial for Type 2 diabetes blood glucose management.', dosage: '500mg twice daily with meals', timing: 'With breakfast and dinner', priority: 'High', interactions: 'Enhances blood sugar lowering — monitor glucose closely with doctor' });
-    recs.push({ name: 'Alpha-Lipoic Acid (ALA)', reason: 'Improves insulin sensitivity and reduces diabetic neuropathy symptoms including tingling and numbness.', dosage: '600mg daily', timing: 'Before meals', priority: 'Medium', interactions: 'May lower blood sugar — monitor glucose when starting' });
+    recs.push({ name: 'Berberine', reason: 'Clinical evidence shows berberine improves insulin sensitivity comparable to metformin. Particularly beneficial for Type 2 diabetes blood glucose management.', dosage: '500mg twice daily with meals', timing: 'With breakfast and dinner', priority: 'High', interactions: 'Enhances blood sugar lowering ï¿½ monitor glucose closely with doctor' });
+    recs.push({ name: 'Alpha-Lipoic Acid (ALA)', reason: 'Improves insulin sensitivity and reduces diabetic neuropathy symptoms including tingling and numbness.', dosage: '600mg daily', timing: 'Before meals', priority: 'Medium', interactions: 'May lower blood sugar ï¿½ monitor glucose when starting' });
     warnings.push('Diabetes: Berberine and ALA lower blood sugar. Monitor glucose closely and inform your doctor.');
     lifestyleAdvice.push({ category: 'Diet', advice: 'Follow a low-glycemic diet. Prioritize fiber-rich vegetables, legumes, and whole grains. Limit refined carbohydrates and sugary drinks. Eat smaller, more frequent meals to stabilize blood sugar.' });
     lifestyleAdvice.push({ category: 'Exercise', advice: 'Aim for 30 minutes of moderate exercise 5 days/week. Even a 10-minute walk after meals significantly reduces post-meal blood sugar spikes.' });
   }
   if (conditions.includes('High Blood Pressure')) {
-    recs.push({ name: 'Magnesium Glycinate', reason: 'Magnesium deficiency is common in hypertension. Relaxes blood vessel walls with clinical evidence for blood pressure reduction. Glycinate avoids digestive side effects.', dosage: '400mg daily', timing: 'Evening with dinner', priority: 'High', interactions: onACE ? 'Safe with ACE inhibitors — monitor potassium' : 'Inform your doctor' });
-    recs.push({ name: 'CoQ10', reason: 'Multiple trials show CoQ10 reduces systolic BP by 10-17 mmHg. Essential for heart muscle energy.', dosage: '100-200mg daily', timing: 'With fat-containing meal', priority: 'High', interactions: 'May enhance antihypertensive effect — monitor BP' });
+    recs.push({ name: 'Magnesium Glycinate', reason: 'Magnesium deficiency is common in hypertension. Relaxes blood vessel walls with clinical evidence for blood pressure reduction. Glycinate avoids digestive side effects.', dosage: '400mg daily', timing: 'Evening with dinner', priority: 'High', interactions: onACE ? 'Safe with ACE inhibitors ï¿½ monitor potassium' : 'Inform your doctor' });
+    recs.push({ name: 'CoQ10', reason: 'Multiple trials show CoQ10 reduces systolic BP by 10-17 mmHg. Essential for heart muscle energy.', dosage: '100-200mg daily', timing: 'With fat-containing meal', priority: 'High', interactions: 'May enhance antihypertensive effect ï¿½ monitor BP' });
     warnings.push('High blood pressure: CoQ10 and magnesium can lower BP. Monitor and inform your doctor.');
     lifestyleAdvice.push({ category: 'Diet', advice: 'Follow the DASH diet: reduce sodium to <2300mg/day, increase potassium-rich foods (bananas, sweet potatoes, spinach), limit alcohol, and avoid processed foods.' });
     lifestyleAdvice.push({ category: 'Stress', advice: 'Chronic stress directly raises blood pressure. Practice daily deep breathing (4-7-8 technique), meditation, or progressive muscle relaxation for 10-15 minutes.' });
   }
   if (conditions.includes('Heart Disease')) {
-    recs.push({ name: 'Omega-3 (EPA+DHA, pharmaceutical grade)', reason: 'Strongest cardiovascular evidence of any supplement — reduces triglycerides, inflammation, and cardiac event risk.', dosage: '2000-4000mg EPA+DHA daily', timing: 'With meals', priority: 'High', interactions: onBloodThinner ? 'Use with caution on blood thinners — discuss with cardiologist' : 'Inform cardiologist' });
+    recs.push({ name: 'Omega-3 (EPA+DHA, pharmaceutical grade)', reason: 'Strongest cardiovascular evidence of any supplement ï¿½ reduces triglycerides, inflammation, and cardiac event risk.', dosage: '2000-4000mg EPA+DHA daily', timing: 'With meals', priority: 'High', interactions: onBloodThinner ? 'Use with caution on blood thinners ï¿½ discuss with cardiologist' : 'Inform cardiologist' });
     lifestyleAdvice.push({ category: 'Exercise', advice: 'Cardiac rehabilitation exercise is essential. Start with 20-30 minutes of low-intensity walking daily, gradually increasing. Always follow your cardiologist\'s exercise guidelines.' });
   }
 
@@ -842,8 +845,8 @@ function generateClinicalFallback(a) {
   if (['Vegan', 'Vegetarian'].includes(diet)) {
     if (!recs.find(r => r.name.includes('B12')))
       recs.push({ name: 'Vitamin B12 (Methylcobalamin)', reason: 'B12 is found almost exclusively in animal products. Deficiency is near-universal in vegans without supplementation and causes irreversible neurological damage.', dosage: '1000mcg daily', timing: 'Morning with breakfast', priority: 'High', interactions: 'None identified' });
-    recs.push({ name: 'Algae-based Omega-3 (DHA+EPA)', reason: 'Vegan source of omega-3 — algae is where fish get their DHA/EPA. Equally effective for brain function and inflammation control.', dosage: '500-1000mg DHA+EPA daily', timing: 'With fat-containing meal', priority: 'High', interactions: 'None identified' });
-    recs.push({ name: 'Vitamin D3 + K2 (vegan certified)', reason: 'D3 from lichen is the vegan form. K2 (MK-7) directs calcium to bones. Both commonly deficient in plant-based diets.', dosage: '2000 IU D3 + 100mcg K2 daily', timing: 'With largest meal', priority: 'High', interactions: onBloodThinner ? 'K2 may interact with warfarin — consult doctor' : 'None identified' });
+    recs.push({ name: 'Algae-based Omega-3 (DHA+EPA)', reason: 'Vegan source of omega-3 ï¿½ algae is where fish get their DHA/EPA. Equally effective for brain function and inflammation control.', dosage: '500-1000mg DHA+EPA daily', timing: 'With fat-containing meal', priority: 'High', interactions: 'None identified' });
+    recs.push({ name: 'Vitamin D3 + K2 (vegan certified)', reason: 'D3 from lichen is the vegan form. K2 (MK-7) directs calcium to bones. Both commonly deficient in plant-based diets.', dosage: '2000 IU D3 + 100mcg K2 daily', timing: 'With largest meal', priority: 'High', interactions: onBloodThinner ? 'K2 may interact with warfarin ï¿½ consult doctor' : 'None identified' });
     recs.push({ name: 'Iron Bisglycinate + Vitamin C', reason: 'Plant-based iron has lower absorption. Bisglycinate is gentlest form. Vitamin C triples absorption when taken together.', dosage: '18-25mg iron + 500mg Vitamin C', timing: 'Morning on empty stomach, away from coffee', priority: 'Medium', interactions: onThyroid ? '4+ hours away from thyroid medication' : 'None identified' });
     lifestyleAdvice.push({ category: 'Diet', advice: 'Ensure adequate protein from varied plant sources: combine legumes with grains, include tofu, tempeh, seitan, and hemp seeds. Aim for 0.8-1g protein per kg body weight daily.' });
   }
@@ -852,9 +855,9 @@ function generateClinicalFallback(a) {
   if (symptoms.includes('Fatigue') || goals.includes('Increase Energy')) {
     const sev = symptomSeverity['Fatigue'] || 'Moderate';
     if (!recs.find(r => r.name.includes('B12')))
-      recs.push({ name: 'Vitamin B12 (Methylcobalamin)', reason: `B12 deficiency is one of the most overlooked causes of fatigue. ${sev === 'Severe' ? 'Severe fatigue warrants priority B12 supplementation.' : ''} Methylcobalamin is directly usable by the nervous system.`, dosage: sev === 'Severe' ? '2000mcg daily (sublingual)' : '1000mcg daily', timing: 'Morning', priority: sev === 'Severe' ? 'High' : 'High', interactions: onMetformin ? 'Critical — metformin depletes B12' : 'None identified', triggeredBy: `Fatigue (${sev}) reported` });
+      recs.push({ name: 'Vitamin B12 (Methylcobalamin)', reason: `B12 deficiency is one of the most overlooked causes of fatigue. ${sev === 'Severe' ? 'Severe fatigue warrants priority B12 supplementation.' : ''} Methylcobalamin is directly usable by the nervous system.`, dosage: sev === 'Severe' ? '2000mcg daily (sublingual)' : '1000mcg daily', timing: 'Morning', priority: sev === 'Severe' ? 'High' : 'High', interactions: onMetformin ? 'Critical ï¿½ metformin depletes B12' : 'None identified', triggeredBy: `Fatigue (${sev}) reported` });
     recs.push({ name: 'Iron Bisglycinate', reason: `Iron deficiency anemia is the leading cause of fatigue, especially in women. ${sev === 'Severe' ? 'Severe fatigue may indicate significant iron deficiency.' : ''} Bisglycinate is highly absorbable without constipation.`, dosage: '18-25mg daily', timing: 'Morning on empty stomach with Vitamin C', priority: sev === 'Severe' ? 'High' : 'Medium', interactions: onThyroid ? '4+ hours from levothyroxine' : 'None identified', triggeredBy: `Fatigue (${sev}) reported` });
-    lifestyleAdvice.push({ category: 'Sleep', advice: 'Fatigue is often worsened by poor sleep quality. Maintain a consistent sleep schedule (same bedtime/wake time daily), keep bedroom cool (65-68°F/18-20°C), and avoid screens 1 hour before bed.' });
+    lifestyleAdvice.push({ category: 'Sleep', advice: 'Fatigue is often worsened by poor sleep quality. Maintain a consistent sleep schedule (same bedtime/wake time daily), keep bedroom cool (65-68ï¿½F/18-20ï¿½C), and avoid screens 1 hour before bed.' });
     lifestyleAdvice.push({ category: 'Diet', advice: 'Eat iron-rich foods with Vitamin C: spinach with lemon juice, lentils with tomatoes. Avoid coffee/tea within 1 hour of iron-rich meals as they block absorption.' });
   }
   if (symptoms.includes('Poor Sleep') || goals.includes('Improve Sleep') || sleepQuality === 'Very Poor' || sleepQuality === 'Poor') {
@@ -874,17 +877,17 @@ function generateClinicalFallback(a) {
   if (symptoms.includes('Anxiety/Stress')) {
     if (!onAntidepressant)
       recs.push({ name: 'Ashwagandha (KSM-66)', reason: 'KSM-66 is the most clinically studied extract. Multiple RCTs show 27-30% cortisol reduction and significant anxiety improvement.', dosage: '300-600mg daily', timing: 'Morning or evening with food', priority: 'Medium', interactions: 'None identified' });
-    recs.push({ name: 'L-Theanine', reason: 'Promotes alpha brain wave activity — calm alertness without sedation. Works with caffeine to reduce jitteriness. No dependency risk.', dosage: '200mg daily', timing: 'Morning or as needed', priority: 'Medium', interactions: onAntidepressant ? 'Safe with SSRIs' : 'None identified' });
+    recs.push({ name: 'L-Theanine', reason: 'Promotes alpha brain wave activity ï¿½ calm alertness without sedation. Works with caffeine to reduce jitteriness. No dependency risk.', dosage: '200mg daily', timing: 'Morning or as needed', priority: 'Medium', interactions: onAntidepressant ? 'Safe with SSRIs' : 'None identified' });
     lifestyleAdvice.push({ category: 'Stress', advice: 'Practice daily stress management: 10 minutes of mindfulness meditation, journaling, or deep breathing. The 4-7-8 breathing technique activates the parasympathetic nervous system within minutes.' });
     lifestyleAdvice.push({ category: 'Exercise', advice: 'Exercise is one of the most effective anxiety treatments. 30 minutes of moderate cardio 3-5x/week reduces cortisol and increases GABA and serotonin naturally.' });
   }
   if (symptoms.includes('Joint Pain')) {
-    recs.push({ name: 'Curcumin + Piperine (or Liposomal)', reason: 'Anti-inflammatory evidence comparable to NSAIDs for joint pain without GI side effects. Must include piperine or liposomal form for absorption.', dosage: '500-1000mg curcumin + 5mg piperine daily', timing: 'With meals', priority: 'Medium', interactions: onBloodThinner ? 'Mild blood-thinning — use with caution' : 'None identified' });
+    recs.push({ name: 'Curcumin + Piperine (or Liposomal)', reason: 'Anti-inflammatory evidence comparable to NSAIDs for joint pain without GI side effects. Must include piperine or liposomal form for absorption.', dosage: '500-1000mg curcumin + 5mg piperine daily', timing: 'With meals', priority: 'Medium', interactions: onBloodThinner ? 'Mild blood-thinning ï¿½ use with caution' : 'None identified' });
     lifestyleAdvice.push({ category: 'Exercise', advice: 'Low-impact exercise reduces joint pain by strengthening surrounding muscles. Try swimming, cycling, or water aerobics. Avoid high-impact activities during flare-ups. Gentle stretching and yoga improve joint mobility.' });
     lifestyleAdvice.push({ category: 'Diet', advice: 'Anti-inflammatory diet reduces joint pain: increase omega-3 rich foods (fatty fish, walnuts, flaxseed), colorful vegetables, and berries. Reduce processed foods, refined sugar, and vegetable oils high in omega-6.' });
   }
   if (symptoms.includes('Digestive Issue') || goals.includes('Digestive Health')) {
-    recs.push({ name: 'Probiotic (Multi-strain, 50B CFU)', reason: 'Restores gut microbiome diversity. Key strains: L. acidophilus, B. longum, L. rhamnosus GG — the most clinically validated for digestive health.', dosage: '50 billion CFU daily', timing: 'Morning before breakfast', priority: 'Medium', interactions: 'Safe with all medications' });
+    recs.push({ name: 'Probiotic (Multi-strain, 50B CFU)', reason: 'Restores gut microbiome diversity. Key strains: L. acidophilus, B. longum, L. rhamnosus GG ï¿½ the most clinically validated for digestive health.', dosage: '50 billion CFU daily', timing: 'Morning before breakfast', priority: 'Medium', interactions: 'Safe with all medications' });
     lifestyleAdvice.push({ category: 'Diet', advice: 'Feed your gut bacteria with prebiotic foods: garlic, onions, leeks, asparagus, bananas, and oats. Eat slowly and chew thoroughly. Avoid eating when stressed as it impairs digestion.' });
     lifestyleAdvice.push({ category: 'Hydration', advice: 'Drink 2L of water daily to support digestion and prevent constipation. Warm water with lemon in the morning stimulates digestive enzymes.' });
   }
@@ -905,21 +908,21 @@ function generateClinicalFallback(a) {
     if (/back\s*pain|backache|spine|lower back|upper back/.test(fd)) {
       if (!recs.find(r => r.name.includes('Magnesium')))
         recs.push({ name: 'Magnesium Glycinate', reason: 'Back pain is frequently associated with magnesium deficiency, which causes muscle tension and spasms. Magnesium glycinate relaxes skeletal muscle and reduces pain signaling.', dosage: '300-400mg daily', timing: 'Evening with dinner', priority: 'High', interactions: 'None identified' });
-      recs.push({ name: 'Curcumin + Piperine', reason: 'Curcumin has strong anti-inflammatory evidence for musculoskeletal pain including back pain. Piperine is required for adequate absorption.', dosage: '500-1000mg curcumin + 5mg piperine daily', timing: 'With meals', priority: 'High', interactions: onBloodThinner ? 'Mild blood-thinning — use with caution' : 'None identified' });
-      lifestyleAdvice.push({ category: 'Exercise', advice: 'For back pain, focus on core strengthening exercises (planks, bird-dogs, dead bugs) 3x/week. Weak core muscles are the primary driver of chronic back pain. Avoid prolonged sitting — stand or walk every 30 minutes.' });
+      recs.push({ name: 'Curcumin + Piperine', reason: 'Curcumin has strong anti-inflammatory evidence for musculoskeletal pain including back pain. Piperine is required for adequate absorption.', dosage: '500-1000mg curcumin + 5mg piperine daily', timing: 'With meals', priority: 'High', interactions: onBloodThinner ? 'Mild blood-thinning ï¿½ use with caution' : 'None identified' });
+      lifestyleAdvice.push({ category: 'Exercise', advice: 'For back pain, focus on core strengthening exercises (planks, bird-dogs, dead bugs) 3x/week. Weak core muscles are the primary driver of chronic back pain. Avoid prolonged sitting ï¿½ stand or walk every 30 minutes.' });
       lifestyleAdvice.push({ category: 'Posture', advice: 'Poor posture is a leading cause of back pain. Ensure your workstation is ergonomically set up: monitor at eye level, feet flat on floor, lower back supported. Stretch your hip flexors and hamstrings daily as tightness pulls on the lower back.' });
     }
 
     if (/headache|migraine|head\s*pain|head\s*ache/.test(fd)) {
       if (!recs.find(r => r.name.includes('Magnesium')))
         recs.push({ name: 'Magnesium Glycinate', reason: 'Magnesium deficiency is found in up to 50% of migraine sufferers. Clinical trials show magnesium supplementation reduces migraine frequency by 41%. It relaxes blood vessels and reduces neurological excitability.', dosage: '400mg daily', timing: 'Evening with dinner', priority: 'High', interactions: 'None identified' });
-      recs.push({ name: 'Riboflavin (Vitamin B2)', reason: 'Riboflavin at high doses has strong clinical evidence for migraine prevention, reducing frequency by up to 50% in trials. It improves mitochondrial energy production in brain cells.', dosage: '400mg daily', timing: 'With breakfast', priority: 'High', interactions: 'None identified — very safe' });
+      recs.push({ name: 'Riboflavin (Vitamin B2)', reason: 'Riboflavin at high doses has strong clinical evidence for migraine prevention, reducing frequency by up to 50% in trials. It improves mitochondrial energy production in brain cells.', dosage: '400mg daily', timing: 'With breakfast', priority: 'High', interactions: 'None identified ï¿½ very safe' });
       lifestyleAdvice.push({ category: 'Hydration', advice: 'Dehydration is one of the most common headache triggers. Drink at least 2-3L of water daily. Keep a water bottle visible as a reminder. Electrolyte imbalance (low sodium, magnesium) also triggers headaches.' });
       lifestyleAdvice.push({ category: 'Sleep', advice: 'Irregular sleep is a major headache trigger. Maintain consistent sleep and wake times even on weekends. Both too little and too much sleep can trigger migraines.' });
     }
 
     if (/knee\s*pain|knee\s*ache|knee\s*hurt/.test(fd)) {
-      recs.push({ name: 'Glucosamine Sulfate + Chondroitin', reason: 'Glucosamine sulfate has the strongest evidence for knee osteoarthritis pain relief, comparable to ibuprofen in long-term trials. Chondroitin helps maintain cartilage hydration and elasticity.', dosage: '1500mg glucosamine + 1200mg chondroitin daily', timing: 'With meals, split into 2-3 doses', priority: 'High', interactions: onBloodThinner ? 'Glucosamine may mildly affect INR — monitor' : 'None identified' });
+      recs.push({ name: 'Glucosamine Sulfate + Chondroitin', reason: 'Glucosamine sulfate has the strongest evidence for knee osteoarthritis pain relief, comparable to ibuprofen in long-term trials. Chondroitin helps maintain cartilage hydration and elasticity.', dosage: '1500mg glucosamine + 1200mg chondroitin daily', timing: 'With meals, split into 2-3 doses', priority: 'High', interactions: onBloodThinner ? 'Glucosamine may mildly affect INR ï¿½ monitor' : 'None identified' });
       recs.push({ name: 'Collagen Peptides (Type II)', reason: 'Type II collagen specifically targets joint cartilage. Clinical studies show it reduces knee pain and stiffness by stimulating cartilage regeneration.', dosage: '10g daily', timing: 'Morning on empty stomach with Vitamin C', priority: 'Medium', interactions: 'None identified' });
       lifestyleAdvice.push({ category: 'Exercise', advice: 'Strengthen the muscles around the knee to reduce joint load. Focus on quad sets, straight leg raises, and step-ups. Swimming and cycling are excellent low-impact options. Avoid running on hard surfaces until pain improves.' });
     }
@@ -932,7 +935,7 @@ function generateClinicalFallback(a) {
 
     if (/tired|exhausted|no energy|low energy|drained|lethargic/.test(fd) && !symptoms.includes('Fatigue')) {
       if (!recs.find(r => r.name.includes('B12')))
-        recs.push({ name: 'Vitamin B12 (Methylcobalamin)', reason: 'The patient reports persistent tiredness and low energy. B12 deficiency is one of the most common and overlooked causes of fatigue. Methylcobalamin is the neurologically active form with superior absorption.', dosage: '1000mcg daily', timing: 'Morning', priority: 'High', interactions: onMetformin ? 'Critical — metformin depletes B12' : 'None identified' });
+        recs.push({ name: 'Vitamin B12 (Methylcobalamin)', reason: 'The patient reports persistent tiredness and low energy. B12 deficiency is one of the most common and overlooked causes of fatigue. Methylcobalamin is the neurologically active form with superior absorption.', dosage: '1000mcg daily', timing: 'Morning', priority: 'High', interactions: onMetformin ? 'Critical ï¿½ metformin depletes B12' : 'None identified' });
       if (!recs.find(r => r.name.includes('D3')))
         recs.push({ name: 'Vitamin D3', reason: 'Low energy and fatigue are hallmark symptoms of Vitamin D deficiency, which affects over 40% of adults. Vitamin D is essential for mitochondrial energy production.', dosage: '2000 IU daily', timing: 'With a fat-containing meal', priority: 'High', interactions: 'None identified' });
       lifestyleAdvice.push({ category: 'Sleep', advice: 'Persistent tiredness despite adequate sleep may indicate poor sleep quality. Evaluate sleep hygiene: consistent schedule, dark/cool room, no screens 1 hour before bed, and limit caffeine after 2pm.' });
@@ -942,7 +945,7 @@ function generateClinicalFallback(a) {
       if (!onAntidepressant)
         recs.push({ name: 'Ashwagandha (KSM-66)', reason: 'The patient reports stress and anxiety. KSM-66 ashwagandha has the strongest clinical evidence for cortisol reduction and stress relief among adaptogens, with multiple RCTs showing 27-30% cortisol reduction.', dosage: '300-600mg daily', timing: 'Morning or evening with food', priority: 'High', interactions: 'None identified' });
       recs.push({ name: 'L-Theanine', reason: 'L-Theanine promotes calm alertness by increasing alpha brain waves. Particularly effective for stress-related tension without causing drowsiness.', dosage: '200mg as needed', timing: 'During stressful periods or morning', priority: 'Medium', interactions: onAntidepressant ? 'Safe with SSRIs' : 'None identified' });
-      lifestyleAdvice.push({ category: 'Stress', advice: 'For burnout and chronic stress, implement daily recovery practices: 10-minute morning meditation, journaling before bed, and at least one screen-free hour daily. Chronic stress depletes magnesium, B vitamins, and Vitamin C — all addressed in your supplement plan.' });
+      lifestyleAdvice.push({ category: 'Stress', advice: 'For burnout and chronic stress, implement daily recovery practices: 10-minute morning meditation, journaling before bed, and at least one screen-free hour daily. Chronic stress depletes magnesium, B vitamins, and Vitamin C ï¿½ all addressed in your supplement plan.' });
     }
 
     if (/sleep|insomnia|can't sleep|cant sleep|wake up|waking up|restless/.test(fd) && !symptoms.includes('Poor Sleep')) {
@@ -959,7 +962,7 @@ function generateClinicalFallback(a) {
     }
 
     if (/weight|fat|overweight|obese|slim|thin|lose weight|gain weight/.test(fd)) {
-      lifestyleAdvice.push({ category: 'Nutrition', advice: 'For weight management, focus on protein at every meal (it increases satiety by 30%), eat fiber-rich vegetables to fill up on fewer calories, and avoid liquid calories (sodas, juices, alcohol). Meal timing matters — avoid eating within 3 hours of bedtime.' });
+      lifestyleAdvice.push({ category: 'Nutrition', advice: 'For weight management, focus on protein at every meal (it increases satiety by 30%), eat fiber-rich vegetables to fill up on fewer calories, and avoid liquid calories (sodas, juices, alcohol). Meal timing matters ï¿½ avoid eating within 3 hours of bedtime.' });
       lifestyleAdvice.push({ category: 'Exercise', advice: 'Combine cardio (150 min/week) with resistance training (2-3x/week) for optimal body composition. Resistance training builds muscle which increases resting metabolic rate, burning more calories even at rest.' });
     }
 
@@ -968,7 +971,7 @@ function generateClinicalFallback(a) {
         recs.push({ name: 'Omega-3 (high EPA)', reason: 'EPA-dominant omega-3 has the strongest evidence for mood support among supplements. Multiple meta-analyses show significant antidepressant effects, particularly with EPA doses above 1g/day.', dosage: '1000-2000mg EPA daily', timing: 'With meals', priority: 'High', interactions: onBloodThinner ? 'Use 1g max on blood thinners' : 'None identified' });
         recs.push({ name: 'Vitamin D3', reason: 'Low Vitamin D is strongly correlated with depression. Vitamin D receptors are found throughout the brain and it plays a key role in serotonin synthesis.', dosage: '2000-4000 IU daily', timing: 'With a fat-containing meal', priority: 'High', interactions: 'None identified' });
       }
-      lifestyleAdvice.push({ category: 'Exercise', advice: 'Exercise is one of the most evidence-based interventions for depression — as effective as antidepressants in mild-to-moderate cases. Aim for 30 minutes of moderate cardio 5x/week. Even a 10-minute walk improves mood immediately.' });
+      lifestyleAdvice.push({ category: 'Exercise', advice: 'Exercise is one of the most evidence-based interventions for depression ï¿½ as effective as antidepressants in mild-to-moderate cases. Aim for 30 minutes of moderate cardio 5x/week. Even a 10-minute walk improves mood immediately.' });
       warnings.push('If you are experiencing persistent low mood or depression, please consult a mental health professional. Supplements support but do not replace professional mental health care.');
     }
   }
@@ -1346,10 +1349,10 @@ function inferSideEffects(name) {
   if (n.includes('vitamin d')) return 'Toxicity possible above 4000 IU/day long-term. Symptoms: nausea, weakness, frequent urination. Get levels tested before high-dose use.';
   if (n.includes('omega') || n.includes('fish oil')) return 'Fishy aftertaste, mild GI upset. Take with meals. High doses (>3g) may thin blood.';
   if (n.includes('ashwagandha')) return 'May cause drowsiness in some. Avoid in pregnancy. Rare: liver sensitivity at very high doses.';
-  if (n.includes('b12')) return 'Very safe — water soluble, excess is excreted. No known toxicity at recommended doses.';
-  if (n.includes('coq10')) return 'Generally well tolerated. Mild GI upset possible. May lower blood pressure — monitor if on BP medications.';
+  if (n.includes('b12')) return 'Very safe ï¿½ water soluble, excess is excreted. No known toxicity at recommended doses.';
+  if (n.includes('coq10')) return 'Generally well tolerated. Mild GI upset possible. May lower blood pressure ï¿½ monitor if on BP medications.';
   if (n.includes('curcumin')) return 'May cause GI upset at high doses. Avoid high doses in pregnancy or with blood thinners.';
-  if (n.includes('berberine')) return 'May cause GI discomfort initially. Can lower blood sugar — monitor if diabetic. Avoid in pregnancy.';
+  if (n.includes('berberine')) return 'May cause GI discomfort initially. Can lower blood sugar ï¿½ monitor if diabetic. Avoid in pregnancy.';
   if (n.includes('vitamin c')) return 'GI upset and diarrhea at doses above 2000mg. Upper limit: 2000mg/day.';
   if (n.includes('vitamin d')) return 'Toxicity possible above 4000 IU/day long-term. Symptoms: nausea, weakness, frequent urination. Get levels tested before high-dose use.';
   if (n.includes('vitamin a') || n.includes('retinol')) return 'Toxicity at high doses (>10,000 IU/day). Avoid in pregnancy. Symptoms: nausea, headache, liver damage. Upper limit: 3000 mcg RAE/day.';

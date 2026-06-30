@@ -354,6 +354,49 @@
   30% { transform: translateY(-7px); opacity: 1; }
 }
 
+/* ── Scroll to Bottom Button ── */
+.chat-scroll-to-bottom {
+  position: absolute;
+  bottom: 195px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  width: 34px;
+  height: 34px;
+  cursor: pointer;
+  box-shadow: 0 3px 12px rgba(34, 197, 94, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  transition: transform 0.2s, box-shadow 0.2s, opacity 0.3s;
+  animation: fadeInUp 0.3s ease-out;
+}
+.chat-scroll-to-bottom svg {
+  width: 16px;
+  height: 16px;
+}
+.chat-scroll-to-bottom:hover {
+  transform: translateX(-50%) scale(1.08) translateY(-2px);
+  box-shadow: 0 5px 16px rgba(34, 197, 94, 0.45);
+}
+.chat-scroll-to-bottom:active {
+  transform: translateX(-50%) scale(0.95);
+}
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
 /* ── Mobile ── */
 @media (max-width: 480px) {
   .chat-window {

@@ -51,6 +51,20 @@
   font-family: sans-serif;
 }
 
+/* Name row - First Name and Last Name side by side */
+.name-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 0;
+  width: 100%;
+}
+
+.name-row .auth-field {
+  flex: 1;
+  min-width: 0; /* Prevents flex items from overflowing */
+  margin-bottom: 16px;
+}
+
 .auth-field {
   display: flex;
   flex-direction: column;
@@ -66,6 +80,7 @@
 }
 
 .auth-field input {
+  width: 100%;
   padding: 12px 14px;
   border: none;
   border-radius: 8px;
@@ -75,6 +90,114 @@
   font-family: sans-serif;
   outline: none;
   transition: box-shadow 0.2s;
+  box-sizing: border-box;
+}
+
+/* Date input placeholder styling - make mm/dd/yyyy lighter */
+.auth-field input[type="date"]::-webkit-datetime-edit-text,
+.auth-field input[type="date"]::-webkit-datetime-edit-month-field,
+.auth-field input[type="date"]::-webkit-datetime-edit-day-field,
+.auth-field input[type="date"]::-webkit-datetime-edit-year-field {
+  color: #9ca3af;
+}
+
+/* When date input is empty, show placeholder color */
+.auth-field input[type="date"]:not(:focus):invalid {
+  color: #9ca3af;
+}
+
+/* When date has value, show FULL OPAQUE color */
+.auth-field input[type="date"]:valid::-webkit-datetime-edit-text,
+.auth-field input[type="date"]:valid::-webkit-datetime-edit-month-field,
+.auth-field input[type="date"]:valid::-webkit-datetime-edit-day-field,
+.auth-field input[type="date"]:valid::-webkit-datetime-edit-year-field {
+  color: #111827;
+}
+
+/* Birthday layout - All three fields in one row */
+.birthday-row-inline {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+}
+
+.birthday-row-inline .birthday-field-wrapper {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Month dropdown */
+.birthday-row-inline .birthday-select-inline {
+  width: 100%;
+  padding: 12px 14px;
+  border: none;
+  border-radius: 8px;
+  background: #f3f4f6;
+  font-size: 14px;
+  color: #111827;
+  font-family: sans-serif;
+  outline: none;
+  transition: box-shadow 0.2s;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23374151' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 36px;
+  box-sizing: border-box;
+}
+
+.birthday-row-inline .birthday-select-inline option {
+  color: #111827;
+  padding: 6px 12px;
+}
+
+/* Day and Year inputs */
+.birthday-row-inline .birthday-input-inline {
+  width: 100%;
+  padding: 12px 14px;
+  border: none;
+  border-radius: 8px;
+  background: #f3f4f6;
+  font-size: 14px;
+  color: #111827;
+  font-family: sans-serif;
+  outline: none;
+  transition: box-shadow 0.2s;
+  box-sizing: border-box;
+}
+
+.birthday-row-inline .birthday-input-inline::placeholder {
+  color: #9ca3af;
+}
+
+/* Remove spinner arrows from number inputs */
+.birthday-row-inline .birthday-input-inline::-webkit-outer-spin-button,
+.birthday-row-inline .birthday-input-inline::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.birthday-row-inline .birthday-input-inline[type=number] {
+  -moz-appearance: textfield;
+}
+
+/* Focus states */
+.birthday-row-inline .birthday-select-inline:focus,
+.birthday-row-inline .birthday-input-inline:focus {
+  box-shadow: 0 0 0 2px #4ade80;
+}
+
+/* Error states */
+.field-has-error .birthday-row-inline .birthday-select-inline,
+.field-has-error .birthday-row-inline .birthday-input-inline {
+  box-shadow: 0 0 0 2px #fca5a5;
+  background-color: #fff5f5;
+}
+
+.field-has-error .birthday-row-inline .birthday-select-inline:focus,
+.field-has-error .birthday-row-inline .birthday-input-inline:focus {
+  box-shadow: 0 0 0 2px #ef4444;
 }
 
 .auth-field input:focus {

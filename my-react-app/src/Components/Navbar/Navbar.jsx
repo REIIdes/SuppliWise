@@ -37,10 +37,19 @@ function Navbar() {
                 <polyline points="12 6 12 12 16 14" />
               </svg>
             </NavLink>
-            <div className="navbar-profile">
-              <div className="navbar-avatar">{user.name.charAt(0).toUpperCase()}</div>
+            <NavLink to="/profile" className="navbar-profile-link" title="Profile Settings">
+              <div 
+                className="navbar-avatar"
+                style={{
+                  backgroundImage: user.profilePicture ? `url(${user.profilePicture})` : 'none',
+                  backgroundSize: 'cover',
+                  backgroundPosition: 'center',
+                }}
+              >
+                {!user.profilePicture && user.name.charAt(0).toUpperCase()}
+              </div>
               <span className="navbar-username">{user.name}</span>
-            </div>
+            </NavLink>
             <button className="navbar-signin-btn" onClick={handleLogout}>
               Log Out
             </button>

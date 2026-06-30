@@ -142,8 +142,10 @@ export default function ChatAssistant({ recommendations }) {
   }]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showScrollButton, setShowScrollButton] = useState(false);
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
+  const messagesContainerRef = useRef(null);
 
   const getRecs = () => {
     if (recommendations && recommendations.length) return recommendations;
@@ -158,6 +160,43 @@ export default function ChatAssistant({ recommendations }) {
       try { sessionStorage.setItem('latest_recommendations', JSON.stringify(recommendations)); } catch {}
     }
   }, [recommendations]);
+
+  // Scroll to top when chat opens
+  useEffect(() => {
+    if (open && messagesContainerRef.current) {
+      // Use setTimeout to ensure DOM is fully rendered
+      setTimeout(() => {
+        if (messagesContainerRef.current) {
+          messagesContainerRef.current.scrollTop = 0;
+          setShowScrollButton(false);
+        }
+      }, 0);
+    }
+  }, [open]);
+
+  // Detect if user has scrolled up
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 50; // Within 50px of bottom
+      setShowScrollButton(!isAtBottom && scrollHeight > clientHeight);
+    };
+
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [open]);
+
+  const scrollToBottom = () => {
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTo({
+        top: messagesContainerRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
+    }
+  };
 
   useEffect(() => {
     if (open) {
@@ -284,7 +323,7 @@ export default function ChatAssistant({ recommendations }) {
             ⚕️ Educational only — not medical advice. Consult a healthcare provider.
           </div>
 
-          <div className="chat-messages">
+          <div className="chat-messages" ref={messagesContainerRef}>
             {messages.map((msg, i) => (
               <div key={i} className={`chat-bubble ${msg.role}`}>
                 {msg.role === 'assistant'
@@ -302,6 +341,19 @@ export default function ChatAssistant({ recommendations }) {
             )}
             <div ref={bottomRef} />
           </div>
+
+          {/* Scroll to bottom button */}
+          {showScrollButton && (
+            <button
+              className="chat-scroll-to-bottom"
+              onClick={scrollToBottom}
+              aria-label="Scroll to bottom"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+          )}
 
           <div className="chat-quick-prompts-wrap">
             <div className="chat-quick-prompts">

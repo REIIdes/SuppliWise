@@ -66,6 +66,28 @@
   color: #22c55e;
 }
 
+.navbar-profile-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  padding: 4px 8px;
+  border-radius: 8px;
+  transition: background 0.2s;
+}
+
+.navbar-profile-link:hover {
+  background: #f3f4f6;
+}
+
+.navbar-profile-link .navbar-avatar {
+  transition: transform 0.2s;
+}
+
+.navbar-profile-link:hover .navbar-avatar {
+  transform: scale(1.1);
+}
+
 .navbar-profile {
   display: flex;
   align-items: center;

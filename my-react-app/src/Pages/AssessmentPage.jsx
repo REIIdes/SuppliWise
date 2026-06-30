@@ -184,6 +184,43 @@ function Step1({ data, onChange, errors }) {
   const age = Number(data.age) || 0;
   const showActivityLevel = age === 0 || age >= 13;
   const [openActivity, setOpenActivity] = useState(null);
+  const [openTooltip, setOpenTooltip] = useState(null);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
+  // Calculate age and load gender from user's data stored in localStorage (only for logged-in users)
+  useEffect(() => {
+    const userStr = localStorage.getItem('user');
+    if (userStr) {
+      setIsLoggedIn(true);
+      try {
+        const user = JSON.parse(userStr);
+        
+        // Auto-calculate age from dateOfBirth
+        if (user.dateOfBirth) {
+          const birthDate = new Date(user.dateOfBirth);
+          const today = new Date();
+          let calculatedAge = today.getFullYear() - birthDate.getFullYear();
+          const monthDiff = today.getMonth() - birthDate.getMonth();
+          if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+            calculatedAge--;
+          }
+          // Only update if age is not already set or is different
+          if (data.age !== String(calculatedAge)) {
+            onChange('age', String(calculatedAge));
+          }
+        }
+        
+        // Auto-load gender from user account
+        if (user.gender && data.gender !== user.gender) {
+          onChange('gender', user.gender);
+        }
+      } catch (err) {
+        console.error('Error loading user data:', err);
+      }
+    } else {
+      setIsLoggedIn(false);
+    }
+  }, []); // Run once on mount
 
   useEffect(() => {
     if (!openActivity) return;
@@ -261,130 +298,236 @@ function Step1({ data, onChange, errors }) {
 
   return (
     <div className="step-body">
-      <h3 className="step-section-title">Basic Information</h3>
-
-      <div className="step-row">
-        {/* Age — no upper limit hint shown */}
-        <div id="field-age" className={`step-field ${errors.age ? 'field-error' : ''}`}>
-          <label>Age <span className="required-star">*</span></label>
-          <input
-            type="number"
-            placeholder="Enter your age"
-            value={data.age}
-            min={1}
-            onChange={(e) => onChange('age', e.target.value)}
-            onBlur={(e) => onChange('age', clamp(e.target.value, 1, 120))}
-          />
-          {errors.age && <span className="field-error-msg">{errors.age}</span>}
-        </div>
-
-        {/* Gender — pill button style */}
-        <div id="field-gender" className={`step-field ${errors.gender ? 'field-error' : ''}`}>
-          <label>Gender <span className="required-star">*</span></label>
-          <div className="gender-pill-group">
-            {['Male', 'Female'].map((g) => (
-              <button
-                key={g}
-                type="button"
-                className={`gender-pill ${data.gender === g ? 'gender-pill-active' : ''}`}
-                onClick={() => {
-                  onChange('gender', g);
-                  if (g !== 'Female') {
-                    onChange('isPregnant', '');
-                    onChange('isBreastfeeding', '');
-                  }
-                }}
-              >
-                {g}
-              </button>
-            ))}
-          </div>
-          {errors.gender && <span className="field-error-msg">{errors.gender}</span>}
-        </div>
+      {/* Section Header with Icon */}
+      <div className="section-header-with-icon">
+        <svg className="section-icon section-icon-green" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 12C14.21 12 16 10.21 16 8C16 5.79 14.21 4 12 4C9.79 4 8 5.79 8 8C8 10.21 9.79 12 12 12ZM12 14C9.33 14 4 15.34 4 18V20H20V18C20 15.34 14.67 14 12 14Z" fill="currentColor"/>
+        </svg>
+        <h3 className="section-title">Basic Information</h3>
       </div>
+      <div className="section-divider section-divider-green"></div>
 
-      {/* Weight and Height side by side */}
-      <div className="step-row">
-        {/* Weight with unit toggle */}
-        <div id="field-weight" className={`step-field ${errors.weight ? 'field-error' : ''}`}>
-          <label>
-            Weight <span className="required-star">*</span>
-            <span className="unit-toggle-inline">
-              {['kg', 'lbs'].map(u => (
-                <button
-                  key={u}
-                  type="button"
-                  className={`unit-btn ${weightUnit === u ? 'unit-btn-active' : ''}`}
-                  onClick={() => handleWeightUnitChange(u)}
-                >
-                  {u}
-                </button>
-              ))}
-            </span>
-          </label>
-          <input
-            type="number"
-            placeholder={weightUnit === 'kg' ? 'e.g. 70' : 'e.g. 154'}
-            value={data.weight}
-            min={1}
-            onChange={(e) => onChange('weight', e.target.value)}
-            onBlur={(e) => {
-              const lim = weightUnit === 'kg' ? LIMITS.weightKg : LIMITS.weightLb;
-              onChange('weight', clamp(e.target.value, lim.min, lim.max));
-            }}
-          />
-          {errors.weight && <span className="field-error-msg">{errors.weight}</span>}
-        </div>
+      {/* Card-based layout: Demographics and Body Measurements */}
+      <div className="info-cards-row">
+        {/* Left card: Demographics */}
+        <div className="info-card demographics-card">
+          <div className="card-header">
+            <svg className="card-icon card-icon-green" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 12C14.21 12 16 10.21 16 8C16 5.79 14.21 4 12 4C9.79 4 8 5.79 8 8C8 10.21 9.79 12 12 12ZM12 14C9.33 14 4 15.34 4 18V20H20V18C20 15.34 14.67 14 12 14Z" fill="currentColor"/>
+            </svg>
+            <h4 className="card-title">Demographics</h4>
+          </div>
 
-        {/* Height with unit toggle */}
-        <div id="field-height" className={`step-field ${errors.height ? 'field-error' : ''}`}>
-          <label>
-            Height <span className="required-star">*</span>
-            <span className="unit-toggle-inline">
-              {['cm', 'ft'].map(u => (
+          {/* Age — auto-calculated and read-only for logged-in users, editable for guests */}
+          <div id="field-age" className={`card-field ${errors.age ? 'field-error' : ''}`}>
+            <label>Age <span className="required-star">*</span>
+              <div className="diet-tooltip-wrap">
                 <button
-                  key={u}
                   type="button"
-                  className={`unit-btn ${heightUnit === u ? 'unit-btn-active' : ''}`}
-                  onClick={() => handleHeightUnitChange(u)}
+                  className="diet-info-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOpenTooltip(openTooltip === 'age' ? null : 'age');
+                  }}
+                  title="Why is age important?"
                 >
-                  {u === 'ft' ? 'ft / in' : 'cm'}
+                  ?
                 </button>
-              ))}
-            </span>
-          </label>
-          {heightUnit === 'cm' ? (
+                {openTooltip === 'age' && (
+                  <div className="diet-tooltip-box">
+                    <span>
+                      {isLoggedIn 
+                        ? 'Age is automatically calculated from your date of birth. '
+                        : 'Enter your age. '
+                      }
+                      Our AI adjusts supplement recommendations based on your age.
+                      {age > 0 && age < 13 && ' As a child (under 13), you will receive pediatric doses tailored for growth and development.'}
+                      {age >= 13 && age < 18 && ' As a teen (13-17), you will receive adolescent doses supporting growth, energy, and hormonal balance.'}
+                      {age >= 18 && age < 65 && ' As an adult (18-64), you will receive standard doses optimized for overall health and wellness.'}
+                      {age >= 65 && ' As a senior (65+), you will receive age-appropriate recommendations focusing on bone health, cognitive function, and energy.'}
+                    </span>
+                    <button
+                      type="button"
+                      className="diet-tooltip-close"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenTooltip(null);
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
+              </div>
+            </label>
             <input
               type="number"
-              placeholder="e.g. 170"
-              value={data.height}
-              min={30}
-              onChange={(e) => onChange('height', e.target.value)}
-              onBlur={(e) => onChange('height', clamp(e.target.value, 30, 300))}
+              placeholder="Enter your age"
+              value={data.age}
+              min={1}
+              max={120}
+              className={isLoggedIn ? 'age-readonly' : ''}
+              readOnly={isLoggedIn}
+              disabled={isLoggedIn}
+              onChange={(e) => !isLoggedIn && onChange('age', e.target.value)}
+              onBlur={(e) => !isLoggedIn && onChange('age', clamp(e.target.value, 1, 120))}
             />
-          ) : (
-            <div className="ft-in-row">
-              <input
-                type="number"
-                placeholder="ft"
-                value={data.heightFt || ''}
-                min={1} max={9}
-                onChange={(e) => handleFtChange(e.target.value)}
-                onBlur={(e) => handleFtChange(clamp(e.target.value, 1, 9))}
-              />
-              <span className="ft-in-sep">ft</span>
-              <input
-                type="number"
-                placeholder="in"
-                value={data.heightIn || ''}
-                min={0} max={11}
-                onChange={(e) => handleInChange(e.target.value)}
-                onBlur={(e) => handleInChange(clamp(e.target.value, 0, 11))}
-              />
-              <span className="ft-in-sep">in</span>
+            {errors.age && <span className="field-error-msg">{errors.age}</span>}
+          </div>
+
+          {/* Gender — auto-loaded and read-only for logged-in users, editable for guests */}
+          <div id="field-gender" className={`card-field ${errors.gender ? 'field-error' : ''}`}>
+            <label>Gender <span className="required-star">*</span>
+              <div className="diet-tooltip-wrap">
+                <button
+                  type="button"
+                  className="diet-info-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOpenTooltip(openTooltip === 'gender' ? null : 'gender');
+                  }}
+                  title="Why is gender important?"
+                >
+                  ?
+                </button>
+                {openTooltip === 'gender' && (
+                  <div className="diet-tooltip-box">
+                    <span>
+                      {isLoggedIn 
+                        ? 'Gender is automatically loaded from your account. '
+                        : 'Select your gender. '
+                      }
+                      Our AI tailors supplement recommendations based on biological sex differences. Males and females have different nutritional needs for hormones, bone density, iron levels, and reproductive health.
+                    </span>
+                    <button
+                      type="button"
+                      className="diet-tooltip-close"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenTooltip(null);
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
+              </div>
+            </label>
+            <div className="gender-pill-group">
+              {['Male', 'Female'].map((g) => (
+                <button
+                  key={g}
+                  type="button"
+                  className={`gender-pill ${data.gender === g ? 'gender-pill-active' : ''} ${isLoggedIn ? 'gender-pill-readonly' : ''}`}
+                  disabled={isLoggedIn}
+                  onClick={() => {
+                    if (!isLoggedIn) {
+                      onChange('gender', g);
+                      if (g !== 'Female') {
+                        onChange('isPregnant', '');
+                        onChange('isBreastfeeding', '');
+                      }
+                    }
+                  }}
+                >
+                  {g}
+                </button>
+              ))}
             </div>
-          )}
-          {errors.height && <span className="field-error-msg">{errors.height}</span>}
+            {errors.gender && <span className="field-error-msg">{errors.gender}</span>}
+          </div>
+        </div>
+
+        {/* Right card: Body Measurements */}
+        <div className="info-card measurements-card">
+          <div className="card-header">
+            <svg className="card-icon card-icon-blue" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M3 17.25V21H6.75L17.81 9.94L14.06 6.19L3 17.25ZM20.71 7.04C21.1 6.65 21.1 6.02 20.71 5.63L18.37 3.29C17.98 2.9 17.35 2.9 16.96 3.29L15.13 5.12L18.88 8.87L20.71 7.04Z" fill="currentColor"/>
+            </svg>
+            <h4 className="card-title">Body Measurements</h4>
+          </div>
+
+          {/* Weight with unit toggle */}
+          <div id="field-weight" className={`card-field ${errors.weight ? 'field-error' : ''}`}>
+            <label>
+              Weight <span className="required-star">*</span>
+              <span className="unit-toggle-inline">
+                {['kg', 'lbs'].map(u => (
+                  <button
+                    key={u}
+                    type="button"
+                    className={`unit-btn ${weightUnit === u ? 'unit-btn-active' : ''}`}
+                    onClick={() => handleWeightUnitChange(u)}
+                  >
+                    {u}
+                  </button>
+                ))}
+              </span>
+            </label>
+            <input
+              type="number"
+              placeholder={weightUnit === 'kg' ? 'e.g. 70' : 'e.g. 154'}
+              value={data.weight}
+              min={1}
+              onChange={(e) => onChange('weight', e.target.value)}
+              onBlur={(e) => {
+                const lim = weightUnit === 'kg' ? LIMITS.weightKg : LIMITS.weightLb;
+                onChange('weight', clamp(e.target.value, lim.min, lim.max));
+              }}
+            />
+            {errors.weight && <span className="field-error-msg">{errors.weight}</span>}
+          </div>
+
+          {/* Height with unit toggle */}
+          <div id="field-height" className={`card-field ${errors.height ? 'field-error' : ''}`}>
+            <label>
+              Height <span className="required-star">*</span>
+              <span className="unit-toggle-inline">
+                {['cm', 'ft'].map(u => (
+                  <button
+                    key={u}
+                    type="button"
+                    className={`unit-btn ${heightUnit === u ? 'unit-btn-active' : ''}`}
+                    onClick={() => handleHeightUnitChange(u)}
+                  >
+                    {u === 'ft' ? 'ft / in' : 'cm'}
+                  </button>
+                ))}
+              </span>
+            </label>
+            {heightUnit === 'cm' ? (
+              <input
+                type="number"
+                placeholder="e.g. 170"
+                value={data.height}
+                min={30}
+                onChange={(e) => onChange('height', e.target.value)}
+                onBlur={(e) => onChange('height', clamp(e.target.value, 30, 300))}
+              />
+            ) : (
+              <div className="ft-in-row">
+                <input
+                  type="number"
+                  placeholder="ft"
+                  value={data.heightFt || ''}
+                  min={1} max={9}
+                  onChange={(e) => handleFtChange(e.target.value)}
+                  onBlur={(e) => handleFtChange(clamp(e.target.value, 1, 9))}
+                />
+                <span className="ft-in-sep">ft</span>
+                <input
+                  type="number"
+                  placeholder="in"
+                  value={data.heightIn || ''}
+                  min={0} max={11}
+                  onChange={(e) => handleInChange(e.target.value)}
+                  onBlur={(e) => handleInChange(clamp(e.target.value, 0, 11))}
+                />
+                <span className="ft-in-sep">in</span>
+              </div>
+            )}
+            {errors.height && <span className="field-error-msg">{errors.height}</span>}
+          </div>
         </div>
       </div>
 
@@ -490,7 +633,14 @@ function Step2({ data, onChange, errors = {} }) {
 
   return (
     <div className="step-body">
-      <h3 className="step-section-title">Diet &amp; Health Goals</h3>
+      {/* Section Header with Icon */}
+      <div className="section-header-with-icon">
+        <svg className="section-icon section-icon-purple" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM13 17H11V15H13V17ZM13 13H11V7H13V13Z" fill="currentColor"/>
+        </svg>
+        <h3 className="section-title">Diet &amp; Health Goals</h3>
+      </div>
+      <div className="section-divider section-divider-purple"></div>
 
       {/* Diet type — 6 options in a 3-col grid with info tooltips */}
       <div id="field-dietType" className="step-field">
@@ -1132,9 +1282,15 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
 
   return (
     <div className="step-body">
+      {/* Section Header with Icon - Medical Information */}
+      <div className="section-header-with-icon">
+        <svg className="section-icon section-icon-red" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M19 3H5C3.9 3 3 3.9 3 5V19C3 20.1 3.9 21 5 21H19C20.1 21 21 20.1 21 19V5C21 3.9 20.1 3 19 3ZM17 13H13V17H11V13H7V11H11V7H13V11H17V13Z" fill="currentColor"/>
+        </svg>
+        <h3 className="section-title">Medical Information</h3>
+      </div>
+      <div className="section-divider section-divider-red"></div>
 
-      {/* ── Medical Information ── */}
-      <h3 className="step-section-title">Medical Information</h3>
       <p id="field-medicalConditions" className="step-hint">Medical Conditions <span className="field-hint">(select all that apply)</span></p>
 
       {conditionGroups.map(({ group, items }) => (
@@ -1169,8 +1325,14 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
       {/* ── Divider ── */}
       <div className="step-section-divider" />
 
-      {/* Current Symptoms */}
-      <h3 className="step-section-title">Current Symptoms</h3>
+      {/* Section Header with Icon - Current Symptoms */}
+      <div className="section-header-with-icon">
+        <svg className="section-icon section-icon-orange" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM13 17H11V11H13V17ZM13 9H11V7H13V9Z" fill="currentColor"/>
+        </svg>
+        <h3 className="section-title">Current Symptoms</h3>
+      </div>
+      <div className="section-divider section-divider-orange"></div>
 
       {(() => {
         const selectedConditions = (data.medicalConditions || []).filter(c => c !== 'None');
@@ -1376,7 +1538,14 @@ function Step4Lifestyle({ data, onChange, errors }) {
 
   return (
     <div className="step-body">
-      <h3 className="step-section-title">Lifestyle &amp; Additional Details</h3>
+      {/* Section Header with Icon - Lifestyle */}
+      <div className="section-header-with-icon">
+        <svg className="section-icon section-icon-teal" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM12 20C7.59 20 4 16.41 4 12C4 7.59 7.59 4 12 4C16.41 4 20 7.59 20 12C20 16.41 16.41 20 12 20ZM12.5 7H11V13L16.25 16.15L17 14.92L12.5 12.25V7Z" fill="currentColor"/>
+        </svg>
+        <h3 className="section-title">Lifestyle &amp; Additional Details</h3>
+      </div>
+      <div className="section-divider section-divider-teal"></div>
 
       {/* Sleep Quality */}
       <div id="field-sleepQuality" className="step-field">
@@ -1442,7 +1611,13 @@ function Step4Lifestyle({ data, onChange, errors }) {
       </div>
 
       {/* Current Supplement Usage */}
-      <hr className="step4-divider" />
+      <div className="subsection-header-with-icon">
+        <svg className="subsection-icon subsection-icon-teal" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M4.22 11.29L11.29 4.22C13.64 1.88 17.43 1.88 19.78 4.22C22.12 6.56 22.12 10.36 19.78 12.71L12.71 19.78C10.36 22.12 6.56 22.12 4.22 19.78C1.88 17.43 1.88 13.64 4.22 11.29ZM5.64 12.71C4.59 13.75 4.24 15.24 4.6 16.57L10.59 10.59L14.83 14.83L18.36 11.29C19.93 9.73 19.93 7.2 18.36 5.64C16.8 4.07 14.27 4.07 12.71 5.64L5.64 12.71Z" fill="currentColor"/>
+        </svg>
+        <h4 className="subsection-title">Current Supplements</h4>
+      </div>
+      <div className="subsection-divider subsection-divider-teal"></div>
       <div className="step-field">
         <label>Are you currently taking any supplements? <span className="field-hint">(optional)</span></label>
         <div className="radio-group">
@@ -1510,7 +1685,13 @@ function Step4Lifestyle({ data, onChange, errors }) {
       </div>
 
       {/* Sun Exposure */}
-      <hr className="step4-divider" />
+      <div className="subsection-header-with-icon">
+        <svg className="subsection-icon subsection-icon-teal" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 7C9.24 7 7 9.24 7 12C7 14.76 9.24 17 12 17C14.76 17 17 14.76 17 12C17 9.24 14.76 7 12 7ZM2 13H4C4.55 13 5 12.55 5 12C5 11.45 4.55 11 4 11H2C1.45 11 1 11.45 1 12C1 12.55 1.45 13 2 13ZM20 13H22C22.55 13 23 12.55 23 12C23 11.45 22.55 11 22 11H20C19.45 11 19 11.45 19 12C19 12.55 19.45 13 20 13ZM11 2V4C11 4.55 11.45 5 12 5C12.55 5 13 4.55 13 4V2C13 1.45 12.55 1 12 1C11.45 1 11 1.45 11 2ZM11 20V22C11 22.55 11.45 23 12 23C12.55 23 13 22.55 13 22V20C13 19.45 12.55 19 12 19C11.45 19 11 19.45 11 20ZM5.99 4.58C5.6 4.19 4.96 4.19 4.58 4.58C4.19 4.97 4.19 5.61 4.58 5.99L5.64 7.05C6.03 7.44 6.67 7.44 7.05 7.05C7.43 6.66 7.44 6.02 7.05 5.64L5.99 4.58ZM18.36 16.95C17.97 16.56 17.33 16.56 16.95 16.95C16.56 17.34 16.56 17.98 16.95 18.36L18.01 19.42C18.4 19.81 19.04 19.81 19.42 19.42C19.81 19.03 19.81 18.39 19.42 18.01L18.36 16.95ZM19.42 5.99C19.81 5.6 19.81 4.96 19.42 4.58C19.03 4.19 18.39 4.19 18.01 4.58L16.95 5.64C16.56 6.03 16.56 6.67 16.95 7.05C17.34 7.43 17.98 7.44 18.36 7.05L19.42 5.99ZM7.05 18.36C7.44 17.97 7.44 17.33 7.05 16.95C6.66 16.56 6.02 16.56 5.64 16.95L4.58 18.01C4.19 18.4 4.19 19.04 4.58 19.42C4.97 19.81 5.61 19.81 5.99 19.42L7.05 18.36Z" fill="currentColor"/>
+        </svg>
+        <h4 className="subsection-title">Dietary & Sun Exposure</h4>
+      </div>
+      <div className="subsection-divider subsection-divider-teal"></div>
       <div className="step-field">
         <label>Daily Sun Exposure <span className="field-hint">(optional)</span></label>
         <div className="radio-group flex-wrap">
@@ -1543,7 +1724,13 @@ function Step4Lifestyle({ data, onChange, errors }) {
       {/* Pregnancy & Breastfeeding — only for Female */}
       {data.gender === 'Female' && (
         <>
-          <hr className="step4-divider" />
+          <div className="subsection-header-with-icon">
+            <svg className="subsection-icon subsection-icon-teal" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M9 11.75C6.66 11.75 4.75 9.84 4.75 7.5C4.75 5.16 6.66 3.25 9 3.25C11.34 3.25 13.25 5.16 13.25 7.5C13.25 9.84 11.34 11.75 9 11.75ZM15 12C15.55 12 16 11.55 16 11C16 10.45 15.55 10 15 10C14.45 10 14 10.45 14 11C14 11.55 14.45 12 15 12ZM15 14C12.79 14 11 12.21 11 10C11 9.45 11.45 9 12 9C12.55 9 13 9.45 13 10C13 11.1 13.9 12 15 12C16.1 12 17 11.1 17 10C17 9.45 17.45 9 18 9C18.55 9 19 9.45 19 10C19 12.21 17.21 14 15 14ZM9 13C5.69 13 3 15.69 3 19V20C3 20.55 3.45 21 4 21H14C14.55 21 15 20.55 15 20V19C15 15.69 12.31 13 9 13Z" fill="currentColor"/>
+            </svg>
+            <h4 className="subsection-title">Pregnancy &amp; Breastfeeding</h4>
+          </div>
+          <div className="subsection-divider subsection-divider-teal"></div>
           <div className="step-field">
             <label>Pregnancy &amp; Breastfeeding <span className="field-hint">(optional)</span></label>
             <div className="pregnancy-grid">
@@ -1743,6 +1930,11 @@ function AssessmentPage() {
   useEffect(() => {
     sessionStorage.setItem(SESSION_KEY, JSON.stringify(formData));
   }, [formData]);
+
+  // Scroll to top whenever step changes
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [step]);
 
   const handleChange = (field, value) => {
     setFormData((prev) => {
