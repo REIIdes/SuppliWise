@@ -224,7 +224,8 @@ function LogIn() {
       gender: data.gender,
       dateOfBirth: data.dateOfBirth,
       age: data.age,
-      profilePicture: data.profilePicture || ''
+      profilePicture: data.profilePicture || '',
+      bannerPicture: data.bannerPicture || ''
     }));
 
     // Check for pending assessment saved before login

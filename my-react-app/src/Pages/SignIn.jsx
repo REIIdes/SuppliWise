@@ -217,7 +217,8 @@ function SignIn() {
         gender: data.gender,
         dateOfBirth: data.dateOfBirth,
         age: data.age,
-        profilePicture: data.profilePicture || ''
+        profilePicture: data.profilePicture || '',
+        bannerPicture: data.bannerPicture || ''
       }));
 
       const pending = sessionStorage.getItem(SESSION_KEY);
