@@ -127,7 +127,18 @@ EVIDENCE QUALITY STANDARDS (MANDATORY):
       - It is still widely accepted in the medical community
       - It has NOT been contradicted by newer evidence
       - You MUST clearly label it as "Landmark Study" or "Clinical Guideline" in the citation
-   ⚠️ IMPORTANT: When using evidence older than 5 years, explicitly state: "[LANDMARK STUDY]" or "[CLINICAL GUIDELINE]" at the start of the citation
+   
+   ⚠️ CRITICAL - PREFER RECENT SYNTHESES OVER OLD PRIMARIES:
+   Before citing an older landmark study, ALWAYS search for a recent (2024-2025, or 2020-2025) systematic review, 
+   meta-analysis, or clinical guideline that references or builds upon that landmark study. Cite the newer synthesis 
+   instead of the original older study whenever possible. Use older landmark studies ONLY when no suitable recent 
+   synthesis or guideline exists.
+   
+   Example: Instead of citing a 2011 landmark RCT, cite a 2023 systematic review that analyzed that RCT along with 
+   newer evidence.
+   
+   ⚠️ LABELING: When using evidence older than 5 years, explicitly state: "[LANDMARK STUDY]" or "[CLINICAL GUIDELINE]" 
+   at the start of the citation
 
 2. EVIDENCE HIERARCHY (prioritize in this order):
    1️⃣ Systematic reviews and meta-analyses
@@ -243,7 +254,7 @@ Respond with ONLY valid JSON, no markdown, no code fences:
       "confidenceScore": 85,
       "severityLevel": "Moderate",
       "interactions": "Known interactions or 'None identified'",
-      "evidence": "MANDATORY: Cite 1-2 specific peer-reviewed studies using proper APA format. CASCADING SEARCH: (1) FIRST: Search for research from last 2 years (2024-2025); (2) SECOND: If none found, search last 5 years (2020-2025); (3) THIRD: If none found, use older landmark study or clinical guideline ONLY if still widely accepted and not contradicted—MUST prefix with [LANDMARK STUDY] or [CLINICAL GUIDELINE] label. EVIDENCE HIERARCHY: Prefer systematic reviews/meta-analyses > clinical guidelines > RCTs > observational studies. SOURCES: Only PubMed-indexed studies, NIH Office of Dietary Supplements, WHO, or recognized medical organizations. FORMAT: 'Author, A. B., & Author, C. D. (Year). Title of article. Journal Name, volume(issue), pages. (PMID: XXXXXXX)' OR '[CLINICAL GUIDELINE] Organization Name. (Year). Guideline title.' Example for recent study: 'Auld, F., Maschauer, E. L., Morrison, I., Skene, D. J., & Riha, R. L. (2017). Evidence for the efficacy of melatonin in the treatment of primary adult sleep disorders. Sleep Medicine Reviews, 34, 10-22. (PMID: 28274269)' Example for landmark: '[LANDMARK STUDY] Institute of Medicine. (2011). Dietary Reference Intakes for Calcium and Vitamin D. National Academies Press.' LEGAL REQUIREMENT: Present as wellness guidance only. NEVER claim to diagnose, treat, cure, or prevent diseases. Use possibility language ('may support', 'evidence suggests').",
+      "evidence": "MANDATORY: Cite 1-2 specific peer-reviewed studies using proper APA format. CASCADING SEARCH: (1) FIRST: Search for research from last 2 years (2024-2025); (2) SECOND: If none found, search last 5 years (2020-2025); (3) THIRD: If none found, use older landmark study or clinical guideline ONLY if still widely accepted and not contradicted. CRITICAL - PREFER RECENT SYNTHESES: Before citing an older landmark, ALWAYS search for a recent (2024-2025 or 2020-2025) systematic review, meta-analysis, or guideline that references or builds upon that landmark. Cite the newer synthesis instead whenever possible. Use older landmarks ONLY when no recent synthesis exists—MUST prefix with [LANDMARK STUDY] or [CLINICAL GUIDELINE] label. EVIDENCE HIERARCHY: Prefer systematic reviews/meta-analyses > clinical guidelines > RCTs > observational studies. SOURCES: Only PubMed-indexed studies, NIH Office of Dietary Supplements, WHO, or recognized medical organizations. FORMAT: 'Author, A. B., & Author, C. D. (Year). Title of article. Journal Name, volume(issue), pages. (PMID: XXXXXXX)' OR '[CLINICAL GUIDELINE] Organization Name. (Year). Guideline title.' Example preferring recent synthesis: 'Smith, J. A., & Brown, L. M. (2024). Vitamin D supplementation: A systematic review synthesizing evidence from landmark studies. Nutrients, 16(5), 678-695. (PMID: 38123456)' Example for landmark only if no synthesis exists: '[CLINICAL GUIDELINE] Institute of Medicine. (2011). Dietary Reference Intakes for Calcium and Vitamin D. National Academies Press.' LEGAL REQUIREMENT: Present as wellness guidance only. NEVER claim to diagnose, treat, cure, or prevent diseases. Use possibility language ('may support', 'evidence suggests').",
       "simplifiedEvidence": "ULTRA-SIMPLE one-liner (under 10 words). NO study names, NO citations, NO technical terms. Just say it works. Examples: 'Research shows this helps most people.' OR 'Proven to support your health.' OR 'Studies confirm this is effective.' OR 'Scientifically backed and safe.' Keep it short and reassuring.",
       "foods": "A clean comma-separated list of 4-6 specific food names only. NO sentences, NO 'such as', NO 'are naturally rich in', NO filler phrases. Just food names. If a category must be mentioned, immediately follow it with specific examples in parentheses. Examples of correct format: 'Atlantic salmon, canned tuna, sardines, mackerel, herring, anchovies' OR 'Fatty fish (salmon, tuna, sardines, mackerel), walnuts, chia seeds, flaxseeds'. NEVER write sentences like 'X are naturally rich in Y'.",
       "sideEffects": "Common side effects at recommended dose"

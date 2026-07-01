@@ -227,9 +227,9 @@ function EvidenceInfoModal({ onClose }) {
 
   return (
     <div className="evidence-info-overlay" ref={overlayRef} onClick={handleOverlayClick}>
-      <div className="evidence-info-panel" role="dialog" aria-modal="true" aria-label="About Our Evidence">
+      <div className="evidence-info-panel" role="dialog" aria-modal="true" aria-label="Evidence & References">
         <div className="evidence-info-header">
-          <h3 className="evidence-info-title">About Our Evidence</h3>
+          <h3 className="evidence-info-title">Evidence & References</h3>
           <button className="evidence-info-close" onClick={onClose} aria-label="Close">✕</button>
         </div>
 
@@ -249,7 +249,11 @@ function EvidenceInfoModal({ onClose }) {
             </div>
             <div className="evidence-info-item">
               <span className="evidence-info-check">✅</span>
-              <span>If unavailable: Landmark studies or clinical guidelines still widely accepted and not contradicted (clearly labeled)</span>
+              <span>Before citing older landmark studies: Search for recent systematic reviews or meta-analyses that build upon them</span>
+            </div>
+            <div className="evidence-info-item">
+              <span className="evidence-info-check">✅</span>
+              <span>If no recent synthesis exists: Landmark studies or clinical guidelines still widely accepted (clearly labeled)</span>
             </div>
             <div className="evidence-info-item">
               <span className="evidence-info-check">✅</span>
@@ -593,8 +597,8 @@ function SupplementCard({ rec, index = 0, expanded, onToggle, onOpenDetail, deta
                       e.stopPropagation();
                       setShowEvidenceInfo(true);
                     }}
-                    aria-label="About our evidence"
-                    title="Learn about our evidence sources"
+                    aria-label="Evidence & References"
+                    title="Learn about our evidence & references"
                   >
                     ⓘ
                   </button>
@@ -1031,7 +1035,7 @@ function ResultsPage() {
 
         {/* Source note */}
         <div className="results-sources">
-          <p>📖 <strong>Evidence Sources:</strong> Recommendations prioritize peer-reviewed research from the last 2 years. If unavailable, evidence from the last 5 years is used when authoritative and clinically relevant. If still unavailable, landmark studies or clinical guidelines that remain widely accepted and uncontradicted may be used (clearly labeled). Evidence prioritizes systematic reviews, meta-analyses, and clinical practice guidelines from PubMed-indexed studies, NIH Office of Dietary Supplements, World Health Organization, Mayo Clinic, and other recognized medical organizations. All recommendations are presented as wellness guidance and do not diagnose, treat, cure, or prevent diseases.</p>
+          <p>📖 <strong>Evidence Sources:</strong> Recommendations prioritize peer-reviewed research published within the last 2 years. When recent evidence is unavailable, the system uses clinically relevant evidence from the last 5 years. Before citing older landmark studies, it searches for newer systematic reviews, meta-analyses, or clinical practice guidelines that update or support the evidence. Landmark studies are used only when no suitable recent evidence exists and are clearly identified. Recommendations are based on PubMed-indexed research, the NIH Office of Dietary Supplements, the World Health Organization (WHO), Mayo Clinic, and other recognized medical organizations. This system provides AI-assisted wellness guidance and is not intended to diagnose, treat, cure, or prevent disease or replace professional medical advice.</p>
         </div>
 
         <p className="results-disclaimer">{r.disclaimer}</p>
