@@ -375,8 +375,13 @@ function ProfilePage() {
 
       // Add password fields only if user wants to change password
       if (formData.newPassword) {
+        if (!formData.currentPassword) {
+          setError('Please enter your current password to change it.');
+          setLoading(false);
+          return;
+        }
         if (formData.newPassword !== formData.confirmPassword) {
-          setError('New passwords do not match.');
+          setError('Passwords do not match.');
           setLoading(false);
           return;
         }
@@ -392,11 +397,6 @@ function ProfilePage() {
         }
         if (!/[0-9]/.test(formData.newPassword)) {
           setError('New password must contain at least one number.');
-          setLoading(false);
-          return;
-        }
-        if (!formData.currentPassword) {
-          setError('Please enter your current password to change it.');
           setLoading(false);
           return;
         }
@@ -603,27 +603,6 @@ function ProfilePage() {
               </div>
             )}
 
-            {error && (
-              <div className="profile-alert profile-alert-error">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="12" y1="8" x2="12" y2="12" />
-                  <line x1="12" y1="16" x2="12.01" y2="16" />
-                </svg>
-                {error}
-              </div>
-            )}
-
-            {success && (
-              <div className="profile-alert profile-alert-success">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-                  <polyline points="22 4 12 14.01 9 11.01" />
-                </svg>
-                {success}
-              </div>
-            )}
-
             <div className="profile-section">
               <h2 className="profile-section-title">Personal Information</h2>
               
@@ -810,6 +789,27 @@ function ProfilePage() {
                     </div>
                   </div>
                 </div>
+              </div>
+            )}
+
+            {error && (
+              <div className="profile-alert profile-alert-error">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+                {error}
+              </div>
+            )}
+
+            {success && (
+              <div className="profile-alert profile-alert-success">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                  <polyline points="22 4 12 14.01 9 11.01" />
+                </svg>
+                {success}
               </div>
             )}
 

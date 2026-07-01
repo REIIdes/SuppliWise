@@ -552,7 +552,13 @@ router.put('/profile', async (req, res) => {
 
       const isMatch = await user.matchPassword(currentPassword);
       if (!isMatch) {
-        return res.status(400).json({ message: 'Invalid email or password.' });
+        return res.status(400).json({ message: 'Current password is incorrect.' });
+      }
+
+      // Check if new password is same as current password
+      const isSamePassword = await user.matchPassword(newPassword);
+      if (isSamePassword) {
+        return res.status(400).json({ message: 'Your new password must be different from your current password.' });
       }
 
       if (newPassword.length < 8) {
