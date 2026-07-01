@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import { saveAssessment, getRecommendations, saveAssessmentResults } from '../api';
 import './AssessmentPage.css';
@@ -1519,7 +1519,7 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
 }
 
 // ── Step 4: Lifestyle & Medical Information ───────────────────────────────
-function Step4Lifestyle({ data, onChange, errors }) {
+function Step4Lifestyle({ data, onChange, errors, isReadOnly = false }) {
   const [showMedicationsInput, setShowMedicationsInput] = useState(false);
   const [showAllergiesInput, setShowAllergiesInput] = useState(false);
 
@@ -1574,10 +1574,12 @@ function Step4Lifestyle({ data, onChange, errors }) {
 
   return (
     <div className="step-body">
-      {/* Required fields notice at top */}
-      <div className="required-notice">
-        Fields marked with <span className="required-star">*</span> are required.
-      </div>
+      {/* Required fields notice at top (hidden in read-only history view) */}
+      {!isReadOnly && (
+        <div className="required-notice">
+          Fields marked with <span className="required-star">*</span> are required.
+        </div>
+      )}
 
       {/* ===== LIFESTYLE SECTION ===== */}
       <div className="section-header-with-icon">
@@ -2048,6 +2050,10 @@ function AILoadingStep({ icon, label, delay }) {
 
 function AssessmentPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const routeState = location.state || {};
+  const routeAssessment = routeState.assessment || null;
+  const routeReadOnly = !!routeState.readOnly;
   const [step, setStep] = useState(1);
   const [errors, setErrors] = useState({});
   const [submitError, setSubmitError] = useState('');
@@ -2056,6 +2062,7 @@ function AssessmentPage() {
   const symptomRowRefs = useRef({});
 
   const [formData, setFormData] = useState(() => {
+    if (routeAssessment) return { ...EMPTY_FORM, ...routeAssessment };
     try {
       const saved = sessionStorage.getItem(SESSION_KEY);
       return saved ? { ...EMPTY_FORM, ...JSON.parse(saved) } : EMPTY_FORM;
@@ -2064,9 +2071,51 @@ function AssessmentPage() {
     }
   });
 
+  const [isReadOnly] = useState(routeReadOnly);
+
   useEffect(() => {
     sessionStorage.setItem(SESSION_KEY, JSON.stringify(formData));
   }, [formData]);
+
+  // If this page is opened in read-only mode, disable form controls so nothing is editable.
+  useEffect(() => {
+    if (!isReadOnly) return;
+    const container = document.querySelector('.assessment-container');
+    if (!container) return;
+    // Disable form controls
+    const controls = container.querySelectorAll('input, select, textarea');
+    controls.forEach((c) => { try { c.disabled = true; c.setAttribute('aria-readonly', 'true'); } catch (e) {} });
+    // Disable interactive buttons inside the step body (but not footer nav)
+    const buttons = container.querySelectorAll('.step-body button');
+    const prevButtonStates = [];
+    buttons.forEach((b, idx) => {
+      try {
+        // Keep diet/info tooltip buttons interactive in read-only history view
+        if (b.classList && (b.classList.contains('diet-info-btn') || b.classList.contains('diet-tooltip-close'))) {
+          prevButtonStates[idx] = b.disabled;
+          return;
+        }
+        prevButtonStates[idx] = b.disabled;
+        b.disabled = true;
+        b.setAttribute('aria-hidden', 'true');
+      } catch (e) {}
+    });
+    // Remove contentEditable if present
+    const editable = container.querySelectorAll('[contenteditable]');
+    const prevEditable = [];
+    editable.forEach((el, idx) => {
+      try {
+        prevEditable[idx] = el.getAttribute('contenteditable');
+        el.setAttribute('contenteditable', 'false');
+      } catch (e) {}
+    });
+
+    return () => {
+      controls.forEach((c) => { try { c.disabled = false; c.removeAttribute('aria-readonly'); } catch (e) {} });
+      buttons.forEach((b, idx) => { try { b.disabled = prevButtonStates[idx] || false; b.removeAttribute('aria-hidden'); } catch (e) {} });
+      editable.forEach((el, idx) => { try { if (prevEditable[idx] !== null && prevEditable[idx] !== undefined) el.setAttribute('contenteditable', prevEditable[idx]); else el.removeAttribute('contenteditable'); } catch (e) {} });
+    };
+  }, [isReadOnly]);
 
   // Scroll to top whenever step changes
   useEffect(() => {
@@ -2097,6 +2146,11 @@ function AssessmentPage() {
   };
 
   const handleNext = () => {
+    if (isReadOnly) {
+      if (step < TOTAL_STEPS) setStep((s) => s + 1);
+      return;
+    }
+
     const stepErrors = validateStep(step, formData);
     if (Object.keys(stepErrors).length > 0) {
       setErrors(stepErrors);
@@ -2133,6 +2187,11 @@ function AssessmentPage() {
     setErrors({});
     if (step > 1) setStep((s) => s - 1);
     else {
+      if (isReadOnly) {
+        // When viewing from history, 'Cancel' should go back to history
+        navigate('/history');
+        return;
+      }
       sessionStorage.removeItem(SESSION_KEY);
       setFormData(EMPTY_FORM);
       navigate('/');
@@ -2236,10 +2295,14 @@ function AssessmentPage() {
   return (
     <div className="assessment-wrapper">
       <Navbar />
-      <div className="assessment-container">
+      <div className={`assessment-container ${isReadOnly ? 'readonly' : ''}`}>
         <div className="assessment-header">
           <div>
-            <h2 className="assessment-title">Health Assessment</h2>
+            <h2 className="assessment-title">
+              {isReadOnly && routeAssessment && routeAssessment.createdAt
+                ? new Date(routeAssessment.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                : (isReadOnly ? 'Health Assessment History' : 'Health Assessment')}
+            </h2>
             <div className="progress-bar-track">
               <div className="progress-bar-fill" style={{ width: `${progress}%` }} />
             </div>
@@ -2274,18 +2337,33 @@ function AssessmentPage() {
           {step === 1 && <Step1 data={formData} onChange={handleChange} errors={errors} />}
           {step === 2 && <Step2 data={formData} onChange={handleChange} errors={errors} />}
           {step === 3 && <Step3Combined data={formData} onChange={handleChange} errors={errors} symptomRowRefs={symptomRowRefs} />}
-          {step === 4 && <Step4Lifestyle data={formData} onChange={handleChange} errors={errors} />}
+          {step === 4 && <Step4Lifestyle data={formData} onChange={handleChange} errors={errors} isReadOnly={isReadOnly} />}
 
           <div className="assessment-footer">
             <button className="btn-cancel" onClick={handleBack}>
-              ← {step === 1 ? 'Cancel' : 'Back'}
+              ← {step === 1 ? (isReadOnly ? 'Back' : 'Cancel') : 'Back'}
             </button>
             {step < TOTAL_STEPS ? (
               <button className="btn-next" onClick={handleNext}>Next →</button>
             ) : (
-              <button className="btn-next" onClick={handleSubmit} disabled={submitting}>
-                Get Recommendations →
-              </button>
+              isReadOnly ? (
+                <button
+                  className="btn-next"
+                  onClick={() => {
+                    if (routeAssessment?.aiResults) {
+                      navigate('/results', { state: { recommendations: routeAssessment.aiResults, assessment: routeAssessment } });
+                    } else {
+                      navigate('/history');
+                    }
+                  }}
+                >
+                  View Supplement History
+                </button>
+              ) : (
+                <button className="btn-next" onClick={handleSubmit} disabled={submitting}>
+                  Get Recommendations →
+                </button>
+              )
             )}
           </div>
         </div>

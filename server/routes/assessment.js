@@ -69,6 +69,7 @@ router.post('/', protect, async (req, res) => {
       fitnessFocus: req.body.fitnessFocus,
       proteinIntake: req.body.proteinIntake,
       recreationalDrugTypes: recreationalDrugTypes || '',
+      expiresAt: new Date(Date.now() + 5 * 365.25 * 24 * 60 * 60 * 1000),
     });
 
     console.log('Assessment saved to DB, id:', assessment._id);
@@ -97,6 +98,7 @@ router.get('/history', protect, async (req, res) => {
     ]);
 
     res.json({
+      serverTime: new Date().toISOString(),
       assessments,
       pagination: {
         total,

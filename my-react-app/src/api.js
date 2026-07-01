@@ -140,8 +140,18 @@ export const getHistory = async (page = 1, limit = 10) => {
   });
   const data = await parseJSON(res);
   if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
-  // Support both old array response and new paginated response
-  return Array.isArray(data) ? data : (data.assessments || []);
+  if (Array.isArray(data)) {
+    return {
+      serverTime: new Date().toISOString(),
+      assessments: data,
+      pagination: null,
+    };
+  }
+  return {
+    serverTime: data.serverTime || new Date().toISOString(),
+    assessments: data.assessments || [],
+    pagination: data.pagination || null,
+  };
 };
 
 // Save AI results to an assessment record

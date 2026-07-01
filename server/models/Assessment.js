@@ -40,6 +40,10 @@ const assessmentSchema = new mongoose.Schema(
     proteinIntake: { type: String },
     bloodTestResults: { type: String },
     recreationalDrugTypes: { type: String },
+    expiresAt: {
+      type: Date,
+      default: () => new Date(Date.now() + 5 * 365.25 * 24 * 60 * 60 * 1000),
+    },
     // User info snapshot (for easy identification in DB)
     userEmail: { type: String },
     userName: { type: String },

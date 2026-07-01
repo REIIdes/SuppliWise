@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
+import ReadOnlyAssessment from '../Components/ReadOnlyAssessment/ReadOnlyAssessment';
 import { getHistory, deleteAssessment } from '../api';
 import { exportResultsToPDF } from '../utils/exportPDF';
 import './HistoryPage.css';
@@ -212,21 +213,19 @@ function enrichAiResults(aiResults) {
 }
 
 
-function DeleteModal({ onConfirm, onCancel, loading }) {
+function ConfirmModal({ title, body, confirmLabel = 'Yes, delete', cancelLabel = 'Keep it', onConfirm, onCancel, loading }) {
   return (
     <div className="modal-overlay" onClick={onCancel}>
       <div className="modal-box" onClick={e => e.stopPropagation()}>
         <div className="modal-icon">🗑️</div>
-        <h3 className="modal-title">Delete Assessment?</h3>
-        <p className="modal-body">
-          This will permanently remove this assessment and its AI analysis from your history. This action cannot be undone.
-        </p>
+        <h3 className="modal-title">{title}</h3>
+        <p className="modal-body">{body}</p>
         <div className="modal-actions">
           <button className="modal-btn-cancel" onClick={onCancel} disabled={loading}>
-            Keep it
+            {cancelLabel}
           </button>
           <button className="modal-btn-confirm" onClick={onConfirm} disabled={loading}>
-            {loading ? 'Deleting...' : 'Yes, delete'}
+            {loading ? 'Deleting...' : confirmLabel}
           </button>
         </div>
       </div>
@@ -240,26 +239,48 @@ function HistoryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [expanded, setExpanded] = useState(null);
-  const [deleteTarget, setDeleteTarget] = useState(null); // id of item to delete
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [serverTime, setServerTime] = useState(new Date());
+  const [answersTarget, setAnswersTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [activeTab, setActiveTab] = useState({});
   const [toast, setToast] = useState('');
   const [showAllSupplements, setShowAllSupplements] = useState({});
 
+  const getExpirationDate = (item) => {
+    if (item.expiresAt) return new Date(item.expiresAt);
+    const createdAt = new Date(item.createdAt);
+    if (Number.isNaN(createdAt.getTime())) return null;
+    const fiveYearsMs = 5 * 365.25 * 24 * 60 * 60 * 1000;
+    return new Date(createdAt.getTime() + fiveYearsMs);
+  };
+
   const toggleShowAllSupplements = (assessmentId) => {
     setShowAllSupplements(prev => ({ ...prev, [assessmentId]: !prev[assessmentId] }));
+  };
+
+  const isOlderThanFiveYears = (dateStr, referenceTime = new Date()) => {
+    if (!dateStr) return false;
+    const createdAt = new Date(dateStr);
+    const reference = new Date(referenceTime);
+    if (Number.isNaN(createdAt.getTime()) || Number.isNaN(reference.getTime())) return false;
+    const fiveYearsMs = 5 * 365.25 * 24 * 60 * 60 * 1000;
+    return reference.getTime() - createdAt.getTime() >= fiveYearsMs;
   };
 
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) { navigate('/login'); return; }
+
     getHistory()
-      .then(data => setHistory(
-        data.map(item => ({
+      .then(data => {
+        const normalized = data.assessments.map(item => ({
           ...item,
           aiResults: enrichAiResults(item.aiResults),
-        }))
-      ))
+        }));
+        setHistory(normalized);
+        setServerTime(new Date(data.serverTime));
+      })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, [navigate]);
@@ -279,16 +300,20 @@ function HistoryPage() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await deleteAssessment(deleteTarget);
-      setHistory(prev => prev.filter(h => h._id !== deleteTarget));
+      await deleteAssessment(deleteTarget._id);
+      setHistory(prev => prev.filter(h => h._id !== deleteTarget._id));
       setExpanded(null);
       showToast('Assessment deleted successfully.');
+      setDeleteTarget(null);
     } catch (err) {
       showToast('Failed to delete. Please try again.');
     } finally {
       setDeleting(false);
-      setDeleteTarget(null);
     }
+  };
+
+  const handleKeepAssessment = () => {
+    setDeleteTarget(null);
   };
 
   const getTab = (id) => activeTab[id] || 'assessment';
@@ -300,9 +325,13 @@ function HistoryPage() {
 
       {/* Delete Modal */}
       {deleteTarget && (
-        <DeleteModal
+        <ConfirmModal
+          title="Review an older assessment"
+          body="This assessment is more than five years old. Would you like to delete it from your history?"
+          confirmLabel="Delete assessment"
+          cancelLabel="Keep assessment"
           onConfirm={handleDeleteConfirm}
-          onCancel={() => setDeleteTarget(null)}
+          onCancel={handleKeepAssessment}
           loading={deleting}
         />
       )}
@@ -313,9 +342,11 @@ function HistoryPage() {
       <div className="history-container">
         <div className="history-header">
           <h2>Assessment History</h2>
-          <button className="btn-primary" onClick={() => navigate('/assessment')}>
-            + New Assessment
-          </button>
+          <div className="history-header-actions">
+            <button className="btn-primary" onClick={() => navigate('/assessment')}>
+              + New Assessment
+            </button>
+          </div>
         </div>
 
         {loading && <p className="history-status">Loading history...</p>}
@@ -336,6 +367,10 @@ function HistoryPage() {
               Start Assessment →
             </button>
           </div>
+        )}
+
+        {answersTarget && (
+          <ReadOnlyAssessment assessment={answersTarget} inline onClose={() => setAnswersTarget(null)} />
         )}
 
         <div className="history-list">
@@ -360,9 +395,26 @@ function HistoryPage() {
                       <span className="tag tag-red">{item.symptoms.length} symptom{item.symptoms.length > 1 ? 's' : ''}</span>
                     )}
                     {item.aiResults && <span className="tag tag-green">✓ AI Analysis</span>}
+                    {getExpirationDate(item) && (
+                      <span className="tag tag-gray">Expires {fmt(getExpirationDate(item))}</span>
+                    )}
                   </div>
                 </div>
                 <div className="history-card-header-right">
+                    <button
+                    className="btn-view-answers"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate('/assessment', { state: { assessment: item, readOnly: true } });
+                    }}
+                    title="View Assessment"
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="9" />
+                      <circle cx="12" cy="9" r="3" />
+                      <path d="M6 19c0-3.314 2.686-6 6-6s6 2.686 6 6" />
+                    </svg>
+                  </button>
                   {item.aiResults && (
                     <button
                       className="btn-view-results"
@@ -370,11 +422,12 @@ function HistoryPage() {
                         e.stopPropagation();
                         navigate('/results', { state: { recommendations: item.aiResults, assessment: item } });
                       }}
-                      title="View full results"
+                      title="View Results"
                     >
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                        <circle cx="12" cy="12" r="3"/>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                        <path d="M9 13l5-5 3 3-5 5H9v-3z" />
                       </svg>
                     </button>
                   )}
@@ -387,20 +440,26 @@ function HistoryPage() {
                       }}
                       title="Download PDF report"
                     >
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                         <polyline points="7 10 12 15 17 10"/>
                         <line x1="12" y1="15" x2="12" y2="3"/>
                       </svg>
                     </button>
                   )}
-                  <button
-                    className="btn-delete"
-                    onClick={(e) => { e.stopPropagation(); setDeleteTarget(item._id); }}
-                    title="Delete assessment"
-                  >
-                    🗑
-                  </button>
+                  {isOlderThanFiveYears(item.createdAt) && (
+                    <button
+                      className="btn-delete"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteTarget(item);
+                      }}
+                      title="Delete assessment"
+                    >
+                      🗑
+                    </button>
+                  )}
+                  
                   <span className="history-toggle">{expanded === i ? '▲' : '▼'}</span>
                 </div>
               </div>

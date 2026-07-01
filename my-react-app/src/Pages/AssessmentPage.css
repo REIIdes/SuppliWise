@@ -325,6 +325,30 @@
   box-sizing: border-box;
 }
 
+/* When viewing a read-only assessment from history, block all interactions inside the container */
+.assessment-container.readonly,
+.assessment-container.readonly * {
+  pointer-events: none !important;
+  user-select: none !important;
+}
+
+.assessment-container.readonly .progress-bar-fill { opacity: 0.6; }
+
+/* Keep footer navigation usable so user can move between steps while viewing history */
+.assessment-container.readonly .assessment-footer,
+.assessment-container.readonly .assessment-footer * {
+  pointer-events: auto !important;
+  user-select: auto !important;
+}
+
+/* Allow the small tooltip/info buttons ('?') to be clickable in readonly history view */
+.assessment-container.readonly .diet-info-btn,
+.assessment-container.readonly .diet-tooltip-wrap,
+.assessment-container.readonly .diet-tooltip-close {
+  pointer-events: auto !important;
+  user-select: auto !important;
+}
+
 .step-field input:focus,
 .step-field textarea:focus,
 .step-field select:focus {
