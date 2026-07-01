@@ -241,19 +241,23 @@ function EvidenceInfoModal({ onClose }) {
           <div className="evidence-info-checklist">
             <div className="evidence-info-item">
               <span className="evidence-info-check">✅</span>
-              <span>Recent peer-reviewed research published within the last 3 years</span>
+              <span>Priority: Peer-reviewed research from the last 2 years</span>
             </div>
             <div className="evidence-info-item">
               <span className="evidence-info-check">✅</span>
-              <span>Supporting evidence from the last 5 years when relevant</span>
+              <span>If unavailable: Supporting evidence from last 5 years when clinically relevant</span>
             </div>
             <div className="evidence-info-item">
               <span className="evidence-info-check">✅</span>
-              <span>High-quality medical evidence, including systematic reviews, meta-analyses, and clinical practice guidelines whenever available</span>
+              <span>If unavailable: Landmark studies or clinical guidelines still widely accepted and not contradicted (clearly labeled)</span>
             </div>
             <div className="evidence-info-item">
               <span className="evidence-info-check">✅</span>
-              <span>Proper APA-formatted references for all cited sources</span>
+              <span>Quality hierarchy: systematic reviews & meta-analyses, clinical guidelines, RCTs, observational studies</span>
+            </div>
+            <div className="evidence-info-item">
+              <span className="evidence-info-check">✅</span>
+              <span>APA-formatted references with PMID from PubMed, NIH, WHO, and recognized medical organizations</span>
             </div>
           </div>
 
@@ -1027,7 +1031,7 @@ function ResultsPage() {
 
         {/* Source note */}
         <div className="results-sources">
-          <p>📖 <strong>Evidence Sources:</strong> Recommendations are informed by NIH Office of Dietary Supplements, PubMed clinical studies, Mayo Clinic guidelines, World Health Organization nutrition guidelines, and peer-reviewed clinical nutrition research. This system uses rule-based clinical logic as a wellness guidance tool, not a diagnostic system.</p>
+          <p>📖 <strong>Evidence Sources:</strong> Recommendations prioritize peer-reviewed research from the last 2 years. If unavailable, evidence from the last 5 years is used when authoritative and clinically relevant. If still unavailable, landmark studies or clinical guidelines that remain widely accepted and uncontradicted may be used (clearly labeled). Evidence prioritizes systematic reviews, meta-analyses, and clinical practice guidelines from PubMed-indexed studies, NIH Office of Dietary Supplements, World Health Organization, Mayo Clinic, and other recognized medical organizations. All recommendations are presented as wellness guidance and do not diagnose, treat, cure, or prevent diseases.</p>
         </div>
 
         <p className="results-disclaimer">{r.disclaimer}</p>
