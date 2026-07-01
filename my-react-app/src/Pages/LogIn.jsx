@@ -136,7 +136,7 @@ function LogIn() {
         throw new Error(data.message || 'Failed to resend code');
       }
 
-      startResendCooldown(60);
+      startResendCooldown(30);
       startOtpExpiryTimer(); // Restart expiry timer with new OTP
       setSuccess('Verification code sent again!');
       setTimeout(() => setSuccess(''), 3000);
@@ -178,7 +178,7 @@ function LogIn() {
         console.log('[DEBUG] OTP required, showing modal');
         setPendingUserId(data.userId);
         setShowOtpModal(true);
-        startResendCooldown(60);
+        startResendCooldown(30);
         startOtpExpiryTimer(); // Start OTP expiry countdown
         setLoading(false);
         return;
@@ -339,7 +339,7 @@ function LogIn() {
 
       setResetUserId(data.userId);
       setForgotPasswordStep('otp');
-      startResendCooldown(60);
+      startResendCooldown(30);
       startOtpExpiryTimer();
       setSuccess('Verification code sent to your email!');
       setTimeout(() => setSuccess(''), 3000);
@@ -452,7 +452,7 @@ function LogIn() {
         throw new Error(data.message || 'Failed to resend code');
       }
 
-      startResendCooldown(60);
+      startResendCooldown(30);
       startOtpExpiryTimer();
       setSuccess('Verification code sent again!');
       setTimeout(() => setSuccess(''), 3000);

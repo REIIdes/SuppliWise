@@ -10,7 +10,7 @@ const otpStore = new Map(); // Format: { email: { otp, expiresAt, requestedAt } 
 
 // Rate limiting map for OTP requests
 const otpRateLimitMap = new Map(); // Format: { userId: lastRequestTime }
-const OTP_COOLDOWN_MS = 60000; // 60 seconds cooldown
+const OTP_COOLDOWN_MS = 30000; // 30 seconds cooldown
 
 // Generate JWT
 const generateToken = (id) => {
