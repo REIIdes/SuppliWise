@@ -190,7 +190,7 @@ function ProfilePage() {
   const requestEmailOtp = async (newEmail) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:5000/api/auth/request-email-otp', {
+      const response = await fetch('/api/auth/request-email-otp', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -262,7 +262,7 @@ function ProfilePage() {
     setOtpLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:5000/api/auth/verify-email-otp', {
+      const response = await fetch('/api/auth/verify-email-otp', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -404,7 +404,7 @@ function ProfilePage() {
         updateData.newPassword = formData.newPassword;
       }
 
-      const response = await fetch('http://localhost:5000/api/auth/profile', {
+      const response = await fetch('/api/auth/profile', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

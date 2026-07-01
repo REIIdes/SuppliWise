@@ -121,7 +121,7 @@ function LogIn() {
     setOtpLoading(true);
 
     try {
-      const response = await fetch('http://localhost:5000/api/auth/resend-login-otp', {
+      const response = await fetch('/api/auth/resend-login-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: pendingUserId }),
@@ -160,7 +160,7 @@ function LogIn() {
     setLoading(true);
     try {
       console.log('[DEBUG] Sending login request...');
-      const response = await fetch('http://localhost:5000/api/auth/login', {
+      const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
@@ -204,7 +204,7 @@ function LogIn() {
     setError('');
 
     try {
-      const response = await fetch('http://localhost:5000/api/auth/verify-login-otp', {
+      const response = await fetch('/api/auth/verify-login-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: pendingUserId, otp: otp.trim() }),
@@ -322,7 +322,7 @@ function LogIn() {
 
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:5000/api/auth/forgot-password', {
+      const response = await fetch('/api/auth/forgot-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: forgotPasswordEmail }),
@@ -360,7 +360,7 @@ function LogIn() {
     setError('');
 
     try {
-      const response = await fetch('http://localhost:5000/api/auth/verify-password-reset-otp', {
+      const response = await fetch('/api/auth/verify-password-reset-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: resetUserId, otp: resetOtp.trim() }),
@@ -401,7 +401,7 @@ function LogIn() {
 
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:5000/api/auth/reset-password', {
+      const response = await fetch('/api/auth/reset-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -437,7 +437,7 @@ function LogIn() {
     setOtpLoading(true);
 
     try {
-      const response = await fetch('http://localhost:5000/api/auth/resend-password-reset-otp', {
+      const response = await fetch('/api/auth/resend-password-reset-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: resetUserId }),
