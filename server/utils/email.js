@@ -51,20 +51,29 @@ const sendOtpEmail = async (toEmail, otp, type = 'email-change') => {
 
     // Configure content based on type
     const isLogin = type === 'login';
-    const subject = isLogin 
-      ? 'Your Login Verification Code - SuppliWise'
-      : 'Verify Your Email Change - SuppliWise';
+    const isPasswordReset = type === 'password-reset';
     
-    const title = isLogin ? 'Login Verification' : 'Verify Your Email';
-    const subtitle = isLogin ? 'SuppliWise Login Security' : 'SuppliWise Email Verification';
+    let subject, title, subtitle, bodyText, securityText;
     
-    const bodyText = isLogin
-      ? 'You are attempting to sign in to your SuppliWise account. To complete your login, please use the verification code below:'
-      : 'You requested to change your email address on SuppliWise. To complete this process, please use the verification code below:';
-    
-    const securityText = isLogin
-      ? "If you didn't attempt to log in, please secure your account immediately by changing your password."
-      : "If you didn't request this change, you can safely ignore this email. Your account remains secure.";
+    if (isPasswordReset) {
+      subject = 'Password Reset Verification Code - SuppliWise';
+      title = 'Reset Your Password';
+      subtitle = 'SuppliWise Password Recovery';
+      bodyText = 'You requested to reset your password for your SuppliWise account. To complete this process, please use the verification code below:';
+      securityText = "If you didn't request a password reset, please secure your account immediately by changing your password or contacting support.";
+    } else if (isLogin) {
+      subject = 'Your Login Verification Code - SuppliWise';
+      title = 'Login Verification';
+      subtitle = 'SuppliWise Login Security';
+      bodyText = 'You are attempting to sign in to your SuppliWise account. To complete your login, please use the verification code below:';
+      securityText = "If you didn't attempt to log in, please secure your account immediately by changing your password.";
+    } else {
+      subject = 'Verify Your Email Change - SuppliWise';
+      title = 'Verify Your Email';
+      subtitle = 'SuppliWise Email Verification';
+      bodyText = 'You requested to change your email address on SuppliWise. To complete this process, please use the verification code below:';
+      securityText = "If you didn't request this change, you can safely ignore this email. Your account remains secure.";
+    }
 
     const mailOptions = {
       from: `"${fromName}" <${fromAddress}>`,
@@ -90,7 +99,9 @@ const sendOtpEmail = async (toEmail, otp, type = 'email-change') => {
                       <div style="width: 60px; height: 60px; background: rgba(255, 255, 255, 0.2); border: 3px solid white; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 16px;">
                         <svg width="32" height="32" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
                           <rect width="100" height="100" rx="22" fill="white"/>
-                          ${isLogin 
+                          ${isPasswordReset 
+                            ? '<g transform="translate(25, 25)"><rect x="15" y="20" width="20" height="30" rx="3" fill="none" stroke="#22c55e" stroke-width="4"/><circle cx="25" cy="15" r="12" fill="none" stroke="#22c55e" stroke-width="4"/><line x1="22" y1="30" x2="28" y2="30" stroke="#22c55e" stroke-width="4" stroke-linecap="round"/><line x1="25" y1="30" x2="25" y2="35" stroke="#22c55e" stroke-width="4" stroke-linecap="round"/></g>'
+                            : isLogin 
                             ? '<g transform="translate(30, 30)"><circle cx="20" cy="15" r="10" fill="#22c55e"/><path d="M 5 40 Q 5 25 20 25 Q 35 25 35 40 L 5 40 Z" fill="#22c55e"/></g>'
                             : '<g transform="rotate(-40, 50, 50)"><rect x="22" y="36" width="56" height="28" rx="14" fill="none" stroke="#22c55e" stroke-width="6"/><line x1="50" y1="36" x2="50" y2="64" stroke="#22c55e" stroke-width="6"/></g>'
                           }

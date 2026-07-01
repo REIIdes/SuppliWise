@@ -1518,12 +1518,16 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
   );
 }
 
-// ── Step 4: Lifestyle & Additional Details ─────────────────────────────────
+// ── Step 4: Lifestyle & Medical Information ───────────────────────────────
 function Step4Lifestyle({ data, onChange, errors }) {
+  const [showMedicationsInput, setShowMedicationsInput] = useState(false);
+  const [showAllergiesInput, setShowAllergiesInput] = useState(false);
+
   const toggleLifestyle = (habit) => {
     const current = data.lifestyleHabits || [];
     if (habit === 'None') {
       onChange('lifestyleHabits', current.includes('None') ? [] : ['None']);
+      onChange('recreationalDrugTypes', '');
       return;
     }
     const filtered = current.filter(x => x !== 'None');
@@ -1536,20 +1540,57 @@ function Step4Lifestyle({ data, onChange, errors }) {
     }
   };
 
+  // Toggle "None" checkbox for medications
+  const handleMedicationsNoneChange = (checked) => {
+    if (checked) {
+      onChange('currentMedications', 'None');
+      setShowMedicationsInput(false);
+    } else {
+      onChange('currentMedications', '');
+      setShowMedicationsInput(true);
+    }
+  };
+
+  // Toggle "None" checkbox for allergies
+  const handleAllergiesNoneChange = (checked) => {
+    if (checked) {
+      onChange('allergies', 'None');
+      setShowAllergiesInput(false);
+    } else {
+      onChange('allergies', '');
+      setShowAllergiesInput(true);
+    }
+  };
+
+  // Initialize state based on existing data
+  useEffect(() => {
+    if (data.currentMedications && data.currentMedications.trim() && data.currentMedications !== 'None') {
+      setShowMedicationsInput(true);
+    }
+    if (data.allergies && data.allergies.trim() && data.allergies !== 'None') {
+      setShowAllergiesInput(true);
+    }
+  }, [data.currentMedications, data.allergies]);
+
   return (
     <div className="step-body">
-      {/* Section Header with Icon - Lifestyle */}
+      {/* Required fields notice at top */}
+      <div className="required-notice">
+        Fields marked with <span className="required-star">*</span> are required.
+      </div>
+
+      {/* ===== LIFESTYLE SECTION ===== */}
       <div className="section-header-with-icon">
         <svg className="section-icon section-icon-teal" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM12 20C7.59 20 4 16.41 4 12C4 7.59 7.59 4 12 4C16.41 4 20 7.59 20 12C20 16.41 16.41 20 12 20ZM12.5 7H11V13L16.25 16.15L17 14.92L12.5 12.25V7Z" fill="currentColor"/>
         </svg>
-        <h3 className="section-title">Lifestyle &amp; Additional Details</h3>
+        <h3 className="section-title">Lifestyle</h3>
       </div>
       <div className="section-divider section-divider-teal"></div>
 
       {/* Sleep Quality */}
       <div id="field-sleepQuality" className="step-field">
-        <label>Sleep Quality <span className="field-hint">(optional)</span></label>
+        <label>Sleep Quality</label>
         <div className="radio-group flex-wrap">
           {SLEEP_OPTIONS.map(({ value, label }) => (
             <label key={value} className="radio-label">
@@ -1565,7 +1606,7 @@ function Step4Lifestyle({ data, onChange, errors }) {
 
       {/* Daily Water Intake */}
       <div className="step-field">
-        <label>Daily Water Intake <span className="field-hint">(optional)</span></label>
+        <label>Daily Water Intake</label>
         <div className="radio-group flex-wrap">
           {WATER_OPTIONS.map(({ value, label }) => (
             <label key={value} className="radio-label">
@@ -1580,9 +1621,9 @@ function Step4Lifestyle({ data, onChange, errors }) {
 
       {/* Lifestyle Habits */}
       <div className="step-field">
-        <label>Lifestyle Habits <span className="field-hint">(optional)</span></label>
-        <div className="radio-group flex-wrap">
-          {['Smoking', 'Alcohol', 'Recreational Drugs'].map((habit) => (
+        <label>Lifestyle Habits</label>
+        <div className="checkbox-group">
+          {['Smoking', 'Alcohol'].map((habit) => (
             <label key={habit} className="checkbox-label">
               <input type="checkbox"
                 checked={(data.lifestyleHabits || []).includes(habit)}
@@ -1590,17 +1631,28 @@ function Step4Lifestyle({ data, onChange, errors }) {
               {habit}
             </label>
           ))}
+          <label className="checkbox-label">
+            <input type="checkbox"
+              checked={(data.lifestyleHabits || []).includes('Recreational Drugs')}
+              onChange={() => toggleLifestyle('Recreational Drugs')} />
+            Recreational Drugs
+            {(data.lifestyleHabits || []).includes('Recreational Drugs') && (
+              <span className="required-star">*</span>
+            )}
+          </label>
         </div>
+        {/* Conditional input for Recreational Drugs - REQUIRED when checked */}
         {(data.lifestyleHabits || []).includes('Recreational Drugs') && (
           <textarea
             placeholder="e.g. Cannabis, MDMA, Cocaine — list any recreational drugs you use"
             value={data.recreationalDrugTypes || ''}
             onChange={(e) => onChange('recreationalDrugTypes', e.target.value)}
-            rows={2}
-            style={{ marginTop: '10px' }}
+            rows={3}
+            style={{ marginTop: '12px', marginBottom: '12px' }}
           />
         )}
-        <div className="radio-group flex-wrap" style={{ marginTop: '10px' }}>
+        {errors.recreationalDrugTypes && <span className="field-error-msg" style={{ display: 'block', marginBottom: '8px' }}>{errors.recreationalDrugTypes}</span>}
+        <div className="checkbox-group">
           <label className="checkbox-label">
             <input type="checkbox"
               checked={(data.lifestyleHabits || []).includes('None')}
@@ -1608,92 +1660,12 @@ function Step4Lifestyle({ data, onChange, errors }) {
             None
           </label>
         </div>
+        {errors.lifestyleHabits && <span className="field-error-msg">{errors.lifestyleHabits}</span>}
       </div>
 
-      {/* Current Supplement Usage */}
-      <div className="subsection-header-with-icon">
-        <svg className="subsection-icon subsection-icon-teal" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M4.22 11.29L11.29 4.22C13.64 1.88 17.43 1.88 19.78 4.22C22.12 6.56 22.12 10.36 19.78 12.71L12.71 19.78C10.36 22.12 6.56 22.12 4.22 19.78C1.88 17.43 1.88 13.64 4.22 11.29ZM5.64 12.71C4.59 13.75 4.24 15.24 4.6 16.57L10.59 10.59L14.83 14.83L18.36 11.29C19.93 9.73 19.93 7.2 18.36 5.64C16.8 4.07 14.27 4.07 12.71 5.64L5.64 12.71Z" fill="currentColor"/>
-        </svg>
-        <h4 className="subsection-title">Current Supplements</h4>
-      </div>
-      <div className="subsection-divider subsection-divider-teal"></div>
+      {/* Daily Sun Exposure */}
       <div className="step-field">
-        <label>Are you currently taking any supplements? <span className="field-hint">(optional)</span></label>
-        <div className="radio-group">
-          {['Yes', 'No'].map((opt) => (
-            <label key={opt} className="radio-label">
-              <input type="radio" name="takingSupplements" value={opt}
-                checked={data.takingSupplements === opt}
-                onChange={() => onChange('takingSupplements', opt)} />
-              {opt}
-            </label>
-          ))}
-        </div>
-        {data.takingSupplements === 'Yes' && (
-          <textarea
-            placeholder="List the supplements you're currently taking (e.g. Vitamin D 2000 IU, Fish Oil 1g)"
-            value={data.currentSupplements || ''}
-            onChange={(e) => onChange('currentSupplements', e.target.value)}
-            rows={2} style={{ marginTop: '8px' }}
-          />
-        )}
-      </div>
-
-      {/* Recent Blood Test */}
-      <div className="step-field">
-        <label>Have you had a recent blood test? <span className="field-hint">(optional)</span></label>
-        <div className="radio-group">
-          {['Yes', 'No'].map((opt) => (
-            <label key={opt} className="radio-label">
-              <input type="radio" name="recentBloodTest" value={opt}
-                checked={data.recentBloodTest === opt}
-                onChange={() => onChange('recentBloodTest', opt)} />
-              {opt}
-            </label>
-          ))}
-        </div>
-        {data.recentBloodTest === 'Yes' && (
-          <textarea
-            placeholder="Share what your results showed — e.g. 'Low vitamin D (18 ng/mL), low ferritin (12), normal B12'"
-            value={data.bloodTestResults || ''}
-            onChange={(e) => onChange('bloodTestResults', e.target.value)}
-            rows={3} style={{ marginTop: '8px', resize: 'vertical' }}
-          />
-        )}
-      </div>
-
-      <div className="step-row">
-        <div id="field-currentMedications" className={`step-field ${errors.currentMedications ? 'field-error' : ''}`}>
-          <label>Current Medications <span className="field-hint">(optional)</span></label>
-          <textarea
-            placeholder="List any medications you're currently taking"
-            value={data.currentMedications || ''}
-            onChange={(e) => onChange('currentMedications', e.target.value)}
-            rows={3} />
-          {errors.currentMedications && <span className="field-error-msg">{errors.currentMedications}</span>}
-        </div>
-        <div id="field-allergies" className={`step-field ${errors.allergies ? 'field-error' : ''}`}>
-          <label>Known Allergies <span className="field-hint">(optional)</span></label>
-          <textarea
-            placeholder="List any known allergies (food, medication, etc.)"
-            value={data.allergies || ''}
-            onChange={(e) => onChange('allergies', e.target.value)}
-            rows={3} />
-          {errors.allergies && <span className="field-error-msg">{errors.allergies}</span>}
-        </div>
-      </div>
-
-      {/* Sun Exposure */}
-      <div className="subsection-header-with-icon">
-        <svg className="subsection-icon subsection-icon-teal" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M12 7C9.24 7 7 9.24 7 12C7 14.76 9.24 17 12 17C14.76 17 17 14.76 17 12C17 9.24 14.76 7 12 7ZM2 13H4C4.55 13 5 12.55 5 12C5 11.45 4.55 11 4 11H2C1.45 11 1 11.45 1 12C1 12.55 1.45 13 2 13ZM20 13H22C22.55 13 23 12.55 23 12C23 11.45 22.55 11 22 11H20C19.45 11 19 11.45 19 12C19 12.55 19.45 13 20 13ZM11 2V4C11 4.55 11.45 5 12 5C12.55 5 13 4.55 13 4V2C13 1.45 12.55 1 12 1C11.45 1 11 1.45 11 2ZM11 20V22C11 22.55 11.45 23 12 23C12.55 23 13 22.55 13 22V20C13 19.45 12.55 19 12 19C11.45 19 11 19.45 11 20ZM5.99 4.58C5.6 4.19 4.96 4.19 4.58 4.58C4.19 4.97 4.19 5.61 4.58 5.99L5.64 7.05C6.03 7.44 6.67 7.44 7.05 7.05C7.43 6.66 7.44 6.02 7.05 5.64L5.99 4.58ZM18.36 16.95C17.97 16.56 17.33 16.56 16.95 16.95C16.56 17.34 16.56 17.98 16.95 18.36L18.01 19.42C18.4 19.81 19.04 19.81 19.42 19.42C19.81 19.03 19.81 18.39 19.42 18.01L18.36 16.95ZM19.42 5.99C19.81 5.6 19.81 4.96 19.42 4.58C19.03 4.19 18.39 4.19 18.01 4.58L16.95 5.64C16.56 6.03 16.56 6.67 16.95 7.05C17.34 7.43 17.98 7.44 18.36 7.05L19.42 5.99ZM7.05 18.36C7.44 17.97 7.44 17.33 7.05 16.95C6.66 16.56 6.02 16.56 5.64 16.95L4.58 18.01C4.19 18.4 4.19 19.04 4.58 19.42C4.97 19.81 5.61 19.81 5.99 19.42L7.05 18.36Z" fill="currentColor"/>
-        </svg>
-        <h4 className="subsection-title">Dietary & Sun Exposure</h4>
-      </div>
-      <div className="subsection-divider subsection-divider-teal"></div>
-      <div className="step-field">
-        <label>Daily Sun Exposure <span className="field-hint">(optional)</span></label>
+        <label>Daily Sun Exposure</label>
         <div className="radio-group flex-wrap">
           {['None', '< 15 min', '15–30 min', '30–60 min', '1 hr+'].map((opt) => (
             <label key={opt} className="radio-label">
@@ -1708,7 +1680,7 @@ function Step4Lifestyle({ data, onChange, errors }) {
 
       {/* Protein Intake */}
       <div className="step-field">
-        <label>Daily Protein Intake <span className="field-hint">(optional)</span></label>
+        <label>Daily Protein Intake</label>
         <div className="radio-group flex-wrap">
           {['Very Low (< 50g)', 'Low (50–80g)', 'Moderate (80–120g)', 'High (120g+)', 'Not sure'].map((opt) => (
             <label key={opt} className="radio-label">
@@ -1721,46 +1693,179 @@ function Step4Lifestyle({ data, onChange, errors }) {
         </div>
       </div>
 
-      {/* Pregnancy & Breastfeeding — only for Female */}
+      {/* Step Section Divider */}
+      <div className="step-section-divider" />
+
+      {/* ===== HEALTH BACKGROUND SECTION ===== */}
+      <div className="section-header-with-icon">
+        <svg className="section-icon section-icon-purple" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M19 3H14.82C14.4 1.84 13.3 1 12 1C10.7 1 9.6 1.84 9.18 3H5C3.9 3 3 3.9 3 5V19C3 20.1 3.9 21 5 21H19C20.1 21 21 20.1 21 19V5C21 3.9 20.1 3 19 3ZM12 3C12.55 3 13 3.45 13 4C13 4.55 12.55 5 12 5C11.45 5 11 4.55 11 4C11 3.45 11.45 3 12 3ZM7 7H17V9H7V7ZM7 11H17V13H7V11ZM7 15H14V17H7V15Z" fill="currentColor"/>
+        </svg>
+        <h3 className="section-title">Health Background</h3>
+      </div>
+      <div className="section-divider section-divider-purple"></div>
+
+      {/* Currently Taking Supplements - REQUIRED */}
+      <div className="step-field">
+        <label>Currently Taking Supplements? <span className="required-star">*</span></label>
+        <div className="radio-group">
+          {['Yes', 'No'].map((opt) => (
+            <label key={opt} className="radio-label">
+              <input type="radio" name="takingSupplements" value={opt}
+                checked={data.takingSupplements === opt}
+                onChange={() => onChange('takingSupplements', opt)} />
+              {opt}
+            </label>
+          ))}
+        </div>
+        {/* Conditional input - If Yes */}
+        {data.takingSupplements === 'Yes' && (
+          <textarea
+            placeholder="List the supplements you're currently taking (e.g. Vitamin D 2000 IU, Fish Oil 1g)"
+            value={data.currentSupplements || ''}
+            onChange={(e) => onChange('currentSupplements', e.target.value)}
+            rows={3}
+            style={{ marginTop: '12px', resize: 'vertical' }}
+          />
+        )}
+        {errors.takingSupplements && <span className="field-error-msg">{errors.takingSupplements}</span>}
+      </div>
+
+      {/* Recent Blood Test - REQUIRED */}
+      <div className="step-field">
+        <label>Recent Blood Test? <span className="required-star">*</span></label>
+        <div className="radio-group">
+          {['Yes', 'No'].map((opt) => (
+            <label key={opt} className="radio-label">
+              <input type="radio" name="recentBloodTest" value={opt}
+                checked={data.recentBloodTest === opt}
+                onChange={() => onChange('recentBloodTest', opt)} />
+              {opt}
+            </label>
+          ))}
+        </div>
+        {/* Conditional input - If Yes */}
+        {data.recentBloodTest === 'Yes' && (
+          <textarea
+            placeholder="Share what your results showed — e.g. 'Low vitamin D (18 ng/mL), low ferritin (12), normal B12'"
+            value={data.bloodTestResults || ''}
+            onChange={(e) => onChange('bloodTestResults', e.target.value)}
+            rows={3}
+            style={{ marginTop: '12px', resize: 'vertical' }}
+          />
+        )}
+        {errors.recentBloodTest && <span className="field-error-msg">{errors.recentBloodTest}</span>}
+      </div>
+
+      {/* Current Medications - REQUIRED */}
+      <div id="field-currentMedications" className={`step-field ${errors.currentMedications ? 'field-error' : ''}`}>
+        <label>Current Medications <span className="required-star">*</span></label>
+        {/* Show textarea unless "None" is checked */}
+        {data.currentMedications !== 'None' && (
+          <textarea
+            placeholder="List any medications you're currently taking"
+            value={data.currentMedications === 'None' ? '' : (data.currentMedications || '')}
+            onChange={(e) => onChange('currentMedications', e.target.value)}
+            rows={3}
+            style={{ marginBottom: '12px' }}
+          />
+        )}
+        <div className="checkbox-group">
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={data.currentMedications === 'None'}
+              onChange={(e) => {
+                if (e.target.checked) {
+                  onChange('currentMedications', 'None');
+                  setShowMedicationsInput(false);
+                } else {
+                  onChange('currentMedications', '');
+                  setShowMedicationsInput(true);
+                }
+              }}
+            />
+            None
+          </label>
+        </div>
+        {errors.currentMedications && <span className="field-error-msg">{errors.currentMedications}</span>}
+      </div>
+
+      {/* Known Allergies - REQUIRED */}
+      <div id="field-allergies" className={`step-field ${errors.allergies ? 'field-error' : ''}`}>
+        <label>Known Allergies <span className="required-star">*</span></label>
+        {/* Show textarea unless "None" is checked */}
+        {data.allergies !== 'None' && (
+          <textarea
+            placeholder="List any known allergies (food, medication, etc.)"
+            value={data.allergies === 'None' ? '' : (data.allergies || '')}
+            onChange={(e) => onChange('allergies', e.target.value)}
+            rows={3}
+            style={{ marginBottom: '12px' }}
+          />
+        )}
+        <div className="checkbox-group">
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={data.allergies === 'None'}
+              onChange={(e) => {
+                if (e.target.checked) {
+                  onChange('allergies', 'None');
+                  setShowAllergiesInput(false);
+                } else {
+                  onChange('allergies', '');
+                  setShowAllergiesInput(true);
+                }
+              }}
+            />
+            None
+          </label>
+        </div>
+        {errors.allergies && <span className="field-error-msg">{errors.allergies}</span>}
+      </div>
+
+      {/* Pregnancy & Breastfeeding — only for Female - REQUIRED */}
       {data.gender === 'Female' && (
         <>
-          <div className="subsection-header-with-icon">
-            <svg className="subsection-icon subsection-icon-teal" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <div className="subsection-header-with-icon" style={{ marginTop: '24px' }}>
+            <svg className="subsection-icon subsection-icon-purple" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path d="M9 11.75C6.66 11.75 4.75 9.84 4.75 7.5C4.75 5.16 6.66 3.25 9 3.25C11.34 3.25 13.25 5.16 13.25 7.5C13.25 9.84 11.34 11.75 9 11.75ZM15 12C15.55 12 16 11.55 16 11C16 10.45 15.55 10 15 10C14.45 10 14 10.45 14 11C14 11.55 14.45 12 15 12ZM15 14C12.79 14 11 12.21 11 10C11 9.45 11.45 9 12 9C12.55 9 13 9.45 13 10C13 11.1 13.9 12 15 12C16.1 12 17 11.1 17 10C17 9.45 17.45 9 18 9C18.55 9 19 9.45 19 10C19 12.21 17.21 14 15 14ZM9 13C5.69 13 3 15.69 3 19V20C3 20.55 3.45 21 4 21H14C14.55 21 15 20.55 15 20V19C15 15.69 12.31 13 9 13Z" fill="currentColor"/>
             </svg>
-            <h4 className="subsection-title">Pregnancy &amp; Breastfeeding</h4>
+            <h4 className="subsection-title">Female-Specific Questions</h4>
           </div>
-          <div className="subsection-divider subsection-divider-teal"></div>
+          <div className="subsection-divider subsection-divider-purple"></div>
+
+          {/* Pregnant */}
           <div className="step-field">
-            <label>Pregnancy &amp; Breastfeeding <span className="field-hint">(optional)</span></label>
-            <div className="pregnancy-grid">
-              <div className="pregnancy-row">
-                <span className="pregnancy-label">Are you currently pregnant?</span>
-                <div className="radio-group">
-                  {['Yes', 'No'].map(opt => (
-                    <label key={opt} className="radio-label">
-                      <input type="radio" name="isPregnant" value={opt}
-                        checked={data.isPregnant === opt}
-                        onChange={() => onChange('isPregnant', opt)} />
-                      {opt}
-                    </label>
-                  ))}
-                </div>
-              </div>
-              <div className="pregnancy-row">
-                <span className="pregnancy-label">Are you currently breastfeeding?</span>
-                <div className="radio-group">
-                  {['Yes', 'No'].map(opt => (
-                    <label key={opt} className="radio-label">
-                      <input type="radio" name="isBreastfeeding" value={opt}
-                        checked={data.isBreastfeeding === opt}
-                        onChange={() => onChange('isBreastfeeding', opt)} />
-                      {opt}
-                    </label>
-                  ))}
-                </div>
-              </div>
+            <label>Pregnant? <span className="required-star">*</span></label>
+            <div className="radio-group">
+              {['Yes', 'No'].map(opt => (
+                <label key={opt} className="radio-label">
+                  <input type="radio" name="isPregnant" value={opt}
+                    checked={data.isPregnant === opt}
+                    onChange={() => onChange('isPregnant', opt)} />
+                  {opt}
+                </label>
+              ))}
             </div>
+            {errors.isPregnant && <span className="field-error-msg">{errors.isPregnant}</span>}
+          </div>
+
+          {/* Breastfeeding */}
+          <div className="step-field">
+            <label>Breastfeeding? <span className="required-star">*</span></label>
+            <div className="radio-group">
+              {['Yes', 'No'].map(opt => (
+                <label key={opt} className="radio-label">
+                  <input type="radio" name="isBreastfeeding" value={opt}
+                    checked={data.isBreastfeeding === opt}
+                    onChange={() => onChange('isBreastfeeding', opt)} />
+                  {opt}
+                </label>
+              ))}
+            </div>
+            {errors.isBreastfeeding && <span className="field-error-msg">{errors.isBreastfeeding}</span>}
           </div>
         </>
       )}
@@ -1854,10 +1959,42 @@ function validateStep(step, formData) {
   }
 
   if (step === 4) {
-    if (formData.currentMedications && isSpam(formData.currentMedications))
-      errors.currentMedications = 'Please enter a valid medication name or leave blank.';
-    if (formData.allergies && isSpam(formData.allergies))
-      errors.allergies = 'Please enter a valid allergy or leave blank.';
+    // Lifestyle Habits - OPTIONAL, but if "Recreational Drugs" is checked, drug types is REQUIRED
+    if ((formData.lifestyleHabits || []).includes('Recreational Drugs')) {
+      if (!formData.recreationalDrugTypes || !formData.recreationalDrugTypes.trim()) {
+        errors.recreationalDrugTypes = 'Please specify which recreational drugs you use.';
+      }
+    }
+
+    // Currently Taking Supplements - REQUIRED
+    if (!formData.takingSupplements)
+      errors.takingSupplements = 'Please indicate if you are taking supplements.';
+    if (formData.takingSupplements === 'Yes' && !formData.currentSupplements?.trim())
+      errors.takingSupplements = 'Please list the supplements you are taking.';
+
+    // Recent Blood Test - REQUIRED
+    if (!formData.recentBloodTest)
+      errors.recentBloodTest = 'Please indicate if you have had a recent blood test.';
+
+    // Current Medications - REQUIRED (accept "None" as valid)
+    if (!formData.currentMedications || !formData.currentMedications.trim())
+      errors.currentMedications = 'Please enter your current medications or select None.';
+    else if (formData.currentMedications !== 'None' && isSpam(formData.currentMedications))
+      errors.currentMedications = 'Please enter a valid medication name.';
+
+    // Known Allergies - REQUIRED (accept "None" as valid)
+    if (!formData.allergies || !formData.allergies.trim())
+      errors.allergies = 'Please enter your known allergies or select None.';
+    else if (formData.allergies !== 'None' && isSpam(formData.allergies))
+      errors.allergies = 'Please enter a valid allergy.';
+
+    // Female-specific - REQUIRED for females
+    if (formData.gender === 'Female') {
+      if (!formData.isPregnant)
+        errors.isPregnant = 'Please indicate if you are pregnant.';
+      if (!formData.isBreastfeeding)
+        errors.isBreastfeeding = 'Please indicate if you are breastfeeding.';
+    }
   }
 
   return errors;

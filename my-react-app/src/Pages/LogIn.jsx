@@ -38,6 +38,19 @@ function LogIn() {
   const [otpExpiresAt, setOtpExpiresAt] = useState(null);
   const [otpTimeLeft, setOtpTimeLeft] = useState(600); // 10 minutes in seconds
   const [otpExpiryTimer, setOtpExpiryTimer] = useState(null);
+  
+  // Forgot password states
+  const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
+  const [forgotPasswordEmail, setForgotPasswordEmail] = useState('');
+  const [forgotPasswordStep, setForgotPasswordStep] = useState('email'); // 'email', 'otp', 'password'
+  const [resetOtp, setResetOtp] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false);
+  const [resetUserId, setResetUserId] = useState('');
+  const [otpVerified, setOtpVerified] = useState(false);
+  
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -270,6 +283,194 @@ function LogIn() {
     setLoading(false);
   };
 
+  // ============== FORGOT PASSWORD HANDLERS ==============
+  
+  const handleForgotPasswordClick = () => {
+    setShowForgotPasswordModal(true);
+    setForgotPasswordStep('email');
+    setForgotPasswordEmail(email); // Pre-fill if email is already entered
+    setError('');
+    setSuccess('');
+  };
+
+  const handleCloseForgotPassword = () => {
+    setShowForgotPasswordModal(false);
+    setForgotPasswordStep('email');
+    setForgotPasswordEmail('');
+    setResetOtp('');
+    setNewPassword('');
+    setConfirmNewPassword('');
+    setResetUserId('');
+    setOtpVerified(false);
+    setError('');
+    setSuccess('');
+    setResendCooldown(0);
+    setOtpTimeLeft(600);
+    if (resendTimer) clearInterval(resendTimer);
+    if (otpExpiryTimer) clearInterval(otpExpiryTimer);
+  };
+
+  const handleForgotPasswordSubmitEmail = async (e) => {
+    e.preventDefault();
+    setError('');
+    
+    const emailErr = validateEmail(forgotPasswordEmail);
+    if (emailErr) {
+      setError(emailErr);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch('http://localhost:5000/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: forgotPasswordEmail }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (response.status === 429 && data.remainingSeconds) {
+          startResendCooldown(data.remainingSeconds);
+        }
+        throw new Error(data.message || 'Failed to send verification code');
+      }
+
+      setResetUserId(data.userId);
+      setForgotPasswordStep('otp');
+      startResendCooldown(60);
+      startOtpExpiryTimer();
+      setSuccess('Verification code sent to your email!');
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyResetOtp = async () => {
+    if (resetOtp.trim().length !== 6) {
+      setError('Please enter a valid 6-digit code.');
+      return;
+    }
+
+    setOtpLoading(true);
+    setError('');
+
+    try {
+      const response = await fetch('http://localhost:5000/api/auth/verify-password-reset-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: resetUserId, otp: resetOtp.trim() }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Invalid verification code');
+      }
+
+      setOtpVerified(true);
+      setForgotPasswordStep('password');
+      setSuccess('Code verified! Now set your new password.');
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError(err.message || 'Invalid verification code. Please try again.');
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e) => {
+    e.preventDefault();
+    setError('');
+
+    // Validate passwords
+    const passwordErr = validatePassword(newPassword);
+    if (passwordErr) {
+      setError(passwordErr);
+      return;
+    }
+
+    if (newPassword !== confirmNewPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch('http://localhost:5000/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          userId: resetUserId, 
+          otp: resetOtp.trim(), 
+          newPassword 
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to reset password');
+      }
+
+      setSuccess('Password reset successfully! You can now sign in.');
+      setTimeout(() => {
+        handleCloseForgotPassword();
+        // Pre-fill the email in login form
+        setEmail(forgotPasswordEmail);
+      }, 2000);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendResetOtp = async () => {
+    if (resendCooldown > 0) return;
+    
+    setError('');
+    setOtpLoading(true);
+
+    try {
+      const response = await fetch('http://localhost:5000/api/auth/resend-password-reset-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: resetUserId }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (response.status === 429 && data.remainingSeconds) {
+          startResendCooldown(data.remainingSeconds);
+        }
+        throw new Error(data.message || 'Failed to resend code');
+      }
+
+      startResendCooldown(60);
+      startOtpExpiryTimer();
+      setSuccess('Verification code sent again!');
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError(err.message || 'Failed to resend code. Please try again.');
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  function validatePassword(password) {
+    if (!password) return 'Please enter a password.';
+    if (password.length < 8) return 'Your password is too short — please use at least 8 characters.';
+    if (!/[A-Z]/.test(password)) return 'Add at least one capital letter to make your password stronger.';
+    if (!/[0-9]/.test(password)) return 'Add at least one number to make your password stronger.';
+    return '';
+  }
+
   return (
     <div className="page-wrapper">
       <Navbar />
@@ -324,6 +525,16 @@ function LogIn() {
           <button type="submit" className="auth-btn" disabled={loading}>
             {loading ? 'Signing in...' : 'Sign In'}
           </button>
+
+          <div className="auth-forgot-password">
+            <button 
+              type="button" 
+              className="auth-forgot-password-link" 
+              onClick={handleForgotPasswordClick}
+            >
+              Forgot Password?
+            </button>
+          </div>
 
           <p className="auth-switch">
             Don't have an account?{' '}
@@ -410,6 +621,237 @@ function LogIn() {
                 {otpLoading ? 'Verifying...' : 'Verify & Sign In'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Forgot Password Modal */}
+      {showForgotPasswordModal && (
+        <div className="profile-modal-overlay" onClick={() => !loading && !otpLoading && handleCloseForgotPassword()}>
+          <div className="profile-modal" onClick={(e) => e.stopPropagation()}>
+            {forgotPasswordStep === 'email' && (
+              <>
+                <h2>Reset Your Password</h2>
+                <p>Enter your email address and we'll send you a verification code.</p>
+                
+                <form onSubmit={handleForgotPasswordSubmitEmail}>
+                  <div className="auth-field">
+                    <label>Email</label>
+                    <input
+                      type="email"
+                      className="profile-otp-input"
+                      placeholder="your.email@example.com"
+                      value={forgotPasswordEmail}
+                      onChange={(e) => {
+                        setForgotPasswordEmail(e.target.value);
+                        setError('');
+                      }}
+                      disabled={loading}
+                      autoFocus
+                      required
+                    />
+                  </div>
+
+                  {error && (
+                    <div className="profile-modal-error">
+                      {error}
+                    </div>
+                  )}
+
+                  {success && (
+                    <div className="profile-modal-success">
+                      {success}
+                    </div>
+                  )}
+
+                  <div className="profile-modal-actions">
+                    <button
+                      type="button"
+                      className="profile-modal-btn profile-modal-btn-secondary"
+                      onClick={handleCloseForgotPassword}
+                      disabled={loading}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="profile-modal-btn profile-modal-btn-primary"
+                      disabled={loading || resendCooldown > 0}
+                    >
+                      {loading ? 'Sending...' : resendCooldown > 0 ? `Wait ${resendCooldown}s` : 'Send Code'}
+                    </button>
+                  </div>
+                </form>
+              </>
+            )}
+
+            {forgotPasswordStep === 'otp' && (
+              <>
+                <h2>Verify Your Email</h2>
+                <p>We've sent a 6-digit verification code to:</p>
+                <p className="profile-modal-email">{forgotPasswordEmail}</p>
+                <p className="profile-modal-note">Enter the code to continue.</p>
+                
+                {/* OTP Expiry Timer */}
+                <div className="otp-expiry-timer">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <polyline points="12 6 12 12 16 14"/>
+                  </svg>
+                  <span className={otpTimeLeft <= 60 ? 'expiring-soon' : ''}>
+                    Code expires in {formatTimeLeft(otpTimeLeft)}
+                  </span>
+                </div>
+                
+                <input
+                  type="text"
+                  className="profile-otp-input"
+                  placeholder="Enter 6-digit code"
+                  value={resetOtp}
+                  onChange={(e) => {
+                    const value = e.target.value.replace(/\D/g, '').slice(0, 6);
+                    setResetOtp(value);
+                    setError('');
+                  }}
+                  maxLength="6"
+                  disabled={otpLoading || otpTimeLeft === 0}
+                  autoFocus
+                />
+
+                {error && (
+                  <div className="profile-modal-error">
+                    {error}
+                  </div>
+                )}
+
+                {success && (
+                  <div className="profile-modal-success">
+                    {success}
+                  </div>
+                )}
+
+                <div className="profile-modal-resend">
+                  <button
+                    type="button"
+                    className="profile-modal-resend-btn"
+                    onClick={handleResendResetOtp}
+                    disabled={resendCooldown > 0 || otpLoading}
+                  >
+                    {resendCooldown > 0 
+                      ? `Send Again (${resendCooldown}s)` 
+                      : 'Send Again'}
+                  </button>
+                </div>
+
+                <div className="profile-modal-actions">
+                  <button
+                    type="button"
+                    className="profile-modal-btn profile-modal-btn-secondary"
+                    onClick={handleCloseForgotPassword}
+                    disabled={otpLoading}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="profile-modal-btn profile-modal-btn-primary"
+                    onClick={handleVerifyResetOtp}
+                    disabled={otpLoading || resetOtp.length !== 6 || otpTimeLeft === 0}
+                  >
+                    {otpLoading ? 'Verifying...' : 'Verify Code'}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {forgotPasswordStep === 'password' && (
+              <>
+                <h2>Create New Password</h2>
+                <p>Enter a strong password for your account.</p>
+                
+                <form onSubmit={handleResetPassword}>
+                  <div className="auth-field">
+                    <label>New Password</label>
+                    <div className="auth-input-wrap">
+                      <input
+                        type={showNewPassword ? 'text' : 'password'}
+                        className="profile-otp-input"
+                        placeholder="Create a strong password"
+                        value={newPassword}
+                        onChange={(e) => {
+                          setNewPassword(e.target.value);
+                          setError('');
+                        }}
+                        disabled={loading}
+                        required
+                      />
+                      <button type="button" className="eye-btn" onClick={() => setShowNewPassword(s => !s)} aria-label="Toggle password visibility">
+                        {showNewPassword ? (
+                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                        ) : (
+                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="auth-field">
+                    <label>Confirm New Password</label>
+                    <div className="auth-input-wrap">
+                      <input
+                        type={showConfirmNewPassword ? 'text' : 'password'}
+                        className="profile-otp-input"
+                        placeholder="Confirm your password"
+                        value={confirmNewPassword}
+                        onChange={(e) => {
+                          setConfirmNewPassword(e.target.value);
+                          setError('');
+                        }}
+                        disabled={loading}
+                        required
+                      />
+                      <button type="button" className="eye-btn" onClick={() => setShowConfirmNewPassword(s => !s)} aria-label="Toggle confirm password visibility">
+                        {showConfirmNewPassword ? (
+                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                        ) : (
+                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {error && (
+                    <div className="profile-modal-error">
+                      {error}
+                    </div>
+                  )}
+
+                  {success && (
+                    <div className="profile-modal-success">
+                      {success}
+                    </div>
+                  )}
+
+                  <div className="profile-modal-actions">
+                    <button
+                      type="button"
+                      className="profile-modal-btn profile-modal-btn-secondary"
+                      onClick={handleCloseForgotPassword}
+                      disabled={loading}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="profile-modal-btn profile-modal-btn-primary"
+                      disabled={loading}
+                    >
+                      {loading ? 'Resetting...' : 'Reset Password'}
+                    </button>
+                  </div>
+                </form>
+              </>
+            )}
           </div>
         </div>
       )}

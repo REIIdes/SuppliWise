@@ -323,6 +323,253 @@ router.post('/resend-login-otp', async (req, res) => {
   }
 });
 
+// @route   POST /api/auth/forgot-password
+// @desc    Request password reset - Send OTP to email
+// @access  Public
+router.post('/forgot-password', async (req, res) => {
+  const { email } = req.body;
+
+  try {
+    if (!email) {
+      return res.status(400).json({ message: 'Please enter your email address.' });
+    }
+
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!isValidEmail(trimmedEmail)) {
+      return res.status(400).json({ message: 'Please enter a valid email address.' });
+    }
+
+    const user = await User.findOne({ email: trimmedEmail });
+    
+    // Security: Don't reveal if email exists or not
+    if (!user) {
+      // Still return success to prevent email enumeration
+      return res.json({ 
+        message: 'If an account exists with this email, a verification code has been sent.',
+      });
+    }
+
+    // Check rate limiting (60 second cooldown)
+    const lastRequest = otpRateLimitMap.get(user._id.toString());
+    if (lastRequest) {
+      const timeSinceLastRequest = Date.now() - lastRequest;
+      if (timeSinceLastRequest < OTP_COOLDOWN_MS) {
+        const remainingSeconds = Math.ceil((OTP_COOLDOWN_MS - timeSinceLastRequest) / 1000);
+        return res.status(429).json({ 
+          message: `Please wait ${remainingSeconds} seconds before requesting another code.`,
+          remainingSeconds,
+        });
+      }
+    }
+
+    // Generate 6-digit OTP
+    const otp = crypto.randomInt(100000, 999999).toString();
+    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+    // Store OTP with password_reset prefix
+    const otpKey = `password_reset_${user._id}`;
+    otpStore.set(otpKey, { otp, expiresAt, requestedAt: Date.now() });
+
+    // Update rate limit
+    otpRateLimitMap.set(user._id.toString(), Date.now());
+
+    // Send OTP via email
+    const emailSent = await sendOtpEmail(trimmedEmail, otp, 'password-reset');
+
+    console.log(`[OTP] Password reset verification for ${user.email}: ${otp}`);
+    console.log(`[OTP] Expires at: ${new Date(expiresAt).toISOString()}`);
+    console.log(`[OTP] Email sent: ${emailSent}`);
+
+    res.json({ 
+      message: emailSent 
+        ? 'Verification code sent to your email successfully' 
+        : 'Verification code generated (check console in development)',
+      userId: user._id,
+      // In development, include OTP in response (remove in production!)
+      ...(process.env.NODE_ENV === 'development' && { otp }),
+    });
+  } catch (error) {
+    console.error('[forgot-password]', error.message);
+    res.status(500).json({ message: 'Something went wrong. Please try again later.' });
+  }
+});
+
+// @route   POST /api/auth/verify-password-reset-otp
+// @desc    Verify OTP for password reset
+// @access  Public
+router.post('/verify-password-reset-otp', async (req, res) => {
+  const { userId, otp } = req.body;
+
+  try {
+    if (!userId || !otp) {
+      return res.status(400).json({ message: 'User ID and OTP are required' });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(401).json({ message: 'Invalid request' });
+    }
+
+    const otpKey = `password_reset_${userId}`;
+    const storedData = otpStore.get(otpKey);
+
+    if (!storedData) {
+      return res.status(400).json({ message: 'No password reset request found. Please try again.' });
+    }
+
+    // Check if OTP has expired
+    if (Date.now() > storedData.expiresAt) {
+      otpStore.delete(otpKey);
+      return res.status(400).json({ message: 'Verification code has expired. Please request a new one.' });
+    }
+
+    // Verify OTP
+    if (storedData.otp !== otp.trim()) {
+      return res.status(400).json({ message: 'Invalid verification code. Please try again.' });
+    }
+
+    // OTP is valid - return success but DON'T delete OTP yet
+    // We'll delete it after password is actually reset
+    res.json({ 
+      message: 'Code verified successfully',
+      verified: true,
+    });
+  } catch (error) {
+    console.error('[verify-password-reset-otp]', error.message);
+    res.status(500).json({ message: 'Something went wrong. Please try again later.' });
+  }
+});
+
+// @route   POST /api/auth/reset-password
+// @desc    Reset password after OTP verification
+// @access  Public
+router.post('/reset-password', async (req, res) => {
+  const { userId, otp, newPassword } = req.body;
+
+  try {
+    if (!userId || !otp || !newPassword) {
+      return res.status(400).json({ message: 'User ID, OTP, and new password are required' });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(401).json({ message: 'Invalid request' });
+    }
+
+    const otpKey = `password_reset_${userId}`;
+    const storedData = otpStore.get(otpKey);
+
+    if (!storedData) {
+      return res.status(400).json({ message: 'No password reset request found. Please try again.' });
+    }
+
+    // Check if OTP has expired
+    if (Date.now() > storedData.expiresAt) {
+      otpStore.delete(otpKey);
+      return res.status(400).json({ message: 'Verification code has expired. Please try again.' });
+    }
+
+    // Verify OTP one more time
+    if (storedData.otp !== otp.trim()) {
+      return res.status(400).json({ message: 'Invalid verification code. Please try again.' });
+    }
+
+    // Password validation
+    if (newPassword.length < 8) {
+      return res.status(400).json({ message: 'Your password is too short — please use at least 8 characters.' });
+    }
+    if (!/[A-Z]/.test(newPassword)) {
+      return res.status(400).json({ message: 'Add at least one capital letter to make your password stronger.' });
+    }
+    if (!/[0-9]/.test(newPassword)) {
+      return res.status(400).json({ message: 'Add at least one number to make your password stronger.' });
+    }
+
+    // Check if new password is same as current password
+    const isSamePassword = await user.matchPassword(newPassword);
+    if (isSamePassword) {
+      return res.status(400).json({ message: 'Your new password must be different from your current password.' });
+    }
+
+    // Update password
+    user.password = newPassword;
+    await user.save();
+
+    // Delete OTP after successful password reset
+    otpStore.delete(otpKey);
+
+    console.log(`[PASSWORD RESET] Password successfully reset for user: ${user.email}`);
+
+    res.json({ 
+      message: 'Password reset successfully. You can now sign in with your new password.',
+      success: true,
+    });
+  } catch (error) {
+    console.error('[reset-password]', error.message);
+    res.status(500).json({ message: 'Something went wrong. Please try again later.' });
+  }
+});
+
+// @route   POST /api/auth/resend-password-reset-otp
+// @desc    Resend OTP for password reset
+// @access  Public
+router.post('/resend-password-reset-otp', async (req, res) => {
+  const { userId } = req.body;
+
+  try {
+    if (!userId) {
+      return res.status(400).json({ message: 'User ID is required' });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(401).json({ message: 'Invalid request' });
+    }
+
+    // Check rate limiting (60 second cooldown)
+    const lastRequest = otpRateLimitMap.get(user._id.toString());
+    if (lastRequest) {
+      const timeSinceLastRequest = Date.now() - lastRequest;
+      if (timeSinceLastRequest < OTP_COOLDOWN_MS) {
+        const remainingSeconds = Math.ceil((OTP_COOLDOWN_MS - timeSinceLastRequest) / 1000);
+        return res.status(429).json({ 
+          message: `Please wait ${remainingSeconds} seconds before requesting another code.`,
+          remainingSeconds,
+        });
+      }
+    }
+
+    // Generate new OTP
+    const otp = crypto.randomInt(100000, 999999).toString();
+    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+    // Store OTP
+    const otpKey = `password_reset_${user._id}`;
+    otpStore.set(otpKey, { otp, expiresAt, requestedAt: Date.now() });
+
+    // Update rate limit
+    otpRateLimitMap.set(user._id.toString(), Date.now());
+
+    // Send OTP via email
+    const emailSent = await sendOtpEmail(user.email, otp, 'password-reset');
+
+    console.log(`[OTP] Password reset resend verification for ${user.email}: ${otp}`);
+    console.log(`[OTP] Expires at: ${new Date(expiresAt).toISOString()}`);
+    console.log(`[OTP] Email sent: ${emailSent}`);
+
+    res.json({ 
+      message: emailSent 
+        ? 'Verification code sent to your email successfully' 
+        : 'Verification code generated (check console in development)',
+      // In development, include OTP in response (remove in production!)
+      ...(process.env.NODE_ENV === 'development' && { otp }),
+    });
+  } catch (error) {
+    console.error('[resend-password-reset-otp]', error.message);
+    res.status(500).json({ message: 'Something went wrong. Please try again later.' });
+  }
+});
+
 // @route   POST /api/auth/request-email-otp
 // @desc    Request OTP for email change
 // @access  Private

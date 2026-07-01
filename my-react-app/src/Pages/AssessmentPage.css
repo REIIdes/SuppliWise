@@ -398,6 +398,43 @@
   margin-left: 2px;
 }
 
+/* Required fields notice at top of step */
+.required-notice {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: #1e40af;
+  margin-bottom: 20px;
+  font-family: sans-serif;
+}
+
+.required-notice .required-star {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+/* Conditional label for nested required fields */
+.conditional-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #374151;
+  display: block;
+  margin-bottom: 6px;
+}
+
+/* Medication/Allergy group with None checkbox */
+.medication-allergy-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.medication-allergy-group .checkbox-label {
+  margin-bottom: 8px;
+}
+
 /* Field error state */
 .field-error input,
 .field-error textarea {
@@ -994,6 +1031,10 @@
   color: #14b8a6;
 }
 
+.section-icon-purple {
+  color: #a855f7;
+}
+
 .section-title {
   font-size: 18px;
   font-weight: 600;
@@ -1047,6 +1088,10 @@
   color: #14b8a6;
 }
 
+.subsection-icon-purple {
+  color: #a855f7;
+}
+
 .subsection-title {
   font-size: 15px;
   font-weight: 600;
@@ -1063,6 +1108,10 @@
 
 .subsection-divider-teal {
   background: linear-gradient(to right, #14b8a6 0%, #ccfbf1 100%);
+}
+
+.subsection-divider-purple {
+  background: linear-gradient(to right, #a855f7 0%, #f3e8ff 100%);
 }
 
 /* ── Physical Activity Level description ── */

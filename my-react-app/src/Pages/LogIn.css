@@ -314,3 +314,28 @@
   margin: -2px 0 4px 0;
   font-family: sans-serif;
 }
+
+/* Forgot Password Link */
+.auth-forgot-password {
+  text-align: center;
+  margin-top: 12px;
+  margin-bottom: 0;
+}
+
+.auth-forgot-password-link {
+  background: none;
+  border: none;
+  color: #2563eb;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: sans-serif;
+  padding: 0;
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.auth-forgot-password-link:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
