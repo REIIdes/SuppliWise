@@ -2349,15 +2349,9 @@ function AssessmentPage() {
               isReadOnly ? (
                 <button
                   className="btn-next"
-                  onClick={() => {
-                    if (routeAssessment?.aiResults) {
-                      navigate('/results', { state: { recommendations: routeAssessment.aiResults, assessment: routeAssessment } });
-                    } else {
-                      navigate('/history');
-                    }
-                  }}
+                  onClick={() => navigate('/history')}
                 >
-                  View Supplement History
+                  Back to History
                 </button>
               ) : (
                 <button className="btn-next" onClick={handleSubmit} disabled={submitting}>
