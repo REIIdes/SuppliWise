@@ -199,7 +199,8 @@ function DashboardPage() {
         if (hasUnfinishedSupplements && todaysSupplements.length > 0) {
           setShowNewAssessmentConfirm(true);
         } else {
-          navigate('/assessment', { state: { clearDraft: true } });
+          // Just navigate to assessment - don't force clear if there's in-progress work
+          navigate('/assessment');
         }
         break;
       case 'recommendations':
@@ -218,6 +219,7 @@ function DashboardPage() {
 
   const confirmNewAssessment = () => {
     setShowNewAssessmentConfirm(false);
+    // When explicitly confirming to abandon current supplements, then clear draft
     navigate('/assessment', { state: { clearDraft: true } });
   };
 

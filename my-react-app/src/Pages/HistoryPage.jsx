@@ -347,7 +347,7 @@ function HistoryPage() {
         <div className="history-header">
           <h2>Assessment History</h2>
           <div className="history-header-actions">
-            <button className="btn-primary" onClick={() => navigate('/assessment', { state: { clearDraft: true } })}>
+            <button className="btn-primary" onClick={() => navigate('/assessment')}>
               + New Assessment
             </button>
           </div>
@@ -378,7 +378,7 @@ function HistoryPage() {
             <div className="history-empty-icon">📋</div>
             <p style={{ fontWeight: 600, color: '#374151', fontSize: '16px', margin: 0 }}>No assessments yet</p>
             <p style={{ margin: 0 }}>Complete your first health assessment to get personalized supplement and lifestyle recommendations.</p>
-            <button className="btn-primary" onClick={() => navigate('/assessment', { state: { clearDraft: true } })}>
+            <button className="btn-primary" onClick={() => navigate('/assessment')}>
               Start Assessment →
             </button>
           </div>

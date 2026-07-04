@@ -2151,29 +2151,27 @@ function AssessmentPage() {
 
   const [isReadOnly] = useState(routeReadOnly);
 
-  // Clear sessionStorage when starting a fresh assessment (not viewing history and no route assessment)
+  // Clear sessionStorage only when explicitly starting fresh after viewing history
   useEffect(() => {
-    if (!routeReadOnly && !routeAssessment) {
-      // Check if we arrived here with explicit intent to start fresh
-      if (location.state?.clearDraft) {
-        sessionStorage.removeItem(SESSION_KEY);
-        
-        // Start fresh but preserve user profile data (age, gender) if available
-        const userRaw = localStorage.getItem('user');
-        if (userRaw) {
-          try {
-            const user = JSON.parse(userRaw);
-            setFormData({
-              ...EMPTY_FORM,
-              age: user.age || '',
-              gender: user.gender || '',
-            });
-          } catch {
-            setFormData(EMPTY_FORM);
-          }
-        } else {
+    // If we just viewed history (routeAssessment exists) and user wants to start fresh
+    if (routeAssessment && location.state?.clearDraft) {
+      sessionStorage.removeItem(SESSION_KEY);
+      
+      // Start fresh but preserve user profile data (age, gender) if available
+      const userRaw = localStorage.getItem('user');
+      if (userRaw) {
+        try {
+          const user = JSON.parse(userRaw);
+          setFormData({
+            ...EMPTY_FORM,
+            age: user.age || '',
+            gender: user.gender || '',
+          });
+        } catch {
           setFormData(EMPTY_FORM);
         }
+      } else {
+        setFormData(EMPTY_FORM);
       }
     }
     
