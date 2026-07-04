@@ -10,6 +10,7 @@ function InsightsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [hasData, setHasData] = useState(false);
+  const [hasAssessment, setHasAssessment] = useState(false);
   
   // Overview data
   const [overviewStats, setOverviewStats] = useState([]);
@@ -41,13 +42,27 @@ function InsightsPage() {
       const data = await getInsights();
 
       if (!data.hasData) {
-        setHasData(false);
-        setError(data.message || 'Not enough tracking data yet. Start tracking your supplements to see insights.');
+        // Set empty state for new users
+        setHasData(true); // Show UI instead of error
+        setHasAssessment(data.hasAssessment !== undefined ? data.hasAssessment : false);
+        setOverviewStats([
+          { icon: 'trophy', label: 'Longest Streak', value: 'None Yet', color: 'purple' },
+          { icon: 'heart', label: 'Adherence rate', value: '0%', color: 'blue' },
+          { icon: 'trend', label: 'Wellness Score', value: '0', color: 'green' },
+          { icon: 'clipboard', label: 'Assessments Completed', value: '0', color: 'pink' },
+        ]);
+        setCurrentPhase(null);
+        setAllPhases([]);
+        setLifestyleAdvice([]);
+        setAdherenceTrends([]);
+        setTodaysSupplements([]);
+        setTodaysStats({ taken: 0, total: 0, percentage: 0 });
         setLoading(false);
         return;
       }
 
       setHasData(true);
+      setHasAssessment(true);
 
       // Set overview stats
       const stats = [
@@ -97,27 +112,24 @@ function InsightsPage() {
       setLoading(false);
     } catch (err) {
       console.error('Error fetching insights:', err);
-      setError(err.message || 'Failed to load insights.');
-      setHasData(false);
+      // Set empty state instead of error
+      setHasData(true); // Show UI instead of error
+      setHasAssessment(false); // No assessment on error
+      setOverviewStats([
+        { icon: 'trophy', label: 'Longest Streak', value: 'None Yet', color: 'purple' },
+        { icon: 'heart', label: 'Adherence rate', value: '0%', color: 'blue' },
+        { icon: 'trend', label: 'Wellness Score', value: '0', color: 'green' },
+        { icon: 'clipboard', label: 'Assessments Completed', value: '0', color: 'pink' },
+      ]);
+      setCurrentPhase(null);
+      setAllPhases([]);
+      setLifestyleAdvice([]);
+      setAdherenceTrends([]);
+      setTodaysSupplements([]);
+      setTodaysStats({ taken: 0, total: 0, percentage: 0 });
       setLoading(false);
     }
   };
-
-  if (!hasData) {
-    return (
-      <div className="insights-wrapper">
-        <Navbar />
-        <div className="insights-container">
-          <div className="insights-error">
-            <p>{error}</p>
-            <button onClick={() => navigate('/track-intake')} className="btn-primary">
-              Start Tracking
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   const getIconSvg = (iconType) => {
     switch (iconType) {
@@ -198,7 +210,7 @@ function InsightsPage() {
   const renderOverview = () => (
     <>
       {/* Current Phase Insights */}
-      {currentPhase && (
+      {currentPhase ? (
         <div className="insights-section">
           <h3 className="insights-section-title">Your Current Phase</h3>
           <div className="current-phase-card">
@@ -224,6 +236,19 @@ function InsightsPage() {
                 </ul>
               </div>
             )}
+          </div>
+        </div>
+      ) : (
+        <div className="insights-section">
+          <h3 className="insights-section-title">Start Your Wellness Journey</h3>
+          <div className="empty-state-message" style={{ textAlign: 'center', padding: '60px 20px' }}>
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ margin: '0 auto 16px', color: '#10b981' }}>
+              <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+              <path d="M3.22 12h3.14L8 8l4 8 1.64-4h3.14"/>
+            </svg>
+            <p style={{ color: '#6b7280', marginBottom: '0' }}>
+              Complete an assessment to get personalized AI insights and action plans.
+            </p>
           </div>
         </div>
       )}
@@ -260,7 +285,11 @@ function InsightsPage() {
               <line x1="3" y1="10" x2="21" y2="10"/>
             </svg>
             <p>No supplements scheduled for today.</p>
-            <p className="empty-state-note">Add supplements to your plan from recommendations to start tracking.</p>
+            <p className="empty-state-note">
+              {hasAssessment
+                ? 'Add supplements to your plan from recommendations to start tracking.'
+                : 'Complete an assessment to get your personalized supplement plan and start tracking.'}
+            </p>
           </div>
         ) : (
           <>
@@ -397,7 +426,11 @@ function InsightsPage() {
               <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
             </svg>
             <p>No adherence data yet.</p>
-            <p className="empty-state-note">Add supplements to your plan from recommendations to start building your adherence history.</p>
+            <p className="empty-state-note">
+              {hasAssessment
+                ? 'Add supplements to your plan from recommendations to start building your adherence history.'
+                : 'Complete an assessment to start building your adherence history and track your progress.'}
+            </p>
           </div>
         )}
       </div>
@@ -424,53 +457,78 @@ function InsightsPage() {
 
   const renderAIInsight = () => (
     <>
-      {currentPhase && (
-        <div className="insights-section">
-          <h3 className="insights-section-title">AI-Powered Phase Guidance</h3>
-          <div className="current-phase-card ai-enhanced">
-            <div className="ai-badge">AI Insight</div>
-            <h4 className="phase-title">{currentPhase.phase}</h4>
-            <p className="phase-focus">{currentPhase.focus}</p>
-            {currentPhase.steps && currentPhase.steps.length > 0 && (
-              <div className="phase-steps">
-                <h5>Recommended Actions:</h5>
-                <ul>
-                  {currentPhase.steps.map((step, idx) => (
-                    <li key={idx}>{step}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {currentPhase.expectedChanges && currentPhase.expectedChanges.length > 0 && (
-              <div className="phase-changes">
-                <h5>What to Expect:</h5>
-                <ul>
-                  {currentPhase.expectedChanges.map((change, idx) => (
-                    <li key={idx}>{change}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {lifestyleAdvice.length > 0 && (
-        <div className="insights-section">
-          <h3 className="insights-section-title">Personalized Lifestyle Tips</h3>
-          <div className="lifestyle-grid">
-            {lifestyleAdvice.map((advice, index) => (
-              <div key={index} className="lifestyle-card">
-                <div className="lifestyle-icon">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-                    <polyline points="22 4 12 14.01 9 11.01"/>
-                  </svg>
+      {currentPhase ? (
+        <>
+          <div className="insights-section">
+            <h3 className="insights-section-title">AI-Powered Phase Guidance</h3>
+            <div className="current-phase-card ai-enhanced">
+              <div className="ai-badge">AI Insight</div>
+              <h4 className="phase-title">{currentPhase.phase}</h4>
+              <p className="phase-focus">{currentPhase.focus}</p>
+              {currentPhase.steps && currentPhase.steps.length > 0 && (
+                <div className="phase-steps">
+                  <h5>Recommended Actions:</h5>
+                  <ul>
+                    {currentPhase.steps.map((step, idx) => (
+                      <li key={idx}>{step}</li>
+                    ))}
+                  </ul>
                 </div>
-                <h4 className="lifestyle-category">{advice.category}</h4>
-                <p className="lifestyle-advice">{advice.advice}</p>
+              )}
+              {currentPhase.expectedChanges && currentPhase.expectedChanges.length > 0 && (
+                <div className="phase-changes">
+                  <h5>What to Expect:</h5>
+                  <ul>
+                    {currentPhase.expectedChanges.map((change, idx) => (
+                      <li key={idx}>{change}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {lifestyleAdvice.length > 0 && (
+            <div className="insights-section">
+              <h3 className="insights-section-title">Personalized Lifestyle Tips</h3>
+              <div className="lifestyle-grid">
+                {lifestyleAdvice.map((advice, index) => (
+                  <div key={index} className="lifestyle-card">
+                    <div className="lifestyle-icon">
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                        <polyline points="22 4 12 14.01 9 11.01"/>
+                      </svg>
+                    </div>
+                    <h4 className="lifestyle-category">{advice.category}</h4>
+                    <p className="lifestyle-advice">{advice.advice}</p>
+                  </div>
+                ))}
               </div>
-            ))}
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="insights-section">
+          <h3 className="insights-section-title">AI Insights Await</h3>
+          <div className="empty-state-message" style={{ textAlign: 'center', padding: '60px 20px' }}>
+            <svg width="64" height="64" viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ margin: '0 auto 16px', color: '#10b981' }}>
+              {/* Speech bubble */}
+              <path d="M20 6 L40 6 Q46 6 46 12 L46 18 Q46 24 40 24 L34 24 L28 30 L28 24 L20 24 Q14 24 14 18 L14 12 Q14 6 20 6 Z" fill="none" stroke="currentColor" strokeWidth="2.5"/>
+              {/* Robot head */}
+              <rect x="14" y="34" width="36" height="24" rx="4" ry="4" fill="none" stroke="currentColor" strokeWidth="2.5"/>
+              {/* Antenna */}
+              <line x1="32" y1="28" x2="32" y2="34" stroke="currentColor" strokeWidth="2.5"/>
+              <circle cx="32" cy="26" r="2.5" fill="currentColor"/>
+              {/* Eyes */}
+              <circle cx="24" cy="44" r="2.5" fill="currentColor"/>
+              <circle cx="40" cy="44" r="2.5" fill="currentColor"/>
+              {/* Smile */}
+              <path d="M24 50 Q32 54 40 50" fill="none" stroke="currentColor" strokeWidth="2.5"/>
+            </svg>
+            <p style={{ color: '#6b7280', marginBottom: '0' }}>
+              Complete an assessment to unlock personalized AI-powered guidance and recommendations.
+            </p>
           </div>
         </div>
       )}

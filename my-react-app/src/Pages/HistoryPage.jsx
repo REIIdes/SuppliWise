@@ -374,13 +374,39 @@ function HistoryPage() {
           </div>
         )}
         {!loading && !error && history.length === 0 && (
-          <div className="history-empty">
-            <div className="history-empty-icon">📋</div>
-            <p style={{ fontWeight: 600, color: '#374151', fontSize: '16px', margin: 0 }}>No assessments yet</p>
-            <p style={{ margin: 0 }}>Complete your first health assessment to get personalized supplement and lifestyle recommendations.</p>
-            <button className="btn-primary" onClick={() => navigate('/assessment')}>
-              Start Assessment →
-            </button>
+          <div style={{ 
+            maxWidth: '600px', 
+            margin: '40px auto',
+            background: 'white',
+            borderRadius: '16px',
+            border: '1px solid #e5e7eb',
+            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)',
+            padding: '60px 40px'
+          }}>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ 
+                width: '120px', 
+                height: '120px', 
+                margin: '0 auto 32px', 
+                background: 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)', 
+                borderRadius: '50%', 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center',
+                boxShadow: '0 10px 25px rgba(16, 185, 129, 0.15)'
+              }}>
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                  <line x1="16" y1="13" x2="8" y2="13"/>
+                  <line x1="16" y1="17" x2="8" y2="17"/>
+                  <polyline points="10 9 9 9 8 9"/>
+                </svg>
+              </div>
+              <p style={{ color: '#6b7280', fontSize: '16px', lineHeight: '1.6', marginBottom: '0', maxWidth: '500px', margin: '0 auto' }}>
+                You haven't completed any assessments yet. Complete your first health assessment to start building your assessment history.
+              </p>
+            </div>
           </div>
         )}
 

@@ -49,7 +49,16 @@ function DashboardPage() {
       const data = await getDashboard();
       
       if (!data.hasAssessment) {
-        setError('No assessment found. Please complete an assessment to see your dashboard.');
+        // Set empty/default state for new users without assessment
+        setTodaysSupplements([]);
+        setWellnessScore(0);
+        setQuickStats({
+          daysStreak: 0,
+          adherenceRate: 0,
+          energyLevel: 'Medium',
+          todaysProgress: { taken: 0, total: 0 },
+        });
+        setInsights(null);
         setLoading(false);
         return;
       }
@@ -240,7 +249,7 @@ function DashboardPage() {
           <div className="dashboard-error">
             <p>{error}</p>
             <button onClick={() => navigate('/assessment')} className="btn-primary">
-              Take Assessment
+              Retry
             </button>
           </div>
         </div>
@@ -306,8 +315,12 @@ function DashboardPage() {
       <div className="dashboard-container">
         {/* Welcome Section */}
         <div className="dashboard-welcome">
-          <h1 className="dashboard-title">Welcome back, {userData.firstName || userData.name}!</h1>
-          <p className="dashboard-subtitle">Here's your personalized wellness dashboard</p>
+          <h1 className="dashboard-title">Welcome{userData.firstName ? `, ${userData.firstName}` : ''}!</h1>
+          <p className="dashboard-subtitle">
+            {todaysSupplements.length > 0 || wellnessScore > 0
+              ? "Here's your personalized wellness dashboard"
+              : "Get started by taking a quick health assessment to receive personalized supplement recommendations"}
+          </p>
         </div>
 
         {/* Action Cards */}
@@ -387,22 +400,51 @@ function DashboardPage() {
               <div className="empty-state">
                 <div className="empty-state-icon">
                   <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                    <line x1="9" y1="9" x2="15" y2="15"/>
-                    <line x1="15" y1="9" x2="9" y2="15"/>
+                    {wellnessScore === 0 ? (
+                      <>
+                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                        <line x1="16" y1="2" x2="16" y2="6"/>
+                        <line x1="8" y1="2" x2="8" y2="6"/>
+                        <line x1="3" y1="10" x2="21" y2="10"/>
+                      </>
+                    ) : (
+                      <>
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                        <line x1="9" y1="9" x2="15" y2="15"/>
+                        <line x1="15" y1="9" x2="9" y2="15"/>
+                      </>
+                    )}
                   </svg>
                 </div>
-                <p className="empty-state-title">You haven't added any supplements to your plan yet.</p>
-                <p className="empty-state-subtitle">Browse AI recommendations and add supplements to start tracking.</p>
+                <p className="empty-state-title">
+                  {wellnessScore === 0 
+                    ? "No Supplement Plan Yet" 
+                    : "You haven't added any supplements to your plan yet."}
+                </p>
+                <p className="empty-state-subtitle">
+                  {wellnessScore === 0
+                    ? "Complete a health assessment and add your recommended supplements to your plan to view today's supplements."
+                    : "Browse AI recommendations and add supplements to start tracking."}
+                </p>
                 <button 
                   className="btn-go-recommendations" 
-                  onClick={() => navigate('/recommendations')}
+                  onClick={() => navigate(wellnessScore === 0 ? '/assessment' : '/recommendations')}
                 >
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 2a10 10 0 0 1 7.94 16.06L12 22l-7.94-3.94A10 10 0 0 1 12 2z"/>
-                    <circle cx="12" cy="11" r="3"/>
+                    {wellnessScore === 0 ? (
+                      <>
+                        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+                        <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
+                        <path d="M9 14l2 2 4-4"/>
+                      </>
+                    ) : (
+                      <>
+                        <path d="M12 2a10 10 0 0 1 7.94 16.06L12 22l-7.94-3.94A10 10 0 0 1 12 2z"/>
+                        <circle cx="12" cy="11" r="3"/>
+                      </>
+                    )}
                   </svg>
-                  Go to AI Recommendations
+                  {wellnessScore === 0 ? 'Take Assessment' : 'Go to AI Recommendations'}
                 </button>
               </div>
             ) : (

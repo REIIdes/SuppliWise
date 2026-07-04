@@ -77,9 +77,24 @@ router.get('/', protect, async (req, res) => {
       .sort({ createdAt: -1 });
 
     if (!latestAssessment) {
-      return res.status(404).json({ 
-        message: 'No assessment found. Please complete an assessment first.',
+      // Return empty dashboard data for new users without assessment
+      return res.json({ 
         hasAssessment: false,
+        assessment: null,
+        todaysSupplements: [],
+        stats: {
+          wellnessScore: 0,
+          daysStreak: 0,
+          longestStreak: 0,
+          adherenceRate: 0,
+          energyLevel: 'Medium',
+          todaysProgress: {
+            taken: 0,
+            total: 0,
+            percentage: 0,
+          },
+        },
+        insights: null,
       });
     }
 

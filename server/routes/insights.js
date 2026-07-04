@@ -28,9 +28,10 @@ router.get('/', protect, async (req, res) => {
       .sort({ createdAt: -1 });
 
     if (!latestAssessment) {
-      return res.status(404).json({ 
+      return res.json({ 
         message: 'No assessment found. Please complete an assessment first.',
         hasData: false,
+        hasAssessment: false,
       });
     }
 
@@ -43,6 +44,7 @@ router.get('/', protect, async (req, res) => {
     if (!metrics) {
       return res.json({
         hasData: false,
+        hasAssessment: true,
         message: 'Not enough tracking data yet. Start tracking your supplements to see insights.',
       });
     }
@@ -126,6 +128,7 @@ router.get('/', protect, async (req, res) => {
     // Response
     res.json({
       hasData: true,
+      hasAssessment: true,
       overview: {
         daysTracked: metrics.totalDaysTracked || daysSinceStart,
         currentStreak: metrics.currentStreak,

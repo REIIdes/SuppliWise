@@ -57,14 +57,17 @@ function RecommendationsPage() {
         if (latestAssessment.aiResults?.recommendations) {
           setRecommendations(latestAssessment.aiResults.recommendations);
         } else {
-          setError('No recommendations found. Please complete an assessment first.');
+          // No recommendations but show empty state UI
+          setRecommendations([]);
         }
       } else {
-        setError('No assessments found. Please complete an assessment to get recommendations.');
+        // No assessments but show empty state UI
+        setRecommendations([]);
       }
     } catch (err) {
       console.error('Error fetching recommendations:', err);
-      setError('Failed to load recommendations. Please try again.');
+      // Show empty state instead of error
+      setRecommendations([]);
     } finally {
       setLoading(false);
     }
@@ -179,22 +182,6 @@ function RecommendationsPage() {
     );
   }
 
-  if (error) {
-    return (
-      <div className="recommendations-wrapper">
-        <Navbar />
-        <div className="recommendations-error">
-          <div className="error-icon">⚠️</div>
-          <h2>No Recommendations Available</h2>
-          <p>{error}</p>
-          <button className="btn-primary" onClick={() => navigate('/assessment')}>
-            Take Assessment
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   const filteredRecommendations = getFilteredRecommendations();
 
   return (
@@ -219,15 +206,17 @@ function RecommendationsPage() {
           <p className="recommendations-subtitle">Personalized supplement suggestions based on your health assessment</p>
         </div>
 
-        {/* Professional Consultation Warning */}
-        <div className="professional-warning">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-            <line x1="12" y1="9" x2="12" y2="13"/>
-            <line x1="12" y1="17" x2="12.01" y2="17"/>
-          </svg>
-          <p>These recommendations are AI-generated suggestions based on your assessment. Always consult with a healthcare professional before starting any new supplement regimen.</p>
-        </div>
+        {/* Professional Consultation Warning - Only show when there are recommendations */}
+        {recommendations && recommendations.length > 0 && (
+          <div className="professional-warning">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            <p>These recommendations are AI-generated suggestions based on your assessment. Always consult with a healthcare professional before starting any new supplement regimen.</p>
+          </div>
+        )}
 
         {/* Recommendations List */}
         <div className="filter-tabs">
@@ -259,9 +248,73 @@ function RecommendationsPage() {
 
         {/* Recommendations List */}
         <div className="recommendations-list">
-          {filteredRecommendations.length === 0 ? (
-            <div className="no-results">
-              <p>No {activeTab !== 'all' ? `${activeTab} priority ` : ''}recommendations found.</p>
+          {recommendations === null || (recommendations.length === 0 && activeTab === 'all') ? (
+            <div style={{ 
+              maxWidth: '600px', 
+              margin: '40px auto',
+              background: 'white',
+              borderRadius: '16px',
+              border: '1px solid #e5e7eb',
+              boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)',
+              padding: '60px 40px'
+            }}>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ 
+                  width: '120px', 
+                  height: '120px', 
+                  margin: '0 auto 32px', 
+                  background: 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)', 
+                  borderRadius: '50%', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  boxShadow: '0 10px 25px rgba(16, 185, 129, 0.15)'
+                }}>
+                  <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+                    <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
+                    <line x1="9" y1="11" x2="15" y2="11"/>
+                    <line x1="9" y1="15" x2="15" y2="15"/>
+                  </svg>
+                </div>
+                <p style={{ color: '#6b7280', fontSize: '16px', lineHeight: '1.6', marginBottom: '0', maxWidth: '500px', margin: '0 auto' }}>
+                  Complete a health assessment to receive personalized AI-powered supplement recommendations tailored to your needs.
+                </p>
+              </div>
+            </div>
+          ) : filteredRecommendations.length === 0 ? (
+            <div style={{ 
+              maxWidth: '600px', 
+              margin: '40px auto',
+              background: 'white',
+              borderRadius: '16px',
+              border: '1px solid #e5e7eb',
+              boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)',
+              padding: '60px 40px'
+            }}>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ 
+                  width: '120px', 
+                  height: '120px', 
+                  margin: '0 auto 32px', 
+                  background: 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)', 
+                  borderRadius: '50%', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  boxShadow: '0 10px 25px rgba(16, 185, 129, 0.15)'
+                }}>
+                  <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+                    <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
+                    <line x1="9" y1="11" x2="15" y2="11"/>
+                    <line x1="9" y1="15" x2="15" y2="15"/>
+                  </svg>
+                </div>
+                <p style={{ color: '#6b7280', fontSize: '16px', lineHeight: '1.6', marginBottom: '0', maxWidth: '500px', margin: '0 auto' }}>
+                  Complete a health assessment to receive personalized AI-powered supplement recommendations tailored to your needs.
+                </p>
+              </div>
             </div>
           ) : (
             filteredRecommendations.map((rec, index) => (

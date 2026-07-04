@@ -11,6 +11,7 @@ function TrackIntakePage() {
   const [error, setError] = useState('');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [todaysSupplements, setTodaysSupplements] = useState([]);
+  const [hasAssessment, setHasAssessment] = useState(false);
   const [weeklyAdherence, setWeeklyAdherence] = useState({
     percentage: 0,
     days: [],
@@ -57,10 +58,18 @@ function TrackIntakePage() {
       const data = await getDashboard();
 
       if (!data.hasAssessment) {
-        setError('No assessment found. Please complete an assessment to track your supplements.');
+        // Set empty state for new users without assessment
+        setHasAssessment(false);
+        setTodaysSupplements([]);
+        setStreak(0);
+        setLongestStreak(0);
+        setAdherenceRate(0);
+        setWeeklyAdherence({ percentage: 0, days: [] });
         setLoading(false);
         return;
       }
+
+      setHasAssessment(true);
 
       // Sort supplements: untaken first (by schedule time, then priority), then taken last (by schedule time, then priority)
       const PRIORITY_ORDER = { High: 0, Medium: 1, Low: 2 };
@@ -358,7 +367,7 @@ function TrackIntakePage() {
           <div className="track-intake-error">
             <p>{error}</p>
             <button onClick={() => navigate('/assessment')} className="btn-primary">
-              Take Assessment
+              Retry
             </button>
           </div>
         </div>
@@ -437,8 +446,67 @@ function TrackIntakePage() {
               </div>
               {todaysSupplements.length === 0 ? (
                 <div className="empty-state">
-                  <p>No supplements scheduled for today.</p>
-                  <p>Complete an assessment to get your personalized plan.</p>
+                  <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ margin: '0 auto 16px', color: '#10b981' }}>
+                    {hasAssessment ? (
+                      <>
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                        <line x1="9" y1="9" x2="15" y2="15"/>
+                        <line x1="15" y1="9" x2="9" y2="15"/>
+                      </>
+                    ) : (
+                      <>
+                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                        <line x1="16" y1="2" x2="16" y2="6"/>
+                        <line x1="8" y1="2" x2="8" y2="6"/>
+                        <line x1="3" y1="10" x2="21" y2="10"/>
+                      </>
+                    )}
+                  </svg>
+                  <p style={{ fontSize: '18px', marginBottom: '8px', color: '#111827', fontWeight: '700' }}>
+                    {hasAssessment 
+                      ? "You haven't added any supplements to your plan yet." 
+                      : "No Supplement Plan Yet"}
+                  </p>
+                  <p style={{ color: '#6b7280', marginBottom: '16px' }}>
+                    {hasAssessment
+                      ? 'Browse AI recommendations and add supplements to start tracking.'
+                      : 'Complete a health assessment and add your recommended supplements to your plan to view today\'s supplements.'}
+                  </p>
+                  <button 
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      padding: '10px 20px',
+                      backgroundColor: '#10b981',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontSize: '14px',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                      transition: 'background-color 0.2s'
+                    }}
+                    onClick={() => navigate(hasAssessment ? '/recommendations' : '/assessment')}
+                    onMouseOver={(e) => e.target.style.backgroundColor = '#059669'}
+                    onMouseOut={(e) => e.target.style.backgroundColor = '#10b981'}
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      {hasAssessment ? (
+                        <>
+                          <path d="M12 2a10 10 0 0 1 7.94 16.06L12 22l-7.94-3.94A10 10 0 0 1 12 2z"/>
+                          <circle cx="12" cy="11" r="3"/>
+                        </>
+                      ) : (
+                        <>
+                          <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+                          <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
+                          <path d="M9 14l2 2 4-4"/>
+                        </>
+                      )}
+                    </svg>
+                    {hasAssessment ? 'Go to AI Recommendations' : 'Take Assessment'}
+                  </button>
                 </div>
               ) : (
                 <div className="supplements-list">
@@ -575,10 +643,7 @@ function TrackIntakePage() {
               <div className="streak-content">
                 <div className="streak-icon">
                   <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-                    <line x1="16" y1="2" x2="16" y2="6"/>
-                    <line x1="8" y1="2" x2="8" y2="6"/>
-                    <line x1="3" y1="10" x2="21" y2="10"/>
+                    <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>
                   </svg>
                 </div>
                 <div className="streak-text">
@@ -615,7 +680,7 @@ function TrackIntakePage() {
                 <div className="streak-text">
                   <span className="streak-number">
                     {longestStreak === 0 
-                      ? 'No Record Yet' 
+                      ? '0 Days' 
                       : longestStreak === 1 
                         ? '1 Day' 
                         : `${longestStreak} Days`
