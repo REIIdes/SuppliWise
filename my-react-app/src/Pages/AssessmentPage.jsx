@@ -2154,8 +2154,6 @@ function AssessmentPage() {
   // Clear sessionStorage when starting a fresh assessment (not viewing history and no route assessment)
   useEffect(() => {
     if (!routeReadOnly && !routeAssessment) {
-      // This is a fresh assessment - we can optionally keep sessionStorage for draft purposes
-      // But if user explicitly clicks "New Assessment" we should start fresh
       // Check if we arrived here with explicit intent to start fresh
       if (location.state?.clearDraft) {
         sessionStorage.removeItem(SESSION_KEY);
@@ -2177,6 +2175,11 @@ function AssessmentPage() {
           setFormData(EMPTY_FORM);
         }
       }
+    }
+    
+    // Clear the clearDraft flag from location state after handling it
+    if (location.state?.clearDraft) {
+      window.history.replaceState({}, document.title);
     }
   }, []);
 
