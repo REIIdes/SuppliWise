@@ -2010,6 +2010,74 @@ function hasMinimumData(formData) {
   return hasBasics && hasSymptomOrGoal;
 }
 
+// ── Reconstruct symptom keys when loading historical data ─────────────────
+// When viewing assessment history, symptoms are stored as plain names like "Dizziness / Lightheadedness"
+// but the UI expects them with condition prefixes like "Hypertension (High Blood Pressure)::Dizziness / Lightheadedness"
+// This function reconstructs the full keys by matching symptoms to their conditions
+function reconstructSymptomKeys(assessment) {
+  const reconstructed = { ...assessment };
+  
+  // If symptoms and medicalConditions exist, reconstruct the symptom keys
+  if (assessment.symptoms && assessment.symptoms.length > 0 && assessment.medicalConditions) {
+    const plainSymptoms = assessment.symptoms;
+    const conditions = assessment.medicalConditions.filter(c => c !== 'None');
+    const severityMap = assessment.symptomSeverity || {};
+    
+    const reconstructedSymptoms = [];
+    const reconstructedSeverity = {};
+    
+    // For each plain symptom, find which condition(s) it belongs to
+    plainSymptoms.forEach(symptomName => {
+      let matched = false;
+      
+      // Check each selected condition
+      conditions.forEach(condition => {
+        // Find if this symptom belongs to this condition
+        const symptomInfo = ALL_SYMPTOMS.find(s => 
+          s.name === symptomName && s.conditions.includes(condition)
+        );
+        
+        if (symptomInfo) {
+          // Reconstruct the full key
+          const fullKey = `${condition}::${symptomName}`;
+          reconstructedSymptoms.push(fullKey);
+          
+          // Reconstruct severity with full key
+          if (severityMap[symptomName]) {
+            reconstructedSeverity[fullKey] = severityMap[symptomName];
+          }
+          
+          matched = true;
+        }
+      });
+      
+      // If no condition matched, it might be a general symptom
+      if (!matched) {
+        const isGeneralSymptom = GENERAL_SYMPTOMS.includes(symptomName);
+        if (isGeneralSymptom) {
+          const fullKey = `General::${symptomName}`;
+          reconstructedSymptoms.push(fullKey);
+          
+          if (severityMap[symptomName]) {
+            reconstructedSeverity[fullKey] = severityMap[symptomName];
+          }
+        } else {
+          // Fallback: keep the plain symptom name
+          reconstructedSymptoms.push(symptomName);
+          if (severityMap[symptomName]) {
+            reconstructedSeverity[symptomName] = severityMap[symptomName];
+          }
+        }
+      }
+    });
+    
+    reconstructed.symptoms = reconstructedSymptoms;
+    reconstructed.symptomSeverity = reconstructedSeverity;
+  }
+  
+  return reconstructed;
+}
+
 // ── Main Assessment Page ───────────────────────────────────────────────────
 const EMPTY_FORM = {
   age: '', gender: '', weight: '', weightUnit: 'kg',
@@ -2062,20 +2130,62 @@ function AssessmentPage() {
   const symptomRowRefs = useRef({});
 
   const [formData, setFormData] = useState(() => {
-    if (routeAssessment) return { ...EMPTY_FORM, ...routeAssessment };
-    try {
-      const saved = sessionStorage.getItem(SESSION_KEY);
-      return saved ? { ...EMPTY_FORM, ...JSON.parse(saved) } : EMPTY_FORM;
-    } catch {
-      return EMPTY_FORM;
+    if (routeAssessment) {
+      const reconstructed = reconstructSymptomKeys(routeAssessment);
+      return { ...EMPTY_FORM, ...reconstructed };
     }
+    
+    // If starting a fresh assessment (not viewing history), load from sessionStorage
+    if (!routeReadOnly) {
+      try {
+        const saved = sessionStorage.getItem(SESSION_KEY);
+        return saved ? { ...EMPTY_FORM, ...JSON.parse(saved) } : EMPTY_FORM;
+      } catch {
+        return EMPTY_FORM;
+      }
+    }
+    
+    // Fallback to empty form
+    return EMPTY_FORM;
   });
 
   const [isReadOnly] = useState(routeReadOnly);
 
+  // Clear sessionStorage when starting a fresh assessment (not viewing history and no route assessment)
   useEffect(() => {
+    if (!routeReadOnly && !routeAssessment) {
+      // This is a fresh assessment - we can optionally keep sessionStorage for draft purposes
+      // But if user explicitly clicks "New Assessment" we should start fresh
+      // Check if we arrived here with explicit intent to start fresh
+      if (location.state?.clearDraft) {
+        sessionStorage.removeItem(SESSION_KEY);
+        
+        // Start fresh but preserve user profile data (age, gender) if available
+        const userRaw = localStorage.getItem('user');
+        if (userRaw) {
+          try {
+            const user = JSON.parse(userRaw);
+            setFormData({
+              ...EMPTY_FORM,
+              age: user.age || '',
+              gender: user.gender || '',
+            });
+          } catch {
+            setFormData(EMPTY_FORM);
+          }
+        } else {
+          setFormData(EMPTY_FORM);
+        }
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    // If viewing in read-only mode, don't persist to sessionStorage
+    if (isReadOnly) return;
+    
     sessionStorage.setItem(SESSION_KEY, JSON.stringify(formData));
-  }, [formData]);
+  }, [formData, isReadOnly]);
 
   // If this page is opened in read-only mode, disable form controls so nothing is editable.
   useEffect(() => {

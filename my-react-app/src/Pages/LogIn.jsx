@@ -266,7 +266,7 @@ function LogIn() {
     } else {
       // Clear any stale pending assessment data
       sessionStorage.removeItem(SESSION_KEY);
-      navigate('/');
+      navigate('/dashboard');
     }
   };
 

@@ -251,8 +251,10 @@ function HistoryPage() {
     if (item.expiresAt) return new Date(item.expiresAt);
     const createdAt = new Date(item.createdAt);
     if (Number.isNaN(createdAt.getTime())) return null;
-    const fiveYearsMs = 5 * 365.25 * 24 * 60 * 60 * 1000;
-    return new Date(createdAt.getTime() + fiveYearsMs);
+    // Add exactly 5 years to the created date (maintaining same time)
+    const expirationDate = new Date(createdAt);
+    expirationDate.setFullYear(expirationDate.getFullYear() + 5);
+    return expirationDate;
   };
 
   const toggleShowAllSupplements = (assessmentId) => {
@@ -264,8 +266,10 @@ function HistoryPage() {
     const createdAt = new Date(dateStr);
     const reference = new Date(referenceTime);
     if (Number.isNaN(createdAt.getTime()) || Number.isNaN(reference.getTime())) return false;
-    const fiveYearsMs = 5 * 365.25 * 24 * 60 * 60 * 1000;
-    return reference.getTime() - createdAt.getTime() >= fiveYearsMs;
+    // Check if 5 years have passed by comparing years and dates
+    const expirationDate = new Date(createdAt);
+    expirationDate.setFullYear(expirationDate.getFullYear() + 5);
+    return reference.getTime() >= expirationDate.getTime();
   };
 
   useEffect(() => {
@@ -343,11 +347,22 @@ function HistoryPage() {
         <div className="history-header">
           <h2>Assessment History</h2>
           <div className="history-header-actions">
-            <button className="btn-primary" onClick={() => navigate('/assessment')}>
+            <button className="btn-primary" onClick={() => navigate('/assessment', { state: { clearDraft: true } })}>
               + New Assessment
             </button>
           </div>
         </div>
+
+        {history.length > 0 && (
+          <div className="active-info-banner">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="16" x2="12" y2="12"/>
+              <line x1="12" y1="8" x2="12.01" y2="8"/>
+            </svg>
+            <span>Your latest assessment is currently active and is used for your Dashboard, Track Intake, and Insights. Complete a new assessment to update your active assessment.</span>
+          </div>
+        )}
 
         {loading && <p className="history-status">Loading history...</p>}
         {error && (
@@ -363,7 +378,7 @@ function HistoryPage() {
             <div className="history-empty-icon">📋</div>
             <p style={{ fontWeight: 600, color: '#374151', fontSize: '16px', margin: 0 }}>No assessments yet</p>
             <p style={{ margin: 0 }}>Complete your first health assessment to get personalized supplement and lifestyle recommendations.</p>
-            <button className="btn-primary" onClick={() => navigate('/assessment')}>
+            <button className="btn-primary" onClick={() => navigate('/assessment', { state: { clearDraft: true } })}>
               Start Assessment →
             </button>
           </div>
@@ -379,9 +394,19 @@ function HistoryPage() {
               {/* Card Header */}
               <div className="history-card-header" onClick={() => setExpanded(expanded === i ? null : i)}>
                 <div className="history-card-header-left">
-                  <span className="history-date">{fmt(item.createdAt)}</span>
+                  <div className="date-with-badge">
+                    {i === 0 && (
+                      <span 
+                        className="active-badge" 
+                        title="This is your active assessment. Your Dashboard, Track Intake, and Insights use this data."
+                      >
+                        Active
+                      </span>
+                    )}
+                    <span className="history-date">{fmt(item.createdAt)}</span>
+                  </div>
                   <div className="history-card-title">
-                    {item.symptoms?.length > 0
+                    {item.symptoms?.length > 0 && !item.symptoms.includes('None')
                       ? item.symptoms.slice(0, 2).join(', ') + (item.symptoms.length > 2 ? ` +${item.symptoms.length - 2} more` : '')
                       : item.healthGoals?.length > 0
                         ? item.healthGoals.slice(0, 2).join(', ')
@@ -391,7 +416,7 @@ function HistoryPage() {
                     {item.age && <span className="tag tag-blue">Age {item.age}</span>}
                     {item.dietType && <span className="tag">{item.dietType}</span>}
                     {item.activityLevel && <span className="tag">{ACTIVITY_LABELS[item.activityLevel] || item.activityLevel}</span>}
-                    {item.symptoms?.length > 0 && (
+                    {item.symptoms?.length > 0 && !item.symptoms.includes('None') && (
                       <span className="tag tag-red">{item.symptoms.length} symptom{item.symptoms.length > 1 ? 's' : ''}</span>
                     )}
                     {item.aiResults && <span className="tag tag-green">✓ AI Analysis</span>}
@@ -509,7 +534,7 @@ function HistoryPage() {
                           <div className="tag-list">{item.healthGoals.map(g => <span key={g} className="tag">{g}</span>)}</div>
                         </div>
                       )}
-                      {item.symptoms?.length > 0 && (
+                      {item.symptoms?.length > 0 && !item.symptoms.includes('None') && (
                         <div className="history-section">
                           <p className="history-section-label">Symptoms</p>
                           <div className="tag-list">{item.symptoms.map(s => <span key={s} className="tag tag-red">{s}</span>)}</div>

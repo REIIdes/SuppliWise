@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Assessment = require('../models/Assessment');
+const DashboardMetrics = require('../models/DashboardMetrics');
 const { protect } = require('../middleware/auth');
 const { sanitizeTextField, sanitizeShortField } = require('../utils/sanitize');
 
@@ -73,6 +74,25 @@ router.post('/', protect, async (req, res) => {
     });
 
     console.log('Assessment saved to DB, id:', assessment._id);
+    
+    // Deactivate all previous dashboard metrics
+    await DashboardMetrics.updateMany(
+      { user: req.user._id, isActive: true },
+      { isActive: false }
+    );
+    
+    // Create new dashboard metrics for this assessment
+    await DashboardMetrics.create({
+      user: req.user._id,
+      assessment: assessment._id,
+      assessmentStartDate: new Date(),
+      isActive: true,
+      currentStreak: 0,
+      overallAdherence: 0,
+      wellnessScore: 0,
+    });
+    
+    console.log('Dashboard metrics reset for new assessment');
     res.status(201).json({ message: 'Assessment saved', assessment, garbageFields });
   } catch (error) {
     console.error('[assessment POST]', error.message);

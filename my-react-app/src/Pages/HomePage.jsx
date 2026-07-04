@@ -113,7 +113,7 @@ function HomePage() {
               View your personalized daily schedule, meal recommendations, and action plan.
               Retake assessments over time to track your progress and update recommendations.
             </p>
-            <button className="how-card-btn" onClick={() => navigate('/assessment')}>
+            <button className="how-card-btn" onClick={() => navigate('/login')}>
               Get Started →
             </button>
           </div>

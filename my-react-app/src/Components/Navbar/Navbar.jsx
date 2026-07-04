@@ -1,8 +1,11 @@
 import { NavLink, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
+import ConfirmModal from '../ConfirmModal/ConfirmModal';
 import './Navbar.css';
 
 function Navbar() {
   const navigate = useNavigate();
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const token = localStorage.getItem('token');
   const userRaw = localStorage.getItem('user');
   const user = userRaw ? JSON.parse(userRaw) : null;
@@ -14,8 +17,30 @@ function Navbar() {
     navigate('/login');
   };
 
+  const handleLogoutClick = () => {
+    setShowLogoutConfirm(true);
+  };
+
+  const confirmLogout = () => {
+    setShowLogoutConfirm(false);
+    handleLogout();
+  };
+
   return (
-    <nav className="navbar">
+    <>
+      {showLogoutConfirm && (
+        <ConfirmModal
+          title="Confirm Logout"
+          message="Are you sure you want to log out?"
+          confirmText="Log Out"
+          cancelText="Cancel"
+          type="warning"
+          onConfirm={confirmLogout}
+          onCancel={() => setShowLogoutConfirm(false)}
+        />
+      )}
+      
+      <nav className="navbar">
       <div className="navbar-left">
         <div className="navbar-logo-box">
           <svg width="30" height="30" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -26,12 +51,12 @@ function Navbar() {
             </g>
           </svg>
         </div>
-        <NavLink to="/" className="navbar-brand">SuppliWise</NavLink>
+        <NavLink to={token ? "/dashboard" : "/"} className="navbar-brand">SuppliWise</NavLink>
       </div>
       <div className="navbar-right">
         {token && user ? (
           <>
-            <NavLink to="/history" className="navbar-history-link" title="History">
+            <NavLink to="/history" className="navbar-nav-link" title="History">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10" />
                 <polyline points="12 6 12 12 16 14" />
@@ -46,11 +71,15 @@ function Navbar() {
                   backgroundPosition: 'center',
                 }}
               >
-                {!user.profilePicture && user.name.charAt(0).toUpperCase()}
+                {!user.profilePicture && (user.firstName ? user.firstName.charAt(0).toUpperCase() : user.name.charAt(0).toUpperCase())}
               </div>
-              <span className="navbar-username">{user.name}</span>
+              <span className="navbar-username">
+                {user.firstName && user.lastName 
+                  ? `${user.firstName} ${user.lastName}` 
+                  : user.name}
+              </span>
             </NavLink>
-            <button className="navbar-signin-btn" onClick={handleLogout}>
+            <button className="navbar-signin-btn" onClick={handleLogoutClick}>
               Log Out
             </button>
           </>
@@ -61,6 +90,7 @@ function Navbar() {
         )}
       </div>
     </nav>
+    </>
   );
 }
 

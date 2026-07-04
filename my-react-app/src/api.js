@@ -200,3 +200,101 @@ export const getSupplementDetail = async (supplementName, context = null) => {
   if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
   return data;
 };
+
+// Get dashboard data (latest assessment metrics)
+export const getDashboard = async () => {
+  const res = await fetch(`${BASE_URL}/dashboard`, {
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// Mark supplement as taken or undo
+export const updateIntake = async (recordId, taken) => {
+  const res = await fetch(`${BASE_URL}/dashboard/intake`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify({ recordId, taken }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// Update energy level
+export const updateEnergyLevel = async (energyLevel) => {
+  const res = await fetch(`${BASE_URL}/dashboard/energy`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify({ energyLevel }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// Get insights and tracking data
+export const getInsights = async () => {
+  const res = await fetch(`${BASE_URL}/insights`, {
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// Get calendar completion history for a specific month
+export const getCalendarData = async (year, month) => {
+  const res = await fetch(`${BASE_URL}/dashboard/calendar/${year}/${month}`, {
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// Add supplement to user's daily plan
+export const addSupplementToPlan = async (supplementData) => {
+  const res = await fetch(`${BASE_URL}/dashboard/add-supplement`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify(supplementData),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// Remove supplement from user's daily plan
+export const removeSupplementFromPlan = async (supplementName) => {
+  const res = await fetch(`${BASE_URL}/dashboard/remove-supplement`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify({ supplementName }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// Get user's personalized supplement plan
+export const getMyPlan = async () => {
+  const res = await fetch(`${BASE_URL}/dashboard/my-plan`, {
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// Get weekly adherence data
+export const getWeeklyAdherence = async () => {
+  const res = await fetch(`${BASE_URL}/dashboard/weekly-adherence`, {
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};

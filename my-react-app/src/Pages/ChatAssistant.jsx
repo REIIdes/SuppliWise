@@ -136,6 +136,7 @@ const QUICK_PROMPTS = [
 // ── Main component ─────────────────────────────────────────────────────────
 export default function ChatAssistant({ recommendations }) {
   const [open, setOpen] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [messages, setMessages] = useState([{
     role: 'assistant',
     text: "Hi! I'm **SuppliWise AI** — your health and wellness assistant.\n\nI can help with:\n- Your supplement recommendations and results\n- Supplements, nutrition, vitamins, and wellness questions\n- How to use any feature on SuppliWise\n- Symptoms, diet, sleep, and lifestyle advice\n\nWhat would you like to know?",
@@ -148,6 +149,12 @@ export default function ChatAssistant({ recommendations }) {
   const messagesContainerRef = useRef(null);
   const chatWindowRef = useRef(null);
   const fabRef = useRef(null);
+
+  // Check if user is logged in
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    setIsLoggedIn(!!token);
+  }, []);
 
   const getRecs = () => {
     if (recommendations && recommendations.length) return recommendations;
@@ -347,84 +354,115 @@ export default function ChatAssistant({ recommendations }) {
             <button className="chat-close" onClick={() => setOpen(false)} aria-label="Close">✕</button>
           </div>
 
-          <div className="chat-disclaimer-banner">
-            ⚕️ Educational only — not medical advice. Consult a healthcare provider.
-          </div>
-
-          <div className="chat-messages" ref={messagesContainerRef}>
-            {messages.map((msg, i) => (
-              <div key={i} className={`chat-bubble ${msg.role}`}>
-                {msg.role === 'assistant'
-                  ? renderMarkdown(msg.text)
-                  : <p className="md-p">{msg.text}</p>
-                }
+          {!isLoggedIn ? (
+            // Auth Required Screen
+            <div className="chat-auth-required">
+              <div className="auth-required-content">
+                <div className="auth-required-icon">
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                  </svg>
+                </div>
+                <h3 className="auth-required-title">Welcome to the SuppliWise AI Assistant! 🤖</h3>
+                <p className="auth-required-message">
+                  Please <strong>log in</strong> or <strong>create an account</strong> to access the AI Assistant.
+                </p>
+                <p className="auth-required-description">
+                  This helps us provide a secure experience and gives you access to all SuppliWise features, including assessments, recommendations, history, and AI assistance.
+                </p>
+                <div className="auth-required-buttons">
+                  <a href="/login" className="auth-btn auth-btn-primary">
+                    Log In
+                  </a>
+                  <a href="/signup" className="auth-btn auth-btn-secondary">
+                    Create Account
+                  </a>
+                </div>
               </div>
-            ))}
-            {loading && (
-              <div className="chat-bubble assistant chat-typing">
-                <span className="typing-dot" />
-                <span className="typing-dot" />
-                <span className="typing-dot" />
-              </div>
-            )}
-            <div ref={bottomRef} />
-          </div>
-
-          {/* Scroll to bottom button */}
-          {showScrollButton && (
-            <button
-              className="chat-scroll-to-bottom"
-              onClick={scrollToBottom}
-              aria-label="Scroll to bottom"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
-          )}
-
-          <div className="chat-quick-prompts-wrap">
-            <div className="chat-quick-prompts">
-              {QUICK_PROMPTS.map(p => (
-                <button
-                  key={p}
-                  className="quick-prompt"
-                  onClick={() => send(p)}
-                  disabled={loading}
-                >
-                  {p}
-                </button>
-              ))}
             </div>
-          </div>
+          ) : (
+            // Normal Chat Interface
+            <>
+              <div className="chat-disclaimer-banner">
+                ⚕️ Educational only — not medical advice. Consult a healthcare provider.
+              </div>
 
-          <div className="chat-input-row">
-            <input
-              ref={inputRef}
-              className="chat-input"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={handleKey}
-              placeholder="Ask about supplements, nutrition, wellness..."
-              aria-label="Chat input"
-              disabled={loading}
-            />
-            <button
-              className="chat-send"
-              onClick={() => send()}
-              disabled={!input.trim() || loading}
-              aria-label="Send message"
-            >
-              {loading ? (
-                <span className="send-spinner" />
-              ) : (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="22" y1="2" x2="11" y2="13" />
-                  <polygon points="22 2 15 22 11 13 2 9 22 2" />
-                </svg>
+              <div className="chat-messages" ref={messagesContainerRef}>
+                {messages.map((msg, i) => (
+                  <div key={i} className={`chat-bubble ${msg.role}`}>
+                    {msg.role === 'assistant'
+                      ? renderMarkdown(msg.text)
+                      : <p className="md-p">{msg.text}</p>
+                    }
+                  </div>
+                ))}
+                {loading && (
+                  <div className="chat-bubble assistant chat-typing">
+                    <span className="typing-dot" />
+                    <span className="typing-dot" />
+                    <span className="typing-dot" />
+                  </div>
+                )}
+                <div ref={bottomRef} />
+              </div>
+
+              {/* Scroll to bottom button */}
+              {showScrollButton && (
+                <button
+                  className="chat-scroll-to-bottom"
+                  onClick={scrollToBottom}
+                  aria-label="Scroll to bottom"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </button>
               )}
-            </button>
-          </div>
+
+              <div className="chat-quick-prompts-wrap">
+                <div className="chat-quick-prompts">
+                  {QUICK_PROMPTS.map(p => (
+                    <button
+                      key={p}
+                      className="quick-prompt"
+                      onClick={() => send(p)}
+                      disabled={loading}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="chat-input-row">
+                <input
+                  ref={inputRef}
+                  className="chat-input"
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  onKeyDown={handleKey}
+                  placeholder="Ask about supplements, nutrition, wellness..."
+                  aria-label="Chat input"
+                  disabled={loading}
+                />
+                <button
+                  className="chat-send"
+                  onClick={() => send()}
+                  disabled={!input.trim() || loading}
+                  aria-label="Send message"
+                >
+                  {loading ? (
+                    <span className="send-spinner" />
+                  ) : (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="22" y1="2" x2="11" y2="13" />
+                      <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                    </svg>
+                  )}
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
     </>

@@ -126,6 +126,31 @@
   margin: 0;
 }
 
+/* ── Active Info Banner ── */
+.active-info-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+  border: 2px solid #6ee7b7;
+  border-radius: 12px;
+  margin-bottom: 24px;
+  color: #065f46;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.active-info-banner svg {
+  flex-shrink: 0;
+  color: #059669;
+}
+
+.active-info-banner strong {
+  font-weight: 700;
+  color: #047857;
+}
+
 /* ── Status / Empty ── */
 .history-status { text-align: center; color: #6b7280; font-size: 15px; padding: 60px 0; }
 .history-status.error { color: #dc2626; }
@@ -183,6 +208,33 @@
   gap: 10px;
   flex-shrink: 0;
   margin-left: 16px;
+}
+
+.date-with-badge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.active-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+  animation: pulse 2s ease-in-out infinite;
+  white-space: nowrap;
+  cursor: help;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.85; }
 }
 
 .history-date {

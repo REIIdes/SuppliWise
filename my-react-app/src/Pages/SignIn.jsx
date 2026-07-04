@@ -236,7 +236,7 @@ function SignIn() {
         sessionStorage.removeItem(SESSION_KEY);
         navigate('/results', { state: { recommendations, assessment: formData } });
       } else {
-        navigate('/');
+        navigate('/dashboard');
       }
     } catch (err) {
       setError(err.message);
