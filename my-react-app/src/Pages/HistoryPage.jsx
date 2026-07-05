@@ -679,7 +679,7 @@ function HistoryPage() {
                           <div className="history-schedule">
                             {item.aiResults.dailySchedule.map((slot, si) => (
                               <div key={si} className="history-schedule-slot">
-                                <div className="history-schedule-time">{fixChars(slot.time)}</div>
+                                <div className="history-schedule-time">{fixChars(slot.time.replace(/With Lunch/gi, 'Afternoon'))}</div>
                                 <div className="history-schedule-pills">
                                   {slot.supplements.map((s, sj) => {
                                     const dosage = getDosage(s);

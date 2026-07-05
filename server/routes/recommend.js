@@ -1628,7 +1628,7 @@ function buildDailySchedule(recs) {
 
   const schedule = [];
   if (morning.length) schedule.push({ time: 'Morning (with breakfast)', supplements: morning });
-  if (withLunch.length) schedule.push({ time: 'With Lunch', supplements: withLunch });
+  if (withLunch.length) schedule.push({ time: 'Afternoon', supplements: withLunch });
   if (evening.length) schedule.push({ time: 'Evening (with dinner)', supplements: evening });
   if (beforeBed.length) schedule.push({ time: 'Before Bed', supplements: beforeBed });
   return schedule;

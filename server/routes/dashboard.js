@@ -72,6 +72,14 @@ const validateStreak = async (userId, assessmentId, metrics) => {
 // @access  Private
 router.get('/', protect, async (req, res) => {
   try {
+    // Track first dashboard visit
+    const User = require('../models/User');
+    const isFirstVisit = !req.user.hasVisitedDashboard;
+    
+    if (isFirstVisit) {
+      await User.findByIdAndUpdate(req.user._id, { hasVisitedDashboard: true });
+    }
+
     // Get the latest assessment
     const latestAssessment = await Assessment.findOne({ user: req.user._id })
       .sort({ createdAt: -1 });
@@ -80,6 +88,7 @@ router.get('/', protect, async (req, res) => {
       // Return empty dashboard data for new users without assessment
       return res.json({ 
         hasAssessment: false,
+        isFirstVisit,
         assessment: null,
         todaysSupplements: [],
         stats: {
@@ -170,6 +179,7 @@ router.get('/', protect, async (req, res) => {
     // Response - always use priority and timing from recommendations, not from stored record
     res.json({
       hasAssessment: true,
+      isFirstVisit,
       assessment: {
         id: latestAssessment._id,
         createdAt: latestAssessment.createdAt,

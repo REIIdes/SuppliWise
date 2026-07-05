@@ -25,6 +25,7 @@ function DashboardPage() {
   const [markTakenToastKey, setMarkTakenToastKey] = useState(0);
   const [showNewAssessmentConfirm, setShowNewAssessmentConfirm] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  const [isFirstLogin, setIsFirstLogin] = useState(false);
 
   useEffect(() => {
     // Get user data from localStorage
@@ -56,6 +57,11 @@ function DashboardPage() {
       setLoading(true);
       setError('');
       const data = await getDashboard();
+      
+      // Set first visit flag from server response
+      if (data.isFirstVisit !== undefined) {
+        setIsFirstLogin(data.isFirstVisit);
+      }
       
       if (!data.hasAssessment) {
         // Set empty/default state for new users without assessment
@@ -390,7 +396,9 @@ function DashboardPage() {
       <div className="dashboard-container">
         {/* Welcome Section */}
         <div className="dashboard-welcome">
-          <h1 className="dashboard-title">Welcome{userData.firstName ? `, ${userData.firstName}` : ''}!</h1>
+          <h1 className="dashboard-title">
+            {isFirstLogin ? 'Welcome' : 'Welcome back'}{userData.firstName ? `, ${userData.firstName}` : ''}!
+          </h1>
           <p className="dashboard-subtitle">
             {todaysSupplements.length > 0 || wellnessScore > 0
               ? "Here's your personalized wellness dashboard"
