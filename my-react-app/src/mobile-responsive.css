@@ -2098,8 +2098,8 @@
 @media (max-width: 768px) {
   .profile-page {
     background: #d1f4e0 !important;
-    padding: 12px !important;
-    padding-top: 60px !important;
+    padding: 4px !important;
+    padding-top: 22px !important;
   }
 
   .profile-container {
