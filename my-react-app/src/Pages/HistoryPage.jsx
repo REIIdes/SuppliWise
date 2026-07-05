@@ -364,7 +364,12 @@ function HistoryPage() {
           </div>
         )}
 
-        {loading && <p className="history-status">Loading history...</p>}
+        {loading && (
+          <div className="history-loading-simple">
+            <div className="loading-spinner-simple"></div>
+          </div>
+        )}
+
         {error && (
           <div className="history-error-box">
             <div className="history-error-icon">⚠️</div>

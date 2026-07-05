@@ -1,15 +1,29 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import './Toast.css';
 
 function Toast({ message, type = 'success', duration = 3000, onClose }) {
+  const timerRef = useRef(null);
+
   useEffect(() => {
+    // Clear any existing timer
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+    }
+
+    // Set new timer if duration is positive
     if (duration > 0) {
-      const timer = setTimeout(() => {
+      timerRef.current = setTimeout(() => {
         onClose();
       }, duration);
-      return () => clearTimeout(timer);
     }
-  }, [duration, onClose]);
+
+    // Cleanup on unmount or when dependencies change
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, [duration, onClose, message]); // Re-run when message changes
 
   const getIcon = () => {
     switch (type) {

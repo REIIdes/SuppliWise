@@ -1,4 +1,16 @@
-const BASE_URL = '/api';
+// TEMPORARY: Hardcode backend URL for mobile testing
+const BASE_URL = 'http://192.168.0.102:5000/api';
+
+// Export BASE_URL so other components can use it
+export { BASE_URL };
+
+// Log the environment for debugging
+if (typeof window !== 'undefined') {
+  console.log('API Configuration:', {
+    BASE_URL: BASE_URL,
+    location: window.location.href
+  });
+}
 
 // Helper to get auth header
 const authHeader = () => {
@@ -81,14 +93,32 @@ export const registerUser = async (firstName, lastName, gender, dateOfBirth, ema
 
 // Login user
 export const loginUser = async (email, password) => {
-  const res = await fetch(`${BASE_URL}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  });
-  const data = await parseJSON(res);
-  if (!res.ok) throw new Error(friendlyError(res.status, data?.message, true)); // true = is login attempt
-  return data;
+  try {
+    console.log('Login attempt:', { BASE_URL, email });
+    
+    const res = await fetch(`${BASE_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    
+    console.log('Login response:', { status: res.status, ok: res.ok });
+    
+    // Check content type - if it's HTML, log and throw better error
+    const contentType = res.headers.get('content-type');
+    if (contentType && contentType.includes('text/html')) {
+      const htmlText = await res.text();
+      console.error('Received HTML instead of JSON:', htmlText.substring(0, 200));
+      throw new Error('Server returned an HTML page instead of data. Please check your network connection.');
+    }
+    
+    const data = await parseJSON(res);
+    if (!res.ok) throw new Error(friendlyError(res.status, data?.message, true)); // true = is login attempt
+    return data;
+  } catch (error) {
+    console.error('Login error:', error);
+    throw error;
+  }
 };
 
 // Save assessment (requires auth)

@@ -633,8 +633,54 @@
   display: flex;
   align-items: flex-start;
   gap: 16px;
-  z-index: 1000;
+  z-index: 1001; /* Higher than regular toast (1000) */
   animation: slideInRight 0.4s ease-out;
+}
+
+/* Mobile: Position completion toast at top */
+@media (max-width: 768px) {
+  .dashboard-wrapper .completion-toast {
+    position: fixed !important;
+    top: 90px !important; /* More space below navbar */
+    right: 12px !important;
+    left: 12px !important;
+    bottom: auto !important;
+    max-width: none !important;
+    width: calc(100% - 24px) !important; /* Account for left/right margins */
+    padding: 16px !important;
+    margin: 0 auto !important;
+    box-sizing: border-box !important;
+    display: flex !important;
+    align-items: flex-start !important;
+    gap: 12px !important;
+  }
+
+  .dashboard-wrapper .completion-toast-icon {
+    flex-shrink: 0 !important;
+    width: 36px !important;
+    height: 36px !important;
+  }
+
+  .dashboard-wrapper .completion-toast-content {
+    flex: 1 !important;
+    min-width: 0 !important;
+  }
+
+  .dashboard-wrapper .completion-toast-title {
+    font-size: 15px !important;
+    line-height: 1.4 !important;
+    margin: 0 0 6px 0 !important;
+  }
+
+  .dashboard-wrapper .completion-toast-subtitle {
+    font-size: 13px !important;
+    line-height: 1.4 !important;
+    margin: 0 !important;
+  }
+
+  .dashboard-wrapper .completion-toast-close {
+    flex-shrink: 0 !important;
+  }
 }
 
 @keyframes slideInRight {

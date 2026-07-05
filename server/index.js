@@ -23,7 +23,22 @@ const app = express();
 app.use(helmet({ contentSecurityPolicy: false }));
 
 // Middleware
-app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:5174'], credentials: true }));
+// Allow CORS from web dev servers and mobile app (Capacitor uses capacitor:// or http://localhost on device)
+app.use(cors({ 
+  origin: [
+    'http://localhost:5173', 
+    'http://localhost:5174',
+    'http://localhost:5175',
+    'https://localhost:5173',
+    'https://localhost:5174', 
+    'https://localhost:5175',
+    'capacitor://localhost',
+    'http://localhost', // Mobile app
+    /^http:\/\/192\.168\.\d+\.\d+:\d+$/, // Allow any local network IP
+    /^https:\/\/192\.168\.\d+\.\d+:\d+$/ // HTTPS version
+  ], 
+  credentials: true 
+}));
 app.use(express.json({ limit: '10mb' })); // Increase limit for profile/banner images
 
 // ── Rate limiters ──────────────────────────────────────────────────────────

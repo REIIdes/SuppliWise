@@ -24,8 +24,21 @@ function RecommendationsPage() {
       return;
     }
 
-    fetchLatestRecommendations();
-    fetchMyPlan();
+    // Fetch both in parallel and wait for both to complete
+    const fetchData = async () => {
+      setLoading(true);
+      setRecommendations(null); // Clear old data immediately
+      setAddedSupplements(new Set()); // Clear old "added" state immediately
+      
+      await Promise.all([
+        fetchLatestRecommendations(),
+        fetchMyPlan()
+      ]);
+      
+      setLoading(false); // Only set loading false after BOTH complete
+    };
+    
+    fetchData();
     
     // Cleanup timer on unmount
     return () => {
@@ -48,7 +61,6 @@ function RecommendationsPage() {
 
   const fetchLatestRecommendations = async () => {
     try {
-      setLoading(true);
       const historyData = await getHistory(1, 1);
       
       if (historyData.assessments && historyData.assessments.length > 0) {
@@ -68,8 +80,6 @@ function RecommendationsPage() {
       console.error('Error fetching recommendations:', err);
       // Show empty state instead of error
       setRecommendations([]);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -174,9 +184,8 @@ function RecommendationsPage() {
     return (
       <div className="recommendations-wrapper">
         <Navbar />
-        <div className="recommendations-loading">
-          <div className="loading-spinner"></div>
-          <p>Loading your recommendations...</p>
+        <div className="recommendations-loading-simple">
+          <div className="loading-spinner-simple"></div>
         </div>
       </div>
     );

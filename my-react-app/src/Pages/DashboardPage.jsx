@@ -21,8 +21,10 @@ function DashboardPage() {
   });
   const [insights, setInsights] = useState(null);
   const [showCompletionToast, setShowCompletionToast] = useState(false);
-  const [showMarkTakenToast, setShowMarkTakenToast] = useState(false);
+  const [markTakenToastMessage, setMarkTakenToastMessage] = useState('');
+  const [markTakenToastKey, setMarkTakenToastKey] = useState(0);
   const [showNewAssessmentConfirm, setShowNewAssessmentConfirm] = useState(false);
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
 
   useEffect(() => {
     // Get user data from localStorage
@@ -40,6 +42,13 @@ function DashboardPage() {
     }
 
     fetchDashboardData();
+
+    // Add resize listener for responsive toast
+    const handleResize = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, [navigate]);
 
   const fetchDashboardData = async () => {
@@ -180,13 +189,17 @@ function DashboardPage() {
         // Check if all supplements are now taken
         if (result.stats.todaysProgress.taken === result.stats.todaysProgress.total && 
             result.stats.todaysProgress.total > 0) {
+          // Hide the "marked as taken" toast immediately
+          setMarkTakenToastMessage('');
+          // Show completion toast
           setShowCompletionToast(true);
           // Auto-hide after 4 seconds
           setTimeout(() => setShowCompletionToast(false), 4000);
         } else if (newTakenState) {
-          // Show small toast when marking as taken (but not completed all)
-          setShowMarkTakenToast(true);
-          setTimeout(() => setShowMarkTakenToast(false), 2000);
+          // Show toast when marking as taken (but not completed all)
+          // Increment key to force re-render even if previous toast is still showing
+          setMarkTakenToastKey(prev => prev + 1);
+          setMarkTakenToastMessage('Supplement marked as taken');
         }
       }
     } catch (err) {
@@ -234,9 +247,11 @@ function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="dashboard-loading">
-        <div className="loading-spinner"></div>
-        <p>Loading your dashboard...</p>
+      <div className="dashboard-wrapper">
+        <Navbar />
+        <div className="dashboard-loading-simple">
+          <div className="loading-spinner-simple"></div>
+        </div>
       </div>
     );
   }
@@ -258,12 +273,7 @@ function DashboardPage() {
   }
 
   if (!userData) {
-    return (
-      <div className="dashboard-loading">
-        <div className="loading-spinner"></div>
-        <p>Loading your dashboard...</p>
-      </div>
-    );
+    return null;
   }
 
   return (
@@ -285,30 +295,95 @@ function DashboardPage() {
 
       {/* Completion Toast */}
       {showCompletionToast && (
-        <div className="completion-toast">
-          <div className="completion-toast-icon">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <div 
+          style={{
+            position: 'fixed',
+            top: isMobile ? '90px' : '24px',
+            right: isMobile ? '12px' : '24px',
+            left: isMobile ? '12px' : 'auto',
+            width: isMobile ? 'auto' : '420px',
+            background: 'linear-gradient(135deg, #6ee7b7 0%, #3dbf8a 100%)',
+            borderRadius: '16px',
+            padding: isMobile ? '16px' : '20px 24px',
+            boxShadow: '0 10px 40px rgba(61, 191, 138, 0.4)',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '16px',
+            zIndex: 1001,
+            boxSizing: 'border-box',
+            animation: 'slideInRight 0.4s ease-out'
+          }}
+        >
+          <div style={{ 
+            flexShrink: 0, 
+            width: isMobile ? '36px' : '40px', 
+            height: isMobile ? '36px' : '40px',
+            background: 'rgba(255, 255, 255, 0.3)',
+            borderRadius: '50%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'white'
+          }}>
+            <svg width={isMobile ? "20" : "24"} height={isMobile ? "20" : "24"} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
               <polyline points="22 4 12 14.01 9 11.01"/>
             </svg>
           </div>
-          <div className="completion-toast-content">
-            <h3 className="completion-toast-title">Great job! You completed today's supplement plan.</h3>
-            <p className="completion-toast-subtitle">Your adherence and streak have been updated.</p>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h3 style={{ 
+              margin: '0 0 6px 0', 
+              fontSize: isMobile ? '14px' : '16px',
+              fontWeight: 700,
+              color: 'white',
+              lineHeight: '1.4'
+            }}>
+              Great job! You completed today's supplement plan.
+            </h3>
+            <p style={{ 
+              margin: 0, 
+              fontSize: isMobile ? '12px' : '14px',
+              color: 'rgba(255, 255, 255, 0.9)',
+              lineHeight: '1.4'
+            }}>
+              Your adherence and streak have been updated.
+            </p>
           </div>
-          <button className="completion-toast-close" onClick={() => setShowCompletionToast(false)}>
+          <button 
+            style={{ 
+              flexShrink: 0,
+              background: 'rgba(255, 255, 255, 0.2)',
+              border: 'none',
+              width: '28px',
+              height: '28px',
+              borderRadius: isMobile ? '6px' : '50%',
+              color: 'white',
+              fontSize: '16px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 0,
+              lineHeight: 1,
+              transition: 'all 0.2s ease'
+            }} 
+            onClick={() => setShowCompletionToast(false)}
+            onMouseEnter={(e) => e.target.style.background = 'rgba(255, 255, 255, 0.3)'}
+            onMouseLeave={(e) => e.target.style.background = 'rgba(255, 255, 255, 0.2)'}
+          >
             ✕
           </button>
         </div>
       )}
 
       {/* Mark Taken Toast */}
-      {showMarkTakenToast && (
+      {markTakenToastMessage && (
         <Toast 
-          message="Supplement marked as taken" 
+          key={markTakenToastKey}
+          message={markTakenToastMessage} 
           type="success" 
           duration={2000}
-          onClose={() => setShowMarkTakenToast(false)}
+          onClose={() => setMarkTakenToastMessage('')}
         />
       )}
 

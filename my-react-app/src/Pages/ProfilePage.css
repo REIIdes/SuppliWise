@@ -313,10 +313,16 @@
 .profile-actions {
   display: flex;
   gap: 12px;
-  justify-content: flex-end;
+  justify-content: space-between;
   margin-top: 32px;
   padding-top: 32px;
   border-top: 2px solid #f3f4f6;
+}
+
+@media (min-width: 769px) {
+  .profile-actions {
+    justify-content: space-between;
+  }
 }
 
 .profile-btn {
@@ -332,6 +338,17 @@
 .profile-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.profile-btn-logout {
+  background: #fee2e2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+}
+
+.profile-btn-logout:hover:not(:disabled) {
+  background: #fecaca;
+  transform: translateY(-1px);
 }
 
 .profile-btn-primary {
@@ -356,26 +373,29 @@
 /* Responsive Design */
 @media (max-width: 768px) {
   .profile-page {
-    padding: 20px 15px;
-    padding-top: 80px;
+    padding: 0;
+    padding-top: 60px;
+    background: white;
   }
 
   .profile-container {
-    border-radius: 12px;
+    border-radius: 0;
+    box-shadow: none;
   }
 
   .profile-header {
-    padding: 30px 20px;
+    padding: 40px 20px 30px;
+    border-radius: 0;
   }
 
   .profile-avatar-large {
-    width: 80px;
-    height: 80px;
-    font-size: 36px;
+    width: 90px;
+    height: 90px;
+    font-size: 40px;
   }
 
   .profile-title {
-    font-size: 24px;
+    font-size: 26px;
   }
 
   .profile-subtitle {
@@ -402,16 +422,23 @@
 
 @media (max-width: 480px) {
   .profile-page {
-    padding: 15px 10px;
-    padding-top: 70px;
+    padding: 0;
+    padding-top: 60px;
+    background: white;
+  }
+
+  .profile-container {
+    border-radius: 0;
+    box-shadow: none;
   }
 
   .profile-header {
-    padding: 25px 15px;
+    padding: 35px 15px 25px;
+    border-radius: 0;
   }
 
   .profile-title {
-    font-size: 22px;
+    font-size: 24px;
   }
 
   .profile-form {

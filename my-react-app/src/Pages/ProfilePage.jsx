@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
+import ConfirmModal from '../Components/ConfirmModal/ConfirmModal';
 import './ProfilePage.css';
 
 function ProfilePage() {
@@ -12,6 +13,7 @@ function ProfilePage() {
   const [success, setSuccess] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [showOtpModal, setShowOtpModal] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [otp, setOtp] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
   const [pendingEmailChange, setPendingEmailChange] = useState('');
@@ -306,6 +308,12 @@ function ProfilePage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    // Prevent submission if not in editing mode
+    if (!isEditing) {
+      return;
+    }
+    
     setError('');
     setSuccess('');
 
@@ -502,6 +510,22 @@ function ProfilePage() {
       age--;
     }
     return age;
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    sessionStorage.removeItem('pending_assessment');
+    navigate('/login');
+  };
+
+  const handleLogoutClick = () => {
+    setShowLogoutConfirm(true);
+  };
+
+  const confirmLogout = () => {
+    setShowLogoutConfirm(false);
+    handleLogout();
   };
 
   return (
@@ -815,13 +839,26 @@ function ProfilePage() {
 
             <div className="profile-actions">
               {!isEditing ? (
-                <button
-                  type="button"
-                  className="profile-btn profile-btn-primary"
-                  onClick={() => setIsEditing(true)}
-                >
-                  Edit Profile
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="profile-btn profile-btn-logout"
+                    onClick={handleLogoutClick}
+                  >
+                    Log Out
+                  </button>
+                  <button
+                    type="button"
+                    className="profile-btn profile-btn-primary"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setIsEditing(true);
+                    }}
+                  >
+                    Edit Profile
+                  </button>
+                </>
               ) : (
                 <>
                   <button
@@ -845,6 +882,19 @@ function ProfilePage() {
           </form>
         </div>
       </div>
+
+      {/* Logout Confirmation Modal */}
+      {showLogoutConfirm && (
+        <ConfirmModal
+          title="Confirm Logout"
+          message="Are you sure you want to log out?"
+          confirmText="Log Out"
+          cancelText="Cancel"
+          type="warning"
+          onConfirm={confirmLogout}
+          onCancel={() => setShowLogoutConfirm(false)}
+        />
+      )}
 
       {/* OTP Verification Modal */}
       {showOtpModal && (

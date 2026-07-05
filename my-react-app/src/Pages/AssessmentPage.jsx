@@ -132,13 +132,13 @@ const CONDITION_INFO = {
   'Hypertension (High Blood Pressure)': 'Blood pressure consistently above 130/80 mmHg. The heart works harder than normal to pump blood, which can strain blood vessels and organs over time.',
   'High Cholesterol': 'Elevated levels of LDL ("bad") cholesterol or total cholesterol in the blood, which can increase the risk of plaque buildup in arteries.',
   'Diabetes': 'Type 1: The body produces little to no insulin (autoimmune). Type 2: The body does not use insulin effectively, leading to high blood sugar. Prediabetes: Blood sugar is elevated but not yet diabetic range.',
-  'Heart Disease / Cardiovascular Disease': 'A broad term covering conditions affecting the heart and blood vessels, including coronary artery disease, heart failure, and arrhythmia.',
+  'Heart / Cardiovascular Disease': 'A broad term covering conditions affecting the heart and blood vessels, including coronary artery disease, heart failure, and arrhythmia.',
   'Obesity': 'A BMI of 30 or higher, associated with excess body fat that increases risk for diabetes, heart disease, joint problems, and other conditions.',
   'Arthritis': 'Inflammation of one or more joints causing pain and stiffness. Osteoarthritis is wear-and-tear; Rheumatoid arthritis is autoimmune.',
   'Osteoporosis': 'A condition where bones become weak and brittle due to reduced bone density, increasing the risk of fractures especially in the hip, spine, and wrist.',
   'Gout': 'A form of arthritis caused by a buildup of uric acid crystals in joints, most commonly the big toe, causing sudden severe pain and swelling.',
-  'Irritable Bowel Syndrome (IBS)': 'A common gut disorder causing recurring abdominal pain, bloating, and changes in bowel habits (diarrhea, constipation, or both) without visible damage to the digestive tract.',
-  'Celiac Disease / Gluten Sensitivity': 'Celiac disease: An autoimmune condition where gluten damages the small intestine. Non-celiac gluten sensitivity: Similar symptoms without the autoimmune response.',
+  'IBS (Irritable Bowel Syndrome)': 'A common gut disorder causing recurring abdominal pain, bloating, and changes in bowel habits (diarrhea, constipation, or both) without visible damage to the digestive tract.',
+  'Celiac / Gluten Sensitivity': 'Celiac disease: An autoimmune condition where gluten damages the small intestine. Non-celiac gluten sensitivity: Similar symptoms without the autoimmune response.',
   'Asthma': 'A chronic respiratory condition where airways become inflamed and narrowed, causing episodes of wheezing, shortness of breath, chest tightness, and coughing.',
   'Autoimmune Disorders': 'Conditions where the immune system mistakenly attacks the body\'s own tissues. Examples include lupus, rheumatoid arthritis, multiple sclerosis, and psoriasis.',
   'Anxiety Disorder': 'Persistent, excessive worry or fear that interferes with daily activities. Includes generalized anxiety, panic disorder, and social anxiety.',
@@ -1043,11 +1043,11 @@ const SEVERITY_DESCRIPTIONS = {
 // Gender-specific symptoms are filtered in the component
 const ALL_SYMPTOMS = [
   // ── Cardiovascular & Metabolic ──────────────────────────────────────────
-  { name: 'Fatigue',                       genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Hypertension (High Blood Pressure)', 'High Cholesterol', 'Diabetes', 'Heart Disease / Cardiovascular Disease', 'Obesity', 'Anemia', 'Thyroid Disorders', 'Chronic Kidney Disease', 'Liver Disease', 'Anxiety Disorder', 'Depression'] },
-  { name: 'Shortness of Breath',           genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Heart Disease / Cardiovascular Disease', 'Asthma', 'Obesity'] },
-  { name: 'Chest Tightness',               genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Heart Disease / Cardiovascular Disease', 'Asthma', 'Hypertension (High Blood Pressure)'] },
-  { name: 'Rapid or Irregular Heartbeat',  genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Heart Disease / Cardiovascular Disease', 'Hypertension (High Blood Pressure)', 'Anxiety Disorder', 'Thyroid Disorders'] },
-  { name: 'Dizziness / Lightheadedness',   genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Hypertension (High Blood Pressure)', 'Anemia', 'Diabetes', 'Heart Disease / Cardiovascular Disease'] },
+  { name: 'Fatigue',                       genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Hypertension (High Blood Pressure)', 'High Cholesterol', 'Diabetes', 'Heart / Cardiovascular Disease', 'Obesity', 'Anemia', 'Thyroid Disorders', 'Chronic Kidney Disease', 'Liver Disease', 'Anxiety Disorder', 'Depression'] },
+  { name: 'Shortness of Breath',           genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Heart / Cardiovascular Disease', 'Asthma', 'Obesity'] },
+  { name: 'Chest Tightness',               genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Heart / Cardiovascular Disease', 'Asthma', 'Hypertension (High Blood Pressure)'] },
+  { name: 'Rapid or Irregular Heartbeat',  genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Heart / Cardiovascular Disease', 'Hypertension (High Blood Pressure)', 'Anxiety Disorder', 'Thyroid Disorders'] },
+  { name: 'Dizziness / Lightheadedness',   genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Hypertension (High Blood Pressure)', 'Anemia', 'Diabetes', 'Heart / Cardiovascular Disease'] },
   { name: 'Frequent Headaches',            genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Hypertension (High Blood Pressure)', 'Migraine', 'Anxiety Disorder', 'Depression'] },
   { name: 'Excessive Thirst',              genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Diabetes'] },
   { name: 'Frequent Urination',            genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Diabetes', 'Chronic Kidney Disease'] },
@@ -1063,16 +1063,16 @@ const ALL_SYMPTOMS = [
   { name: 'Back / Bone Pain',             genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Osteoporosis', 'Arthritis'] },
 
   // ── Digestive ─────────────────────────────────────────────────────────────
-  { name: 'Bloating',                      genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Irritable Bowel Syndrome (IBS)', 'Celiac Disease / Gluten Sensitivity'] },
-  { name: 'Digestive Issue',               genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Irritable Bowel Syndrome (IBS)', 'Celiac Disease / Gluten Sensitivity', 'Liver Disease'] },
-  { name: 'Nausea',                        genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Irritable Bowel Syndrome (IBS)', 'Migraine', 'Chronic Kidney Disease', 'Liver Disease'] },
-  { name: 'Abdominal Pain / Cramps',       genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Irritable Bowel Syndrome (IBS)', 'Celiac Disease / Gluten Sensitivity'] },
-  { name: 'Low Appetite',                  genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Liver Disease', 'Chronic Kidney Disease', 'Depression', 'Irritable Bowel Syndrome (IBS)'] },
+  { name: 'Bloating',                      genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['IBS (Irritable Bowel Syndrome)', 'Celiac / Gluten Sensitivity'] },
+  { name: 'Digestive Issue',               genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['IBS (Irritable Bowel Syndrome)', 'Celiac / Gluten Sensitivity', 'Liver Disease'] },
+  { name: 'Nausea',                        genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['IBS (Irritable Bowel Syndrome)', 'Migraine', 'Chronic Kidney Disease', 'Liver Disease'] },
+  { name: 'Abdominal Pain / Cramps',       genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['IBS (Irritable Bowel Syndrome)', 'Celiac / Gluten Sensitivity'] },
+  { name: 'Low Appetite',                  genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Liver Disease', 'Chronic Kidney Disease', 'Depression', 'IBS (Irritable Bowel Syndrome)'] },
 
   // ── Respiratory & Immune ─────────────────────────────────────────────────
   { name: 'Wheezing / Breathing Difficulty', genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Asthma'] },
   { name: 'Frequent Colds',               genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Autoimmune Disorders', 'Asthma'] },
-  { name: 'Skin Rashes / Flare-ups',      genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Autoimmune Disorders', 'Celiac Disease / Gluten Sensitivity'] },
+  { name: 'Skin Rashes / Flare-ups',      genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Autoimmune Disorders', 'Celiac / Gluten Sensitivity'] },
   { name: 'Acne / Skin Issues',            genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Autoimmune Disorders'] },
   { name: 'Dry Skin',                      genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Thyroid Disorders', 'Autoimmune Disorders', 'Diabetes'] },
 
@@ -1082,7 +1082,7 @@ const ALL_SYMPTOMS = [
   { name: 'Anxiety / Excessive Worry',     genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Anxiety Disorder', 'Thyroid Disorders'] },
   { name: 'Sleep Disturbances',            genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Anxiety Disorder', 'Depression', 'Thyroid Disorders'] },
   { name: 'Loss of Interest',              genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Depression'] },
-  { name: 'Brain Fog',                     genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Depression', 'Anxiety Disorder', 'Thyroid Disorders', 'Anemia', 'Chronic Kidney Disease', 'Celiac Disease / Gluten Sensitivity'] },
+  { name: 'Brain Fog',                     genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Depression', 'Anxiety Disorder', 'Thyroid Disorders', 'Anemia', 'Chronic Kidney Disease', 'Celiac / Gluten Sensitivity'] },
 
   // ── Thyroid / Anemia / Kidney / Liver ────────────────────────────────────
   { name: 'Cold Sensitivity',              genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Thyroid Disorders', 'Anemia'] },
@@ -1090,8 +1090,8 @@ const ALL_SYMPTOMS = [
   { name: 'Swollen Neck / Goiter',         genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Thyroid Disorders'] },
   { name: 'Pale Skin / Pallor',            genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Anemia'] },
   { name: 'Numbness / Tingling',           genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Diabetes', 'Anemia', 'Chronic Kidney Disease'] },
-  { name: 'Slow Recovery',                 genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Anemia', 'Autoimmune Disorders', 'Diabetes', 'Heart Disease / Cardiovascular Disease'] },
-  { name: 'Swelling (Edema)',              genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Chronic Kidney Disease', 'Heart Disease / Cardiovascular Disease', 'Liver Disease'] },
+  { name: 'Slow Recovery',                 genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Anemia', 'Autoimmune Disorders', 'Diabetes', 'Heart / Cardiovascular Disease'] },
+  { name: 'Swelling (Edema)',              genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Chronic Kidney Disease', 'Heart / Cardiovascular Disease', 'Liver Disease'] },
   { name: 'Jaundice / Yellow Skin',        genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Liver Disease'] },
 
   // ── Migraine ─────────────────────────────────────────────────────────────
@@ -1132,7 +1132,7 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
   const conditionGroups = [
     {
       group: 'Cardiovascular & Metabolic',
-      items: ['Hypertension (High Blood Pressure)', 'High Cholesterol', 'Diabetes', 'Heart Disease / Cardiovascular Disease', 'Obesity'],
+      items: ['Hypertension (High Blood Pressure)', 'High Cholesterol', 'Diabetes', 'Heart / Cardiovascular Disease', 'Obesity'],
     },
     {
       group: 'Bone & Joint',
@@ -1140,7 +1140,7 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
     },
     {
       group: 'Digestive',
-      items: ['Irritable Bowel Syndrome (IBS)', 'Celiac Disease / Gluten Sensitivity'],
+      items: ['IBS (Irritable Bowel Syndrome)', 'Celiac / Gluten Sensitivity'],
     },
     {
       group: 'Respiratory & Immune',
@@ -1343,7 +1343,6 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
         if (!hasConditions && !noneSelected) {
           return (
             <div className="symptoms-no-conditions">
-              <span className="symptoms-no-conditions-icon">&#128161;</span>
               <p>Select your medical conditions above to see relevant symptoms.</p>
             </div>
           );

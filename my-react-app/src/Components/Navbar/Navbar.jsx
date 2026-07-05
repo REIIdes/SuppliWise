@@ -1,46 +1,13 @@
-import { NavLink, useNavigate } from 'react-router-dom';
-import { useState } from 'react';
-import ConfirmModal from '../ConfirmModal/ConfirmModal';
+import { NavLink } from 'react-router-dom';
 import './Navbar.css';
 
 function Navbar() {
-  const navigate = useNavigate();
-  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const token = localStorage.getItem('token');
   const userRaw = localStorage.getItem('user');
   const user = userRaw ? JSON.parse(userRaw) : null;
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    sessionStorage.removeItem('pending_assessment'); // clear any pending assessment on logout
-    navigate('/login');
-  };
-
-  const handleLogoutClick = () => {
-    setShowLogoutConfirm(true);
-  };
-
-  const confirmLogout = () => {
-    setShowLogoutConfirm(false);
-    handleLogout();
-  };
-
   return (
-    <>
-      {showLogoutConfirm && (
-        <ConfirmModal
-          title="Confirm Logout"
-          message="Are you sure you want to log out?"
-          confirmText="Log Out"
-          cancelText="Cancel"
-          type="warning"
-          onConfirm={confirmLogout}
-          onCancel={() => setShowLogoutConfirm(false)}
-        />
-      )}
-      
-      <nav className="navbar">
+    <nav className="navbar">
       <div className="navbar-left">
         <div className="navbar-logo-box">
           <svg width="30" height="30" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -79,9 +46,6 @@ function Navbar() {
                   : user.name}
               </span>
             </NavLink>
-            <button className="navbar-signin-btn" onClick={handleLogoutClick}>
-              Log Out
-            </button>
           </>
         ) : (
           <NavLink to="/login" className="navbar-signin-btn">
@@ -90,7 +54,6 @@ function Navbar() {
         )}
       </div>
     </nav>
-    </>
   );
 }
 
