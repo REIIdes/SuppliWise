@@ -7,7 +7,7 @@ import basicSsl from '@vitejs/plugin-basic-ssl'
 export default defineConfig({
   plugins: [
     react(),
-    basicSsl(), // Enable HTTPS in development
+    // basicSsl(), // DISABLED: Causes Mixed Content errors with HTTP backend
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'robots.txt', 'apple-touch-icon.png'],

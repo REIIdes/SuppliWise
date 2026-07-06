@@ -1,14 +1,15 @@
 // TEMPORARY: Hardcode backend URL for mobile testing
-const BASE_URL = 'http://192.168.0.102:5000/api';
+const BASE_URL = 'http://192.168.0.34:5000/api';
 
 // Export BASE_URL so other components can use it
 export { BASE_URL };
 
 // Log the environment for debugging
 if (typeof window !== 'undefined') {
-  console.log('API Configuration:', {
+  console.log('🔧 API Configuration:', {
     BASE_URL: BASE_URL,
-    location: window.location.href
+    location: window.location.href,
+    platform: navigator.userAgent.includes('Android') ? 'Android' : 'Web'
   });
 }
 

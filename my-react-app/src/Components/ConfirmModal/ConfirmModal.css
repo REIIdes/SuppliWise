@@ -96,12 +96,14 @@
 }
 
 .confirm-modal-btn-cancel {
-  background: #f3f4f6;
-  color: #6b7280;
+  background: #e5e7eb;
+  color: #374151;
+  border: 2px solid #d1d5db;
 }
 
 .confirm-modal-btn-cancel:hover {
-  background: #e5e7eb;
+  background: #d1d5db;
+  border-color: #9ca3af;
 }
 
 .confirm-modal-btn-confirm {
