@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
+import ReadOnlyAssessment from '../Components/ReadOnlyAssessment/ReadOnlyAssessment';
 import { getHistory, deleteAssessment } from '../api';
 import { exportResultsToPDF } from '../utils/exportPDF';
 import './HistoryPage.css';
@@ -212,21 +213,19 @@ function enrichAiResults(aiResults) {
 }
 
 
-function DeleteModal({ onConfirm, onCancel, loading }) {
+function ConfirmModal({ title, body, confirmLabel = 'Yes, delete', cancelLabel = 'Keep it', onConfirm, onCancel, loading }) {
   return (
     <div className="modal-overlay" onClick={onCancel}>
       <div className="modal-box" onClick={e => e.stopPropagation()}>
         <div className="modal-icon">🗑️</div>
-        <h3 className="modal-title">Delete Assessment?</h3>
-        <p className="modal-body">
-          This will permanently remove this assessment and its AI analysis from your history. This action cannot be undone.
-        </p>
+        <h3 className="modal-title">{title}</h3>
+        <p className="modal-body">{body}</p>
         <div className="modal-actions">
           <button className="modal-btn-cancel" onClick={onCancel} disabled={loading}>
-            Keep it
+            {cancelLabel}
           </button>
           <button className="modal-btn-confirm" onClick={onConfirm} disabled={loading}>
-            {loading ? 'Deleting...' : 'Yes, delete'}
+            {loading ? 'Deleting...' : confirmLabel}
           </button>
         </div>
       </div>
@@ -240,26 +239,52 @@ function HistoryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [expanded, setExpanded] = useState(null);
-  const [deleteTarget, setDeleteTarget] = useState(null); // id of item to delete
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [serverTime, setServerTime] = useState(new Date());
+  const [answersTarget, setAnswersTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [activeTab, setActiveTab] = useState({});
   const [toast, setToast] = useState('');
   const [showAllSupplements, setShowAllSupplements] = useState({});
 
+  const getExpirationDate = (item) => {
+    if (item.expiresAt) return new Date(item.expiresAt);
+    const createdAt = new Date(item.createdAt);
+    if (Number.isNaN(createdAt.getTime())) return null;
+    // Add exactly 5 years to the created date (maintaining same time)
+    const expirationDate = new Date(createdAt);
+    expirationDate.setFullYear(expirationDate.getFullYear() + 5);
+    return expirationDate;
+  };
+
   const toggleShowAllSupplements = (assessmentId) => {
     setShowAllSupplements(prev => ({ ...prev, [assessmentId]: !prev[assessmentId] }));
+  };
+
+  const isOlderThanFiveYears = (dateStr, referenceTime = new Date()) => {
+    if (!dateStr) return false;
+    const createdAt = new Date(dateStr);
+    const reference = new Date(referenceTime);
+    if (Number.isNaN(createdAt.getTime()) || Number.isNaN(reference.getTime())) return false;
+    // Check if 5 years have passed by comparing years and dates
+    const expirationDate = new Date(createdAt);
+    expirationDate.setFullYear(expirationDate.getFullYear() + 5);
+    return reference.getTime() >= expirationDate.getTime();
   };
 
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) { navigate('/login'); return; }
+
     getHistory()
-      .then(data => setHistory(
-        data.map(item => ({
+      .then(data => {
+        const normalized = data.assessments.map(item => ({
           ...item,
           aiResults: enrichAiResults(item.aiResults),
-        }))
-      ))
+        }));
+        setHistory(normalized);
+        setServerTime(new Date(data.serverTime));
+      })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, [navigate]);
@@ -279,16 +304,20 @@ function HistoryPage() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await deleteAssessment(deleteTarget);
-      setHistory(prev => prev.filter(h => h._id !== deleteTarget));
+      await deleteAssessment(deleteTarget._id);
+      setHistory(prev => prev.filter(h => h._id !== deleteTarget._id));
       setExpanded(null);
       showToast('Assessment deleted successfully.');
+      setDeleteTarget(null);
     } catch (err) {
       showToast('Failed to delete. Please try again.');
     } finally {
       setDeleting(false);
-      setDeleteTarget(null);
     }
+  };
+
+  const handleKeepAssessment = () => {
+    setDeleteTarget(null);
   };
 
   const getTab = (id) => activeTab[id] || 'assessment';
@@ -300,9 +329,13 @@ function HistoryPage() {
 
       {/* Delete Modal */}
       {deleteTarget && (
-        <DeleteModal
+        <ConfirmModal
+          title="Review an older assessment"
+          body="This assessment is more than five years old. Would you like to delete it from your history?"
+          confirmLabel="Delete assessment"
+          cancelLabel="Keep assessment"
           onConfirm={handleDeleteConfirm}
-          onCancel={() => setDeleteTarget(null)}
+          onCancel={handleKeepAssessment}
           loading={deleting}
         />
       )}
@@ -313,12 +346,30 @@ function HistoryPage() {
       <div className="history-container">
         <div className="history-header">
           <h2>Assessment History</h2>
-          <button className="btn-primary" onClick={() => navigate('/assessment')}>
-            + New Assessment
-          </button>
+          <div className="history-header-actions">
+            <button className="btn-primary" onClick={() => navigate('/assessment')}>
+              + New Assessment
+            </button>
+          </div>
         </div>
 
-        {loading && <p className="history-status">Loading history...</p>}
+        {history.length > 0 && (
+          <div className="active-info-banner">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="16" x2="12" y2="12"/>
+              <line x1="12" y1="8" x2="12.01" y2="8"/>
+            </svg>
+            <span>Your latest assessment is currently active and is used for your Dashboard, Track Intake, and Insights. Complete a new assessment to update your active assessment.</span>
+          </div>
+        )}
+
+        {loading && (
+          <div className="history-loading-simple">
+            <div className="loading-spinner-simple"></div>
+          </div>
+        )}
+
         {error && (
           <div className="history-error-box">
             <div className="history-error-icon">⚠️</div>
@@ -328,14 +379,44 @@ function HistoryPage() {
           </div>
         )}
         {!loading && !error && history.length === 0 && (
-          <div className="history-empty">
-            <div className="history-empty-icon">📋</div>
-            <p style={{ fontWeight: 600, color: '#374151', fontSize: '16px', margin: 0 }}>No assessments yet</p>
-            <p style={{ margin: 0 }}>Complete your first health assessment to get personalized supplement and lifestyle recommendations.</p>
-            <button className="btn-primary" onClick={() => navigate('/assessment')}>
-              Start Assessment →
-            </button>
+          <div style={{ 
+            maxWidth: '600px', 
+            margin: '40px auto',
+            background: 'white',
+            borderRadius: '16px',
+            border: '1px solid #e5e7eb',
+            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)',
+            padding: '60px 40px'
+          }}>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ 
+                width: '120px', 
+                height: '120px', 
+                margin: '0 auto 32px', 
+                background: 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)', 
+                borderRadius: '50%', 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center',
+                boxShadow: '0 10px 25px rgba(16, 185, 129, 0.15)'
+              }}>
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                  <line x1="16" y1="13" x2="8" y2="13"/>
+                  <line x1="16" y1="17" x2="8" y2="17"/>
+                  <polyline points="10 9 9 9 8 9"/>
+                </svg>
+              </div>
+              <p style={{ color: '#6b7280', fontSize: '16px', lineHeight: '1.6', marginBottom: '0', maxWidth: '500px', margin: '0 auto' }}>
+                You haven't completed any assessments yet. Complete your first health assessment to start building your assessment history.
+              </p>
+            </div>
           </div>
+        )}
+
+        {answersTarget && (
+          <ReadOnlyAssessment assessment={answersTarget} inline onClose={() => setAnswersTarget(null)} />
         )}
 
         <div className="history-list">
@@ -344,9 +425,19 @@ function HistoryPage() {
               {/* Card Header */}
               <div className="history-card-header" onClick={() => setExpanded(expanded === i ? null : i)}>
                 <div className="history-card-header-left">
-                  <span className="history-date">{fmt(item.createdAt)}</span>
+                  <div className="date-with-badge">
+                    {i === 0 && (
+                      <span 
+                        className="active-badge" 
+                        title="This is your active assessment. Your Dashboard, Track Intake, and Insights use this data."
+                      >
+                        Active
+                      </span>
+                    )}
+                    <span className="history-date">{fmt(item.createdAt)}</span>
+                  </div>
                   <div className="history-card-title">
-                    {item.symptoms?.length > 0
+                    {item.symptoms?.length > 0 && !item.symptoms.includes('None')
                       ? item.symptoms.slice(0, 2).join(', ') + (item.symptoms.length > 2 ? ` +${item.symptoms.length - 2} more` : '')
                       : item.healthGoals?.length > 0
                         ? item.healthGoals.slice(0, 2).join(', ')
@@ -356,13 +447,30 @@ function HistoryPage() {
                     {item.age && <span className="tag tag-blue">Age {item.age}</span>}
                     {item.dietType && <span className="tag">{item.dietType}</span>}
                     {item.activityLevel && <span className="tag">{ACTIVITY_LABELS[item.activityLevel] || item.activityLevel}</span>}
-                    {item.symptoms?.length > 0 && (
+                    {item.symptoms?.length > 0 && !item.symptoms.includes('None') && (
                       <span className="tag tag-red">{item.symptoms.length} symptom{item.symptoms.length > 1 ? 's' : ''}</span>
                     )}
                     {item.aiResults && <span className="tag tag-green">✓ AI Analysis</span>}
+                    {getExpirationDate(item) && (
+                      <span className="tag tag-gray">Expires {fmt(getExpirationDate(item))}</span>
+                    )}
                   </div>
                 </div>
                 <div className="history-card-header-right">
+                    <button
+                    className="btn-view-answers"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate('/assessment', { state: { assessment: item, readOnly: true } });
+                    }}
+                    title="View Assessment"
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="9" />
+                      <circle cx="12" cy="9" r="3" />
+                      <path d="M6 19c0-3.314 2.686-6 6-6s6 2.686 6 6" />
+                    </svg>
+                  </button>
                   {item.aiResults && (
                     <button
                       className="btn-view-results"
@@ -370,11 +478,12 @@ function HistoryPage() {
                         e.stopPropagation();
                         navigate('/results', { state: { recommendations: item.aiResults, assessment: item } });
                       }}
-                      title="View full results"
+                      title="View Results"
                     >
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                        <circle cx="12" cy="12" r="3"/>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                        <path d="M9 13l5-5 3 3-5 5H9v-3z" />
                       </svg>
                     </button>
                   )}
@@ -387,20 +496,26 @@ function HistoryPage() {
                       }}
                       title="Download PDF report"
                     >
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                         <polyline points="7 10 12 15 17 10"/>
                         <line x1="12" y1="15" x2="12" y2="3"/>
                       </svg>
                     </button>
                   )}
-                  <button
-                    className="btn-delete"
-                    onClick={(e) => { e.stopPropagation(); setDeleteTarget(item._id); }}
-                    title="Delete assessment"
-                  >
-                    🗑
-                  </button>
+                  {isOlderThanFiveYears(item.createdAt) && (
+                    <button
+                      className="btn-delete"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteTarget(item);
+                      }}
+                      title="Delete assessment"
+                    >
+                      🗑
+                    </button>
+                  )}
+                  
                   <span className="history-toggle">{expanded === i ? '▲' : '▼'}</span>
                 </div>
               </div>
@@ -450,7 +565,7 @@ function HistoryPage() {
                           <div className="tag-list">{item.healthGoals.map(g => <span key={g} className="tag">{g}</span>)}</div>
                         </div>
                       )}
-                      {item.symptoms?.length > 0 && (
+                      {item.symptoms?.length > 0 && !item.symptoms.includes('None') && (
                         <div className="history-section">
                           <p className="history-section-label">Symptoms</p>
                           <div className="tag-list">{item.symptoms.map(s => <span key={s} className="tag tag-red">{s}</span>)}</div>
@@ -564,7 +679,7 @@ function HistoryPage() {
                           <div className="history-schedule">
                             {item.aiResults.dailySchedule.map((slot, si) => (
                               <div key={si} className="history-schedule-slot">
-                                <div className="history-schedule-time">{fixChars(slot.time)}</div>
+                                <div className="history-schedule-time">{fixChars(slot.time.replace(/With Lunch/gi, 'Afternoon'))}</div>
                                 <div className="history-schedule-pills">
                                   {slot.supplements.map((s, sj) => {
                                     const dosage = getDosage(s);

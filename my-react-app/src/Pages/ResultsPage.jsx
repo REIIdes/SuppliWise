@@ -884,7 +884,7 @@ function ResultsPage() {
 
                   return r.dailySchedule.map((slot, i) => (
                     <div key={i} className="schedule-slot">
-                      <div className="schedule-time">{fixChars(slot.time)}</div>
+                      <div className="schedule-time">{fixChars(slot.time.replace(/With Lunch/gi, 'Afternoon'))}</div>
                       <div className="schedule-supplements">
                         {slot.supplements.map((s, si) => {
                           const dosage = getDosage(s);

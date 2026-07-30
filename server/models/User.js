@@ -63,6 +63,10 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    hasVisitedDashboard: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: true }
 );

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import { saveAssessment, getRecommendations, saveAssessmentResults } from '../api';
 import './AssessmentPage.css';
@@ -132,13 +132,13 @@ const CONDITION_INFO = {
   'Hypertension (High Blood Pressure)': 'Blood pressure consistently above 130/80 mmHg. The heart works harder than normal to pump blood, which can strain blood vessels and organs over time.',
   'High Cholesterol': 'Elevated levels of LDL ("bad") cholesterol or total cholesterol in the blood, which can increase the risk of plaque buildup in arteries.',
   'Diabetes': 'Type 1: The body produces little to no insulin (autoimmune). Type 2: The body does not use insulin effectively, leading to high blood sugar. Prediabetes: Blood sugar is elevated but not yet diabetic range.',
-  'Heart Disease / Cardiovascular Disease': 'A broad term covering conditions affecting the heart and blood vessels, including coronary artery disease, heart failure, and arrhythmia.',
+  'Heart / Cardiovascular Disease': 'A broad term covering conditions affecting the heart and blood vessels, including coronary artery disease, heart failure, and arrhythmia.',
   'Obesity': 'A BMI of 30 or higher, associated with excess body fat that increases risk for diabetes, heart disease, joint problems, and other conditions.',
   'Arthritis': 'Inflammation of one or more joints causing pain and stiffness. Osteoarthritis is wear-and-tear; Rheumatoid arthritis is autoimmune.',
   'Osteoporosis': 'A condition where bones become weak and brittle due to reduced bone density, increasing the risk of fractures especially in the hip, spine, and wrist.',
   'Gout': 'A form of arthritis caused by a buildup of uric acid crystals in joints, most commonly the big toe, causing sudden severe pain and swelling.',
-  'Irritable Bowel Syndrome (IBS)': 'A common gut disorder causing recurring abdominal pain, bloating, and changes in bowel habits (diarrhea, constipation, or both) without visible damage to the digestive tract.',
-  'Celiac Disease / Gluten Sensitivity': 'Celiac disease: An autoimmune condition where gluten damages the small intestine. Non-celiac gluten sensitivity: Similar symptoms without the autoimmune response.',
+  'IBS (Irritable Bowel Syndrome)': 'A common gut disorder causing recurring abdominal pain, bloating, and changes in bowel habits (diarrhea, constipation, or both) without visible damage to the digestive tract.',
+  'Celiac / Gluten Sensitivity': 'Celiac disease: An autoimmune condition where gluten damages the small intestine. Non-celiac gluten sensitivity: Similar symptoms without the autoimmune response.',
   'Asthma': 'A chronic respiratory condition where airways become inflamed and narrowed, causing episodes of wheezing, shortness of breath, chest tightness, and coughing.',
   'Autoimmune Disorders': 'Conditions where the immune system mistakenly attacks the body\'s own tissues. Examples include lupus, rheumatoid arthritis, multiple sclerosis, and psoriasis.',
   'Anxiety Disorder': 'Persistent, excessive worry or fear that interferes with daily activities. Includes generalized anxiety, panic disorder, and social anxiety.',
@@ -1043,11 +1043,11 @@ const SEVERITY_DESCRIPTIONS = {
 // Gender-specific symptoms are filtered in the component
 const ALL_SYMPTOMS = [
   // ── Cardiovascular & Metabolic ──────────────────────────────────────────
-  { name: 'Fatigue',                       genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Hypertension (High Blood Pressure)', 'High Cholesterol', 'Diabetes', 'Heart Disease / Cardiovascular Disease', 'Obesity', 'Anemia', 'Thyroid Disorders', 'Chronic Kidney Disease', 'Liver Disease', 'Anxiety Disorder', 'Depression'] },
-  { name: 'Shortness of Breath',           genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Heart Disease / Cardiovascular Disease', 'Asthma', 'Obesity'] },
-  { name: 'Chest Tightness',               genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Heart Disease / Cardiovascular Disease', 'Asthma', 'Hypertension (High Blood Pressure)'] },
-  { name: 'Rapid or Irregular Heartbeat',  genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Heart Disease / Cardiovascular Disease', 'Hypertension (High Blood Pressure)', 'Anxiety Disorder', 'Thyroid Disorders'] },
-  { name: 'Dizziness / Lightheadedness',   genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Hypertension (High Blood Pressure)', 'Anemia', 'Diabetes', 'Heart Disease / Cardiovascular Disease'] },
+  { name: 'Fatigue',                       genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Hypertension (High Blood Pressure)', 'High Cholesterol', 'Diabetes', 'Heart / Cardiovascular Disease', 'Obesity', 'Anemia', 'Thyroid Disorders', 'Chronic Kidney Disease', 'Liver Disease', 'Anxiety Disorder', 'Depression'] },
+  { name: 'Shortness of Breath',           genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Heart / Cardiovascular Disease', 'Asthma', 'Obesity'] },
+  { name: 'Chest Tightness',               genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Heart / Cardiovascular Disease', 'Asthma', 'Hypertension (High Blood Pressure)'] },
+  { name: 'Rapid or Irregular Heartbeat',  genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Heart / Cardiovascular Disease', 'Hypertension (High Blood Pressure)', 'Anxiety Disorder', 'Thyroid Disorders'] },
+  { name: 'Dizziness / Lightheadedness',   genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Hypertension (High Blood Pressure)', 'Anemia', 'Diabetes', 'Heart / Cardiovascular Disease'] },
   { name: 'Frequent Headaches',            genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Hypertension (High Blood Pressure)', 'Migraine', 'Anxiety Disorder', 'Depression'] },
   { name: 'Excessive Thirst',              genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Diabetes'] },
   { name: 'Frequent Urination',            genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Diabetes', 'Chronic Kidney Disease'] },
@@ -1063,16 +1063,16 @@ const ALL_SYMPTOMS = [
   { name: 'Back / Bone Pain',             genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Osteoporosis', 'Arthritis'] },
 
   // ── Digestive ─────────────────────────────────────────────────────────────
-  { name: 'Bloating',                      genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Irritable Bowel Syndrome (IBS)', 'Celiac Disease / Gluten Sensitivity'] },
-  { name: 'Digestive Issue',               genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Irritable Bowel Syndrome (IBS)', 'Celiac Disease / Gluten Sensitivity', 'Liver Disease'] },
-  { name: 'Nausea',                        genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Irritable Bowel Syndrome (IBS)', 'Migraine', 'Chronic Kidney Disease', 'Liver Disease'] },
-  { name: 'Abdominal Pain / Cramps',       genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Irritable Bowel Syndrome (IBS)', 'Celiac Disease / Gluten Sensitivity'] },
-  { name: 'Low Appetite',                  genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Liver Disease', 'Chronic Kidney Disease', 'Depression', 'Irritable Bowel Syndrome (IBS)'] },
+  { name: 'Bloating',                      genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['IBS (Irritable Bowel Syndrome)', 'Celiac / Gluten Sensitivity'] },
+  { name: 'Digestive Issue',               genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['IBS (Irritable Bowel Syndrome)', 'Celiac / Gluten Sensitivity', 'Liver Disease'] },
+  { name: 'Nausea',                        genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['IBS (Irritable Bowel Syndrome)', 'Migraine', 'Chronic Kidney Disease', 'Liver Disease'] },
+  { name: 'Abdominal Pain / Cramps',       genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['IBS (Irritable Bowel Syndrome)', 'Celiac / Gluten Sensitivity'] },
+  { name: 'Low Appetite',                  genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Liver Disease', 'Chronic Kidney Disease', 'Depression', 'IBS (Irritable Bowel Syndrome)'] },
 
   // ── Respiratory & Immune ─────────────────────────────────────────────────
   { name: 'Wheezing / Breathing Difficulty', genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Asthma'] },
   { name: 'Frequent Colds',               genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Autoimmune Disorders', 'Asthma'] },
-  { name: 'Skin Rashes / Flare-ups',      genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Autoimmune Disorders', 'Celiac Disease / Gluten Sensitivity'] },
+  { name: 'Skin Rashes / Flare-ups',      genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Autoimmune Disorders', 'Celiac / Gluten Sensitivity'] },
   { name: 'Acne / Skin Issues',            genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Autoimmune Disorders'] },
   { name: 'Dry Skin',                      genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Thyroid Disorders', 'Autoimmune Disorders', 'Diabetes'] },
 
@@ -1082,7 +1082,7 @@ const ALL_SYMPTOMS = [
   { name: 'Anxiety / Excessive Worry',     genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Anxiety Disorder', 'Thyroid Disorders'] },
   { name: 'Sleep Disturbances',            genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Anxiety Disorder', 'Depression', 'Thyroid Disorders'] },
   { name: 'Loss of Interest',              genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Depression'] },
-  { name: 'Brain Fog',                     genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Depression', 'Anxiety Disorder', 'Thyroid Disorders', 'Anemia', 'Chronic Kidney Disease', 'Celiac Disease / Gluten Sensitivity'] },
+  { name: 'Brain Fog',                     genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Depression', 'Anxiety Disorder', 'Thyroid Disorders', 'Anemia', 'Chronic Kidney Disease', 'Celiac / Gluten Sensitivity'] },
 
   // ── Thyroid / Anemia / Kidney / Liver ────────────────────────────────────
   { name: 'Cold Sensitivity',              genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Thyroid Disorders', 'Anemia'] },
@@ -1090,8 +1090,8 @@ const ALL_SYMPTOMS = [
   { name: 'Swollen Neck / Goiter',         genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Thyroid Disorders'] },
   { name: 'Pale Skin / Pallor',            genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Anemia'] },
   { name: 'Numbness / Tingling',           genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Diabetes', 'Anemia', 'Chronic Kidney Disease'] },
-  { name: 'Slow Recovery',                 genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Anemia', 'Autoimmune Disorders', 'Diabetes', 'Heart Disease / Cardiovascular Disease'] },
-  { name: 'Swelling (Edema)',              genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Chronic Kidney Disease', 'Heart Disease / Cardiovascular Disease', 'Liver Disease'] },
+  { name: 'Slow Recovery',                 genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Anemia', 'Autoimmune Disorders', 'Diabetes', 'Heart / Cardiovascular Disease'] },
+  { name: 'Swelling (Edema)',              genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Chronic Kidney Disease', 'Heart / Cardiovascular Disease', 'Liver Disease'] },
   { name: 'Jaundice / Yellow Skin',        genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Liver Disease'] },
 
   // ── Migraine ─────────────────────────────────────────────────────────────
@@ -1132,7 +1132,7 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
   const conditionGroups = [
     {
       group: 'Cardiovascular & Metabolic',
-      items: ['Hypertension (High Blood Pressure)', 'High Cholesterol', 'Diabetes', 'Heart Disease / Cardiovascular Disease', 'Obesity'],
+      items: ['Hypertension (High Blood Pressure)', 'High Cholesterol', 'Diabetes', 'Heart / Cardiovascular Disease', 'Obesity'],
     },
     {
       group: 'Bone & Joint',
@@ -1140,7 +1140,7 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
     },
     {
       group: 'Digestive',
-      items: ['Irritable Bowel Syndrome (IBS)', 'Celiac Disease / Gluten Sensitivity'],
+      items: ['IBS (Irritable Bowel Syndrome)', 'Celiac / Gluten Sensitivity'],
     },
     {
       group: 'Respiratory & Immune',
@@ -1343,7 +1343,6 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
         if (!hasConditions && !noneSelected) {
           return (
             <div className="symptoms-no-conditions">
-              <span className="symptoms-no-conditions-icon">&#128161;</span>
               <p>Select your medical conditions above to see relevant symptoms.</p>
             </div>
           );
@@ -1519,7 +1518,7 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
 }
 
 // ── Step 4: Lifestyle & Medical Information ───────────────────────────────
-function Step4Lifestyle({ data, onChange, errors }) {
+function Step4Lifestyle({ data, onChange, errors, isReadOnly = false }) {
   const [showMedicationsInput, setShowMedicationsInput] = useState(false);
   const [showAllergiesInput, setShowAllergiesInput] = useState(false);
 
@@ -1574,10 +1573,12 @@ function Step4Lifestyle({ data, onChange, errors }) {
 
   return (
     <div className="step-body">
-      {/* Required fields notice at top */}
-      <div className="required-notice">
-        Fields marked with <span className="required-star">*</span> are required.
-      </div>
+      {/* Required fields notice at top (hidden in read-only history view) */}
+      {!isReadOnly && (
+        <div className="required-notice">
+          Fields marked with <span className="required-star">*</span> are required.
+        </div>
+      )}
 
       {/* ===== LIFESTYLE SECTION ===== */}
       <div className="section-header-with-icon">
@@ -2008,6 +2009,74 @@ function hasMinimumData(formData) {
   return hasBasics && hasSymptomOrGoal;
 }
 
+// ── Reconstruct symptom keys when loading historical data ─────────────────
+// When viewing assessment history, symptoms are stored as plain names like "Dizziness / Lightheadedness"
+// but the UI expects them with condition prefixes like "Hypertension (High Blood Pressure)::Dizziness / Lightheadedness"
+// This function reconstructs the full keys by matching symptoms to their conditions
+function reconstructSymptomKeys(assessment) {
+  const reconstructed = { ...assessment };
+  
+  // If symptoms and medicalConditions exist, reconstruct the symptom keys
+  if (assessment.symptoms && assessment.symptoms.length > 0 && assessment.medicalConditions) {
+    const plainSymptoms = assessment.symptoms;
+    const conditions = assessment.medicalConditions.filter(c => c !== 'None');
+    const severityMap = assessment.symptomSeverity || {};
+    
+    const reconstructedSymptoms = [];
+    const reconstructedSeverity = {};
+    
+    // For each plain symptom, find which condition(s) it belongs to
+    plainSymptoms.forEach(symptomName => {
+      let matched = false;
+      
+      // Check each selected condition
+      conditions.forEach(condition => {
+        // Find if this symptom belongs to this condition
+        const symptomInfo = ALL_SYMPTOMS.find(s => 
+          s.name === symptomName && s.conditions.includes(condition)
+        );
+        
+        if (symptomInfo) {
+          // Reconstruct the full key
+          const fullKey = `${condition}::${symptomName}`;
+          reconstructedSymptoms.push(fullKey);
+          
+          // Reconstruct severity with full key
+          if (severityMap[symptomName]) {
+            reconstructedSeverity[fullKey] = severityMap[symptomName];
+          }
+          
+          matched = true;
+        }
+      });
+      
+      // If no condition matched, it might be a general symptom
+      if (!matched) {
+        const isGeneralSymptom = GENERAL_SYMPTOMS.includes(symptomName);
+        if (isGeneralSymptom) {
+          const fullKey = `General::${symptomName}`;
+          reconstructedSymptoms.push(fullKey);
+          
+          if (severityMap[symptomName]) {
+            reconstructedSeverity[fullKey] = severityMap[symptomName];
+          }
+        } else {
+          // Fallback: keep the plain symptom name
+          reconstructedSymptoms.push(symptomName);
+          if (severityMap[symptomName]) {
+            reconstructedSeverity[symptomName] = severityMap[symptomName];
+          }
+        }
+      }
+    });
+    
+    reconstructed.symptoms = reconstructedSymptoms;
+    reconstructed.symptomSeverity = reconstructedSeverity;
+  }
+  
+  return reconstructed;
+}
+
 // ── Main Assessment Page ───────────────────────────────────────────────────
 const EMPTY_FORM = {
   age: '', gender: '', weight: '', weightUnit: 'kg',
@@ -2048,6 +2117,10 @@ function AILoadingStep({ icon, label, delay }) {
 
 function AssessmentPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const routeState = location.state || {};
+  const routeAssessment = routeState.assessment || null;
+  const routeReadOnly = !!routeState.readOnly;
   const [step, setStep] = useState(1);
   const [errors, setErrors] = useState({});
   const [submitError, setSubmitError] = useState('');
@@ -2056,17 +2129,103 @@ function AssessmentPage() {
   const symptomRowRefs = useRef({});
 
   const [formData, setFormData] = useState(() => {
-    try {
-      const saved = sessionStorage.getItem(SESSION_KEY);
-      return saved ? { ...EMPTY_FORM, ...JSON.parse(saved) } : EMPTY_FORM;
-    } catch {
-      return EMPTY_FORM;
+    if (routeAssessment) {
+      const reconstructed = reconstructSymptomKeys(routeAssessment);
+      return { ...EMPTY_FORM, ...reconstructed };
     }
+    
+    // If starting a fresh assessment (not viewing history), load from sessionStorage
+    if (!routeReadOnly) {
+      try {
+        const saved = sessionStorage.getItem(SESSION_KEY);
+        return saved ? { ...EMPTY_FORM, ...JSON.parse(saved) } : EMPTY_FORM;
+      } catch {
+        return EMPTY_FORM;
+      }
+    }
+    
+    // Fallback to empty form
+    return EMPTY_FORM;
   });
 
+  const [isReadOnly] = useState(routeReadOnly);
+
+  // Clear sessionStorage only when explicitly starting fresh after viewing history
   useEffect(() => {
+    // If we just viewed history (routeAssessment exists) and user wants to start fresh
+    if (routeAssessment && location.state?.clearDraft) {
+      sessionStorage.removeItem(SESSION_KEY);
+      
+      // Start fresh but preserve user profile data (age, gender) if available
+      const userRaw = localStorage.getItem('user');
+      if (userRaw) {
+        try {
+          const user = JSON.parse(userRaw);
+          setFormData({
+            ...EMPTY_FORM,
+            age: user.age || '',
+            gender: user.gender || '',
+          });
+        } catch {
+          setFormData(EMPTY_FORM);
+        }
+      } else {
+        setFormData(EMPTY_FORM);
+      }
+    }
+    
+    // Clear the clearDraft flag from location state after handling it
+    if (location.state?.clearDraft) {
+      window.history.replaceState({}, document.title);
+    }
+  }, []);
+
+  useEffect(() => {
+    // If viewing in read-only mode, don't persist to sessionStorage
+    if (isReadOnly) return;
+    
     sessionStorage.setItem(SESSION_KEY, JSON.stringify(formData));
-  }, [formData]);
+  }, [formData, isReadOnly]);
+
+  // If this page is opened in read-only mode, disable form controls so nothing is editable.
+  useEffect(() => {
+    if (!isReadOnly) return;
+    const container = document.querySelector('.assessment-container');
+    if (!container) return;
+    // Disable form controls
+    const controls = container.querySelectorAll('input, select, textarea');
+    controls.forEach((c) => { try { c.disabled = true; c.setAttribute('aria-readonly', 'true'); } catch (e) {} });
+    // Disable interactive buttons inside the step body (but not footer nav)
+    const buttons = container.querySelectorAll('.step-body button');
+    const prevButtonStates = [];
+    buttons.forEach((b, idx) => {
+      try {
+        // Keep diet/info tooltip buttons interactive in read-only history view
+        if (b.classList && (b.classList.contains('diet-info-btn') || b.classList.contains('diet-tooltip-close'))) {
+          prevButtonStates[idx] = b.disabled;
+          return;
+        }
+        prevButtonStates[idx] = b.disabled;
+        b.disabled = true;
+        b.setAttribute('aria-hidden', 'true');
+      } catch (e) {}
+    });
+    // Remove contentEditable if present
+    const editable = container.querySelectorAll('[contenteditable]');
+    const prevEditable = [];
+    editable.forEach((el, idx) => {
+      try {
+        prevEditable[idx] = el.getAttribute('contenteditable');
+        el.setAttribute('contenteditable', 'false');
+      } catch (e) {}
+    });
+
+    return () => {
+      controls.forEach((c) => { try { c.disabled = false; c.removeAttribute('aria-readonly'); } catch (e) {} });
+      buttons.forEach((b, idx) => { try { b.disabled = prevButtonStates[idx] || false; b.removeAttribute('aria-hidden'); } catch (e) {} });
+      editable.forEach((el, idx) => { try { if (prevEditable[idx] !== null && prevEditable[idx] !== undefined) el.setAttribute('contenteditable', prevEditable[idx]); else el.removeAttribute('contenteditable'); } catch (e) {} });
+    };
+  }, [isReadOnly]);
 
   // Scroll to top whenever step changes
   useEffect(() => {
@@ -2097,6 +2256,11 @@ function AssessmentPage() {
   };
 
   const handleNext = () => {
+    if (isReadOnly) {
+      if (step < TOTAL_STEPS) setStep((s) => s + 1);
+      return;
+    }
+
     const stepErrors = validateStep(step, formData);
     if (Object.keys(stepErrors).length > 0) {
       setErrors(stepErrors);
@@ -2133,6 +2297,11 @@ function AssessmentPage() {
     setErrors({});
     if (step > 1) setStep((s) => s - 1);
     else {
+      if (isReadOnly) {
+        // When viewing from history, 'Cancel' should go back to history
+        navigate('/history');
+        return;
+      }
       sessionStorage.removeItem(SESSION_KEY);
       setFormData(EMPTY_FORM);
       navigate('/');
@@ -2236,10 +2405,14 @@ function AssessmentPage() {
   return (
     <div className="assessment-wrapper">
       <Navbar />
-      <div className="assessment-container">
+      <div className={`assessment-container ${isReadOnly ? 'readonly' : ''}`}>
         <div className="assessment-header">
           <div>
-            <h2 className="assessment-title">Health Assessment</h2>
+            <h2 className="assessment-title">
+              {isReadOnly && routeAssessment && routeAssessment.createdAt
+                ? new Date(routeAssessment.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                : (isReadOnly ? 'Health Assessment History' : 'Health Assessment')}
+            </h2>
             <div className="progress-bar-track">
               <div className="progress-bar-fill" style={{ width: `${progress}%` }} />
             </div>
@@ -2274,18 +2447,27 @@ function AssessmentPage() {
           {step === 1 && <Step1 data={formData} onChange={handleChange} errors={errors} />}
           {step === 2 && <Step2 data={formData} onChange={handleChange} errors={errors} />}
           {step === 3 && <Step3Combined data={formData} onChange={handleChange} errors={errors} symptomRowRefs={symptomRowRefs} />}
-          {step === 4 && <Step4Lifestyle data={formData} onChange={handleChange} errors={errors} />}
+          {step === 4 && <Step4Lifestyle data={formData} onChange={handleChange} errors={errors} isReadOnly={isReadOnly} />}
 
           <div className="assessment-footer">
             <button className="btn-cancel" onClick={handleBack}>
-              ← {step === 1 ? 'Cancel' : 'Back'}
+              ← {step === 1 ? (isReadOnly ? 'Back' : 'Cancel') : 'Back'}
             </button>
             {step < TOTAL_STEPS ? (
               <button className="btn-next" onClick={handleNext}>Next →</button>
             ) : (
-              <button className="btn-next" onClick={handleSubmit} disabled={submitting}>
-                Get Recommendations →
-              </button>
+              isReadOnly ? (
+                <button
+                  className="btn-next"
+                  onClick={() => navigate('/history')}
+                >
+                  Back to History
+                </button>
+              ) : (
+                <button className="btn-next" onClick={handleSubmit} disabled={submitting}>
+                  Get Recommendations →
+                </button>
+              )
             )}
           </div>
         </div>

@@ -236,7 +236,9 @@ function SignIn() {
         sessionStorage.removeItem(SESSION_KEY);
         navigate('/results', { state: { recommendations, assessment: formData } });
       } else {
-        navigate('/');
+        // Check if there's a redirect destination from HomePage
+        const redirectTo = location.state?.redirectTo;
+        navigate(redirectTo || '/dashboard');
       }
     } catch (err) {
       setError(err.message);

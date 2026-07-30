@@ -1,0 +1,2273 @@
+/* ═══════════════════════════════════════════════════════════════
+   MOBILE-FIRST RESPONSIVE OVERRIDES FOR SUPPLIWISE
+   This file adds comprehensive mobile responsiveness
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ═══ MOBILE BACKGROUND - DARKER FOR BETTER CONTRAST ═══ */
+@media (max-width: 768px) {
+  /* Darken page backgrounds on mobile for better contrast */
+  .assessment-wrapper,
+  .history-wrapper,
+  .recommendations-wrapper,
+  .insights-wrapper,
+  .dashboard-wrapper,
+  .profile-page,
+  .results-wrapper,
+  .home-wrapper,
+  .page-wrapper {
+    background: #d1f4e0 !important;
+  }
+
+  /* Assessment page specific - darker green background */
+  .assessment-container {
+    background: transparent !important;
+  }
+
+  /* Make landing page cards more visible on mobile */
+  .home-wrapper .how-card,
+  .home-wrapper .how-card-featured {
+    background: white !important;
+    border: 2px solid #86efac !important;
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.15) !important;
+  }
+
+  /* Keep featured card with green background tint */
+  .home-wrapper .how-card-featured {
+    background: #f0fdf4 !important;
+    border: 2px solid #22c55e !important;
+    box-shadow: 0 4px 16px rgba(34, 197, 94, 0.25) !important;
+  }
+
+  /* Make auth card more visible on mobile darker background */
+  .auth-card {
+    background: white !important;
+    border: 2px solid #86efac !important;
+    box-shadow: 0 6px 20px rgba(16, 185, 129, 0.2) !important;
+  }
+}
+
+/* ═══ NAVBAR FIX ═══ */
+@media (max-width: 768px) {
+  .navbar {
+    padding: 12px 16px !important;
+    flex-wrap: nowrap !important;
+    overflow-x: visible !important;
+    min-height: 60px !important;
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 1000 !important;
+    background: white !important;
+  }
+
+  .navbar-left {
+    gap: 10px !important;
+    flex-shrink: 1 !important;
+    min-width: 0 !important;
+  }
+
+  .navbar-logo-box {
+    width: 44px !important;
+    height: 44px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .navbar-logo-box svg {
+    width: 32px !important;
+    height: 32px !important;
+  }
+
+  .navbar-brand {
+    font-size: 20px !important;
+    white-space: nowrap !important;
+  }
+
+  .navbar-right {
+    gap: 12px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .navbar-username {
+    display: none !important;  /* Hide username text on mobile */
+  }
+
+  .navbar-nav-link {
+    padding: 8px !important;
+  }
+
+  .navbar-profile-link {
+    padding: 6px !important;
+    min-width: 0 !important;
+  }
+
+  .navbar-avatar {
+    width: 40px !important;
+    height: 40px !important;
+    font-size: 16px !important;
+  }
+
+  .navbar-signin-btn {
+    padding: 10px 18px !important;
+    font-size: 15px !important;
+    white-space: nowrap !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .navbar {
+    padding: 10px 14px !important;
+    min-height: 56px !important;
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 1000 !important;
+    background: white !important;
+  }
+
+  .navbar-left {
+    gap: 8px !important;
+  }
+
+  .navbar-logo-box {
+    width: 40px !important;
+    height: 40px !important;
+  }
+
+  .navbar-logo-box svg {
+    width: 28px !important;
+    height: 28px !important;
+  }
+
+  .navbar-brand {
+    font-size: 18px !important;
+  }
+
+  .navbar-right {
+    gap: 10px !important;
+  }
+
+  .navbar-nav-link {
+    padding: 7px !important;
+  }
+
+  .navbar-nav-link svg {
+    width: 20px !important;
+    height: 20px !important;
+  }
+
+  .navbar-signin-btn {
+    padding: 8px 16px !important;
+    font-size: 14px !important;
+  }
+
+  .navbar-avatar {
+    width: 36px !important;
+    height: 36px !important;
+    font-size: 14px !important;
+  }
+}
+
+/* ═══ CHAT/ASK AI BUTTON FIX ═══ */
+@media (max-width: 768px) {
+  .chat-fab {
+    bottom: 16px !important;
+    right: 16px !important;
+    padding: 10px 16px !important;
+    font-size: 16px !important;
+    box-shadow: 0 3px 16px rgba(34, 197, 94, 0.4) !important;
+  }
+
+  .chat-fab-label {
+    display: none !important;  /* Hide "Ask" text, show only icon */
+  }
+
+  .chat-fab {
+    width: 56px !important;
+    height: 56px !important;
+    border-radius: 50% !important;
+    padding: 0 !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  .chat-fab-icon svg {
+    width: 24px !important;
+    height: 24px !important;
+  }
+
+  /* Chat Window Mobile */
+  .chat-window {
+    right: 10px !important;
+    left: 10px !important;
+    width: auto !important;
+    bottom: 80px !important;
+    max-height: 70vh !important;
+    border-radius: 14px !important;
+  }
+
+  /* Fix initial positioning glitch - prevent off-screen render */
+  .chat-window {
+    transform: translateX(0) !important;
+  }
+
+  /* Make quick prompts horizontally scrollable on mobile */
+  .chat-quick-prompts {
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    -webkit-overflow-scrolling: touch !important;
+    scrollbar-width: none !important;
+    padding-bottom: 4px !important;
+  }
+
+  .chat-quick-prompts::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  .quick-prompt {
+    flex-shrink: 0 !important;
+    white-space: nowrap !important;
+  }
+
+  /* Fix close button (X) on mobile */
+  .chat-close {
+    width: 32px !important;
+    height: 32px !important;
+    font-size: 16px !important;
+    flex-shrink: 0 !important;
+    border-radius: 8px !important;
+  }
+
+  /* Fix scroll-to-bottom button (arrow down) on mobile */
+  .chat-scroll-to-bottom {
+    width: 40px !important;
+    height: 40px !important;
+    bottom: 145px !important;
+  }
+
+  .chat-scroll-to-bottom svg {
+    width: 18px !important;
+    height: 18px !important;
+  }
+}
+
+/* ═══ CLEAN MINIMAL LOADING STATES ═══ */
+.dashboard-loading-simple,
+.history-loading-simple,
+.recommendations-loading-simple,
+.track-intake-loading-simple {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 80px); /* Full viewport height minus navbar */
+  width: 100%;
+  padding: 60px 20px;
+  box-sizing: border-box;
+}
+
+.loading-spinner-simple {
+  width: 40px;
+  height: 40px;
+  border: 3px solid #d1f4e0;
+  border-top-color: #22c55e;
+  border-radius: 50%;
+  animation: spin-simple 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin-simple {
+  to { transform: rotate(360deg); }
+}
+
+/* Mobile-specific centering adjustments */
+@media (max-width: 768px) {
+  .dashboard-loading-simple,
+  .history-loading-simple,
+  .recommendations-loading-simple,
+  .track-intake-loading-simple {
+    min-height: calc(100vh - 70px); /* Slightly less navbar height on mobile */
+    padding: 40px 20px;
+  }
+}
+
+/* ═══ INSIGHTS PAGE MOBILE FIXES ═══ */
+@media (max-width: 768px) {
+  /* Darker tabs for better visibility */
+  .insights-tabs {
+    gap: 8px !important;
+    padding: 0 12px !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    scrollbar-width: none !important;
+  }
+
+  .insights-tabs::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  .insights-tab {
+    flex-shrink: 0 !important;
+    white-space: nowrap !important;
+    padding: 10px 16px !important;
+    font-size: 14px !important;
+    background: #e5e7eb !important; /* Darker grey for unselected */
+    color: #4b5563 !important; /* Darker text */
+  }
+
+  .insights-tab.active {
+    background: white !important;
+    color: #22c55e !important;
+    border-bottom: 3px solid #22c55e !important;
+  }
+
+  /* Fix adherence pattern count format - show "/" instead of "of" */
+  .adherence-count-desktop {
+    display: none !important;
+  }
+
+  .adherence-count-mobile {
+    display: inline !important;
+  }
+
+  .adherence-day-count {
+    font-size: 11px !important;
+    line-height: 1.3 !important;
+    margin-top: 4px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 2px !important;
+  }
+
+  .adherence-day-count svg {
+    width: 14px !important;
+    height: 14px !important;
+    flex-shrink: 0 !important;
+    margin-right: 2px !important;
+  }
+
+  /* Make supplement boxes less cramped on mobile */
+  .todays-supplements-list {
+    padding: 16px 8px !important; /* Reduce side padding to give more room to boxes */
+  }
+
+  .supplements-grid {
+    gap: 12px !important;
+  }
+
+  .supplement-progress-item {
+    padding: 16px 18px !important; /* Increased horizontal padding inside boxes */
+    border-radius: 12px !important;
+    gap: 14px !important;
+    margin: 0 4px !important; /* Add small margin for visual breathing room */
+  }
+
+  .supplement-status-icon {
+    width: 36px !important;
+    height: 36px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .supplement-status-icon svg {
+    width: 20px !important;
+    height: 20px !important;
+  }
+
+  .supplement-progress-info {
+    flex: 1 !important;
+    min-width: 0 !important;
+  }
+
+  .supplement-progress-name {
+    font-size: 15px !important;
+    margin-bottom: 6px !important;
+    line-height: 1.4 !important;
+  }
+
+  .supplement-progress-details {
+    font-size: 13px !important;
+    margin-bottom: 4px !important;
+    line-height: 1.4 !important;
+  }
+
+  .supplement-progress-time {
+    font-size: 12px !important;
+    line-height: 1.3 !important;
+  }
+}
+
+/* Desktop: Hide mobile format, show "of" format */
+@media (min-width: 769px) {
+  .adherence-count-mobile {
+    display: none !important;
+  }
+
+  .adherence-count-desktop {
+    display: inline !important;
+  }
+}
+
+/* ═══ TOAST NOTIFICATION MOBILE FIXES ═══ */
+@media (max-width: 768px) {
+  /* Position at top center like other toasts - FORCE position */
+  .toast {
+    position: fixed !important;
+    top: 90px !important; /* Below navbar with safe spacing */
+    right: 12px !important;
+    left: 12px !important;
+    max-width: none !important;
+    width: auto !important;
+    margin: 0 !important;
+    z-index: 1000 !important;
+  }
+
+  /* Fix close button - make it more mobile friendly */
+  .toast-close {
+    width: 28px !important;
+    height: 28px !important;
+    border-radius: 6px !important;
+    font-size: 14px !important;
+    flex-shrink: 0 !important;
+  }
+
+  /* Completion toast mobile fixes - FORCE to top at same position as regular toast */
+  .completion-toast {
+    position: fixed !important;
+    top: 90px !important; /* Same as regular toast - below navbar with safe spacing */
+    bottom: auto !important; /* Override any bottom positioning */
+    right: 12px !important;
+    left: 12px !important;
+    max-width: none !important;
+    width: auto !important;
+    padding: 16px !important;
+    z-index: 1001 !important; /* Higher than regular toast */
+    margin: 0 !important;
+    transform: translateY(0) !important; /* Override any transform */
+  }
+
+  .completion-toast-close {
+    width: 28px !important;
+    height: 28px !important;
+    border-radius: 6px !important;
+    font-size: 14px !important;
+    flex-shrink: 0 !important;
+  }
+
+  /* Override any animation transforms on mobile */
+  @keyframes slideInRight {
+    from {
+      transform: translateY(-20px);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+}
+
+/* ═══ SCHEDULE & RECOVERY MOBILE IMPROVEMENTS ═══ */
+@media (max-width: 768px) {
+  /* Daily Schedule improvements */
+  .daily-schedule {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 14px !important;
+    margin-bottom: 16px !important;
+  }
+
+  .schedule-slot {
+    flex-direction: column !important;
+    gap: 12px !important;
+    padding: 16px 18px !important;
+    border-radius: 12px !important;
+    background: white !important;
+    border: 2px solid #e5e7eb !important;
+  }
+
+  .schedule-time {
+    min-width: unset !important;
+    font-size: 15px !important;
+    font-weight: 700 !important;
+    color: #059669 !important;
+    padding-bottom: 8px !important;
+    border-bottom: 1px solid #f0fdf4 !important;
+    width: 100% !important;
+  }
+
+  .schedule-supplements {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 10px !important;
+    width: 100% !important;
+  }
+
+  .schedule-pill {
+    background: #f0fdf4 !important;
+    border: 1.5px solid #86efac !important;
+    border-radius: 10px !important;
+    padding: 12px 14px !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    color: #166534 !important;
+    line-height: 1.5 !important;
+    display: block !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .schedule-pill-dosage {
+    display: block !important;
+    font-size: 13px !important;
+    color: #059669 !important;
+    margin-top: 4px !important;
+    opacity: 0.9 !important;
+  }
+
+  /* Recovery Plan improvements */
+  .recovery-plan {
+    gap: 16px !important;
+    margin-bottom: 20px !important;
+  }
+
+  .recovery-phase {
+    padding: 18px !important;
+    border-radius: 12px !important;
+    border: 2px solid #e5e7eb !important;
+  }
+
+  .recovery-phase-header {
+    gap: 12px !important;
+    margin-bottom: 12px !important;
+  }
+
+  .recovery-phase-num {
+    width: 32px !important;
+    height: 32px !important;
+    font-size: 14px !important;
+  }
+
+  .recovery-phase-title {
+    font-size: 16px !important;
+    line-height: 1.4 !important;
+    margin: 0 !important;
+  }
+
+  .recovery-phase-focus {
+    font-size: 14px !important;
+    line-height: 1.5 !important;
+    margin-top: 6px !important;
+  }
+
+  .recovery-steps,
+  .recovery-expected ul {
+    padding-left: 20px !important;
+    margin: 0 !important;
+  }
+
+  .recovery-steps li,
+  .recovery-expected li {
+    font-size: 14px !important;
+    line-height: 1.6 !important;
+    margin-bottom: 8px !important;
+  }
+
+  .recovery-expected-label {
+    font-size: 13px !important;
+    display: block !important;
+    margin-bottom: 8px !important;
+  }
+}
+
+/* ═══ RESULTS PAGE MOBILE FIXES ═══ */
+@media (max-width: 768px) {
+  /* Professional warning text - better mobile styling */
+  .professional-warning,
+  .results-disclaimer {
+    padding: 16px !important;
+    font-size: 13px !important;
+    line-height: 1.6 !important;
+    text-align: left !important;
+    margin: 16px 12px !important;
+    border-radius: 12px !important;
+  }
+
+  .professional-warning p,
+  .results-disclaimer p {
+    margin-bottom: 12px !important;
+  }
+
+  .professional-warning p:last-child,
+  .results-disclaimer p:last-child {
+    margin-bottom: 0 !important;
+  }
+
+  /* Results page buttons - centered and full width */
+  .results-actions,
+  .results-buttons {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+    padding: 0 12px 20px !important;
+    margin: 0 !important;
+  }
+
+  .btn-export-pdf,
+  .btn-view-history,
+  .btn-retake,
+  .btn-back-home {
+    width: 100% !important;
+    justify-content: center !important;
+    text-align: center !important;
+    padding: 14px 20px !important;
+    font-size: 15px !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Export PDF button specific */
+  .btn-export-pdf {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 8px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .chat-fab {
+    bottom: 12px !important;
+    right: 12px !important;
+    width: 52px !important;
+    height: 52px !important;
+  }
+
+  .chat-fab-icon svg {
+    width: 22px !important;
+    height: 22px !important;
+  }
+}
+
+/* ═══ HISTORY PAGE TABS FIX ═══ */
+@media (max-width: 768px) {
+  .history-tabs {
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    -webkit-overflow-scrolling: touch !important;
+    scrollbar-width: none !important;
+    padding: 0 12px !important;
+    gap: 6px !important;
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    touch-action: pan-x !important;
+    pointer-events: auto !important;
+    justify-content: flex-start !important;
+  }
+
+  .history-tabs::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  .history-tab {
+    padding: 12px 18px !important;
+    font-size: 13px !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+    min-width: auto !important;
+    cursor: pointer !important;
+    pointer-events: auto !important;
+    touch-action: manipulation !important;
+    user-select: none !important;
+  }
+
+  .history-card-header-right {
+    flex-wrap: nowrap !important;
+    gap: 6px !important;
+  }
+
+  .btn-view-answers,
+  .btn-view-results,
+  .btn-download-pdf,
+  .btn-delete {
+    width: 30px !important;
+    height: 30px !important;
+    padding: 0 !important;
+    flex-shrink: 0 !important;
+  }
+
+  .btn-view-answers svg,
+  .btn-view-results svg,
+  .btn-download-pdf svg,
+  .btn-delete svg {
+    width: 14px !important;
+    height: 14px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .history-tabs {
+    padding: 0 10px !important;
+  }
+
+  .history-tab {
+    padding: 10px 14px !important;
+    font-size: 12px !important;
+  }
+
+  .btn-view-answers,
+  .btn-view-results,
+  .btn-download-pdf,
+  .btn-delete {
+    width: 28px !important;
+    height: 28px !important;
+  }
+
+  .btn-view-answers svg,
+  .btn-view-results svg,
+  .btn-download-pdf svg,
+  .btn-delete svg {
+    width: 13px !important;
+    height: 13px !important;
+  }
+}
+
+/* ═══ ASSESSMENT PAGE - COMPLETE MOBILE REDESIGN ═══ */
+@media (max-width: 768px) {
+  /* Assessment Container */
+  .assessment-container {
+    padding: 16px 12px 100px !important;
+    max-width: 100% !important;
+  }
+
+  /* Progress Bar */
+  .assessment-progress-container {
+    padding: 0 12px 16px !important;
+  }
+
+  .assessment-progress-bar {
+    height: 6px !important;
+  }
+
+  /* Step Header */
+  .assessment-step-header {
+    padding: 16px 12px !important;
+    gap: 8px !important;
+  }
+
+  .assessment-step-title {
+    font-size: 20px !important;
+  }
+
+  .assessment-step-indicator {
+    font-size: 13px !important;
+  }
+
+  /* Step Body */
+  .step-body {
+    padding: 0 !important;
+  }
+
+  /* Section Headers */
+  .section-header-with-icon {
+    padding: 16px 12px 12px !important;
+    gap: 10px !important;
+  }
+
+  .section-icon {
+    width: 22px !important;
+    height: 22px !important;
+  }
+
+  .section-title {
+    font-size: 16px !important;
+  }
+
+  /* ═══ CRITICAL FIX: STEP 1 SIDE-BY-SIDE CARDS ═══ */
+  /* Force cards to stack vertically */
+  .info-cards-row {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 16px !important;
+    width: 100% !important;
+  }
+
+  .info-card,
+  .demographics-card,
+  .measurements-card {
+    width: 100% !important;
+    max-width: 100% !important;
+    flex: none !important;
+    padding: 16px !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Card content */
+  .card-header {
+    margin-bottom: 14px !important;
+    gap: 8px !important;
+  }
+
+  .card-icon {
+    width: 20px !important;
+    height: 20px !important;
+  }
+
+  .card-title {
+    font-size: 15px !important;
+  }
+
+  /* Card fields */
+  .card-field {
+    margin-bottom: 14px !important;
+  }
+
+  .card-field label {
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    font-size: 14px !important;
+    margin-bottom: 8px !important;
+    flex-wrap: wrap !important;
+    line-height: 1.4 !important;
+  }
+
+  .card-field input[type="number"],
+  .card-field input[type="text"] {
+    width: 100% !important;
+    padding: 12px !important;
+    font-size: 15px !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Gender pills - cleaner mobile design */
+  .gender-pill-group {
+    display: flex !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
+
+  .gender-pill {
+    flex: 1 !important;
+    padding: 10px 16px !important;
+    font-size: 14px !important;
+    height: 40px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-width: 1.5px !important;
+  }
+
+  /* Active gender pill */
+  .gender-pill-active {
+    box-shadow: 0 2px 8px rgba(34, 197, 94, 0.25) !important;
+  }
+
+  /* Unit toggles */
+  .unit-toggle-inline {
+    display: flex !important;
+    gap: 6px !important;
+    margin-left: auto !important;
+  }
+
+  .unit-btn {
+    padding: 6px 12px !important;
+    font-size: 12px !important;
+    min-width: 50px !important;
+  }
+
+  /* ═══ FIX: FT/IN HEIGHT INPUT LAYOUT ═══ */
+  .ft-in-row {
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+    width: 100% !important;
+    justify-content: space-between !important;
+  }
+
+  .ft-in-row input {
+    flex: 1 !important;
+    min-width: 0 !important;
+    padding: 12px 10px !important;
+    text-align: center !important;
+  }
+
+  .ft-in-sep {
+    font-size: 13px !important;
+    color: #6b7280 !important;
+    font-weight: 600 !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+    min-width: 24px !important;
+    text-align: center !important;
+  }
+
+  /* ═══ CRITICAL FIX: STEP 2 DIET TYPES & HEALTH GOALS ═══ */
+  /* Diet types grid → single column */
+  .diet-types-grid,
+  .radio-group-two-col {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 10px !important;
+    width: 100% !important;
+  }
+
+  /* Each diet option */
+  .diet-option,
+  .radio-option {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    padding: 12px 14px !important;
+    gap: 12px !important;
+    background: white !important;
+    border: 2px solid #e5e7eb !important;
+    border-radius: 10px !important;
+    transition: all 0.2s !important;
+    position: relative !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    min-height: 44px !important;
+  }
+
+  .diet-option:active,
+  .radio-option:active {
+    transform: scale(0.98) !important;
+  }
+
+  /* Radio/checkbox input - properly aligned */
+  .diet-option input[type="radio"],
+  .radio-option input[type="radio"],
+  .radio-option input[type="checkbox"] {
+    width: 20px !important;
+    height: 20px !important;
+    flex-shrink: 0 !important;
+    margin: 0 !important;
+    align-self: flex-start !important;
+    margin-top: 2px !important;
+  }
+
+  /* Label - properly aligned with checkbox */
+  .diet-option label,
+  .radio-option label {
+    flex: 1 !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    cursor: pointer !important;
+    margin: 0 !important;
+    line-height: 1.5 !important;
+    display: flex !important;
+    align-items: flex-start !important;
+  }
+
+  /* ═══ FORCE ALL CHECKBOX GRIDS TO SINGLE COLUMN ═══ */
+  /* This prevents text wrapping/cutting in two-column layouts */
+  .checkbox-grid-2,
+  .checkbox-grid-3,
+  .goal-group .checkbox-grid-2,
+  .condition-group .checkbox-grid-2 {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 10px !important;
+    grid-template-columns: none !important;
+  }
+
+  /* Ensure checkbox labels in grids don't wrap awkwardly */
+  .checkbox-grid-2 .checkbox-label,
+  .checkbox-grid-3 .checkbox-label {
+    display: flex !important;
+    align-items: center !important;
+    padding: 12px 14px !important;
+    background: white !important;
+    border: 2px solid #e5e7eb !important;
+    border-radius: 10px !important;
+    gap: 12px !important;
+    min-height: 44px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .checkbox-grid-2 .checkbox-label input,
+  .checkbox-grid-3 .checkbox-label input {
+    width: 20px !important;
+    height: 20px !important;
+    flex-shrink: 0 !important;
+    margin: 0 !important;
+    align-self: flex-start !important;
+    margin-top: 2px !important;
+  }
+
+  .checkbox-grid-2 .checkbox-label,
+  .checkbox-grid-3 .checkbox-label {
+    font-size: 14px !important;
+    line-height: 1.5 !important;
+  }
+
+  /* ═══ COMPREHENSIVE: HIDE ALL HELP ICONS (?) ON MOBILE ═══ */
+  /* This targets ALL possible help icon variations across all steps */
+  .diet-tooltip-wrap,
+  .diet-info-btn,
+  .help-icon-btn,
+  .info-btn,
+  button[aria-label*="Info"],
+  button[aria-label*="info"],
+  button[title*="Why"],
+  button[title*="important"] {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  /* Remove any tooltip boxes that might appear */
+  .diet-tooltip-box {
+    display: none !important;
+  }
+
+  /* Add helpful banner at top of assessment */
+  .assessment-container::before {
+    content: "💡 Need help? Tap the green Ask AI button below for guidance" !important;
+    display: block !important;
+    background: linear-gradient(135deg, #dbeafe, #bfdbfe) !important;
+    color: #1e40af !important;
+    padding: 14px 18px !important;
+    border-radius: 12px !important;
+    margin: 0 0 20px 0 !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    text-align: center !important;
+    border: 2px solid #93c5fd !important;
+    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.15) !important;
+  }
+
+  /* Selected state */
+  .diet-option:has(input:checked),
+  .radio-option:has(input:checked) {
+    background: #f0fdf4 !important;
+    border-color: #22c55e !important;
+  }
+
+  /* ═══ HEALTH GOALS CHECKBOXES ═══ */
+  .health-goals-grid {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 10px !important;
+  }
+
+  .goal-checkbox-option {
+    display: flex !important;
+    align-items: flex-start !important;
+    padding: 12px 14px !important;
+    background: white !important;
+    border: 2px solid #e5e7eb !important;
+    border-radius: 10px !important;
+    gap: 12px !important;
+    min-height: 44px !important;
+  }
+
+  .goal-checkbox-option input[type="checkbox"] {
+    width: 20px !important;
+    height: 20px !important;
+    flex-shrink: 0 !important;
+    margin: 0 !important;
+    margin-top: 2px !important;
+  }
+
+  .goal-checkbox-option label {
+    flex: 1 !important;
+    font-size: 14px !important;
+    cursor: pointer !important;
+    line-height: 1.5 !important;
+    margin: 0 !important;
+  }
+
+  .goal-checkbox-option:has(input:checked) {
+    background: #fef3c7 !important;
+    border-color: #fbbf24 !important;
+  }
+
+  /* ═══ CRITICAL FIX: STEP 3 MEDICAL CONDITIONS ═══ */
+  .conditions-grid {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 10px !important;
+  }
+
+  .condition-checkbox-option {
+    display: flex !important;
+    align-items: flex-start !important;
+    padding: 12px 14px !important;
+    background: white !important;
+    border: 2px solid #e5e7eb !important;
+    border-radius: 10px !important;
+    gap: 12px !important;
+    min-height: 44px !important;
+  }
+
+  .condition-checkbox-option input[type="checkbox"] {
+    width: 20px !important;
+    height: 20px !important;
+    flex-shrink: 0 !important;
+    margin: 0 !important;
+    margin-top: 2px !important;
+  }
+
+  .condition-checkbox-option label {
+    flex: 1 !important;
+    font-size: 14px !important;
+    cursor: pointer !important;
+    line-height: 1.5 !important;
+    margin: 0 !important;
+  }
+
+  .condition-checkbox-option:has(input:checked) {
+    background: #fef2f2 !important;
+    border-color: #fca5a5 !important;
+  }
+
+  /* ═══ SECTION LABELS ═══ */
+  .section-label,
+  .conditions-category-label,
+  .goal-group-label,
+  .goal-subgroup-label,
+  .condition-group-label {
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.5px !important;
+    color: #6b7280 !important;
+    margin: 16px 0 10px 0 !important;
+    padding: 0 12px !important;
+  }
+
+  /* ═══ PHYSICAL ACTIVITY ═══ */
+  .activity-level-section {
+    padding: 0 12px !important;
+  }
+
+  .activity-level-section h3 {
+    font-size: 15px !important;
+    margin-bottom: 12px !important;
+  }
+
+  .activity-options {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 10px !important;
+  }
+
+  /* Activity option wrapper */
+  .activity-option-wrap {
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  /* Radio label inside activity options */
+  .activity-option-wrap .radio-label {
+    display: flex !important;
+    align-items: flex-start !important;
+    padding: 12px 14px !important;
+    background: white !important;
+    border: 2px solid #e5e7eb !important;
+    border-radius: 10px !important;
+    gap: 12px !important;
+    min-height: 44px !important;
+  }
+
+  .activity-option-wrap .radio-label input[type="radio"] {
+    width: 20px !important;
+    height: 20px !important;
+    margin: 0 !important;
+    margin-top: 2px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .activity-option-wrap .radio-label {
+    font-size: 14px !important;
+    line-height: 1.5 !important;
+  }
+
+  /* ═══ FORM FIELDS - FULL WIDTH ═══ */
+  .form-group {
+    margin-bottom: 16px !important;
+  }
+
+  .form-label {
+    font-size: 13px !important;
+    margin-bottom: 8px !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+  }
+
+  .form-input {
+    width: 100% !important;
+    padding: 12px !important;
+    font-size: 15px !important;
+  }
+
+  /* ═══ SYMPTOMS CHECKBOXES ═══ */
+  .symptoms-group {
+    padding: 0 12px !important;
+  }
+
+  .symptoms-list {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 10px !important;
+  }
+
+  .symptom-option {
+    display: flex !important;
+    align-items: flex-start !important;
+    padding: 12px 14px !important;
+    background: white !important;
+    border: 2px solid #e5e7eb !important;
+    border-radius: 10px !important;
+    gap: 12px !important;
+    min-height: 44px !important;
+  }
+
+  .symptom-option input[type="checkbox"] {
+    width: 20px !important;
+    height: 20px !important;
+    flex-shrink: 0 !important;
+    margin: 0 !important;
+    margin-top: 2px !important;
+  }
+
+  .symptom-option label {
+    flex: 1 !important;
+    font-size: 14px !important;
+    cursor: pointer !important;
+    line-height: 1.5 !important;
+    margin: 0 !important;
+  }
+
+  .symptom-option:has(input:checked) {
+    background: #fef3c7 !important;
+    border-color: #fbbf24 !important;
+  }
+
+  /* ═══ TEXTAREA ═══ */
+  .form-textarea {
+    width: 100% !important;
+    min-height: 100px !important;
+    padding: 12px !important;
+    font-size: 14px !important;
+    border: 2px solid #e5e7eb !important;
+    border-radius: 10px !important;
+    resize: vertical !important;
+  }
+
+  /* ═══ NAVIGATION BUTTONS ═══ */
+  .assessment-navigation {
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    background: white !important;
+    padding: 10px 12px !important;
+    border-top: 1px solid #e5e7eb !important;
+    display: flex !important;
+    gap: 20px !important;
+    z-index: 50 !important;
+    box-shadow: 0 -2px 10px rgba(0,0,0,0.05) !important;
+  }
+
+  /* Force gap with margin as well */
+  .btn-back {
+    flex: 0 0 auto !important;
+    padding: 11px 16px !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    border-radius: 8px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 6px !important;
+    height: 44px !important;
+    box-sizing: border-box !important;
+    background: white !important;
+    color: #374151 !important;
+    border: 1.5px solid #d1d5db !important;
+    min-width: 90px !important;
+    max-width: 110px !important;
+    margin-right: 4px !important;
+  }
+
+  .btn-next,
+  .btn-submit {
+    flex: 1 !important;
+    padding: 11px 20px !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    border-radius: 8px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 6px !important;
+    height: 44px !important;
+    box-sizing: border-box !important;
+    background: #22c55e !important;
+    color: white !important;
+    border: none !important;
+    margin-left: 4px !important;
+  }
+
+  /* ═══ PREGNANCY SECTION ═══ */
+  .pregnancy-section {
+    padding: 0 12px !important;
+    margin-top: 16px !important;
+  }
+
+  .pregnancy-options {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+  }
+
+  /* ═══ TAGS INPUT ═══ */
+  .tags-input-container {
+    padding: 10px !important;
+    min-height: 60px !important;
+  }
+
+  .tag {
+    padding: 6px 10px !important;
+    font-size: 13px !important;
+  }
+
+  .tags-input {
+    font-size: 14px !important;
+    padding: 8px !important;
+  }
+}
+
+/* ═══ EXTRA SMALL MOBILE (≤480px) ═══ */
+@media (max-width: 480px) {
+  .assessment-container {
+    padding: 12px 8px 100px !important;
+  }
+
+  .assessment-step-title {
+    font-size: 18px !important;
+  }
+
+  .info-card {
+    padding: 12px !important;
+  }
+
+  .radio-option,
+  .diet-option {
+    padding: 12px 10px !important;
+  }
+
+  .radio-option label,
+  .diet-option label {
+    font-size: 13px !important;
+  }
+
+  .diet-info-btn {
+    width: 26px !important;
+    height: 26px !important;
+  }
+
+  .btn-back,
+  .btn-next,
+  .btn-submit {
+    padding: 12px !important;
+    font-size: 14px !important;
+  }
+}
+
+/* ═══ ASSESSMENT PAGE HELP ICONS FIX ═══ */
+@media (max-width: 768px) {
+  /* Two-column radio layouts */
+  .radio-group-two-col,
+  .diet-types-grid,
+  .health-goals-grid {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+
+  /* Radio options with help icons */
+  .radio-option {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    padding: 12px !important;
+    gap: 8px !important;
+  }
+
+  .radio-option label {
+    flex: 1 !important;
+    min-width: 0 !important;
+  }
+
+  .help-icon-btn,
+  .info-btn {
+    flex-shrink: 0 !important;
+    width: 22px !important;
+    height: 22px !important;
+    padding: 0 !important;
+    margin-left: auto !important;
+  }
+
+  .help-icon-btn svg,
+  .info-btn svg {
+    width: 14px !important;
+    height: 14px !important;
+  }
+
+  /* Unit toggle buttons */
+  .unit-toggle {
+    gap: 6px !important;
+  }
+
+  .unit-btn {
+    padding: 6px 12px !important;
+    font-size: 12px !important;
+    min-width: 50px !important;
+  }
+
+  /* Assessment navigation */
+  .assessment-navigation {
+    flex-direction: column-reverse !important;
+    gap: 10px !important;
+  }
+
+  .assessment-navigation button {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+
+  /* Info cards */
+  .info-card {
+    padding: 14px !important;
+  }
+
+  .card-header {
+    margin-bottom: 12px !important;
+  }
+
+  .card-title {
+    font-size: 14px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .radio-option {
+    padding: 10px !important;
+  }
+
+  .radio-option label {
+    font-size: 13px !important;
+  }
+
+  .help-icon-btn,
+  .info-btn {
+    width: 20px !important;
+    height: 20px !important;
+  }
+
+  .help-icon-btn svg,
+  .info-btn svg {
+    width: 12px !important;
+    height: 12px !important;
+  }
+}
+
+/* Base Mobile Improvements */
+@media (max-width: 768px) {
+  /* Global Container Fixes */
+  .dashboard-container,
+  .recommendations-container,
+  .insights-container,
+  .history-container {
+    padding: 20px 12px !important;
+    max-width: 100% !important;
+  }
+
+  /* Header Text Sizing */
+  .dashboard-title,
+  .recommendations-title,
+  .insights-title,
+  h2 {
+    font-size: 22px !important;
+    line-height: 1.3 !important;
+  }
+
+  .dashboard-subtitle,
+  .recommendations-subtitle,
+  .insights-subtitle {
+    font-size: 14px !important;
+    line-height: 1.5 !important;
+  }
+
+  /* Card Grids - Force Single Column on Mobile */
+  .dashboard-cards {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+
+  .dashboard-card {
+    padding: 20px 16px !important;
+    min-height: 100px !important;
+  }
+
+  /* Bottom Section - Stack Vertically */
+  .dashboard-bottom {
+    grid-template-columns: 1fr !important;
+    gap: 16px !important;
+  }
+
+  .dashboard-right-column {
+    grid-template-columns: 1fr !important;
+    position: static !important;
+  }
+
+  /* Stats Grid - Single Column */
+  .stats-grid {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+
+  .stat-item {
+    padding: 12px !important;
+    gap: 10px !important;
+  }
+
+  .stat-icon-box {
+    width: 50px !important;
+    height: 50px !important;
+  }
+
+  .stat-icon-box svg {
+    width: 20px !important;
+    height: 20px !important;
+  }
+
+  .stat-label {
+    font-size: 11px !important;
+  }
+
+  .stat-value {
+    font-size: 14px !important;
+  }
+
+  /* Supplements List */
+  .supplements-list {
+    max-height: none !important;
+  }
+
+  .supplement-item {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 12px !important;
+    padding: 14px !important;
+  }
+
+  .supplement-btn,
+  .btn-mark-taken,
+  .btn-undo {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+
+  /* Section Titles */
+  .section-title,
+  .insights-section-title {
+    font-size: 16px !important;
+  }
+
+  /* Recommendations Page */
+  .recommendation-card {
+    padding: 16px !important;
+  }
+
+  .recommendation-header {
+    flex-direction: column !important;
+    gap: 12px !important;
+    align-items: flex-start !important;
+  }
+
+  .recommendation-name {
+    font-size: 18px !important;
+  }
+
+  .recommendation-confidence {
+    align-items: flex-start !important;
+    flex-direction: row !important;
+    gap: 8px !important;
+  }
+
+  .confidence-value {
+    font-size: 24px !important;
+  }
+
+  .recommendation-actions {
+    flex-direction: column !important;
+    width: 100% !important;
+  }
+
+  .btn-add-plan,
+  .btn-added,
+  .btn-find-products {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+
+  /* Filter Tabs - Horizontal Scroll */
+  .filter-tabs,
+  .insights-tabs {
+    overflow-x: auto !important;
+    flex-wrap: nowrap !important;
+    -webkit-overflow-scrolling: touch !important;
+    padding-bottom: 4px !important;
+  }
+
+  .filter-tab,
+  .insights-tab {
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+    font-size: 13px !important;
+    padding: 8px 16px !important;
+  }
+
+  /* Warning Banners */
+  .professional-warning,
+  .warning-banner {
+    padding: 12px 14px !important;
+    gap: 10px !important;
+  }
+
+  .professional-warning p,
+  .warning-banner p {
+    font-size: 13px !important;
+    line-height: 1.5 !important;
+  }
+
+  /* Insights Page */
+  .insights-stats-grid,
+  .adherence-stats-grid,
+  .ai-insights-grid,
+  .lifestyle-grid {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+
+  .insight-stat-card,
+  .ai-insight-card,
+  .adherence-stat-card {
+    padding: 16px !important;
+  }
+
+  .stat-icon,
+  .ai-insight-icon,
+  .adherence-stat-icon {
+    width: 48px !important;
+    height: 48px !important;
+  }
+
+  .stat-value {
+    font-size: 24px !important;
+  }
+
+  .stat-label {
+    font-size: 12px !important;
+  }
+
+  /* History Page */
+  .history-card-header {
+    padding: 14px 16px !important;
+  }
+
+  .history-card-header-right {
+    gap: 6px !important;
+    flex-wrap: wrap !important;
+  }
+
+  .history-grid {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+    padding: 12px !important;
+  }
+
+  .tab-content {
+    padding: 16px !important;
+  }
+
+  .history-rec-card {
+    padding: 12px 14px !important;
+  }
+
+  /* Phase Cards */
+  .phase-item {
+    flex-direction: column !important;
+    gap: 12px !important;
+    padding: 16px !important;
+  }
+
+  .current-phase-card {
+    padding: 20px !important;
+  }
+
+  /* Charts */
+  .adherence-weekly-grid {
+    grid-template-columns: repeat(7, 1fr) !important;
+    gap: 6px !important;
+  }
+
+  .adherence-bar-container {
+    height: 100px !important;
+  }
+
+  .adherence-day-label {
+    font-size: 11px !important;
+  }
+
+  .adherence-day-percentage {
+    font-size: 10px !important;
+  }
+}
+
+/* Extra Small Mobile (< 480px) */
+@media (max-width: 480px) {
+  /* Even More Compact */
+  .dashboard-container,
+  .recommendations-container,
+  .insights-container,
+  .history-container {
+    padding: 16px 10px !important;
+  }
+
+  .dashboard-title,
+  .recommendations-title,
+  .insights-title,
+  h2 {
+    font-size: 20px !important;
+  }
+
+  .dashboard-subtitle,
+  .recommendations-subtitle,
+  .insights-subtitle {
+    font-size: 13px !important;
+  }
+
+  /* Cards */
+  .dashboard-card {
+    padding: 16px 12px !important;
+  }
+
+  .dashboard-card .card-icon {
+    width: 48px !important;
+    height: 48px !important;
+  }
+
+  .dashboard-card .card-title {
+    font-size: 15px !important;
+  }
+
+  /* Buttons */
+  .supplement-btn,
+  .btn-add-plan,
+  .btn-find-products,
+  .btn-primary,
+  .btn-mark-taken,
+  .btn-undo {
+    padding: 10px 16px !important;
+    font-size: 13px !important;
+  }
+
+  /* Section Padding */
+  .dashboard-section,
+  .insights-section,
+  .recommendation-card {
+    padding: 14px !important;
+  }
+
+  /* Text Sizes */
+  .supplement-name,
+  .recommendation-name {
+    font-size: 15px !important;
+  }
+
+  .supplement-details,
+  .supplement-time,
+  .dosage-text,
+  .reason-text {
+    font-size: 12px !important;
+  }
+
+  /* Empty States */
+  .empty-state,
+  .coming-soon-box {
+    padding: 40px 16px !important;
+  }
+
+  .empty-state-icon,
+  .coming-soon-icon {
+    font-size: 48px !important;
+  }
+
+  /* Modal */
+  .modal-box {
+    padding: 28px 20px !important;
+  }
+
+  .modal-title {
+    font-size: 18px !important;
+  }
+
+  .modal-body {
+    font-size: 13px !important;
+  }
+
+  /* Toast */
+  .recommendations-toast,
+  .history-toast,
+  .completion-toast {
+    bottom: 20px !important;
+    left: 10px !important;
+    right: 10px !important;
+    transform: none !important;
+    font-size: 13px !important;
+    padding: 12px 16px !important;
+    max-width: calc(100vw - 20px) !important;
+  }
+
+  /* Completion Toast Specific */
+  .completion-toast {
+    position: fixed !important;
+    top: auto !important;
+    bottom: 80px !important;
+    left: 50% !important;
+    right: auto !important;
+    transform: translateX(-50%) !important;
+    width: calc(100vw - 32px) !important;
+    max-width: 400px !important;
+    padding: 16px 18px !important;
+  }
+
+  .completion-toast-icon {
+    width: 36px !important;
+    height: 36px !important;
+  }
+
+  .completion-toast-title {
+    font-size: 14px !important;
+  }
+
+  .completion-toast-subtitle {
+    font-size: 13px !important;
+  }
+
+  .completion-toast-close {
+    width: 24px !important;
+    height: 24px !important;
+    font-size: 14px !important;
+  }
+
+  /* Priority Legend - Stack Vertically */
+  .section-header-with-legend {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+  }
+
+  .priority-legend {
+    gap: 12px !important;
+  }
+
+  /* History Tags */
+  .history-tags {
+    gap: 4px !important;
+  }
+
+  .tag {
+    font-size: 10px !important;
+    padding: 2px 8px !important;
+  }
+
+  /* Assessment Grid */
+  .history-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Tabs - Smaller */
+  .history-tabs {
+    padding: 0 12px !important;
+  }
+
+  .history-tab {
+    padding: 10px 12px !important;
+    font-size: 12px !important;
+  }
+
+  /* Adherence Chart - Even More Compact */
+  .adherence-weekly-grid {
+    gap: 4px !important;
+  }
+
+  .adherence-bar-container {
+    height: 80px !important;
+  }
+
+  .adherence-day-label {
+    font-size: 10px !important;
+  }
+
+  .adherence-day-percentage {
+    font-size: 9px !important;
+  }
+}
+
+/* Portrait Orientation Specific */
+@media (max-width: 768px) and (orientation: portrait) {
+  /* Ensure full width usage */
+  * {
+    max-width: 100vw !important;
+  }
+
+  body {
+    overflow-x: hidden !important;
+  }
+
+  /* Prevent horizontal scroll */
+  .dashboard-wrapper,
+  .recommendations-wrapper,
+  .insights-wrapper,
+  .history-wrapper {
+    overflow-x: hidden !important;
+    width: 100% !important;
+  }
+}
+
+/* Fix Overflow Issues */
+@media (max-width: 768px) {
+  /* Prevent text overflow */
+  .supplement-name,
+  .recommendation-name,
+  .history-card-title,
+  .phase-name {
+    word-break: break-word !important;
+    overflow-wrap: break-word !important;
+  }
+
+  /* Flexible Images */
+  img {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+
+  /* Flexible Containers */
+  .recommendation-card,
+  .dashboard-card,
+  .insight-stat-card,
+  .ai-insight-card {
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+}
+
+/* Touch-friendly Interactive Elements */
+@media (max-width: 768px) {
+  /* Larger tap targets */
+  button,
+  .dashboard-card,
+  .filter-tab,
+  .insights-tab,
+  .history-tab,
+  .supplement-btn,
+  .btn-add-plan,
+  .btn-find-products {
+    min-height: 44px !important;
+    touch-action: manipulation !important;
+  }
+
+  /* Comfortable spacing for touch */
+  .recommendation-actions,
+  .supplement-item,
+  .history-card-header-right {
+    gap: 10px !important;
+  }
+}
+
+/* PWA Install Prompt - Mobile Optimization */
+@media (max-width: 768px) {
+  .pwa-install-prompt {
+    bottom: 10px !important;
+    width: calc(100% - 20px) !important;
+    max-width: 100% !important;
+  }
+
+  .pwa-install-content {
+    padding: 16px !important;
+  }
+
+  .pwa-install-icon {
+    font-size: 36px !important;
+  }
+
+  .pwa-install-content h3 {
+    font-size: 17px !important;
+  }
+
+  .pwa-install-content p {
+    font-size: 13px !important;
+  }
+
+  .pwa-install-btn {
+    padding: 10px 24px !important;
+    font-size: 14px !important;
+  }
+}
+
+/* Chat Assistant Mobile Fix */
+@media (max-width: 768px) {
+  .chat-button {
+    bottom: 16px !important;
+    right: 16px !important;
+    width: 56px !important;
+    height: 56px !important;
+  }
+
+  .chat-modal {
+    width: 100% !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    bottom: 0 !important;
+    right: 0 !important;
+    border-radius: 0 !important;
+  }
+}
+
+/* Assessment Page Mobile */
+@media (max-width: 768px) {
+  .assessment-container {
+    padding: 20px 12px !important;
+  }
+
+  .assessment-progress-bar {
+    height: 6px !important;
+  }
+
+  .assessment-card {
+    padding: 20px 16px !important;
+    margin-bottom: 16px !important;
+  }
+
+  .assessment-navigation {
+    flex-direction: column-reverse !important;
+    gap: 10px !important;
+  }
+
+  .assessment-navigation button {
+    width: 100% !important;
+  }
+}
+
+/* Results Page Mobile */
+@media (max-width: 768px) {
+  .results-container {
+    padding: 20px 12px !important;
+  }
+
+  .results-actions {
+    flex-direction: column !important;
+    gap: 10px !important;
+  }
+
+  .results-actions button {
+    width: 100% !important;
+  }
+}
+
+/* Track Intake Page Mobile */
+@media (max-width: 768px) {
+  .track-intake-container {
+    padding: 20px 12px !important;
+  }
+
+  .intake-calendar {
+    padding: 12px !important;
+  }
+
+  .calendar-day {
+    padding: 8px 4px !important;
+    font-size: 12px !important;
+  }
+}
+
+/* Profile Page Mobile */
+@media (max-width: 768px) {
+  .profile-page {
+    background: #d1f4e0 !important;
+    padding: 4px !important;
+    padding-top: 22px !important;
+  }
+
+  .profile-container {
+    padding: 0 !important;
+    border-radius: 16px !important;
+    overflow: hidden !important;
+  }
+
+  .profile-header {
+    border-radius: 0 !important;
+  }
+
+  .profile-form {
+    gap: 12px !important;
+    padding: 30px 20px !important;
+  }
+
+  .profile-form input,
+  .profile-form select {
+    padding: 10px !important;
+    font-size: 14px !important;
+  }
+}
+
+/* Score Display */
+@media (max-width: 768px) {
+  .score-number {
+    font-size: 40px !important;
+  }
+
+  .score-bar {
+    height: 10px !important;
+  }
+}
+
+/* Benefits List */
+@media (max-width: 768px) {
+  .benefits-list li {
+    font-size: 13px !important;
+    padding-left: 20px !important;
+  }
+
+  .benefits-list li::before {
+    font-size: 16px !important;
+  }
+}
+
+/* Double Section Layout */
+@media (max-width: 768px) {
+  .insights-double-section {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Progress Summary */
+@media (max-width: 768px) {
+  .progress-summary-card {
+    flex-direction: column !important;
+    gap: 20px !important;
+    padding: 20px !important;
+    align-items: center !important;
+    text-align: center !important;
+  }
+
+  .progress-message h4 {
+    font-size: 18px !important;
+  }
+
+  .progress-message p {
+    font-size: 14px !important;
+  }
+}
+
+/* Supplement Grid */
+@media (max-width: 768px) {
+  .supplements-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .supplement-progress-item {
+    padding: 14px !important;
+  }
+}
+
+/* Recovery Plan */
+@media (max-width: 768px) {
+  .history-recovery-steps,
+  .history-recovery-expected {
+    margin-left: 0 !important;
+  }
+}
+
+/* Seeking Support Resources */
+@media (max-width: 768px) {
+  .history-seeking-support-resources {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Results Page - Evidence Info Mobile */
+@media (max-width: 768px) {
+  /* Make info icon larger and more touch-friendly on mobile */
+  .evidence-info-btn {
+    width: 24px !important;
+    height: 24px !important;
+    font-size: 20px !important;
+    border: none !important;
+    background: transparent !important;
+    margin-left: 8px !important;
+  }
+
+  /* Mobile-optimized modal */
+  .evidence-info-overlay {
+    padding: 12px !important;
+    align-items: center !important;
+    padding-top: 12px !important;
+    padding-bottom: 12px !important;
+  }
+
+  .evidence-info-panel {
+    max-width: 100% !important;
+    width: calc(100% - 24px) !important;
+    max-height: calc(100vh - 100px) !important;
+    border-radius: 16px !important;
+    overflow-y: auto !important;
+    margin: auto !important;
+  }
+
+  .evidence-info-header {
+    padding: 16px !important;
+    position: sticky;
+    top: 0;
+    background: #f9fafb;
+    z-index: 10;
+  }
+
+  .evidence-info-title {
+    font-size: 16px !important;
+  }
+
+  .evidence-info-close {
+    font-size: 24px !important;
+    padding: 8px !important;
+    min-width: 40px;
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .evidence-info-body {
+    padding: 16px !important;
+    padding-bottom: 24px !important;
+    font-size: 14px !important;
+  }
+
+  .evidence-info-body p {
+    font-size: 14px !important;
+    line-height: 1.6 !important;
+  }
+
+  .evidence-info-body ul {
+    padding-left: 20px !important;
+  }
+
+  .evidence-info-body li {
+    margin-bottom: 12px !important;
+    font-size: 14px !important;
+    line-height: 1.6 !important;
+  }
+}

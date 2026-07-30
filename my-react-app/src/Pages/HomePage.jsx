@@ -29,7 +29,7 @@ function HomePage() {
           decisions about your wellness journey.
         </p>
         <div className="hero-actions">
-          <button className="btn-primary" onClick={() => navigate('/assessment')}>
+          <button className="btn-primary" onClick={() => navigate('/login', { state: { redirectTo: '/assessment' } })}>
             Start Assessment →
           </button>
           <button
@@ -85,7 +85,7 @@ function HomePage() {
               Complete a 4-step questionnaire covering your basic info, diet, symptoms,
               and medical history. The more detail you provide, the more personalized your results.
             </p>
-            <button className="how-card-btn" onClick={() => navigate('/assessment')}>
+            <button className="how-card-btn" onClick={() => navigate('/login', { state: { redirectTo: '/assessment' } })}>
               Start Now →
             </button>
           </div>
@@ -110,10 +110,9 @@ function HomePage() {
             </div>
             <h3>Track Progress</h3>
             <p>
-              View your personalized daily schedule, meal recommendations, and action plan.
-              Retake assessments over time to track your progress and update recommendations.
+              View your personalized daily supplement plan, track your adherence and wellness progress, and receive updated AI recommendations based on your latest assessment.
             </p>
-            <button className="how-card-btn" onClick={() => navigate('/assessment')}>
+            <button className="how-card-btn" onClick={() => navigate('/login', { state: { redirectTo: '/dashboard' } })}>
               Get Started →
             </button>
           </div>

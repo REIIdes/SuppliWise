@@ -1,4 +1,17 @@
-const BASE_URL = '/api';
+// TEMPORARY: Hardcode backend URL for mobile testing
+const BASE_URL = 'http://192.168.0.34:5000/api';
+
+// Export BASE_URL so other components can use it
+export { BASE_URL };
+
+// Log the environment for debugging
+if (typeof window !== 'undefined') {
+  console.log('🔧 API Configuration:', {
+    BASE_URL: BASE_URL,
+    location: window.location.href,
+    platform: navigator.userAgent.includes('Android') ? 'Android' : 'Web'
+  });
+}
 
 // Helper to get auth header
 const authHeader = () => {
@@ -81,14 +94,32 @@ export const registerUser = async (firstName, lastName, gender, dateOfBirth, ema
 
 // Login user
 export const loginUser = async (email, password) => {
-  const res = await fetch(`${BASE_URL}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  });
-  const data = await parseJSON(res);
-  if (!res.ok) throw new Error(friendlyError(res.status, data?.message, true)); // true = is login attempt
-  return data;
+  try {
+    console.log('Login attempt:', { BASE_URL, email });
+    
+    const res = await fetch(`${BASE_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    
+    console.log('Login response:', { status: res.status, ok: res.ok });
+    
+    // Check content type - if it's HTML, log and throw better error
+    const contentType = res.headers.get('content-type');
+    if (contentType && contentType.includes('text/html')) {
+      const htmlText = await res.text();
+      console.error('Received HTML instead of JSON:', htmlText.substring(0, 200));
+      throw new Error('Server returned an HTML page instead of data. Please check your network connection.');
+    }
+    
+    const data = await parseJSON(res);
+    if (!res.ok) throw new Error(friendlyError(res.status, data?.message, true)); // true = is login attempt
+    return data;
+  } catch (error) {
+    console.error('Login error:', error);
+    throw error;
+  }
 };
 
 // Save assessment (requires auth)
@@ -140,8 +171,18 @@ export const getHistory = async (page = 1, limit = 10) => {
   });
   const data = await parseJSON(res);
   if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
-  // Support both old array response and new paginated response
-  return Array.isArray(data) ? data : (data.assessments || []);
+  if (Array.isArray(data)) {
+    return {
+      serverTime: new Date().toISOString(),
+      assessments: data,
+      pagination: null,
+    };
+  }
+  return {
+    serverTime: data.serverTime || new Date().toISOString(),
+    assessments: data.assessments || [],
+    pagination: data.pagination || null,
+  };
 };
 
 // Save AI results to an assessment record
@@ -185,6 +226,104 @@ export const getSupplementDetail = async (supplementName, context = null) => {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
     body: JSON.stringify({ supplementName, context }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// Get dashboard data (latest assessment metrics)
+export const getDashboard = async () => {
+  const res = await fetch(`${BASE_URL}/dashboard`, {
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// Mark supplement as taken or undo
+export const updateIntake = async (recordId, taken) => {
+  const res = await fetch(`${BASE_URL}/dashboard/intake`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify({ recordId, taken }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// Update energy level
+export const updateEnergyLevel = async (energyLevel) => {
+  const res = await fetch(`${BASE_URL}/dashboard/energy`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify({ energyLevel }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// Get insights and tracking data
+export const getInsights = async () => {
+  const res = await fetch(`${BASE_URL}/insights`, {
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// Get calendar completion history for a specific month
+export const getCalendarData = async (year, month) => {
+  const res = await fetch(`${BASE_URL}/dashboard/calendar/${year}/${month}`, {
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// Add supplement to user's daily plan
+export const addSupplementToPlan = async (supplementData) => {
+  const res = await fetch(`${BASE_URL}/dashboard/add-supplement`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify(supplementData),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// Remove supplement from user's daily plan
+export const removeSupplementFromPlan = async (supplementName) => {
+  const res = await fetch(`${BASE_URL}/dashboard/remove-supplement`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify({ supplementName }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// Get user's personalized supplement plan
+export const getMyPlan = async () => {
+  const res = await fetch(`${BASE_URL}/dashboard/my-plan`, {
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// Get weekly adherence data
+export const getWeeklyAdherence = async () => {
+  const res = await fetch(`${BASE_URL}/dashboard/weekly-adherence`, {
+    headers: { ...authHeader() },
   });
   const data = await parseJSON(res);
   if (!res.ok) throw new Error(friendlyError(res.status, data?.message));

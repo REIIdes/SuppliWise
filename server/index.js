@@ -11,6 +11,8 @@ const recommendRoutes = require('./routes/recommend');
 const chatRoutes = require('./routes/chat');
 const polishRoutes = require('./routes/polish');
 const supplementDetailRoutes = require('./routes/supplement_detail');
+const dashboardRoutes = require('./routes/dashboard');
+const insightsRoutes = require('./routes/insights');
 
 const app = express();
 
@@ -21,7 +23,22 @@ const app = express();
 app.use(helmet({ contentSecurityPolicy: false }));
 
 // Middleware
-app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:5174'], credentials: true }));
+// Allow CORS from web dev servers and mobile app (Capacitor uses capacitor:// or http://localhost on device)
+app.use(cors({ 
+  origin: [
+    'http://localhost:5173', 
+    'http://localhost:5174',
+    'http://localhost:5175',
+    'https://localhost:5173',
+    'https://localhost:5174', 
+    'https://localhost:5175',
+    'capacitor://localhost',
+    'http://localhost', // Mobile app
+    /^http:\/\/192\.168\.\d+\.\d+:\d+$/, // Allow any local network IP
+    /^https:\/\/192\.168\.\d+\.\d+:\d+$/ // HTTPS version
+  ], 
+  credentials: true 
+}));
 app.use(express.json({ limit: '10mb' })); // Increase limit for profile/banner images
 
 // ── Rate limiters ──────────────────────────────────────────────────────────
@@ -50,6 +67,8 @@ app.use('/api/recommend', recommendLimiter, recommendRoutes);
 app.use('/api/chat', chatRoutes);       // no rate limit — chat needs to feel instant
 app.use('/api/polish', polishRoutes);
 app.use('/api/supplement-detail', supplementDetailRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/insights', insightsRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

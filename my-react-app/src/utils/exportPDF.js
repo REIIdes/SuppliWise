@@ -237,15 +237,19 @@ function expandFoods(str) {
 }
 
 
-export function exportResultsToPDF(recommendations, assessment) {
-  const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
-  let y = 0;
+export async function exportResultsToPDF(recommendations, assessment) {
+  try {
+    const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
+    let y = 0;
 
-  // Resolve user name — from assessment object or localStorage fallback
-  const storedUser = (() => {
-    try { return JSON.parse(localStorage.getItem('user') || '{}'); } catch { return {}; }
-  })();
-  const userName = assessment?.userName || assessment?.name || storedUser?.name || null;
+    // Resolve user name — from assessment object or localStorage fallback
+    const storedUser = (() => {
+      try { return JSON.parse(localStorage.getItem('user') || '{}'); } catch { return {}; }
+    })();
+    const userName = assessment?.userName || assessment?.name || storedUser?.name || null;
+
+    // Use assessment creation date throughout
+    const assessmentDate = assessment?.createdAt ? new Date(assessment.createdAt) : new Date();
 
   // ── COVER HEADER ────────────────────────────────────────────────────────
   // Full-width green band
@@ -264,12 +268,11 @@ export function exportResultsToPDF(recommendations, assessment) {
   doc.setTextColor(220, 252, 231);
   doc.text('Personalized Supplement & Wellness Report', ML, 27);
 
-  // Patient name + date/time — same row, same size, same style
-  const now = new Date();
-  const dateStr = now.toLocaleDateString('en-US', {
+  // Patient name + date/time — use assessment creation date, not current date
+  const dateStr = assessmentDate.toLocaleDateString('en-US', {
     year: 'numeric', month: 'long', day: 'numeric',
   });
-  const timeStr = now.toLocaleTimeString('en-US', {
+  const timeStr = assessmentDate.toLocaleTimeString('en-US', {
     hour: '2-digit', minute: '2-digit', hour12: true,
   });
   const dateTimeStr = `${dateStr}  ${timeStr}`;
@@ -1010,9 +1013,24 @@ export function exportResultsToPDF(recommendations, assessment) {
   drawFooters(doc, userName);
 
   // ── SAVE ─────────────────────────────────────────────────────────────────
-  const datePart = now.toISOString().slice(0, 10);
-  const timePart = now.toTimeString().slice(0, 8).replace(/:/g, '-');
+  // Use assessment date for filename
+  const datePart = assessmentDate.toISOString().slice(0, 10);
+  const timePart = assessmentDate.toTimeString().slice(0, 8).replace(/:/g, '-');
   const namePart = userName ? `_${userName.replace(/\s+/g, '_')}` : '';
   const filename = `SuppliWise_Report${namePart}_${datePart}_${timePart}.pdf`;
-  doc.save(filename);
+  
+  // Use data URI for better APK compatibility
+  const pdfData = doc.output('datauristring');
+  const link = document.createElement('a');
+  link.href = pdfData;
+  link.download = filename;
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  
+  } catch (error) {
+    console.error('Error generating PDF:', error);
+    alert('Failed to generate PDF. Please try again.');
+  }
 }

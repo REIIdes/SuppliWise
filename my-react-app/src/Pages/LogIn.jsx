@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
-import { loginUser, saveAssessment, getRecommendations, saveAssessmentResults } from '../api';
+import { BASE_URL, loginUser, saveAssessment, getRecommendations, saveAssessmentResults } from '../api';
 import './LogIn.css';
 import './ProfilePage.css'; // Import for OTP modal styles
 
@@ -121,7 +121,7 @@ function LogIn() {
     setOtpLoading(true);
 
     try {
-      const response = await fetch('/api/auth/resend-login-otp', {
+      const response = await fetch(`${BASE_URL}/auth/resend-login-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: pendingUserId }),
@@ -160,7 +160,7 @@ function LogIn() {
     setLoading(true);
     try {
       console.log('[DEBUG] Sending login request...');
-      const response = await fetch('/api/auth/login', {
+      const response = await fetch(`${BASE_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
@@ -204,7 +204,7 @@ function LogIn() {
     setError('');
 
     try {
-      const response = await fetch('/api/auth/verify-login-otp', {
+      const response = await fetch(`${BASE_URL}/auth/verify-login-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: pendingUserId, otp: otp.trim() }),
@@ -266,7 +266,10 @@ function LogIn() {
     } else {
       // Clear any stale pending assessment data
       sessionStorage.removeItem(SESSION_KEY);
-      navigate('/');
+      
+      // Check if there's a redirect destination from HomePage
+      const redirectTo = location.state?.redirectTo;
+      navigate(redirectTo || '/dashboard');
     }
   };
 
@@ -322,7 +325,7 @@ function LogIn() {
 
     setLoading(true);
     try {
-      const response = await fetch('/api/auth/forgot-password', {
+      const response = await fetch(`${BASE_URL}/auth/forgot-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: forgotPasswordEmail }),
@@ -360,7 +363,7 @@ function LogIn() {
     setError('');
 
     try {
-      const response = await fetch('/api/auth/verify-password-reset-otp', {
+      const response = await fetch(`${BASE_URL}/auth/verify-password-reset-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: resetUserId, otp: resetOtp.trim() }),
@@ -401,7 +404,7 @@ function LogIn() {
 
     setLoading(true);
     try {
-      const response = await fetch('/api/auth/reset-password', {
+      const response = await fetch(`${BASE_URL}/auth/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -437,7 +440,7 @@ function LogIn() {
     setOtpLoading(true);
 
     try {
-      const response = await fetch('/api/auth/resend-password-reset-otp', {
+      const response = await fetch(`${BASE_URL}/auth/resend-password-reset-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: resetUserId }),

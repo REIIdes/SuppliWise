@@ -1242,10 +1242,10 @@
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  border: 1.5px solid #22c55e;
-  background: #f0fdf4;
+  border: none;
+  background: transparent;
   color: #16a34a;
-  font-size: 11px;
+  font-size: 16px;
   font-weight: 700;
   cursor: pointer;
   margin-left: 6px;
@@ -1257,10 +1257,10 @@
 }
 
 .evidence-info-btn:hover {
-  background: #dcfce7;
-  border-color: #16a34a;
+  background: transparent;
+  border: none;
   color: #15803d;
-  transform: scale(1.1);
+  transform: scale(1.15);
 }
 
 /* ── Evidence Info Modal ── */

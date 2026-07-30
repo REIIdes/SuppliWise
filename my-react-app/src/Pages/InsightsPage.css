@@ -1,0 +1,1173 @@
+/* Insights Wrapper */
+.insights-wrapper {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #f0faf0 0%, #e8f5e9 100%);
+}
+
+/* Container */
+.insights-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+/* Header */
+.insights-header {
+  margin-bottom: 32px;
+}
+
+.insights-title {
+  font-size: 32px;
+  font-weight: 700;
+  color: #1f2937;
+  margin: 0 0 8px 0;
+}
+
+.insights-subtitle {
+  font-size: 16px;
+  color: #6b7280;
+  margin: 0;
+}
+
+/* Tabs */
+.insights-tabs {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 32px;
+  background: #e5e7eb;
+  padding: 6px;
+  border-radius: 12px;
+  flex-wrap: wrap;
+}
+
+.insights-tab {
+  padding: 12px 24px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.insights-tab:hover {
+  color: #374151;
+}
+
+.insights-tab.active {
+  background: white;
+  color: #1f2937;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Content */
+.insights-content {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* Stats Grid (Overview) */
+.insights-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+  margin-bottom: 24px;
+}
+
+.insight-stat-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 24px;
+  border-radius: 16px;
+  transition: all 0.3s ease;
+}
+
+.insight-stat-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+}
+
+.stat-green {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+}
+
+.stat-blue {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+}
+
+.stat-purple {
+  background: linear-gradient(135deg, #a855f7 0%, #9333ea 100%);
+}
+
+.stat-pink {
+  background: linear-gradient(135deg, #ec4899 0%, #db2777 100%);
+}
+
+.stat-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.stat-content {
+  flex: 1;
+}
+
+.stat-value {
+  font-size: 32px;
+  font-weight: 700;
+  color: white;
+  line-height: 1;
+  margin-bottom: 6px;
+}
+
+.stat-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* AI Insights Grid */
+.ai-insights-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.ai-insight-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 24px;
+  background: white;
+  border: 2px solid #86efac;
+  border-radius: 16px;
+  transition: all 0.3s ease;
+}
+
+.ai-insight-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+.ai-insight-icon {
+  width: 56px;
+  height: 56px;
+  background: #f0fdf4;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: #10b981;
+}
+
+.ai-insight-content {
+  flex: 1;
+}
+
+.ai-insight-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1f2937;
+  margin: 0 0 8px 0;
+}
+
+.ai-insight-description {
+  font-size: 14px;
+  color: #6b7280;
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* Insights Section */
+.insights-section {
+  background: white;
+  border: 2px solid #86efac;
+  border-radius: 16px;
+  padding: 24px;
+}
+
+.insights-section-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1f2937;
+  margin: 0 0 20px 0;
+}
+
+/* Trends Chart */
+.trends-chart {
+  display: flex;
+  gap: 16px;
+}
+
+.chart-y-axis {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 20px 0;
+  color: #6b7280;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.chart-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.chart-svg {
+  width: 100%;
+  height: 200px;
+  margin-bottom: 12px;
+}
+
+.chart-x-axis {
+  display: flex;
+  justify-content: space-between;
+  color: #6b7280;
+  font-size: 13px;
+  font-weight: 600;
+  padding-top: 8px;
+  border-top: 2px solid #e5e7eb;
+}
+
+/* Double Section */
+.insights-double-section {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+/* Insight Metrics */
+.insight-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.insight-metric {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  background: #d1fae5;
+  border-radius: 12px;
+}
+
+.metric-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #065f46;
+}
+
+.metric-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #047857;
+}
+
+/* Coming Soon Box */
+.coming-soon-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+  text-align: center;
+  gap: 16px;
+  padding: 48px 24px;
+}
+
+.coming-soon-icon {
+  font-size: 64px;
+  margin-bottom: 8px;
+}
+
+.coming-soon-box h3 {
+  font-size: 24px;
+  font-weight: 700;
+  color: #1f2937;
+  margin: 0;
+}
+
+.coming-soon-box p {
+  font-size: 16px;
+  color: #6b7280;
+  max-width: 500px;
+  margin: 0;
+  line-height: 1.6;
+}
+
+/* Adherence Stats Grid */
+.adherence-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 20px;
+  margin-bottom: 24px;
+}
+
+.adherence-stat-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px;
+  background: white;
+  border: 2px solid #86efac;
+  border-radius: 16px;
+  transition: all 0.3s ease;
+}
+
+.adherence-stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.adherence-stat-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.adherence-stat-content {
+  flex: 1;
+}
+
+.adherence-stat-label {
+  font-size: 12px;
+  color: #6b7280;
+  margin: 0 0 4px 0;
+  font-weight: 500;
+}
+
+.adherence-stat-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #1f2937;
+  margin: 0 0 2px 0;
+}
+
+.adherence-stat-change {
+  font-size: 12px;
+  color: #10b981;
+  margin: 0;
+  font-weight: 500;
+}
+
+/* Weekly Adherence Chart */
+.adherence-weekly-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 16px;
+  padding: 20px 0;
+}
+
+.adherence-day-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.adherence-bar-container {
+  width: 100%;
+  height: 200px;
+  background: #f3f4f6;
+  border-radius: 8px;
+  display: flex;
+  align-items: flex-end;
+  padding: 4px;
+}
+
+.adherence-bar {
+  width: 100%;
+  border-radius: 6px;
+  transition: all 0.3s ease;
+}
+
+.adherence-day-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+  margin: 0;
+}
+
+.adherence-day-percentage {
+  font-size: 12px;
+  color: #6b7280;
+  margin: 0;
+  font-weight: 500;
+}
+
+/* Missed Doses */
+.missed-doses-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.missed-dose-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: #fef2f2;
+  border: 2px solid #fecaca;
+  border-radius: 12px;
+}
+
+.missed-dose-icon {
+  width: 40px;
+  height: 40px;
+  background: #fee2e2;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #dc2626;
+  flex-shrink: 0;
+}
+
+.missed-dose-content {
+  flex: 1;
+}
+
+.missed-dose-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: #991b1b;
+  margin: 0 0 4px 0;
+}
+
+.missed-dose-time {
+  font-size: 13px;
+  color: #b91c1c;
+  margin: 0;
+}
+
+/* Phases List */
+.phases-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.phase-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  padding: 24px;
+  background: linear-gradient(135deg, #f0fdf4 0%, #d1fae5 100%);
+  border: 2px solid #86efac;
+  border-radius: 16px;
+  transition: all 0.3s ease;
+}
+
+.phase-item:hover {
+  transform: translateX(4px);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.15);
+  border-color: #6ee7b7;
+}
+
+.phase-number {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 700;
+  flex-shrink: 0;
+  box-shadow: 0 4px 8px rgba(16, 185, 129, 0.3);
+}
+
+.phase-details {
+  flex: 1;
+}
+
+.phase-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: #065f46;
+  margin: 0 0 8px 0;
+}
+
+.phase-description {
+  font-size: 14px;
+  color: #047857;
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* Current Phase Card */
+/* Current Phase Card */
+.current-phase-card {
+  padding: 28px;
+  background: linear-gradient(135deg, #f0fdf4 0%, #d1fae5 100%);
+  border: 2px solid #86efac;
+  border-radius: 16px;
+  transition: all 0.3s ease;
+}
+
+.current-phase-card:hover {
+  box-shadow: 0 8px 20px rgba(16, 185, 129, 0.15);
+}
+
+.current-phase-card.ai-enhanced {
+  background: linear-gradient(135deg, #ede9fe 0%, #ddd6fe 100%);
+  border-color: #c4b5fd;
+  position: relative;
+  overflow: hidden;
+}
+
+.current-phase-card.ai-enhanced::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  right: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.1) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.ai-badge {
+  display: inline-block;
+  padding: 6px 14px;
+  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+  color: white;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 8px rgba(139, 92, 246, 0.3);
+}
+
+.phase-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: #065f46;
+  margin: 0 0 12px 0;
+}
+
+.current-phase-card.ai-enhanced .phase-title {
+  color: #5b21b6;
+}
+
+.phase-focus {
+  font-size: 15px;
+  color: #047857;
+  line-height: 1.6;
+  margin: 0 0 20px 0;
+}
+
+.current-phase-card.ai-enhanced .phase-focus {
+  color: #6b21a8;
+}
+
+.phase-steps,
+.phase-changes {
+  margin-top: 20px;
+}
+
+.phase-steps h5,
+.phase-changes h5 {
+  font-size: 14px;
+  font-weight: 700;
+  color: #065f46;
+  margin: 0 0 12px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.current-phase-card.ai-enhanced .phase-steps h5,
+.current-phase-card.ai-enhanced .phase-changes h5 {
+  color: #5b21b6;
+}
+
+.phase-steps ul,
+.phase-changes ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.phase-steps li,
+.phase-changes li {
+  padding-left: 28px;
+  position: relative;
+  font-size: 14px;
+  color: #047857;
+  line-height: 1.6;
+}
+
+.current-phase-card.ai-enhanced .phase-steps li,
+.current-phase-card.ai-enhanced .phase-changes li {
+  color: #6b21a8;
+}
+
+.phase-steps li::before,
+.phase-changes li::before {
+  content: '✓';
+  position: absolute;
+  left: 0;
+  width: 20px;
+  height: 20px;
+  background: #10b981;
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.current-phase-card.ai-enhanced .phase-steps li::before,
+.current-phase-card.ai-enhanced .phase-changes li::before {
+  background: #8b5cf6;
+}
+
+/* Lifestyle Recommendations */
+.lifestyle-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.lifestyle-card {
+  padding: 20px;
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border: 2px solid #fbbf24;
+  border-radius: 16px;
+  transition: all 0.3s ease;
+}
+
+.lifestyle-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(251, 191, 36, 0.2);
+}
+
+.lifestyle-icon {
+  width: 44px;
+  height: 44px;
+  background: white;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #f59e0b;
+  margin-bottom: 12px;
+}
+
+.lifestyle-category {
+  font-size: 16px;
+  font-weight: 700;
+  color: #92400e;
+  margin: 0 0 8px 0;
+}
+
+.lifestyle-advice {
+  font-size: 14px;
+  color: #b45309;
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* Coming Soon Card */
+.coming-soon-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 24px;
+  text-align: center;
+  background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+  border-radius: 16px;
+  gap: 16px;
+}
+
+.coming-soon-card svg {
+  color: #9ca3af;
+}
+
+.coming-soon-card p {
+  font-size: 16px;
+  color: #6b7280;
+  line-height: 1.6;
+  max-width: 500px;
+  margin: 0;
+}
+
+.coming-soon-note {
+  font-size: 14px;
+  color: #9ca3af;
+  font-style: italic;
+}
+
+/* Today's Progress Tab */
+.empty-state-progress {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 24px;
+  text-align: center;
+  gap: 12px;
+}
+
+.empty-state-progress svg {
+  color: #10b981;
+  margin-bottom: 8px;
+}
+
+.empty-state-progress p {
+  font-size: 16px;
+  color: #6b7280;
+  margin: 0;
+}
+
+.empty-state-note {
+  font-size: 14px;
+  color: #9ca3af;
+  font-style: italic;
+}
+
+.progress-summary-card {
+  display: flex;
+  align-items: center;
+  gap: 40px;
+  padding: 32px;
+  background: linear-gradient(135deg, #f0fdf4 0%, #d1fae5 100%);
+  border-radius: 16px;
+  margin-bottom: 24px;
+}
+
+.progress-circle-container {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.progress-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+}
+
+.progress-percentage {
+  font-size: 36px;
+  font-weight: 700;
+  color: #065f46;
+  line-height: 1;
+}
+
+.progress-count {
+  font-size: 14px;
+  color: #047857;
+  margin-top: 4px;
+  font-weight: 600;
+}
+
+.progress-message {
+  flex: 1;
+}
+
+.progress-message h4 {
+  font-size: 22px;
+  font-weight: 700;
+  color: #065f46;
+  margin: 0 0 12px 0;
+}
+
+.progress-message p {
+  font-size: 15px;
+  color: #047857;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.todays-supplements-list {
+  margin-top: 24px;
+}
+
+.subsection-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1f2937;
+  margin: 0 0 16px 0;
+}
+
+.supplements-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.supplement-progress-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 20px;
+  border-radius: 12px;
+  transition: all 0.3s ease;
+}
+
+.supplement-progress-item.completed {
+  background: #d1fae5;
+  border: 2px solid #6ee7b7;
+}
+
+.supplement-progress-item.pending {
+  background: #fef3c7;
+  border: 2px solid #fbbf24;
+}
+
+.supplement-status-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.supplement-progress-item.completed .supplement-status-icon {
+  background: #10b981;
+  color: white;
+}
+
+.supplement-progress-item.pending .supplement-status-icon {
+  background: white;
+  color: #f59e0b;
+}
+
+.supplement-progress-info {
+  flex: 1;
+}
+
+.supplement-progress-name {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0 0 4px 0;
+}
+
+.supplement-progress-item.completed .supplement-progress-name {
+  color: #065f46;
+}
+
+.supplement-progress-item.pending .supplement-progress-name {
+  color: #92400e;
+}
+
+.supplement-progress-details {
+  font-size: 14px;
+  margin: 0 0 6px 0;
+}
+
+.supplement-progress-item.completed .supplement-progress-details {
+  color: #047857;
+}
+
+.supplement-progress-item.pending .supplement-progress-details {
+  color: #b45309;
+}
+
+.supplement-progress-time {
+  font-size: 13px;
+  margin: 0;
+  font-weight: 500;
+}
+
+.supplement-progress-item.completed .supplement-progress-time {
+  color: #059669;
+}
+
+.supplement-progress-item.pending .supplement-progress-time {
+  color: #d97706;
+}
+
+.adherence-day-count {
+  font-size: 12px;
+  color: #6b7280;
+  margin: 0;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (max-width: 1024px) {
+  .insights-stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .insights-double-section {
+    grid-template-columns: 1fr;
+  }
+
+  .adherence-stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .adherence-weekly-grid {
+    gap: 12px;
+  }
+
+  .adherence-bar-container {
+    height: 160px;
+  }
+}
+
+@media (max-width: 768px) {
+  .insights-container {
+    padding: 24px 16px;
+  }
+
+  .insights-title {
+    font-size: 24px;
+  }
+
+  .insights-subtitle {
+    font-size: 14px;
+  }
+
+  .insights-tabs {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .insights-tab {
+    white-space: nowrap;
+    font-size: 14px;
+    padding: 10px 20px;
+  }
+
+  .insights-stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ai-insights-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .stat-value {
+    font-size: 28px;
+  }
+
+  .stat-icon {
+    width: 48px;
+    height: 48px;
+  }
+
+  .stat-icon svg {
+    width: 24px;
+    height: 24px;
+  }
+
+  .trends-chart {
+    flex-direction: column;
+  }
+
+  .chart-y-axis {
+    flex-direction: row;
+    padding: 0 0 12px 0;
+  }
+
+  .chart-x-axis {
+    font-size: 11px;
+  }
+
+  .adherence-stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .adherence-stat-card {
+    padding: 16px;
+  }
+
+  .adherence-stat-icon {
+    width: 48px;
+    height: 48px;
+  }
+
+  .adherence-stat-icon svg {
+    width: 24px;
+    height: 24px;
+  }
+
+  .adherence-stat-value {
+    font-size: 20px;
+  }
+
+  .adherence-weekly-grid {
+    gap: 8px;
+  }
+
+  .adherence-bar-container {
+    height: 140px;
+  }
+
+  .adherence-day-label {
+    font-size: 12px;
+  }
+
+  .adherence-day-percentage {
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 480px) {
+  .insight-stat-card {
+    padding: 16px;
+  }
+
+  .stat-value {
+    font-size: 24px;
+  }
+
+  .stat-label {
+    font-size: 12px;
+  }
+
+  .ai-insight-card {
+    padding: 16px;
+  }
+
+  .ai-insight-icon {
+    width: 48px;
+    height: 48px;
+  }
+
+  .ai-insight-title {
+    font-size: 16px;
+  }
+
+  .ai-insight-description {
+    font-size: 13px;
+  }
+
+  .insights-section {
+    padding: 16px;
+  }
+
+  .insights-section-title {
+    font-size: 18px;
+  }
+
+  .metric-label {
+    font-size: 12px;
+  }
+
+  .metric-value {
+    font-size: 16px;
+  }
+
+  .coming-soon-box {
+    min-height: 200px;
+    padding: 32px 16px;
+  }
+
+  .coming-soon-icon {
+    font-size: 48px;
+  }
+
+  .coming-soon-box h3 {
+    font-size: 20px;
+  }
+
+  .coming-soon-box p {
+    font-size: 14px;
+  }
+
+  .adherence-stat-card {
+    padding: 14px;
+    gap: 12px;
+  }
+
+  .adherence-stat-icon {
+    width: 44px;
+    height: 44px;
+  }
+
+  .adherence-stat-icon svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .adherence-stat-label {
+    font-size: 11px;
+  }
+
+  .adherence-stat-value {
+    font-size: 18px;
+  }
+
+  .adherence-stat-change {
+    font-size: 11px;
+  }
+
+  .adherence-weekly-grid {
+    gap: 6px;
+  }
+
+  .adherence-bar-container {
+    height: 120px;
+  }
+
+  .adherence-day-label {
+    font-size: 11px;
+  }
+
+  .adherence-day-percentage {
+    font-size: 10px;
+  }
+
+  .missed-dose-item {
+    padding: 12px;
+    gap: 10px;
+  }
+
+  .missed-dose-icon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .missed-dose-icon svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .missed-dose-name {
+    font-size: 14px;
+  }
+
+  .missed-dose-time {
+    font-size: 12px;
+  }
+}
