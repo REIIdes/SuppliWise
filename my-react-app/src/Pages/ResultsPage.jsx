@@ -866,18 +866,30 @@ function ResultsPage() {
                     }
                   });
 
-                  // Fuzzy lookup: find best matching rec dosage for a schedule pill name
+                  // Dosage lookup — strict matching to prevent cross-supplement bleed
                   const getDosage = (pillName) => {
-                    const pill = pillName.toLowerCase();
-                    // Exact match first
+                    const pill = pillName.toLowerCase().trim();
+                    // 1. Exact match
                     if (dosageMap[pill]) return dosageMap[pill];
-                    // Partial match: pill name contains rec name or rec name contains pill name
+                    // 2. Rec name is fully contained in pill name (e.g. "magnesium glycinate" in pill)
                     for (const [recName, dosage] of Object.entries(dosageMap)) {
-                      if (pill.includes(recName) || recName.includes(pill)) return dosage;
-                      // Word-level overlap: share at least one meaningful word (>3 chars)
-                      const pillWords = pill.split(/\s+/).filter(w => w.length > 3);
-                      const recWords = recName.split(/\s+/).filter(w => w.length > 3);
-                      if (pillWords.some(w => recWords.includes(w))) return dosage;
+                      if (pill === recName) return dosage;
+                      // Only match if the rec name is substantially contained (>60% of rec name length)
+                      // AND the pill name starts with or fully includes the rec name
+                      if (recName.length > 4 && pill.includes(recName)) return dosage;
+                      if (pill.length > 4 && recName.includes(pill)) return dosage;
+                    }
+                    // 3. Last resort: ALL non-generic words must match (exclude "vitamin","mineral","acid","complex")
+                    const genericWords = new Set(['vitamin','mineral','acid','complex','supplement','extract','oxide','citrate']);
+                    const pillSpecific = pill.split(/\s+/).filter(w => w.length > 1 && !genericWords.has(w));
+                    if (pillSpecific.length > 0) {
+                      for (const [recName, dosage] of Object.entries(dosageMap)) {
+                        const recSpecific = recName.split(/\s+/).filter(w => w.length > 1 && !genericWords.has(w));
+                        // ALL specific words from pill must appear in rec name
+                        if (recSpecific.length > 0 && pillSpecific.every(w => recSpecific.includes(w)) && recSpecific.every(w => pillSpecific.includes(w))) {
+                          return dosage;
+                        }
+                      }
                     }
                     return null;
                   };
@@ -887,10 +899,12 @@ function ResultsPage() {
                       <div className="schedule-time">{fixChars(slot.time.replace(/With Lunch/gi, 'Afternoon'))}</div>
                       <div className="schedule-supplements">
                         {slot.supplements.map((s, si) => {
-                          const dosage = getDosage(s);
+                          // Strip any dosage text the AI may have included after ' - '
+                          const pillName = s.split(' - ')[0].trim();
+                          const dosage = getDosage(pillName);
                           return (
                             <span key={si} className="schedule-pill">
-                              {fixChars(s)}{dosage ? <span className="schedule-pill-dosage"> - {fixChars(dosage)}</span> : ''}
+                              {fixChars(pillName)}{dosage ? <span className="schedule-pill-dosage"> - {fixChars(dosage)}</span> : ''}
                             </span>
                           );
                         })}

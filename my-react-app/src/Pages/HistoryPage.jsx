@@ -665,13 +665,22 @@ function HistoryPage() {
                           if (rec.name && rec.dosage) dosageMap[rec.name.toLowerCase()] = rec.dosage;
                         });
                         const getDosage = (pillName) => {
-                          const pill = pillName.toLowerCase();
+                          const pill = pillName.toLowerCase().trim();
                           if (dosageMap[pill]) return dosageMap[pill];
                           for (const [recName, dosage] of Object.entries(dosageMap)) {
-                            if (pill.includes(recName) || recName.includes(pill)) return dosage;
-                            const pillWords = pill.split(/\s+/).filter(w => w.length > 3);
-                            const recWords = recName.split(/\s+/).filter(w => w.length > 3);
-                            if (pillWords.some(w => recWords.includes(w))) return dosage;
+                            if (pill === recName) return dosage;
+                            if (recName.length > 4 && pill.includes(recName)) return dosage;
+                            if (pill.length > 4 && recName.includes(pill)) return dosage;
+                          }
+                          const genericWords = new Set(['vitamin','mineral','acid','complex','supplement','extract','oxide','citrate']);
+                          const pillSpecific = pill.split(/\s+/).filter(w => w.length > 1 && !genericWords.has(w));
+                          if (pillSpecific.length > 0) {
+                            for (const [recName, dosage] of Object.entries(dosageMap)) {
+                              const recSpecific = recName.split(/\s+/).filter(w => w.length > 1 && !genericWords.has(w));
+                              if (recSpecific.length > 0 && pillSpecific.every(w => recSpecific.includes(w)) && recSpecific.every(w => pillSpecific.includes(w))) {
+                                return dosage;
+                              }
+                            }
                           }
                           return null;
                         };
@@ -682,10 +691,12 @@ function HistoryPage() {
                                 <div className="history-schedule-time">{fixChars(slot.time.replace(/With Lunch/gi, 'Afternoon'))}</div>
                                 <div className="history-schedule-pills">
                                   {slot.supplements.map((s, sj) => {
-                                    const dosage = getDosage(s);
+                                    // Strip any dosage text the AI may have included after ' - '
+                                    const pillName = s.split(' - ')[0].trim();
+                                    const dosage = getDosage(pillName);
                                     return (
                                       <span key={sj} className="history-schedule-pill">
-                                        {fixChars(s)}{dosage ? <span className="history-schedule-pill-dosage"> - {fixChars(dosage)}</span> : ''}
+                                        {fixChars(pillName)}{dosage ? <span className="history-schedule-pill-dosage"> - {fixChars(dosage)}</span> : ''}
                                       </span>
                                     );
                                   })}
