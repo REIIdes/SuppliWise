@@ -70,7 +70,7 @@
 │  │   └─ DELETE /:id        → Delete assessment                         │
 │  │                                                                       │
 │  ├─ /api/recommend         → recommendRoutes                            │
-│  │   └─ POST /             → Generate AI recommendations (Groq)        │
+│  │   └─ POST /             → Generate AI recommendations (OpenRouter)  │
 │  │                                                                       │
 │  ├─ /api/dashboard         → dashboardRoutes (✅ NEW)                  │
 │  │   ├─ GET /              → Get dashboard data                        │
@@ -160,7 +160,7 @@
 │                          EXTERNAL SERVICES                               │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
-│  🤖 GROQ AI API (Llama Model)                                           │
+│  🤖 OPENROUTER AI (DeepSeek V4 Flash)                                   │
 │  ├─ Generate supplement recommendations                                 │
 │  ├─ Create action plans                                                 │
 │  ├─ Provide lifestyle advice                                            │
@@ -542,7 +542,7 @@ Load Balancer
 │      └─ Monitoring & alerts                                 │
 │                                                              │
 │  AI Service                                                  │
-│  └─ Groq API                                                │
+│  └─ OpenRouter API (DeepSeek V4 Flash)                      │
 │      ├─ Rate limits managed                                 │
 │      └─ API key rotation                                    │
 │                                                              │

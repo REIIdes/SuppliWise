@@ -12,7 +12,7 @@ Use this checklist to verify all features are working correctly.
 - [ ] All environment variables configured:
   - [ ] `MONGO_URI`
   - [ ] `JWT_SECRET`
-  - [ ] `GROQ_API_KEY`
+  - [ ] `OPENROUTER_API_KEY`
 - [ ] Server starts without errors: `cd server && npm start`
 - [ ] Server console shows: "Connected to MongoDB" and "Server running on port 5000"
 

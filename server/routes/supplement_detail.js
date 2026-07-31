@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
 
-const GROQ_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
+const OPENROUTER_MODEL = 'deepseek/deepseek-v4-flash';
 
 router.post('/', protect, async (req, res) => {
   const { supplementName, context } = req.body;
@@ -110,14 +110,14 @@ Rules:
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000);
 
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: GROQ_MODEL,
+        model: OPENROUTER_MODEL,
         messages: [
           {
             role: 'system',
@@ -128,6 +128,7 @@ Rules:
         max_tokens: 2000,
         temperature: 0.3,
         stream: false,
+        reasoning: { effort: 'none' },
       }),
       signal: controller.signal,
     });
@@ -140,7 +141,8 @@ Rules:
     }
 
     const data = await response.json();
-    const raw = data.choices?.[0]?.message?.content?.trim() || '';
+    const choice = data.choices?.[0]?.message;
+    const raw = (choice?.content || choice?.reasoning || '').trim();
     const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
     const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
 

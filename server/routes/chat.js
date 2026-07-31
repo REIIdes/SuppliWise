@@ -55,7 +55,7 @@ Use one of these styles (vary them naturally):
 2. Diet & Goals: Diet type, health goals (energy, sleep, immunity, digestion, mental clarity, stress, heart, bone, muscle, skin, weight, hormonal, joint, etc.)
 3. Symptoms: Select with severity (mild/moderate/severe), sleep quality, water intake
 4. Medical: Conditions, medications, allergies, lifestyle (smoking/alcohol/caffeine), blood tests (optional), notes
-- AI: Groq (Llama 4 Maverick), auto-saves progress
+- AI: OpenRouter (DeepSeek V4 Flash), auto-saves progress
 
 ### Results & Supplements
 **Supplement Cards:** Name, dosage, timing, priority (High/Med/Low), confidence % (90-100%=direct match, 80-89%=good, 70-79%=moderate, <70%=partial), reason, interactions
@@ -183,45 +183,47 @@ router.post('/', async (req, res) => {
 
     messages.push({ role: 'user', content: q });
 
-    // ── Groq ───────────────────────────────────────────────────────────────
-    const GROQ_API_KEY = process.env.GROQ_API_KEY;
-    if (GROQ_API_KEY && GROQ_API_KEY !== 'your_groq_api_key_here') {
+    // ── OpenRouter (DeepSeek V4 Flash) ─────────────────────────────────────
+    const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+    if (OPENROUTER_API_KEY && OPENROUTER_API_KEY !== 'your_openrouter_api_key_here') {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 15000);
       try {
-        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${GROQ_API_KEY}`,
+            Authorization: `Bearer ${OPENROUTER_API_KEY}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+            model: 'deepseek/deepseek-v4-flash',
             messages,
             max_tokens: 700,
             temperature: 0.7,
             stream: false,
+            reasoning: { effort: 'none' },
           }),
           signal: controller.signal,
         });
         clearTimeout(timeout);
         if (response.ok) {
           const data = await response.json();
-          const reply = data.choices?.[0]?.message?.content?.trim();
+          const choice = data.choices?.[0]?.message;
+          const reply = (choice?.content || choice?.reasoning || '').trim();
           if (reply && reply.length > 0) {
-            return res.json({ reply, source: 'groq' });
+            return res.json({ reply, source: 'openrouter' });
           }
         } else {
           const errText = await response.text();
-          console.error('[chat] Groq error:', response.status, errText.substring(0, 200));
+          console.error('[chat] OpenRouter error:', response.status, errText.substring(0, 200));
         }
       } catch (e) {
         clearTimeout(timeout);
-        console.error('[chat] Groq failed:', e.name, e.message);
+        console.error('[chat] OpenRouter failed:', e.name, e.message);
       }
     }
 
-    // ── Fallback — only if Groq is completely unreachable ─────────────────
+    // ── Fallback — only if OpenRouter is completely unreachable ───────────
     return res.json({ reply: offlineFallback(q), source: 'fallback' });
 
   } catch (err) {

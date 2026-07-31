@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 
 // @route   POST /api/polish
-// @desc    Polish a free-text health description using Groq AI
+// @desc    Polish a free-text health description using OpenRouter AI (DeepSeek V4 Flash)
 // @access  Public
 router.post('/', async (req, res) => {
   try {
@@ -27,8 +27,8 @@ router.post('/', async (req, res) => {
       return res.json({ polished: null, rejected: true, reason: 'garbage' });
     }
 
-    const GROQ_API_KEY = process.env.GROQ_API_KEY;
-    if (!GROQ_API_KEY || GROQ_API_KEY === 'your_groq_api_key_here') {
+    const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+    if (!OPENROUTER_API_KEY || OPENROUTER_API_KEY === 'your_openrouter_api_key_here') {
       // No API key — return cleaned version using basic preprocessing
       return res.json({ polished: basicClean(raw), rejected: false });
     }
@@ -51,14 +51,14 @@ Patient input: "${raw}"`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 12000);
 
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${GROQ_API_KEY}`,
+        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+        model: 'deepseek/deepseek-v4-flash',
         messages: [
           {
             role: 'system',
@@ -69,18 +69,20 @@ Patient input: "${raw}"`;
         max_tokens: 300,
         temperature: 0.2,
         stream: false,
+        reasoning: { effort: 'none' },
       }),
       signal: controller.signal,
     });
     clearTimeout(timeout);
 
     if (!response.ok) {
-      console.error('[polish] Groq error:', response.status);
+      console.error('[polish] OpenRouter error:', response.status);
       return res.json({ polished: basicClean(raw), rejected: false });
     }
 
     const data = await response.json();
-    const result = data.choices?.[0]?.message?.content?.trim() || '';
+    const choice = data.choices?.[0]?.message;
+    const result = (choice?.content || choice?.reasoning || '').trim();
 
     if (result === 'REJECTED' || result.toUpperCase().startsWith('REJECTED')) {
       return res.json({ polished: null, rejected: true, reason: 'not_health_related' });
@@ -100,7 +102,7 @@ Patient input: "${raw}"`;
   }
 });
 
-// Basic cleanup when Groq is unavailable
+// Basic cleanup when OpenRouter is unavailable
 function basicClean(text) {
   return text
     .trim()

@@ -3,7 +3,7 @@ const router = express.Router();
 const { protect } = require('../middleware/auth');
 const { preprocessUserInput, sanitizeMedicalField } = require('../utils/sanitize');
 
-const GROQ_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
+const OPENROUTER_MODEL = 'deepseek/deepseek-v4-flash'; // OpenRouter DeepSeek V4 Flash
 
 // -- Recursively sanitize all strings in a JSON object ---------------------
 // Replaces em/en dashes, smart quotes, and other problematic Unicode
@@ -37,7 +37,7 @@ function sanitizeStrings(obj) {
 
 router.post('/', protect, async (req, res) => {
   try {
-    console.log('Groq key loaded:', process.env.GROQ_API_KEY ? 'YES' : 'NO');
+    console.log('OpenRouter key loaded:', process.env.OPENROUTER_API_KEY ? 'YES' : 'NO');
     const a = req.body;
 
     // -- Input length guards (prevent prompt injection via oversized fields) --
@@ -364,22 +364,22 @@ Respond with ONLY valid JSON, no markdown, no code fences:
 
 Provide exactly 20 supplement recommendations total. Assign priority based on clinical relevance: most critical get High, moderately relevant get Medium, supportive/preventive get Low. Be specific and use possibility language. [/INST]`;
 
-    // -- Groq API call (fast, Llama 3.3 70B) -------------------------------
+    // -- OpenRouter API call (DeepSeek V4 Flash) ----------------------------
     let aiResult = null;
     try {
-      console.log('Calling Groq API...');
+      console.log('Calling OpenRouter API...');
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 30000);
 
-      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: GROQ_MODEL,
+          model: OPENROUTER_MODEL,
           messages: [
             {
               role: 'system',
@@ -390,9 +390,10 @@ Provide exactly 20 supplement recommendations total. Assign priority based on cl
               content: prompt,
             },
           ],
-          max_tokens: 8000,
+          max_tokens: 16000,
           temperature: 0.4,
           stream: false,
+          reasoning: { effort: 'none' },
         }),
         signal: controller.signal,
       });
@@ -400,7 +401,10 @@ Provide exactly 20 supplement recommendations total. Assign priority based on cl
 
       if (response.ok) {
         const data = await response.json();
-        const raw = data.choices?.[0]?.message?.content?.trim() || '';
+        console.log('OpenRouter raw response:', JSON.stringify(data).substring(0, 800));
+        const choice = data.choices?.[0]?.message;
+        // DeepSeek reasoning models may put output in reasoning when content is null
+        const raw = (choice?.content || choice?.reasoning || '').trim();
 
         // Strip any accidental markdown fences
         const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
@@ -409,20 +413,20 @@ Provide exactly 20 supplement recommendations total. Assign priority based on cl
         if (jsonMatch) {
           try {
             aiResult = JSON.parse(jsonMatch[0]);
-            console.log('Groq result parsed successfully');
+      console.log('OpenRouter result parsed successfully');
           } catch (parseErr) {
-            console.warn('Groq JSON parse error:', parseErr.message);
+            console.warn('OpenRouter JSON parse error:', parseErr.message);
           }
         } else {
-          console.warn('No JSON found in Groq response');
+          console.warn('No JSON found in OpenRouter response. Raw content (first 500 chars):', raw.substring(0, 500));
         }
       } else {
         const errText = await response.text();
-        console.error('Groq API error:', response.status, errText.substring(0, 200));
+        console.error('OpenRouter API error:', response.status, errText.substring(0, 200));
       }
     } catch (fetchErr) {
       const isTimeout = fetchErr.name === 'AbortError';
-      console.error(`Groq fetch ${isTimeout ? 'timeout' : 'error'}:`, fetchErr.message);
+      console.error(`OpenRouter fetch ${isTimeout ? 'timeout' : 'error'}:`, fetchErr.message);
     }
 
     // Use AI result if valid, otherwise rule-based fallback
@@ -1187,7 +1191,7 @@ function buildResult(a, recs, lifestyleAdvice, actionPlan, warnings, avoidList, 
     actionPlan,
     warnings: warnings.length ? warnings : ['Always inform your healthcare provider about supplements, especially with chronic conditions or prescription medications.'],
     avoidList: avoidList.length ? avoidList : [],
-    seekingSupport: (lifestyleHabits || []).includes('Recreational Drugs') ? buildSeekingSupport() : null,
+    seekingSupport: (a.lifestyleHabits || []).includes('Recreational Drugs') ? buildSeekingSupport() : null,
     disclaimer: 'This information is for educational and wellness purposes only and does not diagnose, treat, or cure any disease. Always consult a licensed healthcare professional before starting any supplement regimen, especially if you have existing medical conditions or take prescription medications.',
   };
 }

@@ -21,7 +21,7 @@ Backend:
 
 ### Data Flow
 ```
-User Assessment → Backend AI (Groq) → JSON Response
+User Assessment → Backend AI (OpenRouter DeepSeek V4 Flash) → JSON Response
                                       ├─ summary
                                       ├─ simplifiedSummary
                                       └─ recommendations[]

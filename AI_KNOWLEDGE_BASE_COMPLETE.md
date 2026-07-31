@@ -79,7 +79,7 @@ The AI Assistant now has **100% accurate and complete** knowledge of all SuppliW
 - **Additional notes**: Free text
 
 **AI Processing:**
-- Groq AI (Llama 4 Maverick)
+- OpenRouter — DeepSeek V4 Flash (`deepseek/deepseek-v4-flash`)
 - Analyzes complete profile for safety and personalization
 - Progress auto-saves if logged in
 

@@ -52,7 +52,7 @@ The AI Assistant has been updated with comprehensive and accurate knowledge abou
 #### **Assessment Flow Section** (DETAILED)
 - ✅ 4-step breakdown with specific fields in each step
 - ✅ Auto-save progress explanation
-- ✅ AI model details (Groq AI with Llama 4 Maverick)
+- ✅ AI model details (OpenRouter DeepSeek V4 Flash)
 
 #### **Features That Don't Exist Section** (UPDATED)
 - ✅ Explicitly states: No delete assessments

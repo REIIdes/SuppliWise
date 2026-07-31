@@ -300,7 +300,7 @@ Before deploying to production:
 - [ ] MongoDB connection string configured
 - [ ] Environment variables set
 - [ ] JWT secret configured
-- [ ] GROQ API key set (for AI recommendations)
+- [ ] OPENROUTER_API_KEY set (for AI recommendations — DeepSeek V4 Flash)
 - [ ] CORS origins updated for production domain
 - [ ] Rate limiters reviewed
 - [ ] Error logging configured
