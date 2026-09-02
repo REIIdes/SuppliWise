@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
 
-const OPENROUTER_MODEL = 'deepseek/deepseek-v4-flash';
+const OPENROUTER_MODEL = 'deepseek/deepseek-v4-flash-0731';
 
 router.post('/', protect, async (req, res) => {
   const { supplementName, context } = req.body;
@@ -128,7 +128,6 @@ Rules:
         max_tokens: 2000,
         temperature: 0.3,
         stream: false,
-        reasoning: { effort: 'none' },
       }),
       signal: controller.signal,
     });
@@ -136,7 +135,7 @@ Rules:
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error('Groq supplement detail error:', response.status, errText.substring(0, 200));
+      console.error('[supplement_detail] OpenRouter error:', response.status, errText.substring(0, 500));
       return res.status(502).json({ message: 'AI service unavailable. Please try again.' });
     }
 

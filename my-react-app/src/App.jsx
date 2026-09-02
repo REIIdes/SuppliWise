@@ -13,7 +13,6 @@ import ResultsPage from './Pages/ResultsPage';
 import HistoryPage from './Pages/HistoryPage';
 import ProfilePage from './Pages/ProfilePage';
 import ChatAssistant from './Pages/ChatAssistant';
-import PWAInstallPrompt from './components/PWAInstallPrompt';
 
 // ── Global Error Boundary — prevents white screens ─────────────────────────
 class ErrorBoundary extends Component {
@@ -129,7 +128,6 @@ function App() {
           <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
         </Routes>
         <GlobalChat />
-        <PWAInstallPrompt />
       </BrowserRouter>
     </ErrorBoundary>
   );

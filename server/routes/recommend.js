@@ -3,7 +3,7 @@ const router = express.Router();
 const { protect } = require('../middleware/auth');
 const { preprocessUserInput, sanitizeMedicalField } = require('../utils/sanitize');
 
-const OPENROUTER_MODEL = 'deepseek/deepseek-v4-flash'; // OpenRouter DeepSeek V4 Flash
+const OPENROUTER_MODEL = 'deepseek/deepseek-v4-flash-0731'; // OpenRouter DeepSeek V4 Flash GA
 
 // -- Recursively sanitize all strings in a JSON object ---------------------
 // Replaces em/en dashes, smart quotes, and other problematic Unicode
@@ -115,254 +115,94 @@ router.post('/', protect, async (req, res) => {
     if (a.fitnessFocus && a.fitnessFocus !== 'Not applicable') optionalLines.push(`- Primary Fitness Focus: ${a.fitnessFocus}`);
     if (a.proteinIntake && a.proteinIntake !== 'Not sure') optionalLines.push(`- Daily Protein Intake: ${a.proteinIntake}`);
 
-    const prompt = `<s>[INST] You are an expert clinical nutritionist and integrative medicine specialist with 20 years of experience. A patient has completed a health assessment. Analyze ONLY the provided information holistically like a real doctor and provide a complete wellness plan.
+    const prompt = `You are an expert clinical nutritionist. A patient completed a health assessment. Generate a personalized wellness plan as valid JSON only — no markdown, no code fences.
 
-EVIDENCE QUALITY STANDARDS (MANDATORY):
-📖 Evidence Citation Rules - ALL recommendations must follow these strict standards:
+CORE RULES:
+1. Every recommendation MUST combine at least 2-3 of these factors: symptoms (with severity), conditions, goals, diet type, BMI, lifestyle, medications, or blood test. Never cite only one thing.
+2. reason field: 2-4 sentences. Weave together symptoms+severity, diet, BMI, goals, and lifestyle naturally. Vary sentence starters — do NOT repeat "Given your..." or "Because you reported..." more than once per recommendation. Example style: "Magnesium plays a central role in nerve signaling and muscle relaxation. This patient follows a ketogenic diet, which may support fat-soluble nutrient absorption, but their sedentary lifestyle and reported migraines (with severe nausea) suggest a higher likelihood of magnesium insufficiency. Supplementation may help reduce neuronal excitability and support the muscle gain goal."
+3. conditionContext field: One punchy sentence. Combine 2-3 factors. Vary openers: "Given your...", "Since you reported...", "Your [X] and [Y] together suggest...", "With your [diet] and [symptom]...". NEVER "Based on your...". Example: "Given your severe nausea and migraine history, and your keto diet's fat-soluble nutrient profile, magnesium may support nerve function and reduce symptom frequency."
+4. simplifiedReason: 1 plain-language sentence specific to this patient. Mention their goal or symptom.
+5. evidence: Cite 1 real source: NIH ODS, WHO, Mayo Clinic, Cochrane, or PubMed-indexed study. Format: "Org/Author (Year). Title. Source. URL if available."
+6. foods: MUST reflect the patient's diet type. Vegan = fortified plant milk, nutritional yeast, tempeh, tofu, algae oil, pumpkin seeds. Keto = eggs, salmon, avocado, cheese, sardines, nuts. Mediterranean = olive oil, sardines, Greek yogurt, legumes, walnuts. Pescatarian = fish/seafood ok, no meat. Vegetarian = no meat/fish. NEVER suggest animal products for Vegan patients.
+7. SAFETY: Check med interactions (warfarin+VitK/fish oil, statins+CoQ10, SSRIs+5-HTP, metformin+B12, thyroid+Ca/Fe timing). Exclude allergens.
+8. AGE: Under 4 = pediatric only. 4-12 = pediatric doses. 13-17 = adolescent. 65+ = bone/B12/CoQ10 priority.
+9. PREGNANCY: Prioritize folate, iron, DHA, iodine. Avoid high-dose Vit A, herbs.
+10. ALLERGIES: Never include any allergen in any field including foods.
+11. triggeredBy: Only list what the patient actually reported. Never invent.
+12. BMI: Reference BMI when relevant — e.g. "Although your BMI is within normal range, your sedentary lifestyle may still reduce muscle strength." or "Your BMI indicates overweight status, which may increase..." Only mention when it genuinely adds context.
+13. SEVERITY: Always include severity when referencing symptoms. Say "severe nausea" not just "nausea", "moderate fatigue" not just "fatigue".
+14. GOALS: Explicitly tie each recommendation back to a stated goal where relevant. e.g. "This aligns with your goal of improving immunity and muscle gain."
+15. Provide exactly 15 recommendations. Personalize EVERY field — no copy-paste across supplements.
 
-1. RECENCY REQUIREMENTS (CASCADING SEARCH):
-   ✅ FIRST: Search for peer-reviewed medical research published within the last 2 years (2024-2025)
-   ✅ SECOND: If no suitable evidence from last 2 years exists, search within the last 5 years (2020-2025)
-   ✅ THIRD: If no suitable evidence from last 5 years exists, use an older landmark study or current clinical guideline ONLY if:
-      - It is still widely accepted in the medical community
-      - It has NOT been contradicted by newer evidence
-      - You MUST clearly label it as "Landmark Study" or "Clinical Guideline" in the citation
-   
-   ⚠️ CRITICAL - PREFER RECENT SYNTHESES OVER OLD PRIMARIES:
-   Before citing an older landmark study, ALWAYS search for a recent (2024-2025, or 2020-2025) systematic review, 
-   meta-analysis, or clinical guideline that references or builds upon that landmark study. Cite the newer synthesis 
-   instead of the original older study whenever possible. Use older landmark studies ONLY when no suitable recent 
-   synthesis or guideline exists.
-   
-   Example: Instead of citing a 2011 landmark RCT, cite a 2023 systematic review that analyzed that RCT along with 
-   newer evidence.
-   
-   ⚠️ LABELING: When using evidence older than 5 years, explicitly state: "[LANDMARK STUDY]" or "[CLINICAL GUIDELINE]" 
-   at the start of the citation
-
-2. EVIDENCE HIERARCHY (prioritize in this order):
-   1️⃣ Systematic reviews and meta-analyses
-   2️⃣ Clinical practice guidelines
-   3️⃣ Randomized controlled trials (RCTs)
-   4️⃣ High-quality observational studies
-
-3. AUTHORITATIVE SOURCES ONLY:
-   ✅ PubMed-indexed peer-reviewed studies
-   ✅ NIH Office of Dietary Supplements
-   ✅ World Health Organization (WHO)
-   ✅ Recognized medical or academic organizations (Mayo Clinic, Cochrane, Endocrine Society, etc.)
-
-4. APA REFERENCE FORMAT REQUIRED:
-   Every recommendation MUST include properly formatted APA references with:
-   - Author(s) and year
-   - Journal name
-   - Brief finding
-   - PMID when available
-   Example: "Smith, J. A., & Brown, L. M. (2024). Magnesium supplementation for sleep quality: A systematic review. Sleep Medicine Reviews, 65, 101-112. (PMID: 12345678)"
-
-5. LEGAL/ETHICAL COMPLIANCE:
-   ⚠️ ALL recommendations MUST be presented as wellness guidance
-   ❌ NEVER claim to diagnose, treat, cure, or prevent diseases
-   ✅ Use possibility language: "may support", "evidence suggests", "some individuals find"
-   ❌ NEVER use diagnostic language: "will cure", "treats", "prevents", "you have"
-
-IMPORTANT MEDICAL SAFETY RULES:
-- Use possibility language, NOT diagnostic language. Say "may support", "some individuals find", "evidence suggests" ? NOT "X causes Y" or "you have X deficiency"
-- NEVER diagnose conditions. Suggest possibilities only.
-- Always include safe upper limits in dosage warnings
-- Flag any supplement that may interact with medications or conditions
-- If symptoms suggest serious conditions (chest pain, severe depression, rapid weight loss), trigger a doctor consultation alert
-- Provide exactly 20 recommendations total, prioritized by clinical relevance
-CRITICAL RULES:
-1. Check medications for supplement interactions (warfarin+VitK/fish oil, statins+CoQ10, SSRIs+St.John's Wort/5-HTP, metformin+B12, thyroid meds+calcium/iron timing).
-2. Exclude supplements that conflict with allergies.
-3. Adjust for medical conditions (kidney disease: avoid high-dose minerals; diabetes: monitor blood sugar supplements; heart disease: prioritize CoQ10/omega-3).
-4. Consider ONLY the information explicitly listed in the patient profile below. Do NOT invent, assume, or infer symptoms, conditions, or severity levels that are not present. If the patient selected None for conditions and None/no symptoms, do NOT add any symptoms or conditions to triggeredBy or conditionContext.
-5. Use specific supplement forms (magnesium glycinate not oxide, methylcobalamin not cyanocobalamin).
-6. Provide REAL lifestyle advice ? sleep hygiene, diet changes, exercise, stress management, hydration.
-7. AGE IS CRITICAL: Under 4 = pediatric only. 4-12 = pediatric doses. 13-17 = adolescent. 65+ = bone/B12/CoQ10 priority. NEVER adult doses for children.
-8. BMI matters: underweight = caloric density; obese = metabolic health.
-9. SEVERITY MATTERS - but ONLY for symptoms the patient actually reported. If no symptoms were reported, do NOT reference any severity. The triggeredBy field must ONLY contain what the patient explicitly selected.
-10. PREGNANCY/BREASTFEEDING: If pregnant or breastfeeding, avoid high-dose Vitamin A, avoid herbs (ashwagandha, St. John's Wort), prioritize folate, iron, DHA, and iodine.
-11. LIFESTYLE HABITS: Smoking depletes Vitamin C and antioxidants. Alcohol depletes B vitamins, magnesium, and zinc.
-12. OPTIONAL FIELDS NOT PROVIDED: If an optional field was not answered, do NOT mention it, do NOT say "not provided", and do NOT base recommendations on it. Only use what is explicitly listed in the patient profile below.
-13. EXPLAINABLE AI: For triggeredBy, ONLY list conditions, symptoms, and goals that the patient actually reported. If the patient reported no symptoms and no conditions, triggeredBy must reference only their health goals or age/diet factors - NEVER invent symptoms. If no relevant trigger exists, write "General wellness".
-14. RULE-BASED SAFEGUARDS: IF kidney disease ? avoid magnesium >200mg, avoid high-dose Vitamin C. IF on blood thinners ? avoid high-dose Vitamin K, fish oil >1g.
-PATIENT PROFILE (only answered fields are listed):
+PATIENT PROFILE:
 - Age: ${a.age}, Gender: ${a.gender}
 - Weight: ${a.weight}kg, Height: ${a.height}cm${bmiNote ? ', ' + bmiNote : ''}
 ${optionalLines.join('\n')}
-SUMMARY INSTRUCTIONS:
-Write a professional clinical summary (3-4 sentences) that maintains a clinical tone at all times. You MUST:
 
-**INPUT PROCESSING RULES:**
-1. **Correct spelling automatically** - "tireed" ? "fatigue", "vitamen" ? "vitamin", "suppliment" ? "supplement"
-2. **Convert slang to professional medical terms:**
-   - "super tired" ? "reports significant fatigue"
-   - "can't sleep" ? "experiencing insomnia"
-   - "tummy ache" ? "abdominal discomfort"
-   - "brain fog" ? "cognitive impairment"
-   - "stressed out" ? "experiencing elevated stress levels"
-3. **Convert Filipino/Tagalog terms to English medical terms:**
-   - "pagod" ? "fatigue"
-   - "nahihilo" ? "dizziness"
-   - "naiinis" ? "irritability"
-   - "masakit" ? "pain"
-   - "sakit sa bata" ? "childhood illness history (requires clarification)"
-4. **Handle food/allergy terms professionally:**
-   - "sea foods" ? "seafood"
-   - "nuts" ? "tree nuts and/or peanuts"
-   - "diary" ? "dairy products"
-5. **Ignore nonsense/filler words** - Remove "like", "um", "you know", repeated characters
-6. **Infer intended meaning carefully** - If unclear, use neutral phrases:
-   - Unclear allergy ? "allergy information requires clarification"
-   - Vague symptom ? "unspecified symptoms"
-   - Incomplete medication ? "medication history incomplete"
-7. **NEVER quote raw user input verbatim** - Always paraphrase professionally
-8. **Use neutral medical language** - Avoid casual, emotional, or judgmental terms
-9. **Maintain professional clinical tone** - Write as a healthcare professional would document
-
-**SUMMARY STRUCTURE:**
-- Sentence 1: Patient demographics and primary presentation
-- Sentence 2: Key symptoms, severity, and relevant medical history
-- Sentence 3: Lifestyle factors, diet, and current health management
-- Sentence 4 (if needed): Notable concerns or consultation recommendations
-
-**LANGUAGE REQUIREMENTS:**
-- Use possibility language ("may indicate", "suggests", "consistent with", "reports")
-- Use complete, grammatically correct sentences
-- Capitalize properly
-- Paraphrase naturally - synthesize information, don't list it
-- Professional medical terminology throughout
-
-Respond with ONLY valid JSON, no markdown, no code fences:
+Respond with ONLY this JSON structure:
 {
-  "summary": "Professional clinical summary 3-4 sentences written in natural, grammatically correct prose. ALWAYS start the first sentence with the patient's age, gender, and BMI woven naturally into the sentence ? for example: 'A 22-year-old male patient with a BMI of 23.4 (normal weight) reports...' or 'A 35-year-old female patient with a BMI of 27.1, indicating overweight status, presents with...'. Use possibility language throughout. Do not quote patient verbatim. Paraphrase naturally. Write as a clinical professional would document a patient case.",
-  "simplifiedSummary": "ULTRA-SIMPLE summary in 1-2 short sentences. Use ONLY everyday words (5th grade reading level). NO medical terms. NO conditions mentioned. NO explanations. Just tell them what the plan will do for them. Examples: 'This plan can help you feel more energized and sleep better.' OR 'These supplements may help reduce your tiredness and improve your focus.' OR 'This routine is designed to support your overall wellness and boost your energy levels.'",
-  "consultDoctor": true or false - true if symptoms suggest serious conditions needing immediate medical attention,
-  "consultReason": "Reason why doctor consultation is recommended, or null",
+  "summary": "3-4 sentence clinical summary. Start: 'A [age]-year-old [gender] patient with BMI [X] ([category])...'. Weave in symptoms with severity, conditions, diet, lifestyle, and goals naturally. Professional tone, possibility language.",
+  "simplifiedSummary": "1-2 sentences, plain language (5th grade level). Tell them what the plan will do. No medical terms.",
+  "consultDoctor": true/false,
+  "consultReason": "Reason or null",
+  "wellnessBaseline": <integer 0-30: start 15, adjust: -3 per severe symptom, -2 moderate, -1 mild, +2 good sleep, -2 poor sleep, +2 active, -2 sedentary, -3 smoking/drugs, -2 alcohol, +1 healthy diet, -2 per serious condition, under 30 +1, over 65 -1>,
   "recommendations": [
     {
-      "name": "Specific supplement name and form",
-      "reason": "Write this in a direct, personalized style that connects the supplement to the patient's specific condition AND symptom(s). Format: 'Because you reported [condition] with [specific symptom(s)], [supplement] may help by [mechanism]. [1-2 sentences on how it addresses their situation specifically].' Always use possibility language ('may', 'suggests', 'some individuals find'). Make it feel like a real clinician is speaking directly to this patient.",
-      "simplifiedReason": "ULTRA-SIMPLE explanation (1 sentence max, 10-15 words). NO medical jargon. NO 'Based on...' NO conditions/symptoms mentioned. Just say what it does in plain everyday language. Examples: 'Helps you feel less tired and more energized.' OR 'Supports better sleep and relaxation.' OR 'Boosts your immune system and overall health.' OR 'Helps reduce stress and improve mood.' Keep it short and direct like talking to a friend.",
-      "triggeredBy": "Comma-separated list of the exact conditions, symptoms, or goals that triggered this. For symptoms with severity, append ONLY the exact severity word in parentheses - use ONLY Mild, Moderate, or Severe (no other words). Do NOT invent or rephrase severity. Example: 'Diabetes, Fatigue (Moderate), Muscle Weakness' or 'Improve Sleep, Anxiety'.",
-      "conditionContext": "One sentence callout in plain conversational language. ONLY reference things the patient actually reported - conditions, symptoms, or goals. If none were reported, base it only on their age, gender, or health goals. NEVER invent symptoms or severity. Start with 'Based on your [goal/age/profile]...' when no symptoms exist. Keep it concise and warm. If there is truly nothing to reference, return null.",
-      "dosage": "Specific dosage with units and safe upper limit note",
-      "timing": "Specific timing instructions",
-      "priority": "High",
-      "confidenceScore": 85,
-      "severityLevel": "Moderate",
-      "interactions": "Known interactions or 'None identified'",
-      "evidence": "MANDATORY: Cite 1-2 specific peer-reviewed studies using proper APA format. CASCADING SEARCH: (1) FIRST: Search for research from last 2 years (2024-2025); (2) SECOND: If none found, search last 5 years (2020-2025); (3) THIRD: If none found, use older landmark study or clinical guideline ONLY if still widely accepted and not contradicted. CRITICAL - PREFER RECENT SYNTHESES: Before citing an older landmark, ALWAYS search for a recent (2024-2025 or 2020-2025) systematic review, meta-analysis, or guideline that references or builds upon that landmark. Cite the newer synthesis instead whenever possible. Use older landmarks ONLY when no recent synthesis exists—MUST prefix with [LANDMARK STUDY] or [CLINICAL GUIDELINE] label. EVIDENCE HIERARCHY: Prefer systematic reviews/meta-analyses > clinical guidelines > RCTs > observational studies. SOURCES: Only PubMed-indexed studies, NIH Office of Dietary Supplements, WHO, or recognized medical organizations. FORMAT: 'Author, A. B., & Author, C. D. (Year). Title of article. Journal Name, volume(issue), pages. (PMID: XXXXXXX)' OR '[CLINICAL GUIDELINE] Organization Name. (Year). Guideline title.' Example preferring recent synthesis: 'Smith, J. A., & Brown, L. M. (2024). Vitamin D supplementation: A systematic review synthesizing evidence from landmark studies. Nutrients, 16(5), 678-695. (PMID: 38123456)' Example for landmark only if no synthesis exists: '[CLINICAL GUIDELINE] Institute of Medicine. (2011). Dietary Reference Intakes for Calcium and Vitamin D. National Academies Press.' LEGAL REQUIREMENT: Present as wellness guidance only. NEVER claim to diagnose, treat, cure, or prevent diseases. Use possibility language ('may support', 'evidence suggests').",
-      "simplifiedEvidence": "ULTRA-SIMPLE one-liner (under 10 words). NO study names, NO citations, NO technical terms. Just say it works. Examples: 'Research shows this helps most people.' OR 'Proven to support your health.' OR 'Studies confirm this is effective.' OR 'Scientifically backed and safe.' Keep it short and reassuring.",
-      "foods": "A clean comma-separated list of 4-6 specific food names only. NO sentences, NO 'such as', NO 'are naturally rich in', NO filler phrases. Just food names. If a category must be mentioned, immediately follow it with specific examples in parentheses. Examples of correct format: 'Atlantic salmon, canned tuna, sardines, mackerel, herring, anchovies' OR 'Fatty fish (salmon, tuna, sardines, mackerel), walnuts, chia seeds, flaxseeds'. NEVER write sentences like 'X are naturally rich in Y'.",
-      "sideEffects": "Common side effects at recommended dose"
+      "name": "Supplement name and specific form (e.g. Magnesium Glycinate not just Magnesium)",
+      "reason": "2-4 sentences. Combine symptoms with severity + diet + BMI/lifestyle + goals. Vary sentence starters. Focus on mechanism. Use possibility language. Each recommendation must feel written specifically for this patient — no two reasons should read the same.",
+      "simplifiedReason": "1 plain sentence. Mention their specific symptom or goal. e.g. 'Helps ease your migraines and supports the muscle strength you are working toward.'",
+      "triggeredBy": "Only what patient reported, severity in parentheses e.g. 'Migraine, Nausea (Severe), Muscle Gain'",
+      "conditionContext": "One sentence combining 2-3 patient factors. Vary opener each time: 'Given your...', 'Since you reported...', 'With your [diet] and [symptom]...', 'Your [X] and [Y] together suggest...'. Never 'Based on your...'. Return null if nothing to reference.",
+      "dosage": "Specific dose with units and safe upper limit",
+      "timing": "Specific timing with absorption tips relevant to their diet",
+      "priority": "High|Medium|Low",
+      "confidenceScore": <70-100>,
+      "severityLevel": "High|Moderate|Low",
+      "interactions": "Interactions relevant to this patient's meds/conditions, or 'None identified'",
+      "evidence": "Org/Author (Year). Title. Source. URL if available.",
+      "simplifiedEvidence": "Under 10 words. e.g. 'Research supports this for your condition.'",
+      "foods": "4-6 foods matching the patient's diet type. Vegan = plant sources only. Keto = high-fat low-carb sources. Mediterranean = olive oil, fish, legumes, nuts. No animal products for vegan. No grains for keto.",
+      "sideEffects": "Common side effects and safe limits at recommended dose"
     }
   ],
   "lifestyleAdvice": [
-    {
-      "category": "Category",
-      "advice": "Specific actionable advice for this patient"
-    }
+    { "category": "Category tied to patient's conditions/goals", "advice": "Specific advice referencing their diet, lifestyle habits, BMI, and goals" }
   ],
   "mealRecommendations": [
-    {
-      "meal": "Breakfast/Lunch/Dinner/Snack",
-      "suggestion": "CRITICAL MEAL RULES ? every meal MUST follow ALL of these: (1) DIET TYPE: strictly respect the patient's diet (Vegan/Vegetarian = no meat/fish/dairy/eggs; Keto = no grains/high-carb foods; Paleo = no grains/dairy/legumes; Pescatarian = no meat but fish ok; Carnivore = animal products only). (2) ALLERGIES: NEVER include any ingredient matching the patient's known allergies ? check every single ingredient. (3) CONDITIONS: Diabetes = low-GI only, no refined sugar; Hypertension = low-sodium, high-potassium; Kidney Disease = low-potassium, low-phosphorus, low-protein. (4) GOALS/SYMPTOMS: match foods to their specific nutritional deficiencies and goals. (5) FORMAT: write as a real meal with specific foods, not a supplement list ? e.g. 'Grilled salmon with quinoa and steamed broccoli ? rich in omega-3, B12, and magnesium for energy and focus.'"
-    }
+    { "meal": "Breakfast|Lunch|Dinner|Snack", "suggestion": "Real meal with specific foods. Respect diet type and allergies strictly. Include brief rationale tied to patient's goals/conditions." }
   ],
   "dailySchedule": [
-    {
-      "time": "Morning/With Lunch/Evening/Before Bed",
-      "supplements": ["Supplement name 1", "Supplement name 2"]
-    }
+    { "time": "Morning|With Lunch|Evening|Before Bed", "supplements": ["Supplement name only — NO dosage text here, e.g. 'Magnesium Glycinate' not 'Magnesium Glycinate - 400mg'. The dosage will be pulled automatically from the recommendations."] }
   ],
   "actionPlan": [
     {
-      "phase": "Week 1 - Build Foundations",
-      "focus": "One sentence describing the overall focus for this week based on the patient's profile",
-      "steps": [
-        "Start [specific supplement] for [specific reason tied to their symptoms]",
-        "Specific diet or hydration action",
-        "Specific movement or lifestyle action"
-      ],
-      "expectedChanges": [
-        "Specific early improvement the patient may notice",
-        "Another expected early change"
-      ]
+      "phase": "Week 1 - [title tied to patient's primary concern]",
+      "focus": "One sentence based on this patient's most urgent need",
+      "steps": ["Start [supplement] for [patient-specific reason with severity]", "Diet action matching their diet type", "Movement/lifestyle action referencing their activity level"],
+      "expectedChanges": ["Specific early improvement tied to their symptoms", "Another expected change"]
     },
-    {
-      "phase": "Week 2 - Improve Energy & Recovery",
-      "focus": "One sentence describing the focus for week 2",
-      "steps": [
-        "Continue previous supplements",
-        "Add [next supplement] for [reason]",
-        "Specific activity or habit to add"
-      ],
-      "expectedChanges": [
-        "Expected improvement by end of week 2",
-        "Another expected change"
-      ]
-    },
-    {
-      "phase": "Weeks 3-4 - Build Sustainable Habits",
-      "focus": "One sentence describing the focus for weeks 3-4",
-      "steps": [
-        "Continue supplement routine",
-        "Specific habit or lifestyle improvement",
-        "Specific sleep, diet, or exercise action"
-      ],
-      "expectedChanges": [
-        "Expected improvement by end of week 4",
-        "Another expected change"
-      ]
-    },
-    {
-      "phase": "Month 2 - Assess & Strengthen",
-      "focus": "One sentence describing the month 2 focus",
-      "steps": [
-        "Maintain full supplement routine",
-        "Specific mid-term action or check-in",
-        "Consider lab work or doctor visit if symptoms persist"
-      ],
-      "expectedChanges": [
-        "Primary symptoms should show measurable improvement",
-        "What to do if improvement is not seen"
-      ]
-    },
-    {
-      "phase": "Month 3+ - Long-Term Recovery",
-      "focus": "One sentence on long-term maintenance",
-      "steps": [
-        "Reassess supplement stack with a healthcare provider",
-        "Maintain lifestyle habits established in previous weeks",
-        "Specific long-term goal tied to their health profile"
-      ],
-      "expectedChanges": [
-        "Full therapeutic effect expected by this point",
-        "Long-term outcome if plan is maintained"
-      ]
-    }
+    { "phase": "Week 2 - [title]", "focus": "...", "steps": ["..."], "expectedChanges": ["..."] },
+    { "phase": "Weeks 3-4 - [title]", "focus": "...", "steps": ["..."], "expectedChanges": ["..."] },
+    { "phase": "Month 2 - [title]", "focus": "...", "steps": ["..."], "expectedChanges": ["..."] },
+    { "phase": "Month 3+ - Long-Term Maintenance", "focus": "...", "steps": ["..."], "expectedChanges": ["..."] }
   ],
-  "warnings": ["Specific warnings based on medications/conditions"],
-  "avoidList": ["Supplements to avoid and why"],
-  "wellnessBaseline": "MANDATORY FIELD: Calculate an initial Wellness Score baseline (integer from 0-30) that reflects the patient's current health state BEFORE they start the supplement plan. This baseline represents their starting point. SCORING GUIDELINES: Analyze symptom count, severity (Mild=+1, Moderate=+2, Severe=+3 to penalty), medical conditions, stress level (High=-3, Medium=-1, Low=+2), sleep quality (Poor=-3, Fair=-1, Good=+2, Excellent=+3), activity level (Sedentary=-2, Light=0, Moderate=+2, Very Active=+3), diet quality (None/Poor=-2, Vegan/Vegetarian=+1, Mediterranean/Balanced=+2, Keto/Paleo=+1), age (under 30=+1, 30-50=0, over 50=-1), lifestyle habits (Smoking=-3, Excessive Alcohol=-2, Recreational Drugs=-3, each positive habit=+1), and overall health picture. START AT 15 (neutral baseline) and adjust up or down based on these factors. FINAL RANGE: Minimum 0 (severe multi-condition critical health), Maximum 30 (excellent health, no symptoms, optimal lifestyle). EXAMPLES: Healthy 25yo with good sleep, active lifestyle, no symptoms = 25-28. Middle-aged with 2-3 moderate symptoms, fair sleep, sedentary = 12-15. Severe multi-condition patient with poor sleep, high stress = 5-10. Return ONLY the integer score (e.g., 18), no explanation or text.",
+  "warnings": ["Specific warning tied to this patient's meds/conditions/supplements"],
+  "avoidList": ["Supplement to avoid — specific reason for THIS patient"],
   "seekingSupport": {
-    "include": true or false ? set true ONLY if the patient listed Recreational Drugs in lifestyle habits,
+    "include": <true only if patient listed Recreational Drugs>,
     "title": "Seeking Support",
-    "intro": "2-3 non-judgmental sentences about how prolonged recreational drug use affects brain chemistry and nutrient levels, and that confidential support is available in the Philippines.",
+    "intro": "2-3 non-judgmental sentences about drug use effects on nutrient levels and available Philippine support.",
     "resources": [
-      { "label": "Crisis Helpline", "name": "DOH Substance Abuse Helpline ? Call 1550", "description": "Free and confidential Department of Health hotline providing treatment referrals, psychosocial support, and rehabilitation information.", "url": "https://doh.gov.ph/press-release/doh-launches-substance-abuse-1550-helpline/" },
-      { "label": "Government Agency", "name": "Dangerous Drugs Board (DDB)", "description": "Primary Philippine government body for drug prevention and control. Provides education, referrals, and rehabilitation program information.", "url": "https://ddb.gov.ph" },
-      { "label": "Rehabilitation & Reintegration", "name": "DSWD Yakap Bayan Program", "description": "DSWD program supporting recovering persons who used drugs (RPWUDs) with reintegration into family and community.", "url": "https://assistance.ph/dswd-yakap-bayan-program/" },
-      { "label": "Mental Health Crisis Line", "name": "NCMH Crisis Hotline ? Call 1553", "description": "Free 24/7 National Center for Mental Health hotline for substance use, emotional distress, and co-occurring mental health concerns.", "url": "https://ncmh.gov.ph" }
+      { "label": "Crisis Helpline", "name": "DOH Substance Abuse Helpline - Call 1550", "description": "Free and confidential DOH hotline for treatment referrals and psychosocial support.", "url": "https://doh.gov.ph/press-release/doh-launches-substance-abuse-1550-helpline/" },
+      { "label": "Government Agency", "name": "Dangerous Drugs Board (DDB)", "description": "Primary Philippine government body for drug prevention, education, and rehabilitation referrals.", "url": "https://ddb.gov.ph" },
+      { "label": "Rehabilitation & Reintegration", "name": "DSWD Yakap Bayan Program", "description": "DSWD program supporting recovering persons with family and community reintegration.", "url": "https://assistance.ph/dswd-yakap-bayan-program/" },
+      { "label": "Mental Health Crisis Line", "name": "NCMH Crisis Hotline - Call 1553", "description": "Free 24/7 National Center for Mental Health hotline for substance use and mental health concerns.", "url": "https://ncmh.gov.ph" }
     ]
   },
   "disclaimer": "This information is for educational and wellness purposes only and does not diagnose, treat, or cure any disease. Always consult a licensed healthcare professional before starting any supplement regimen."
 }
 
-Provide exactly 20 supplement recommendations total. Assign priority based on clinical relevance: most critical get High, moderately relevant get Medium, supportive/preventive get Low. Be specific and use possibility language. [/INST]`;
+Output exactly 15 recommendations. High = most clinically urgent for this patient, Medium = moderately relevant, Low = supportive/preventive. Every recommendation must combine multiple patient factors — symptoms with severity, diet, BMI, goals, lifestyle.[/INST]`;
 
     // -- OpenRouter API call (DeepSeek V4 Flash) ----------------------------
     let aiResult = null;
@@ -370,7 +210,7 @@ Provide exactly 20 supplement recommendations total. Assign priority based on cl
       console.log('Calling OpenRouter API...');
 
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30000);
+      const timeout = setTimeout(() => controller.abort(), 180000); // 3 minute timeout
 
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
@@ -383,7 +223,7 @@ Provide exactly 20 supplement recommendations total. Assign priority based on cl
           messages: [
             {
               role: 'system',
-              content: 'You are an expert clinical nutritionist. Always respond with valid JSON only ? no markdown, no code fences, no extra text. Your entire response must be parseable JSON.',
+              content: 'You are an expert clinical nutritionist. Respond with valid JSON only — no markdown, no code fences, no extra text. Every supplement recommendation must be personalized to the specific patient profile provided. Never use generic descriptions.',
             },
             {
               role: 'user',
@@ -401,7 +241,6 @@ Provide exactly 20 supplement recommendations total. Assign priority based on cl
 
       if (response.ok) {
         const data = await response.json();
-        console.log('OpenRouter raw response:', JSON.stringify(data).substring(0, 800));
         const choice = data.choices?.[0]?.message;
         // DeepSeek reasoning models may put output in reasoning when content is null
         const raw = (choice?.content || choice?.reasoning || '').trim();
