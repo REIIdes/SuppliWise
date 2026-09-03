@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const speakeasy = require('speakeasy');
+const QRCode = require('qrcode');
 const User = require('../models/User');
 const { sendOtpEmail } = require('../utils/email');
 
@@ -11,10 +13,11 @@ const otpStore = new Map(); // Format: { email: { otp, expiresAt, requestedAt } 
 // Rate limiting map for OTP requests
 const otpRateLimitMap = new Map(); // Format: { userId: lastRequestTime }
 const OTP_COOLDOWN_MS = 30000; // 30 seconds cooldown
+const shouldExposeDevOtp = () => process.env.ALLOW_DEV_OTP_RESPONSE === 'true';
 
 // Generate JWT
 const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+  return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '12h' });
 };
 
 // Email regex — requires a real TLD (2–6 letters), rejects .con, .cmo, etc.
@@ -172,6 +175,14 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ message: 'Invalid email or password.' });
     }
 
+    if (user.twoFactorEnabled) {
+      return res.json({
+        requiresTwoFactor: true,
+        userId: user._id,
+        message: 'Google Authenticator verification required.',
+      });
+    }
+
     // Credentials valid - generate and send OTP
     const otp = crypto.randomInt(100000, 999999).toString();
     const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
@@ -198,7 +209,7 @@ router.post('/login', async (req, res) => {
       requiresOtp: true,
       userId: user._id,
       // In development, include OTP in response (remove in production!)
-      ...(process.env.NODE_ENV === 'development' && { otp }),
+      ...(shouldExposeDevOtp() && { otp }),
     });
   } catch (error) {
     console.error('[login]', error.message);
@@ -263,6 +274,68 @@ router.post('/verify-login-otp', async (req, res) => {
   }
 });
 
+router.post('/setup-2fa', async (req, res) => {
+  try {
+    const header = req.headers.authorization || '';
+    if (!header.startsWith('Bearer ')) return res.status(401).json({ message: 'Not authorized.' });
+    const decoded = jwt.verify(header.slice(7), process.env.JWT_SECRET);
+    const user = await User.findById(decoded.id);
+    if (!user) return res.status(401).json({ message: 'Not authorized.' });
+    const secret = speakeasy.generateSecret({ name: `SuppliWise (${user.email})`, issuer: 'SuppliWise' });
+    user.twoFactorSecret = secret.base32;
+    await user.save();
+    res.json({ qrCode: await QRCode.toDataURL(secret.otpauth_url), secret: secret.base32 });
+  } catch (error) {
+    res.status(401).json({ message: 'Unable to start two-factor setup.' });
+  }
+});
+
+router.post('/verify-2fa', async (req, res) => {
+  try {
+    const header = req.headers.authorization || '';
+    if (!header.startsWith('Bearer ')) return res.status(401).json({ message: 'Not authorized.' });
+    const decoded = jwt.verify(header.slice(7), process.env.JWT_SECRET);
+    const user = await User.findById(decoded.id).select('+twoFactorSecret');
+    if (!user || !user.twoFactorSecret) return res.status(400).json({ message: 'Two-factor setup was not started.' });
+    const verified = speakeasy.totp.verify({ secret: user.twoFactorSecret, encoding: 'base32', token: String(req.body.otp || '').trim(), window: 1 });
+    if (!verified) return res.status(401).json({ message: 'Invalid verification code.' });
+    user.twoFactorEnabled = true;
+    await user.save();
+    res.json({ message: 'Two-factor authentication enabled successfully.', twoFactorEnabled: true });
+  } catch (error) {
+    res.status(401).json({ message: 'Unable to verify the authentication code.' });
+  }
+});
+
+router.post('/login-2fa', async (req, res) => {
+  try {
+    const user = await User.findById(req.body.userId).select('+twoFactorSecret');
+    if (!user || !user.twoFactorEnabled || !user.twoFactorSecret) return res.status(401).json({ message: 'Two-factor authentication is not enabled.' });
+    const verified = speakeasy.totp.verify({ secret: user.twoFactorSecret, encoding: 'base32', token: String(req.body.otp || '').trim(), window: 1 });
+    if (!verified) return res.status(401).json({ message: 'Invalid Google Authenticator code.' });
+    res.json({ _id: user._id, firstName: user.firstName, lastName: user.lastName, name: user.fullName, email: user.email, dateOfBirth: user.dateOfBirth, age: user.age, gender: user.gender, profilePicture: user.profilePicture, bannerPicture: user.bannerPicture, twoFactorEnabled: true, token: generateToken(user._id) });
+  } catch (error) {
+    res.status(401).json({ message: 'Unable to verify the 2FA code.' });
+  }
+});
+
+router.post('/disable-2fa', async (req, res) => {
+  try {
+    const header = req.headers.authorization || '';
+    if (!header.startsWith('Bearer ')) return res.status(401).json({ message: 'Not authorized.' });
+    const decoded = jwt.verify(header.slice(7), process.env.JWT_SECRET);
+    const user = await User.findById(decoded.id).select('+twoFactorSecret');
+    const verified = user && user.twoFactorEnabled && speakeasy.totp.verify({ secret: user.twoFactorSecret, encoding: 'base32', token: String(req.body.otp || '').trim(), window: 1 });
+    if (!verified) return res.status(401).json({ message: 'Invalid Google Authenticator code.' });
+    user.twoFactorEnabled = false;
+    user.twoFactorSecret = '';
+    await user.save();
+    res.json({ message: 'Google Authenticator has been disabled successfully.', twoFactorEnabled: false });
+  } catch (error) {
+    res.status(401).json({ message: 'Your session has expired or the code is invalid.' });
+  }
+});
+
 // @route   POST /api/auth/resend-login-otp
 // @desc    Resend OTP for login
 // @access  Public
@@ -315,7 +388,7 @@ router.post('/resend-login-otp', async (req, res) => {
         ? 'Verification code sent to your email successfully' 
         : 'Verification code generated (check console in development)',
       // In development, include OTP in response (remove in production!)
-      ...(process.env.NODE_ENV === 'development' && { otp }),
+      ...(shouldExposeDevOtp() && { otp }),
     });
   } catch (error) {
     console.error('[resend-login-otp]', error.message);

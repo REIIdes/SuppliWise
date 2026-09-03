@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
-import { BASE_URL, loginUser, saveAssessment, getRecommendations, saveAssessmentResults } from '../api';
+import { BASE_URL, loginUser, saveAssessment, getRecommendations, saveAssessmentResults, parseJSON } from '../api';
 import './LogIn.css';
 import './ProfilePage.css'; // Import for OTP modal styles
 
@@ -38,6 +38,7 @@ function LogIn() {
   const [otpExpiresAt, setOtpExpiresAt] = useState(null);
   const [otpTimeLeft, setOtpTimeLeft] = useState(600); // 10 minutes in seconds
   const [otpExpiryTimer, setOtpExpiryTimer] = useState(null);
+  const [requiresTwoFactor, setRequiresTwoFactor] = useState(false);
   
   // Forgot password states
   const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
@@ -117,7 +118,9 @@ function LogIn() {
   const handleResendOtp = async () => {
     if (resendCooldown > 0) return;
     
+    setOtp('');
     setError('');
+    setSuccess('');
     setOtpLoading(true);
 
     try {
@@ -127,7 +130,7 @@ function LogIn() {
         body: JSON.stringify({ userId: pendingUserId }),
       });
 
-      const data = await response.json();
+      const data = await parseJSON(response);
 
       if (!response.ok) {
         if (response.status === 429 && data.remainingSeconds) {
@@ -166,16 +169,28 @@ function LogIn() {
         body: JSON.stringify({ email, password }),
       });
 
-      const data = await response.json();
+      const data = await parseJSON(response);
       console.log('[DEBUG] Login response:', data);
 
       if (!response.ok) {
         throw new Error(data.message || 'Login failed');
       }
 
+      if (data?.requiresTwoFactor) {
+        setRequiresTwoFactor(true);
+        setPendingUserId(data.userId);
+        setOtp('');
+        setShowOtpModal(true);
+        setLoading(false);
+        return;
+      }
+
       // Check if OTP is required
       if (data.requiresOtp) {
         console.log('[DEBUG] OTP required, showing modal');
+        setOtp('');
+        setError('');
+        setSuccess('');
         setPendingUserId(data.userId);
         setShowOtpModal(true);
         startResendCooldown(30);
@@ -204,13 +219,13 @@ function LogIn() {
     setError('');
 
     try {
-      const response = await fetch(`${BASE_URL}/auth/verify-login-otp`, {
+      const response = await fetch(`${BASE_URL}/auth/${requiresTwoFactor ? 'login-2fa' : 'verify-login-otp'}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: pendingUserId, otp: otp.trim() }),
       });
 
-      const data = await response.json();
+      const data = await parseJSON(response);
 
       if (!response.ok) {
         throw new Error(data.message || 'Invalid verification code');
@@ -221,7 +236,10 @@ function LogIn() {
       setOtp('');
       await completeLogin(data);
     } catch (err) {
-      setError(err.message || 'Invalid verification code. Please try again.');
+      const message = err.message?.includes('Invalid verification code')
+        ? 'That code is no longer valid. Please use the newest verification code sent to your email.'
+        : err.message || 'Invalid verification code. Please try again.';
+      setError(message);
     } finally {
       setOtpLoading(false);
     }
@@ -237,6 +255,7 @@ function LogIn() {
       gender: data.gender,
       dateOfBirth: data.dateOfBirth,
       age: data.age,
+      twoFactorEnabled: data.twoFactorEnabled === true,
       profilePicture: data.profilePicture || '',
       bannerPicture: data.bannerPicture || ''
     }));
@@ -275,6 +294,7 @@ function LogIn() {
 
   const handleCancelOtp = () => {
     setShowOtpModal(false);
+    setRequiresTwoFactor(false);
     setOtp('');
     setPendingUserId('');
     setError('');
@@ -331,7 +351,7 @@ function LogIn() {
         body: JSON.stringify({ email: forgotPasswordEmail }),
       });
 
-      const data = await response.json();
+      const data = await parseJSON(response);
 
       if (!response.ok) {
         if (response.status === 429 && data.remainingSeconds) {
@@ -369,7 +389,7 @@ function LogIn() {
         body: JSON.stringify({ userId: resetUserId, otp: resetOtp.trim() }),
       });
 
-      const data = await response.json();
+      const data = await parseJSON(response);
 
       if (!response.ok) {
         throw new Error(data.message || 'Invalid verification code');
@@ -380,7 +400,10 @@ function LogIn() {
       setSuccess('Code verified! Now set your new password.');
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
-      setError(err.message || 'Invalid verification code. Please try again.');
+      const message = err.message?.includes('Invalid verification code')
+        ? 'That code is no longer valid. Please use the newest verification code sent to your email.'
+        : err.message || 'Invalid verification code. Please try again.';
+      setError(message);
     } finally {
       setOtpLoading(false);
     }
@@ -414,7 +437,7 @@ function LogIn() {
         }),
       });
 
-      const data = await response.json();
+      const data = await parseJSON(response);
 
       if (!response.ok) {
         throw new Error(data.message || 'Failed to reset password');
@@ -436,7 +459,9 @@ function LogIn() {
   const handleResendResetOtp = async () => {
     if (resendCooldown > 0) return;
     
+    setResetOtp('');
     setError('');
+    setSuccess('');
     setOtpLoading(true);
 
     try {
@@ -446,7 +471,7 @@ function LogIn() {
         body: JSON.stringify({ userId: resetUserId }),
       });
 
-      const data = await response.json();
+      const data = await parseJSON(response);
 
       if (!response.ok) {
         if (response.status === 429 && data.remainingSeconds) {
@@ -551,8 +576,8 @@ function LogIn() {
         <div className="profile-modal-overlay" onClick={() => !otpLoading && handleCancelOtp()}>
           <div className="profile-modal" onClick={(e) => e.stopPropagation()}>
             <h2>Login Verification</h2>
-            <p>For your security, we've sent a 6-digit verification code to:</p>
-            <p className="profile-modal-email">{email}</p>
+            <p>{requiresTwoFactor ? 'Enter the current code from Google Authenticator.' : "For your security, we've sent a 6-digit verification code to:"}</p>
+            {!requiresTwoFactor && <p className="profile-modal-email">{email}</p>}
             <p className="profile-modal-note">Please enter the code to complete your login.</p>
             
             {/* OTP Expiry Timer */}
@@ -593,7 +618,7 @@ function LogIn() {
               </div>
             )}
 
-            <div className="profile-modal-resend">
+            {!requiresTwoFactor && <div className="profile-modal-resend">
               <button
                 type="button"
                 className="profile-modal-resend-btn"
@@ -604,7 +629,7 @@ function LogIn() {
                   ? `Send Again (${resendCooldown}s)` 
                   : 'Send Again'}
               </button>
-            </div>
+            </div>}
 
             <div className="profile-modal-actions">
               <button

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import ConfirmModal from '../Components/ConfirmModal/ConfirmModal';
+import { BASE_URL } from '../api';
 import './ProfilePage.css';
 
 function ProfilePage() {
@@ -14,6 +15,11 @@ function ProfilePage() {
   const [isEditing, setIsEditing] = useState(false);
   const [showOtpModal, setShowOtpModal] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [showDisable2FAConfirm, setShowDisable2FAConfirm] = useState(false);
+  const [show2FASetup, setShow2FASetup] = useState(false);
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
+  const [twoFactorQrCode, setTwoFactorQrCode] = useState('');
+  const [twoFactorCode, setTwoFactorCode] = useState('');
   const [otp, setOtp] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
   const [pendingEmailChange, setPendingEmailChange] = useState('');
@@ -63,6 +69,7 @@ function ProfilePage() {
       setProfilePicturePreview(user.profilePicture || '');
       setBannerPicture(user.bannerPicture || '');
       setBannerPicturePreview(user.bannerPicture || '');
+      setTwoFactorEnabled(user.twoFactorEnabled === true);
     }
 
     // Cleanup timer on unmount
@@ -103,6 +110,82 @@ function ProfilePage() {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const handleSetup2FA = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const response = await fetch(`${BASE_URL}/auth/setup-2fa`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to start authenticator setup.');
+      setTwoFactorQrCode(data.qrCode);
+      setTwoFactorCode('');
+      setShow2FASetup(true);
+    } catch (err) {
+      setError(err.message || 'Unable to start authenticator setup.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerify2FA = async () => {
+    if (!/^\d{6}$/.test(twoFactorCode)) {
+      setError('Enter the 6-digit code from Google Authenticator.');
+      return;
+    }
+    setError('');
+    setOtpLoading(true);
+    try {
+      const response = await fetch(`${BASE_URL}/auth/verify-2fa`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+        body: JSON.stringify({ otp: twoFactorCode }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Invalid authenticator code.');
+      setTwoFactorEnabled(true);
+      setShow2FASetup(false);
+      setTwoFactorCode('');
+      setSuccess('Google Authenticator is now enabled.');
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      localStorage.setItem('user', JSON.stringify({ ...user, twoFactorEnabled: true }));
+    } catch (err) {
+      setError(err.message || 'Unable to verify the authenticator code.');
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleDisable2FA = async () => {
+    if (!/^\d{6}$/.test(twoFactorCode)) {
+      setError('Enter the current 6-digit authenticator code to disable 2FA.');
+      return;
+    }
+    setError('');
+    setOtpLoading(true);
+    try {
+      const response = await fetch(`${BASE_URL}/auth/disable-2fa`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+        body: JSON.stringify({ otp: twoFactorCode }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to disable Google Authenticator.');
+      setTwoFactorEnabled(false);
+      setShowDisable2FAConfirm(false);
+      setTwoFactorCode('');
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      localStorage.setItem('user', JSON.stringify({ ...user, twoFactorEnabled: false }));
+      setSuccess('Google Authenticator has been disabled. Email OTP will be used at login.');
+    } catch (err) {
+      setError(err.message || 'Unable to disable Google Authenticator.');
+    } finally {
+      setOtpLoading(false);
+    }
   };
 
   const handleChange = (e) => {
@@ -192,7 +275,7 @@ function ProfilePage() {
   const requestEmailOtp = async (newEmail) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('/api/auth/request-email-otp', {
+      const response = await fetch(`${BASE_URL}/auth/request-email-otp`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -264,7 +347,7 @@ function ProfilePage() {
     setOtpLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('/api/auth/verify-email-otp', {
+      const response = await fetch(`${BASE_URL}/auth/verify-email-otp`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -412,7 +495,7 @@ function ProfilePage() {
         updateData.newPassword = formData.newPassword;
       }
 
-      const response = await fetch('/api/auth/profile', {
+      const response = await fetch(`${BASE_URL}/auth/profile`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -816,6 +899,22 @@ function ProfilePage() {
               </div>
             )}
 
+            <div className="profile-section">
+              <h2 className="profile-section-title">Account Security</h2>
+              <p className="profile-section-subtitle">
+                {twoFactorEnabled ? 'Google Authenticator is active. It is the only second factor used at login.' : 'Email verification codes are used at login.'}
+              </p>
+              {!twoFactorEnabled ? (
+                <button type="button" className="profile-btn profile-btn-primary" onClick={handleSetup2FA} disabled={loading}>
+                  {loading ? 'Preparing...' : 'Enable Google Authenticator'}
+                </button>
+              ) : (
+                <button type="button" className="profile-btn profile-btn-secondary" onClick={() => { setTwoFactorCode(''); setError(''); setShowDisable2FAConfirm(true); }}>
+                  Turn Off Google Authenticator
+                </button>
+              )}
+            </div>
+
             {error && (
               <div className="profile-alert profile-alert-error">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -894,6 +993,35 @@ function ProfilePage() {
           onConfirm={confirmLogout}
           onCancel={() => setShowLogoutConfirm(false)}
         />
+      )}
+
+      {show2FASetup && (
+        <div className="profile-modal-overlay">
+          <div className="profile-modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Set Up Google Authenticator</h2>
+            <p>Scan this QR code in Google Authenticator, then enter the current 6-digit code.</p>
+            {twoFactorQrCode && <img src={twoFactorQrCode} alt="Google Authenticator setup QR code" style={{ display: 'block', width: 220, height: 220, margin: '16px auto' }} />}
+            <input className="profile-otp-input" inputMode="numeric" maxLength="6" placeholder="Enter 6-digit code" value={twoFactorCode} onChange={(e) => setTwoFactorCode(e.target.value.replace(/\D/g, '').slice(0, 6))} />
+            <div className="profile-modal-actions">
+              <button type="button" className="profile-modal-btn profile-modal-btn-secondary" onClick={() => setShow2FASetup(false)} disabled={otpLoading}>Cancel</button>
+              <button type="button" className="profile-modal-btn profile-modal-btn-primary" onClick={handleVerify2FA} disabled={otpLoading || twoFactorCode.length !== 6}>{otpLoading ? 'Verifying...' : 'Enable 2FA'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDisable2FAConfirm && (
+        <div className="profile-modal-overlay">
+          <div className="profile-modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Turn Off Google Authenticator?</h2>
+            <p>Enter your current authenticator code to confirm. Email OTP will be restored after removal.</p>
+            <input className="profile-otp-input" inputMode="numeric" maxLength="6" placeholder="Enter 6-digit code" value={twoFactorCode} onChange={(e) => setTwoFactorCode(e.target.value.replace(/\D/g, '').slice(0, 6))} />
+            <div className="profile-modal-actions">
+              <button type="button" className="profile-modal-btn profile-modal-btn-secondary" onClick={() => setShowDisable2FAConfirm(false)} disabled={otpLoading}>Cancel</button>
+              <button type="button" className="profile-modal-btn profile-modal-btn-primary" onClick={handleDisable2FA} disabled={otpLoading || twoFactorCode.length !== 6}>{otpLoading ? 'Verifying...' : 'Confirm Removal'}</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* OTP Verification Modal */}

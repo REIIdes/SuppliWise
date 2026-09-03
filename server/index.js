@@ -16,6 +16,10 @@ const insightsRoutes = require('./routes/insights');
 
 const app = express();
 
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'suppliwise_jwt_secret_key_change_in_production') {
+  throw new Error('JWT_SECRET is missing or still uses the default placeholder value.');
+}
+
 // ── Security headers ──────────────────────────────────────────────────────
 // Helmet sets X-Frame-Options, X-Content-Type-Options, HSTS, etc.
 // CSP is disabled — it blocks localhost API calls in development and
@@ -42,13 +46,16 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' })); // Increase limit for profile/banner images
 
 // ── Rate limiters ──────────────────────────────────────────────────────────
-// Auth: 20 attempts per 15 min per IP (prevents brute-force)
+// Keep production limits strict while allowing repeated localhost testing.
+const isLocalDevRequest = (req) => process.env.NODE_ENV !== 'production' ||
+  ['localhost', '127.0.0.1'].includes(req.hostname) || req.ip.includes('127.0.0.1') || req.ip.includes('::1');
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: (req) => isLocalDevRequest(req) ? 200 : 20,
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: 'Too many attempts. Please wait 15 minutes and try again.' },
+  skip: (req) => process.env.NODE_ENV !== 'production' && req.path === '/login',
 });
 
 // Recommend: 15 requests per 10 min per IP (protects Groq quota)

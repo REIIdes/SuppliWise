@@ -1,5 +1,5 @@
-// TEMPORARY: Hardcode backend URL for mobile testing
-const BASE_URL = 'http://192.168.0.34:5000/api';
+// Use an environment override when provided; otherwise fall back to the local dev server.
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 // Export BASE_URL so other components can use it
 export { BASE_URL };
@@ -20,7 +20,7 @@ const authHeader = () => {
 };
 
 // Safely parse JSON — returns null if body is empty or unparseable
-const parseJSON = async (res) => {
+export const parseJSON = async (res) => {
   const text = await res.text();
   if (!text) return null;
   try {
