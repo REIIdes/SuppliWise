@@ -233,7 +233,6 @@ Output exactly 15 recommendations. High = most clinically urgent for this patien
           max_tokens: 16000,
           temperature: 0.4,
           stream: false,
-          reasoning: { effort: 'none' },
         }),
         signal: controller.signal,
       });
@@ -261,7 +260,7 @@ Output exactly 15 recommendations. High = most clinically urgent for this patien
         }
       } else {
         const errText = await response.text();
-        console.error('OpenRouter API error:', response.status, errText.substring(0, 200));
+        console.error('[recommend] OpenRouter API error:', response.status, errText.substring(0, 500));
       }
     } catch (fetchErr) {
       const isTimeout = fetchErr.name === 'AbortError';
