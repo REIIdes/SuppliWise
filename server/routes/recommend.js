@@ -230,7 +230,7 @@ Output exactly 15 recommendations. High = most clinically urgent for this patien
               content: prompt,
             },
           ],
-          max_tokens: 16000,
+          max_tokens: 8000,
           temperature: 0.4,
           stream: false,
         }),
