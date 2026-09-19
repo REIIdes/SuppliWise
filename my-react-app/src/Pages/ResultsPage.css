@@ -435,7 +435,7 @@
   padding: 10px 14px;
 }
 .rec-expanded-evidence .rec-expanded-label { color: #1d4ed8; }
-.rec-expanded-evidence p { color: #1e40af; }
+.rec-expanded-evidence p { color: #1e40af; word-break: break-word; overflow-wrap: anywhere; }
 
 /* Simplified Evidence — lighter, less prominent */
 .rec-expanded-simple-evidence {

@@ -1,5 +1,24 @@
-// TEMPORARY: Hardcode backend URL for mobile testing
-const BASE_URL = 'http://192.168.0.34:5000/api';
+// Dynamically resolve the backend URL — fully automatic, no hardcoded IPs:
+// - APK (Capacitor): uses VITE_SERVER_IP injected at build time from your machine's IP
+// - Browser on same PC (localhost): uses Vite proxy /api → localhost:5000
+// - Browser on another device same WiFi: uses window.location.hostname:5000
+const isMobileApp = typeof window !== 'undefined' && (
+  window.location.protocol === 'capacitor:' ||
+  window.location.protocol === 'ionic:' ||
+  typeof window.Capacitor !== 'undefined'
+);
+
+const isNetworkAccess = typeof window !== 'undefined' &&
+  !['localhost', '127.0.0.1'].includes(window.location.hostname);
+
+// VITE_SERVER_IP is injected at build time by build-apk.bat for APK builds
+const buildTimeIP = import.meta.env.VITE_SERVER_IP;
+
+const BASE_URL = isMobileApp
+  ? `http://${buildTimeIP || '192.168.1.166'}:5000/api`   // APK: use build-time IP
+  : isNetworkAccess
+    ? `http://${window.location.hostname}:5000/api`         // Mobile browser on WiFi
+    : '/api';                                               // Desktop browser (Vite proxy)
 
 // Export BASE_URL so other components can use it
 export { BASE_URL };

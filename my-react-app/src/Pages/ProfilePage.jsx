@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import ConfirmModal from '../Components/ConfirmModal/ConfirmModal';
+import { BASE_URL } from '../api';
 import './ProfilePage.css';
 
 function ProfilePage() {
@@ -192,7 +193,7 @@ function ProfilePage() {
   const requestEmailOtp = async (newEmail) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('/api/auth/request-email-otp', {
+      const response = await fetch(`${BASE_URL}/auth/request-email-otp`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -264,7 +265,7 @@ function ProfilePage() {
     setOtpLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('/api/auth/verify-email-otp', {
+      const response = await fetch(`${BASE_URL}/auth/verify-email-otp`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -412,7 +413,7 @@ function ProfilePage() {
         updateData.newPassword = formData.newPassword;
       }
 
-      const response = await fetch('/api/auth/profile', {
+      const response = await fetch(`${BASE_URL}/auth/profile`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

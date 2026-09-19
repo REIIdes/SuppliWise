@@ -2,13 +2,13 @@ const fs = require('fs');
 const path = require('path');
 const sharp = require('sharp');
 
-// Create SVG string for the SuppliWise logo
+// Create SVG string for the SuppliWise logo — matches the app icon exactly
 const createSvg = (size) => `
 <svg width="${size}" height="${size}" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
   <rect width="100" height="100" rx="22" fill="#3dbf8a"/>
   <g transform="rotate(-40, 50, 50)">
-    <rect x="22" y="36" width="56" height="28" rx="14" fill="none" stroke="white" stroke-width="6"/>
-    <line x1="50" y1="36" x2="50" y2="64" stroke="white" stroke-width="6"/>
+    <rect x="20" y="34" width="60" height="32" rx="16" fill="none" stroke="white" stroke-width="5.5"/>
+    <line x1="50" y1="34" x2="50" y2="66" stroke="white" stroke-width="5.5"/>
   </g>
 </svg>
 `;

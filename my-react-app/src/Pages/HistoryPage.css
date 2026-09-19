@@ -878,6 +878,8 @@
   border-left: 3px solid #93c5fd;
   border-radius: 0 6px 6px 0;
   line-height: 1.5;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 /* Evidence — blue tint (matches ResultsPage) */
@@ -885,6 +887,8 @@
   background: #eff6ff;
   border-left: 3px solid #bfdbfe;
   color: #1e40af;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 .history-rec-evidence-blue strong { color: #1d4ed8; }
 

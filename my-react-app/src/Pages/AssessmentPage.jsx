@@ -2436,7 +2436,7 @@ function AssessmentPage() {
                 <AILoadingStep icon="⚗️" label="Checking interactions & dosages" delay={1200} />
                 <AILoadingStep icon="📋" label="Generating your wellness plan" delay={1800} />
               </div>
-              <p className="ai-loading-note">This usually takes 10–20 seconds</p>
+              <p className="ai-loading-note">This usually takes 1–3 minutes</p>
             </div>
           </div>
         )}
