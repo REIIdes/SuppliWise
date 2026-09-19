@@ -1,5 +1,5 @@
-import { BrowserRouter, Routes, Route, useLocation, Navigate } from 'react-router-dom';
-import { Component, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-dom';
+import { Component, useEffect, useState } from 'react';
 
 import HomePage from './Pages/HomePage';
 import DashboardPage from './Pages/DashboardPage';
@@ -13,6 +13,8 @@ import ResultsPage from './Pages/ResultsPage';
 import HistoryPage from './Pages/HistoryPage';
 import ProfilePage from './Pages/ProfilePage';
 import ChatAssistant from './Pages/ChatAssistant';
+import AdminLogin from './Pages/AdminLogin';
+import AdminDashboard from './Pages/AdminDashboard';
 
 // ── Global Error Boundary — prevents white screens ─────────────────────────
 class ErrorBoundary extends Component {
@@ -65,7 +67,18 @@ class ErrorBoundary extends Component {
 }
 
 // Routes where the chat assistant should NOT appear
-const CHAT_HIDDEN_ROUTES = ['/login', '/signup'];
+const CHAT_HIDDEN_ROUTES = ['/login', '/signup', '/admin/login', '/admin'];
+const USER_IDLE_LIMIT_SECONDS = 5 * 60;
+const USER_IDLE_WARNING_SECONDS = 60;
+const USER_ACTIVITY_KEY = 'suppliwise_user_last_activity';
+
+function isAdminJwt(token) {
+  try {
+    return token ? JSON.parse(atob(token.split('.')[1])).role === 'admin' : false;
+  } catch {
+    return false;
+  }
+}
 
 // Scroll to top component - scrolls to top on route change
 function ScrollToTop() {
@@ -78,16 +91,89 @@ function ScrollToTop() {
   return null;
 }
 
+function DocumentTitle() {
+  const location = useLocation();
+
+  useEffect(() => {
+    if (location.pathname === '/admin/login') {
+      document.title = 'SuppliWise Admin';
+    } else if (location.pathname === '/admin') {
+      document.title = 'SuppliWise Control Panel';
+    } else {
+      document.title = 'SuppliWise';
+    }
+  }, [location.pathname]);
+
+  return null;
+}
+
 function GlobalChat() {
   const location = useLocation();
   if (CHAT_HIDDEN_ROUTES.includes(location.pathname)) return null;
   return <ChatAssistant />;
 }
 
+function UserSessionGuard() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [remainingSeconds, setRemainingSeconds] = useState(null);
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    const isAuthRoute = location.pathname === '/login' || location.pathname === '/signup' || location.pathname.startsWith('/admin');
+    if (!token || isAdminJwt(token) || isAuthRoute) {
+      return undefined;
+    }
+
+    const writeActivity = () => {
+      localStorage.setItem(USER_ACTIVITY_KEY, String(Date.now()));
+    };
+    const activityEvents = ['keydown', 'mousedown', 'mousemove', 'scroll', 'touchstart', 'pointerdown', 'focus'];
+    const handleActivity = () => writeActivity();
+    const storedActivity = Number(localStorage.getItem(USER_ACTIVITY_KEY));
+    if (!Number.isFinite(storedActivity) || storedActivity <= 0) writeActivity();
+    const initialStateTimer = window.setTimeout(() => setRemainingSeconds(USER_IDLE_LIMIT_SECONDS), 0);
+
+    const timer = window.setInterval(() => {
+      const lastActivity = Number(localStorage.getItem(USER_ACTIVITY_KEY));
+      const remaining = Math.max(0, Math.ceil((lastActivity + USER_IDLE_LIMIT_SECONDS * 1000 - Date.now()) / 1000));
+      setRemainingSeconds(remaining);
+      if (remaining === 0) {
+        window.clearInterval(timer);
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        localStorage.removeItem(USER_ACTIVITY_KEY);
+        navigate('/login', { replace: true, state: { sessionExpired: true } });
+      }
+    }, 1000);
+
+    activityEvents.forEach(eventName => window.addEventListener(eventName, handleActivity, { passive: true }));
+    return () => {
+      window.clearTimeout(initialStateTimer);
+      window.clearInterval(timer);
+      activityEvents.forEach(eventName => window.removeEventListener(eventName, handleActivity));
+    };
+  }, [location.pathname, navigate]);
+
+  const currentToken = localStorage.getItem('token');
+  const sessionIsVisible = currentToken && !isAdminJwt(currentToken) && !location.pathname.startsWith('/admin') && location.pathname !== '/login' && location.pathname !== '/signup';
+  if (!sessionIsVisible || remainingSeconds === null || remainingSeconds > USER_IDLE_WARNING_SECONDS) return null;
+  const minutes = Math.floor(remainingSeconds / 60);
+  const seconds = String(remainingSeconds % 60).padStart(2, '0');
+  return <div className="user-session-warning" role="status" aria-live="polite">Your session will expire in {minutes}:{seconds} due to inactivity. Move or focus on the page to stay signed in.</div>;
+}
+
 // Protected Route Component - requires authentication
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem('token');
+  if (isAdminJwt(token)) return <Navigate to="/admin/login" replace />;
   return token ? children : <Navigate to="/login" replace />;
+}
+
+function AdminRoute({ children }) {
+  const token = localStorage.getItem('adminToken');
+  const admin = localStorage.getItem('admin');
+  return token && admin ? children : <Navigate to="/admin/login" replace />;
 }
 
 // Landing Route Component - shows HomePage for non-logged users, Dashboard for logged users
@@ -101,6 +187,8 @@ function App() {
     <ErrorBoundary>
       <BrowserRouter>
         <ScrollToTop />
+        <DocumentTitle />
+        <UserSessionGuard />
         <Routes>
           {/* Landing route - shows HomePage for guests, redirects to Dashboard for logged-in users */}
           <Route path="/" element={<LandingRoute />} />
@@ -120,6 +208,8 @@ function App() {
           {/* Auth routes */}
           <Route path="/login" element={<LogIn />} />
           <Route path="/signup" element={<SignIn />} />
+          <Route path="/admin/login" element={<AdminLogin />} />
+          <Route path="/admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
           
           {/* Protected routes - require authentication */}
           <Route path="/assessment" element={<ProtectedRoute><AssessmentPage /></ProtectedRoute>} />

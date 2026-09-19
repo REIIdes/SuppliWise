@@ -247,6 +247,7 @@ function LogIn() {
 
   const completeLogin = async (data) => {
     localStorage.setItem('token', data.token);
+    localStorage.setItem('suppliwise_user_last_activity', String(Date.now()));
     localStorage.setItem('user', JSON.stringify({ 
       firstName: data.firstName, 
       lastName: data.lastName, 
@@ -567,6 +568,9 @@ function LogIn() {
           <p className="auth-switch">
             Don't have an account?{' '}
             <NavLink to="/signup" state={location.state}>Create one</NavLink>
+          </p>
+          <p className="auth-switch">
+            <NavLink to="/admin/login">Administrator access</NavLink>
           </p>
         </form>
       </div>

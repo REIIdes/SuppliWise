@@ -209,6 +209,7 @@ function SignIn() {
       const dateOfBirth = `${birthYear}-${birthMonth}-${birthDay.toString().padStart(2, '0')}`;
       const data = await registerUser(firstName, lastName, gender, dateOfBirth, email, password);
       localStorage.setItem('token', data.token);
+      localStorage.setItem('suppliwise_user_last_activity', String(Date.now()));
       localStorage.setItem('user', JSON.stringify({ 
         firstName: data.firstName, 
         lastName: data.lastName, 

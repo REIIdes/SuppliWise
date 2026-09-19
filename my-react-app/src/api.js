@@ -48,6 +48,7 @@ const isTokenExpired = () => {
 const handleAuthError = () => {
   localStorage.removeItem('token');
   localStorage.removeItem('user');
+  localStorage.removeItem('suppliwise_user_last_activity');
   // Redirect to login page
   if (window.location.pathname !== '/login' && window.location.pathname !== '/signin') {
     window.location.href = '/login';

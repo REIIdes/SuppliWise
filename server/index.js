@@ -13,6 +13,8 @@ const polishRoutes = require('./routes/polish');
 const supplementDetailRoutes = require('./routes/supplement_detail');
 const dashboardRoutes = require('./routes/dashboard');
 const insightsRoutes = require('./routes/insights');
+const adminRoutes = require('./routes/admin');
+const AdminAccount = require('./models/AdminAccount');
 
 const app = express();
 
@@ -76,6 +78,7 @@ app.use('/api/polish', polishRoutes);
 app.use('/api/supplement-detail', supplementDetailRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/insights', insightsRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -110,7 +113,16 @@ mongoose
   .connect(process.env.MONGO_URI)
   .then(() => {
     console.log('Connected to MongoDB');
-    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+    const legacy = process.env.ADMIN_ALIAS && process.env.ADMIN_PASSWORD_HASH && process.env.ADMIN_TOTP_SECRET
+      ? [{ alias: process.env.ADMIN_ALIAS, passwordHash: process.env.ADMIN_PASSWORD_HASH, totpSecret: process.env.ADMIN_TOTP_SECRET }]
+      : [];
+    const configuredAdmins = String(process.env.ADMIN_ACCOUNTS || '').split(',').map(entry => {
+      const [alias, passwordHash, totpSecret] = entry.split('|').map(value => value.trim());
+      return alias && passwordHash && totpSecret ? { alias, passwordHash, totpSecret } : null;
+    }).filter(Boolean);
+    const accounts = [...legacy, ...configuredAdmins];
+    return Promise.all(accounts.map(account => AdminAccount.updateOne({ alias: account.alias }, { $setOnInsert: account }, { upsert: true })))
+      .then(() => app.listen(PORT, () => console.log(`Server running on port ${PORT}`)));
   })
   .catch((err) => {
     console.error('MongoDB connection error:', err.message);

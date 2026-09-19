@@ -598,6 +598,7 @@ function ProfilePage() {
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    localStorage.removeItem('suppliwise_user_last_activity');
     sessionStorage.removeItem('pending_assessment');
     navigate('/login');
   };

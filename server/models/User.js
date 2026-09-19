@@ -76,6 +76,51 @@ const userSchema = new mongoose.Schema(
       default: '',
       select: false,
     },
+    subscriptionActive: {
+      type: Boolean,
+      default: false,
+    },
+    subscriptionPlan: {
+      type: String,
+      default: 'free',
+      enum: ['free', 'monthly', 'annual', 'custom'],
+    },
+    subscriptionUpdatedAt: {
+      type: Date,
+      default: null,
+    },
+    lastLoginAt: {
+      type: Date,
+      default: null,
+    },
+    lastLoginIp: {
+      type: String,
+      default: '',
+      select: false,
+    },
+    lastLoginUserAgent: {
+      type: String,
+      default: '',
+      select: false,
+    },
+    accountRole: {
+      type: String,
+      enum: ['user', 'moderator'],
+      default: 'user',
+    },
+    accountStatus: {
+      type: String,
+      enum: ['active', 'banned', 'deleted'],
+      default: 'active',
+    },
+    lastLoginLocation: {
+      type: String,
+      default: 'Unknown location',
+    },
+    bannedAt: {
+      type: Date,
+      default: null,
+    },
   },
   { timestamps: true }
 );

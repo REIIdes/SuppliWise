@@ -4,7 +4,11 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
+const bcrypt = require('bcryptjs');
 const User = require('../models/User');
+const AdminAccount = require('../models/AdminAccount');
+const AdminEvent = require('../models/AdminEvent');
+const { protect } = require('../middleware/auth');
 const { sendOtpEmail } = require('../utils/email');
 
 // In-memory OTP storage (in production, use Redis or database)
@@ -13,12 +17,26 @@ const otpStore = new Map(); // Format: { email: { otp, expiresAt, requestedAt } 
 // Rate limiting map for OTP requests
 const otpRateLimitMap = new Map(); // Format: { userId: lastRequestTime }
 const OTP_COOLDOWN_MS = 30000; // 30 seconds cooldown
-const shouldExposeDevOtp = () => process.env.ALLOW_DEV_OTP_RESPONSE === 'true';
 
 // Generate JWT
-const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '12h' });
+const generateToken = (id, claims = {}) => {
+  return jwt.sign({ id, ...claims }, process.env.JWT_SECRET, { expiresIn: '12h' });
 };
+
+const adminChallenges = new Map();
+const ADMIN_CHALLENGE_TTL_MS = 5 * 60 * 1000;
+
+function legacyAdminConfiguration() {
+  return {
+    alias: String(process.env.ADMIN_ALIAS || '').trim(),
+    passwordHash: String(process.env.ADMIN_PASSWORD_HASH || '').trim(),
+    totpSecret: String(process.env.ADMIN_TOTP_SECRET || '').trim(),
+  };
+}
+
+function adminToken(account) {
+  return generateToken(String(account._id), { role: 'admin', alias: account.alias, adminId: String(account._id) });
+}
 
 // Email regex — requires a real TLD (2–6 letters), rejects .con, .cmo, etc.
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,6}$/;
@@ -169,10 +187,23 @@ router.post('/login', async (req, res) => {
     if (!user) {
       return res.status(401).json({ message: 'Invalid email or password.' });
     }
+    if (user.accountStatus && user.accountStatus !== 'active') {
+      return res.status(403).json({ message: user.accountStatus === 'banned' ? 'This account has been banned.' : 'This account is no longer active.' });
+    }
 
     const isMatch = await user.matchPassword(password);
     if (!isMatch) {
       return res.status(401).json({ message: 'Invalid email or password.' });
+    }
+
+    const previousUserAgent = user.lastLoginUserAgent;
+    user.lastLoginAt = new Date();
+    user.lastLoginIp = req.ip;
+    user.lastLoginUserAgent = String(req.get('user-agent') || '').slice(0, 500);
+    user.lastLoginLocation = String(req.get('x-login-location') || 'Unknown location').slice(0, 120);
+    if (typeof user.save === 'function') await user.save();
+    if (previousUserAgent && previousUserAgent !== user.lastLoginUserAgent) {
+      AdminEvent.create({ type: 'new-device-login', title: 'New device login', detail: `${user.email} signed in from ${user.lastLoginLocation}.`, user: user._id }).catch(() => {});
     }
 
     if (user.twoFactorEnabled) {
@@ -196,25 +227,59 @@ router.post('/login', async (req, res) => {
 
     // Send OTP via email
     const emailSent = await sendOtpEmail(trimmedEmail, otp, 'login');
-
-    console.log(`[OTP] Login verification for ${user.email}: ${otp}`);
-    console.log(`[OTP] Expires at: ${new Date(expiresAt).toISOString()}`);
-    console.log(`[OTP] Email sent: ${emailSent}`);
-    console.log(`[OTP] *** RELOADED - NEW CODE IS RUNNING ***`);
+    if (!emailSent) {
+      otpStore.delete(otpKey);
+      otpRateLimitMap.delete(user._id.toString());
+      return res.status(503).json({ message: 'We could not send the verification email. Please try again shortly.' });
+    }
 
     res.json({
-      message: emailSent 
-        ? 'Verification code sent to your email successfully' 
-        : 'Verification code generated (check console in development)',
+      message: 'Verification code sent to your email successfully',
       requiresOtp: true,
       userId: user._id,
-      // In development, include OTP in response (remove in production!)
-      ...(shouldExposeDevOtp() && { otp }),
     });
   } catch (error) {
     console.error('[login]', error.message);
     res.status(500).json({ message: 'Something went wrong. Please try again later.' });
   }
+});
+
+// Admin credentials are deliberately isolated from public user accounts.
+// ADMIN_PASSWORD_HASH must be a bcrypt hash; plaintext admin passwords are never accepted.
+router.post('/admin-login', async (req, res) => {
+  const { alias, password } = req.body || {};
+  if (typeof alias !== 'string' || typeof password !== 'string') {
+    return res.status(401).json({ message: 'Invalid admin credentials.' });
+  }
+
+  let account = await AdminAccount.findOne({ alias: alias.trim(), enabled: true }).select('+passwordHash +totpSecret');
+  if (!account) {
+    const legacy = legacyAdminConfiguration();
+    if (legacy.alias !== alias.trim() || !legacy.passwordHash || !legacy.totpSecret) return res.status(401).json({ message: 'Invalid admin credentials.' });
+    account = legacy;
+  }
+  const passwordMatches = await bcrypt.compare(password, account.passwordHash).catch(() => false);
+  if (!passwordMatches) return res.status(401).json({ message: 'Invalid admin credentials.' });
+
+  const challengeId = crypto.randomBytes(24).toString('hex');
+  adminChallenges.set(challengeId, { accountId: account._id, alias: account.alias, totpSecret: account.totpSecret, expiresAt: Date.now() + ADMIN_CHALLENGE_TTL_MS });
+  return res.json({ requiresTwoFactor: true, challengeId, message: 'Authenticator verification required.' });
+});
+
+router.post('/verify-admin-2fa', async (req, res) => {
+  const { challengeId, otp } = req.body || {};
+  const challenge = adminChallenges.get(challengeId);
+  if (!challenge || Date.now() > challenge.expiresAt) {
+    adminChallenges.delete(challengeId);
+    return res.status(401).json({ message: 'Admin verification expired. Please sign in again.' });
+  }
+  const verified = speakeasy.totp.verify({ secret: challenge.totpSecret, encoding: 'base32', token: String(otp || '').trim(), window: 1 });
+  if (!verified) return res.status(401).json({ message: 'Invalid authenticator code.' });
+  adminChallenges.delete(challengeId);
+  const account = { _id: challenge.accountId, alias: challenge.alias };
+  if (account._id && typeof account._id !== 'string') account._id = String(account._id);
+  if (account._id && account._id !== 'admin') await AdminAccount.findByIdAndUpdate(account._id, { lastLoginAt: new Date(), lastActivityAt: new Date() });
+  return res.json({ token: adminToken(account), role: 'admin', alias: account.alias });
 });
 
 // @route   POST /api/auth/verify-login-otp
@@ -274,13 +339,11 @@ router.post('/verify-login-otp', async (req, res) => {
   }
 });
 
-router.post('/setup-2fa', async (req, res) => {
+router.post('/setup-2fa', protect, async (req, res) => {
   try {
-    const header = req.headers.authorization || '';
-    if (!header.startsWith('Bearer ')) return res.status(401).json({ message: 'Not authorized.' });
-    const decoded = jwt.verify(header.slice(7), process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id);
-    if (!user) return res.status(401).json({ message: 'Not authorized.' });
+    if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(401).json({ message: 'Your session is no longer valid. Please sign in again.' });
     const secret = speakeasy.generateSecret({ name: `SuppliWise (${user.email})`, issuer: 'SuppliWise' });
     user.twoFactorSecret = secret.base32;
     await user.save();
@@ -290,12 +353,10 @@ router.post('/setup-2fa', async (req, res) => {
   }
 });
 
-router.post('/verify-2fa', async (req, res) => {
+router.post('/verify-2fa', protect, async (req, res) => {
   try {
-    const header = req.headers.authorization || '';
-    if (!header.startsWith('Bearer ')) return res.status(401).json({ message: 'Not authorized.' });
-    const decoded = jwt.verify(header.slice(7), process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id).select('+twoFactorSecret');
+    if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
+    const user = await User.findById(req.user._id).select('+twoFactorSecret');
     if (!user || !user.twoFactorSecret) return res.status(400).json({ message: 'Two-factor setup was not started.' });
     const verified = speakeasy.totp.verify({ secret: user.twoFactorSecret, encoding: 'base32', token: String(req.body.otp || '').trim(), window: 1 });
     if (!verified) return res.status(401).json({ message: 'Invalid verification code.' });
@@ -319,12 +380,10 @@ router.post('/login-2fa', async (req, res) => {
   }
 });
 
-router.post('/disable-2fa', async (req, res) => {
+router.post('/disable-2fa', protect, async (req, res) => {
   try {
-    const header = req.headers.authorization || '';
-    if (!header.startsWith('Bearer ')) return res.status(401).json({ message: 'Not authorized.' });
-    const decoded = jwt.verify(header.slice(7), process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id).select('+twoFactorSecret');
+    if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
+    const user = await User.findById(req.user._id).select('+twoFactorSecret');
     const verified = user && user.twoFactorEnabled && speakeasy.totp.verify({ secret: user.twoFactorSecret, encoding: 'base32', token: String(req.body.otp || '').trim(), window: 1 });
     if (!verified) return res.status(401).json({ message: 'Invalid Google Authenticator code.' });
     user.twoFactorEnabled = false;
@@ -378,17 +437,14 @@ router.post('/resend-login-otp', async (req, res) => {
 
     // Send OTP via email
     const emailSent = await sendOtpEmail(user.email, otp, 'login');
-
-    console.log(`[OTP] Login resend verification for ${user.email}: ${otp}`);
-    console.log(`[OTP] Expires at: ${new Date(expiresAt).toISOString()}`);
-    console.log(`[OTP] Email sent: ${emailSent}`);
+    if (!emailSent) {
+      otpStore.delete(otpKey);
+      otpRateLimitMap.delete(user._id.toString());
+      return res.status(503).json({ message: 'We could not send the verification email. Please try again shortly.' });
+    }
 
     res.json({ 
-      message: emailSent 
-        ? 'Verification code sent to your email successfully' 
-        : 'Verification code generated (check console in development)',
-      // In development, include OTP in response (remove in production!)
-      ...(shouldExposeDevOtp() && { otp }),
+      message: 'Verification code sent to your email successfully',
     });
   } catch (error) {
     console.error('[resend-login-otp]', error.message);
@@ -448,18 +504,15 @@ router.post('/forgot-password', async (req, res) => {
 
     // Send OTP via email
     const emailSent = await sendOtpEmail(trimmedEmail, otp, 'password-reset');
-
-    console.log(`[OTP] Password reset verification for ${user.email}: ${otp}`);
-    console.log(`[OTP] Expires at: ${new Date(expiresAt).toISOString()}`);
-    console.log(`[OTP] Email sent: ${emailSent}`);
+    if (!emailSent) {
+      otpStore.delete(otpKey);
+      otpRateLimitMap.delete(user._id.toString());
+      return res.status(503).json({ message: 'We could not send the password reset email. Please try again shortly.' });
+    }
 
     res.json({ 
-      message: emailSent 
-        ? 'Verification code sent to your email successfully' 
-        : 'Verification code generated (check console in development)',
+      message: 'Verification code sent to your email successfully',
       userId: user._id,
-      // In development, include OTP in response (remove in production!)
-      ...(process.env.NODE_ENV === 'development' && { otp }),
     });
   } catch (error) {
     console.error('[forgot-password]', error.message);
@@ -625,17 +678,14 @@ router.post('/resend-password-reset-otp', async (req, res) => {
 
     // Send OTP via email
     const emailSent = await sendOtpEmail(user.email, otp, 'password-reset');
-
-    console.log(`[OTP] Password reset resend verification for ${user.email}: ${otp}`);
-    console.log(`[OTP] Expires at: ${new Date(expiresAt).toISOString()}`);
-    console.log(`[OTP] Email sent: ${emailSent}`);
+    if (!emailSent) {
+      otpStore.delete(otpKey);
+      otpRateLimitMap.delete(user._id.toString());
+      return res.status(503).json({ message: 'We could not send the password reset email. Please try again shortly.' });
+    }
 
     res.json({ 
-      message: emailSent 
-        ? 'Verification code sent to your email successfully' 
-        : 'Verification code generated (check console in development)',
-      // In development, include OTP in response (remove in production!)
-      ...(process.env.NODE_ENV === 'development' && { otp }),
+      message: 'Verification code sent to your email successfully',
     });
   } catch (error) {
     console.error('[resend-password-reset-otp]', error.message);
@@ -705,17 +755,14 @@ router.post('/request-email-otp', async (req, res) => {
 
     // Send OTP via email
     const emailSent = await sendOtpEmail(trimmedEmail, otp);
-
-    console.log(`[OTP] Email change verification for ${user.email} -> ${trimmedEmail}: ${otp}`);
-    console.log(`[OTP] Expires at: ${new Date(expiresAt).toISOString()}`);
-    console.log(`[OTP] Email sent: ${emailSent}`);
+    if (!emailSent) {
+      otpStore.delete(otpKey);
+      otpRateLimitMap.delete(user._id.toString());
+      return res.status(503).json({ message: 'We could not send the verification email. Please try again shortly.' });
+    }
 
     res.json({ 
-      message: emailSent 
-        ? 'Verification code sent to your email successfully' 
-        : 'Verification code generated (check console in development)',
-      // In development, include OTP in response (remove in production!)
-      ...(process.env.NODE_ENV === 'development' && { otp }),
+      message: 'Verification code sent to your email successfully',
     });
   } catch (error) {
     console.error('[request-email-otp]', error.message);

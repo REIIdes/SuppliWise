@@ -7,7 +7,7 @@ const getTransporter = () => {
   if (!transporter) {
     // Check if email is configured
     if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
-      console.warn('[Email] Email service not configured. OTP will only be logged to console.');
+      console.error('[Email] Email service is not configured.');
       return null;
     }
 
@@ -16,7 +16,7 @@ const getTransporter = () => {
         service: process.env.EMAIL_SERVICE || 'gmail',
         auth: {
           user: process.env.EMAIL_USER,
-          pass: process.env.EMAIL_PASSWORD,
+          pass: String(process.env.EMAIL_PASSWORD).replace(/\s+/g, ''),
         },
       });
 
@@ -40,10 +40,8 @@ const sendOtpEmail = async (toEmail, otp, type = 'email-change') => {
   try {
     const transport = getTransporter();
     
-    // If email not configured, just log to console (development fallback)
     if (!transport) {
-      console.log(`[Email/Dev] OTP for ${toEmail}: ${otp}`);
-      return true;
+      return false;
     }
 
     const fromName = process.env.EMAIL_FROM_NAME || 'SuppliWise';
@@ -192,12 +190,11 @@ This is an automated message from SuppliWise.
     };
 
     await transport.sendMail(mailOptions);
-    console.log(`[Email] OTP sent successfully to ${toEmail}`);
+    console.log(`[Email] Verification email sent successfully to ${toEmail}`);
     return true;
   } catch (error) {
+    transporter = null;
     console.error('[Email] Failed to send OTP email:', error.message);
-    // Log to console as fallback
-    console.log(`[Email/Fallback] OTP for ${toEmail}: ${otp}`);
     return false;
   }
 };
