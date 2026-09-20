@@ -47,6 +47,12 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '10mb' })); // Increase limit for profile/banner images
 
+// Add a middleware to set Cache-Control headers
+app.use('/api', (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
+
 // ── Rate limiters ──────────────────────────────────────────────────────────
 // Keep production limits strict while allowing repeated localhost testing.
 const isLocalDevRequest = (req) => process.env.NODE_ENV !== 'production' ||

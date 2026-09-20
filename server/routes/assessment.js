@@ -183,4 +183,58 @@ router.delete('/:id', protect, async (req, res) => {
   }
 });
 
+// @route   GET /api/assessment/user/:userId
+// @desc    Get all assessments for a specific user (for admins)
+// @access  Private (Admin only)
+router.get('/user/:userId', protect, async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Not authorized' });
+  }
+  try {
+    const assessments = await Assessment.find({ user: req.params.userId }).sort({ createdAt: -1 });
+    res.json(assessments);
+  } catch (error) {
+    console.error('[assessment GET /user/:userId]', error.message);
+    res.status(500).json({ message: 'Could not load assessments. Please try again.' });
+  }
+});
+
+// @route   GET /api/assessment/results/:assessmentId
+// @desc    Get the results of a specific assessment (for admins)
+// @access  Private (Admin only)
+router.get('/results/:assessmentId', protect, async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Not authorized' });
+  }
+  try {
+    const assessment = await Assessment.findById(req.params.assessmentId);
+    if (!assessment) {
+      return res.status(404).json({ message: 'Assessment not found' });
+    }
+    res.json(assessment.aiResults);
+  } catch (error) {
+    console.error('[assessment GET /results/:assessmentId]', error.message);
+    res.status(500).json({ message: 'Could not load assessment results. Please try again.' });
+  }
+});
+
+// @desc    Delete an assessment
+// @access  Private (Admin only)
+router.delete('/:id', protect, async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Not authorized' });
+  }
+  try {
+    const assessment = await Assessment.findById(req.params.id);
+    if (!assessment) {
+      return res.status(404).json({ message: 'Assessment not found' });
+    }
+    await Assessment.findByIdAndDelete(req.params.id);
+    res.json({ message: 'Assessment removed' });
+  } catch (error) {
+    console.error('[assessment DELETE /:id]', error.message);
+    res.status(500).json({ message: 'Server Error' });
+  }
+});
+
 module.exports = router;

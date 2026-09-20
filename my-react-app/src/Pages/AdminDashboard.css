@@ -33,6 +33,16 @@
 .security-active { color: #24734e; } .security-email { color: #96602b; }
 .danger-action { color: #a23a29; border-color: #e7b8ae; } select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px; font: 12px Arial, sans-serif; } .profile-divider { border: 0; border-top: 1px solid var(--admin-line); margin: 28px 0; } .rotated-key { display: flex; align-items: center; gap: 16px; margin-top: 18px; padding: 12px; border: 1px solid var(--admin-line); background: #fbfcfa; font: 12px Arial, sans-serif; } .rotated-key img { width: 150px; height: 150px; } .rotated-key small { word-break: break-all; }
 .notification { border-left: 3px solid #d46b35; padding: 10px 0 10px 12px; margin: 12px 0; font: 13px Arial, sans-serif; }
+.notification-panel .notification {
+  display: block;
+  padding: 10px;
+  border-bottom: 1px solid var(--admin-line);
+  cursor: pointer;
+}
+
+.notification-panel .notification:hover {
+  background: var(--admin-paper);
+}
 .provider-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 25px; } .provider { border: 1px solid var(--admin-line); padding: 17px; font: 15px Arial, sans-serif; } .provider span { display: block; font-size: 12px; margin-top: 10px; } .provider small { font-size: 11px; }
 .security-row { border-top: 1px solid #edf0ed; display: flex; gap: 15px; padding: 15px 0; font: 14px Arial, sans-serif; align-items: start; } .security-row > span { min-width: 72px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; } .security-row strong { font-weight: 600; }
 .admin-login-page { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: radial-gradient(circle at top right, #e6eee5, transparent 45%), #f5f7f3; }

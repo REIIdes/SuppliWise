@@ -21,13 +21,55 @@ const adminUserFields = 'firstName lastName email createdAt subscriptionActive s
 
 function securityChecks() {
   const checks = [
-    { key: 'jwt', label: 'Strong JWT signing secret', status: Boolean(process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 32), fix: 'Set a random JWT_SECRET with at least 32 characters.' },
-    { key: 'adminMfa', label: 'Admin MFA configured', status: Boolean(process.env.ADMIN_TOTP_SECRET || process.env.ADMIN_ACCOUNTS), fix: 'Configure an authenticator secret for every admin account.' },
-    { key: 'adminHash', label: 'Admin password stored as bcrypt hash', status: /^\$2[aby]?\$\d{2}\$/.test(process.env.ADMIN_PASSWORD_HASH || '') || String(process.env.ADMIN_ACCOUNTS || '').includes('|$2'), fix: 'Store every admin password as a bcrypt hash, never plaintext.' },
-    { key: 'email', label: 'Email OTP delivery configured', status: Boolean(process.env.EMAIL_USER && process.env.EMAIL_PASSWORD), fix: 'Configure EMAIL_USER and EMAIL_PASSWORD for login OTP delivery.' },
-    { key: 'production', label: 'Production environment safeguards', status: process.env.NODE_ENV === 'production' && process.env.ALLOW_DEV_OTP_RESPONSE !== 'true', fix: 'Use NODE_ENV=production and keep ALLOW_DEV_OTP_RESPONSE disabled.' },
+    {
+      key: 'jwt',
+      label: 'Strong JWT signing secret',
+      status: Boolean(process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 32),
+      fix: 'Set a random JWT_SECRET with at least 32 characters.',
+      framework: 'OWASP',
+      implementation: 'middleware/auth.js',
+      critical: true,
+    },
+    {
+      key: 'adminMfa',
+      label: 'Admin MFA configured',
+      status: Boolean(process.env.ADMIN_TOTP_SECRET || process.env.ADMIN_ACCOUNTS),
+      fix: 'Configure an authenticator secret for every admin account.',
+      framework: 'STRIDE',
+      implementation: 'routes/admin.js',
+    },
+    {
+      key: 'adminHash',
+      label: 'Admin password stored as bcrypt hash',
+      status: /^\$2[aby]?\$\d{2}\$/.test(process.env.ADMIN_PASSWORD_HASH || '') || String(process.env.ADMIN_ACCOUNTS || '').includes('|$2'),
+      fix: 'Store every admin password as a bcrypt hash, never plaintext.',
+      framework: 'OWASP',
+      implementation: 'models/AdminAccount.js',
+    },
+    {
+      key: 'email',
+      label: 'Email OTP delivery configured',
+      status: Boolean(process.env.EMAIL_USER && process.env.EMAIL_PASSWORD),
+      fix: 'Configure EMAIL_USER and EMAIL_PASSWORD for login OTP delivery.',
+      framework: 'STRIDE',
+      implementation: 'utils/email.js',
+    },
+    {
+      key: 'production',
+      label: 'Production environment safeguards',
+      status: process.env.NODE_ENV === 'production' && process.env.ALLOW_DEV_OTP_RESPONSE !== 'true',
+      fix: 'Use NODE_ENV=production and keep ALLOW_DEV_OTP_RESPONSE disabled.',
+      framework: 'OWASP',
+      implementation: 'server.js',
+    },
   ];
-  return checks.map(check => ({ ...check, status: check.status ? 'healthy' : 'attention' }));
+  return checks.map(check => {
+    if (check.status) {
+      return { ...check, status: 'Secure' };
+    } else {
+      return { ...check, status: check.critical ? 'Critical' : 'Vulnerable' };
+    }
+  });
 }
 
 async function measureApi(url) {
@@ -88,7 +130,33 @@ router.get('/users', async (req, res) => {
       { firstName: { $regex: search, $options: 'i' } },
       { lastName: { $regex: search, $options: 'i' } },
     ] } : {};
-    const users = await User.find(filter).select(adminUserFields).sort({ createdAt: -1 }).limit(100).lean();
+    const users = await User.aggregate([
+      { $match: filter },
+      { $sort: { createdAt: -1 } },
+      { $limit: 100 },
+      {
+        $lookup: {
+          from: 'assessments',
+          localField: '_id',
+          foreignField: 'user',
+          as: 'assessments',
+        },
+      },
+      {
+        $addFields: {
+          assessmentCount: { $size: '$assessments' },
+        },
+      },
+      {
+        $project: {
+          assessments: 0,
+          password: 0,
+          twoFactorSecret: 0,
+          lastLoginIp: 0,
+          lastLoginUserAgent: 0,
+        },
+      },
+    ]);
     const normalizedUsers = users.map(user => { const device = user.lastLoginUserAgent ? user.lastLoginUserAgent.split(' ').slice(0, 3).join(' ') : 'Unknown device'; delete user.lastLoginUserAgent; return { ...user, device }; });
     res.json({ users: normalizedUsers });
   } catch (error) {
@@ -145,7 +213,35 @@ router.patch('/users/:id/subscription', async (req, res) => {
 
 router.get('/security', (req, res) => {
   const checks = securityChecks();
-  res.json({ checks, notifications: checks.filter(check => check.status === 'attention') });
+  const recommendations = checks
+    .filter(check => check.status !== 'Secure')
+    .map(check => ({
+      title: check.label,
+      description: check.fix,
+      priority: check.critical ? 'Critical' : 'High',
+    }));
+
+  const hasCritical = checks.some(check => check.status === 'Critical');
+  const hasVulnerable = checks.some(check => check.status === 'Vulnerable');
+
+  let overallStatus = 'Secure';
+  if (hasCritical) {
+    overallStatus = 'Critical';
+  } else if (hasVulnerable) {
+    overallStatus = 'Vulnerable';
+  }
+
+  res.json({
+    checks,
+    overallStatus,
+    lastScanned: new Date().toISOString(),
+    recommendations,
+    notifications: recommendations.map(rec => ({
+      type: 'security',
+      title: rec.title,
+      detail: rec.description,
+    })),
+  });
 });
 
 router.get('/ai', (req, res) => {
@@ -193,6 +289,18 @@ router.get('/notifications', async (req, res) => {
   const security = securityChecks().filter(check => check.status === 'attention').map(check => ({ type: 'security', title: check.label, detail: check.fix, createdAt: new Date() }));
   const events = await AdminEvent.find().sort({ createdAt: -1 }).limit(30).lean();
   res.json({ unreadCount: events.filter(event => !event.readBy.some(id => String(id) === String(req.user._id))).length + security.length, notifications: [...security, ...events] });
+});
+
+router.post('/notifications/read', async (req, res) => {
+  const { notificationIds } = req.body;
+  if (!Array.isArray(notificationIds)) return res.status(400).json({ message: 'Invalid request body.' });
+  try {
+    await AdminEvent.updateMany({ _id: { $in: notificationIds } }, { $addToSet: { readBy: req.user._id } });
+    res.json({ message: 'Notifications marked as read.' });
+  } catch (error) {
+    console.error('[admin/notifications/read]', error.message);
+    res.status(500).json({ message: 'Unable to mark notifications as read.' });
+  }
 });
 
 module.exports = router;

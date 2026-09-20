@@ -11,7 +11,7 @@ function Field({ label, value }) {
   );
 }
 
-export default function ReadOnlyAssessment({ assessment, onClose, inline = false }) {
+export default function ReadOnlyAssessment({ assessment, onClose }) {
   if (!assessment) return null;
 
   // Helper to check if array has values other than "None"
@@ -27,10 +27,10 @@ export default function ReadOnlyAssessment({ assessment, onClose, inline = false
     return filtered.length > 0 ? filtered : null;
   };
 
-  const Box = (
+  return (
     <div className="ro-box" onClick={e => e.stopPropagation()}>
       <div className="ro-header">
-        <h3>Assessment Answers</h3>
+        <h3>Assessment Information</h3>
         {onClose && <button className="ro-close" onClick={onClose}>✕</button>}
       </div>
 
@@ -224,20 +224,6 @@ export default function ReadOnlyAssessment({ assessment, onClose, inline = false
           </div>
 
       </div>
-    </div>
-  );
-
-  if (inline) {
-    return (
-      <div className="ro-box-inline">
-        {Box}
-      </div>
-    );
-  }
-
-  return (
-    <div className="ro-overlay" onClick={onClose}>
-      {Box}
     </div>
   );
 }

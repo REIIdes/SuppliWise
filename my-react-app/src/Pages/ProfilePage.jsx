@@ -527,6 +527,7 @@ function ProfilePage() {
         gender: data.gender,
         profilePicture: data.profilePicture || '',
         bannerPicture: data.bannerPicture || '',
+        twoFactorEnabled: twoFactorEnabled,
       }));
 
       setProfilePicture(data.profilePicture || '');

@@ -1,0 +1,203 @@
+.user-list {
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  padding: 10px;
+}
+
+.user-item {
+  margin-bottom: 10px;
+}
+
+.user-header {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px;
+  background-color: #f0f0f0;
+  cursor: pointer;
+  align-items: center;
+}
+
+.profile-picture {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  margin-right: 15px;
+}
+
+.user-info {
+  flex-grow: 1;
+}
+
+.user-info span {
+  font-size: 1.5em;
+  font-weight: bold;
+}
+
+.user-info small {
+  display: block;
+  color: #666;
+}
+
+.assessment-count {
+  margin-right: 15px;
+}
+
+.assessment-list {
+  padding: 10px;
+}
+
+.assessment-item {
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  padding: 10px;
+  margin-bottom: 10px;
+}
+
+.assessment-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.assessment-item.priority {
+  border-left: 4px solid #ffc107;
+}
+
+.active-status {
+  background-color: #6c757d;
+  color: white;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: bold;
+}
+
+.assessment-item.priority .assessment-header .active-status {
+  background-color: #ffc107;
+  color: #333;
+}
+
+.symptoms-and-conditions {
+  margin-bottom: 0.75rem;
+}
+
+.symptoms-list {
+  margin: 0 0 0.5rem 0;
+  color: #333;
+  font-weight: 500;
+}
+
+.conditions-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.condition-tag {
+  background-color: #e9ecef;
+  color: #495057;
+  padding: 0.25rem 0.6rem;
+  border-radius: 15px;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.condition-tag.mild {
+  background-color: #fff3cd;
+  color: #856404;
+}
+
+.condition-tag.moderate {
+  background-color: #ffeeba;
+  color: #856404;
+}
+
+.condition-tag.severe {
+  background-color: #f8d7da;
+  color: #721c24;
+}
+
+.assessment-body {
+  margin-bottom: 10px;
+}
+
+.tags {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.symptom-count {
+  background-color: #dc3545;
+  color: #fff;
+  padding: 2px 5px;
+  border-radius: 3px;
+}
+
+.ai-analysis {
+  color: #28a745;
+}
+
+.assessment-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.actions button {
+  background-color: #4CAF50; /* Green */
+  border: none;
+  color: white;
+  padding: 10px 20px;
+  text-align: center;
+  text-decoration: none;
+  display: inline-block;
+  font-size: 16px;
+  margin: 4px 2px;
+  cursor: pointer;
+  border-radius: 5px;
+}
+
+.actions button:hover {
+  background-color: #45a049;
+}
+
+.modal {
+  position: fixed;
+  z-index: 1;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background-color: rgba(0,0,0,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal .modal-content {
+  background-color: #fff;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+  width: 90%;
+  max-width: 900px; /* Increased width for better viewing */
+  max-height: 80vh; /* Set a max height */
+  overflow-y: auto; /* Allow scrolling for long content */
+  position: relative;
+}
+
+.close {
+  color: #aaa;
+  float: right;
+  font-size: 28px;
+  font-weight: bold;
+}
+
+.close:hover,
+.close:focus {
+  color: black;
+  text-decoration: none;
+  cursor: pointer;
+}

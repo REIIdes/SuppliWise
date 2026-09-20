@@ -15,6 +15,10 @@ import ProfilePage from './Pages/ProfilePage';
 import ChatAssistant from './Pages/ChatAssistant';
 import AdminLogin from './Pages/AdminLogin';
 import AdminDashboard from './Pages/AdminDashboard';
+import AssessmentManagement from './Pages/AssessmentManagement';
+
+import AdminProtectedRoute from './Components/AdminProtectedRoute';
+import SessionRevalidator from './Components/SessionRevalidator';
 
 // ── Global Error Boundary — prevents white screens ─────────────────────────
 class ErrorBoundary extends Component {
@@ -170,12 +174,6 @@ function ProtectedRoute({ children }) {
   return token ? children : <Navigate to="/login" replace />;
 }
 
-function AdminRoute({ children }) {
-  const token = localStorage.getItem('adminToken');
-  const admin = localStorage.getItem('admin');
-  return token && admin ? children : <Navigate to="/admin/login" replace />;
-}
-
 // Landing Route Component - shows HomePage for non-logged users, Dashboard for logged users
 function LandingRoute() {
   const token = localStorage.getItem('token');
@@ -189,6 +187,7 @@ function App() {
         <ScrollToTop />
         <DocumentTitle />
         <UserSessionGuard />
+        <SessionRevalidator />
         <Routes>
           {/* Landing route - shows HomePage for guests, redirects to Dashboard for logged-in users */}
           <Route path="/" element={<LandingRoute />} />
@@ -209,7 +208,12 @@ function App() {
           <Route path="/login" element={<LogIn />} />
           <Route path="/signup" element={<SignIn />} />
           <Route path="/admin/login" element={<AdminLogin />} />
-          <Route path="/admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
+          
+          {/* Admin routes - protected */}
+          <Route element={<AdminProtectedRoute />}>
+            <Route path="/admin" element={<AdminDashboard />} />
+            <Route path="/admin/assessment-management" element={<AssessmentManagement />} />
+          </Route>
           
           {/* Protected routes - require authentication */}
           <Route path="/assessment" element={<ProtectedRoute><AssessmentPage /></ProtectedRoute>} />

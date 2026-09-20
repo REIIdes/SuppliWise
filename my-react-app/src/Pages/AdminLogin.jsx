@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BASE_URL, parseJSON } from '../api';
 import './AdminDashboard.css';
@@ -11,6 +11,13 @@ function AdminLogin() {
   const [challengeId, setChallengeId] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const token = localStorage.getItem('adminToken');
+    if (token) {
+      navigate('/admin', { replace: true });
+    }
+  }, [navigate]);
 
   const submitCredentials = async (event) => {
     event.preventDefault();

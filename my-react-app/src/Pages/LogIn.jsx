@@ -570,6 +570,7 @@ function LogIn() {
             <NavLink to="/signup" state={location.state}>Create one</NavLink>
           </p>
           <p className="auth-switch">
+            Are You an Admin?{' '}
             <NavLink to="/admin/login">Administrator access</NavLink>
           </p>
         </form>

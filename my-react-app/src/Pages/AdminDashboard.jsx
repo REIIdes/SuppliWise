@@ -4,8 +4,10 @@ import { BASE_URL, parseJSON } from '../api';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import './AdminDashboard.css';
+import AssessmentManagement from './AssessmentManagement';
+import SecurityStatus from '../Components/SecurityStatus/SecurityStatus';
 
-const tabs = ['overview', 'users', 'ai', 'profile', 'security'];
+const tabs = ['overview', 'users', 'assessment-management', 'ai', 'profile', 'security'];
 const ADMIN_IDLE_LIMIT_SECONDS = 3 * 60 + 30;
 const ADMIN_WARNING_SECONDS = 30;
 const ADMIN_REFRESH_INTERVAL_MS = 10 * 1000;
@@ -174,24 +176,49 @@ function AdminDashboard() {
     try { await request(`/users/${user._id}`, { method: 'DELETE' }); await loadUsers(); } catch (requestError) { setError(requestError.message); }
   };
 
+  const markAsRead = async (notificationId) => {
+    try {
+      await request('/notifications/read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notificationIds: [notificationId] }),
+      });
+      setNotifications(current => current.filter(n => n._id !== notificationId));
+      setUnreadCount(current => Math.max(0, current - 1));
+    } catch (requestError) {
+      setError(requestError.message);
+    }
+  };
+
+  const handleNotificationClick = (notification) => {
+    if (notification.type === 'security') {
+      setTab('security');
+    }
+    if (notification._id) {
+      markAsRead(notification._id);
+    }
+    setShowNotifications(false);
+  };
+
   const formatIdleTime = () => `${Math.floor(idleSeconds / 60)}:${String(idleSeconds % 60).padStart(2, '0')}`;
 
   return (
     <div className="admin-shell">
       <aside className="admin-sidebar">
         <div><p className="admin-kicker">SUPPLIWISE</p><h2>Control Panel</h2></div>
-        <nav>{tabs.map(item => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item === 'ai' ? 'AI management' : item === 'users' ? 'User management' : item[0].toUpperCase() + item.slice(1)}</button>)}</nav>
+        <nav>{tabs.map(item => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item === 'ai' ? 'AI management' : item === 'users' ? 'User management' : item === 'assessment-management' ? 'Assessment Management' : item[0].toUpperCase() + item.slice(1)}</button>)}</nav>
         <button className="admin-link sidebar-signout" onClick={signOut}>Sign out</button>
       </aside>
       <main className="admin-main">
-        <header className="admin-header"><div><p className="admin-kicker">ADMINISTRATOR / {tab.toUpperCase()}</p><h1>{tab === 'overview' ? 'System overview' : tab === 'ai' ? 'AI management and control' : tab === 'users' ? 'User management' : tab === 'security' ? 'Security center' : 'Admin profile'}</h1></div><div className="admin-header-actions"><div className="notification-wrap"><button className="notification-button" aria-label="Open notifications" onClick={() => { setShowNotifications(current => !current); setUnreadCount(0); }}><span aria-hidden="true">&#128276;</span>{unreadCount > 0 && <b>{unreadCount > 9 ? '9+' : unreadCount}</b>}</button>{showNotifications && <div className="notification-panel"><h3>System notifications</h3>{notifications.length ? notifications.map((notification, index) => <div className="notification" key={`${notification.title}-${index}`}><strong>{notification.title}</strong><span>{notification.detail}</span></div>) : <p className="admin-muted">No new notifications.</p>}</div>}</div><button className="admin-secondary" onClick={downloadReport}>Download security report</button></div></header>
+        <header className="admin-header"><div><p className="admin-kicker">ADMINISTRATOR / {tab.toUpperCase()}</p><h1>{tab === 'overview' ? 'System overview' : tab === 'ai' ? 'AI management and control' : tab === 'users' ? 'User management' : tab === 'security' ? 'Security center' : 'Assessment Management'}</h1></div><div className="admin-header-actions"><div className="notification-wrap"><button className="notification-button" aria-label="Open notifications" onClick={() => { setShowNotifications(current => !current); }}><span aria-hidden="true">&#128276;</span>{unreadCount > 0 && <b>{unreadCount > 9 ? '9+' : unreadCount}</b>}</button>{showNotifications && <div className="notification-panel"><h3>System notifications</h3>{notifications.length ? notifications.map((notification, index) => <div className="notification" key={`${notification.title}-${index}`} onClick={() => handleNotificationClick(notification)}><strong>{notification.title}</strong><span>{notification.detail}</span></div>) : <p className="admin-muted">No new notifications.</p>}</div>}</div><button className="admin-secondary" onClick={downloadReport}>Download security report</button></div></header>
         <div className={`admin-session-status${idleSeconds <= ADMIN_WARNING_SECONDS ? ' warning' : ''}`}>{idleSeconds <= ADMIN_WARNING_SECONDS ? <><strong>Session expiry warning:</strong> signing out in <strong>{formatIdleTime()}</strong> due to inactivity.</> : <>Admin session expires after 3 minutes of inactivity, followed by a 30-second warning. <strong>{formatIdleTime()}</strong></>}</div>
         {idleSeconds <= ADMIN_WARNING_SECONDS && <div className="admin-session-warning" role="alert" aria-live="assertive">Your admin session is about to expire. Move or focus on this page to stay signed in. Automatic logout in <strong>{formatIdleTime()}</strong>.</div>}
         {error && <div className="admin-alert danger">{error}</div>}
         {tab === 'overview' && overview && <Overview overview={overview} />}
         {tab === 'users' && <Users users={users} search={search} setSearch={value => { searchRef.current = value; setSearch(value); }} loadUsers={loadUsers} toggleSubscription={toggleSubscription} updateAccount={updateAccount} deleteAccount={deleteAccount} />}
+        {tab === 'assessment-management' && <AssessmentManagement />}
         {tab === 'ai' && <AiPanel ai={ai} />}
-        {tab === 'security' && <SecurityPanel security={security} />}
+        {tab === 'security' && <SecurityStatus securityData={security} />}
         {tab === 'profile' && <ProfilePanel profile={profile} form={profileForm} setForm={setProfileForm} message={profileMessage} onSubmit={changePassword} rotateOtp={rotateOtp} setRotateOtp={setRotateOtp} rotatedKey={rotatedKey} onRotate={rotateAuthenticator} />}
       </main>
     </div>
