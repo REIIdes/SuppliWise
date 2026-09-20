@@ -68,7 +68,9 @@ const SIGNOUT_ICON = (
 function AdminDashboard() {
   const navigate = useNavigate();
   const [tab, setTab] = useState('overview');
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => localStorage.getItem('adminSidebarCollapsed') === 'true'
+  );
   const [overview, setOverview] = useState(null);
   const [users, setUsers] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
@@ -529,7 +531,7 @@ function AdminDashboard() {
   };
 
   return (
-    <div className="admin-shell">
+    <div className={`admin-shell${sidebarCollapsed ? ' admin-shell--collapsed' : ''}`}>
 
       {/* ── Topbar: spans full width above sidebar + main ── */}
       <AdminTopbar
@@ -551,7 +553,11 @@ function AdminDashboard() {
               className="hamburger-btn"
               aria-label={sidebarCollapsed ? 'Expand menu' : 'Collapse menu'}
               aria-expanded={!sidebarCollapsed}
-              onClick={() => setSidebarCollapsed(v => !v)}
+              onClick={() => setSidebarCollapsed(v => {
+                const next = !v;
+                localStorage.setItem('adminSidebarCollapsed', String(next));
+                return next;
+              })}
             >
               {sidebarCollapsed ? (
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
