@@ -44,6 +44,8 @@ const assessmentSchema = new mongoose.Schema(
       type: Date,
       default: () => new Date(Date.now() + 5 * 365.25 * 24 * 60 * 60 * 1000),
     },
+    // Admin-set priority flag
+    priority: { type: String, enum: ['Priority', 'Standard'], default: 'Standard' },
     // User info snapshot (for easy identification in DB)
     userEmail: { type: String },
     userName: { type: String },

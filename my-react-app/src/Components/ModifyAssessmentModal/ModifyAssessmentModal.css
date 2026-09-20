@@ -1,87 +1,150 @@
-.modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(0, 0, 0, 0.6);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-  }
-  
-  .modal-content {
-    background: #fff;
-    padding: 2rem;
-    border-radius: 8px;
-    width: 90%;
-    max-width: 500px;
-    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
-  }
-  
-  .modal-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border-bottom: 1px solid #eee;
-    padding-bottom: 1rem;
-    margin-bottom: 1rem;
-  }
-  
-  .modal-header h2 {
-    margin: 0;
-    font-size: 1.5rem;
-    color: #333;
-  }
-  
-  .close-button {
-    background: none;
-    border: none;
-    font-size: 2rem;
-    cursor: pointer;
-    color: #aaa;
-  }
-  
-  .modal-body p {
-    font-size: 1rem;
-    color: #666;
-    margin-bottom: 1.5rem;
-  }
-  
-  .action-buttons {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-  
-  .action-buttons button {
-    padding: 0.75rem 1rem;
-    border: 1px solid #ddd;
-    border-radius: 5px;
-    font-size: 1rem;
-    cursor: pointer;
-    transition: all 0.2s ease-in-out;
-  }
-  
-  .priority-button {
-    background-color: #f8f9fa;
-    color: #333;
-  }
-  
-  .priority-button.active {
-    background-color: #28a745;
-    color: white;
-    border-color: #28a745;
-  }
-  
-  .delete-button {
-    background-color: #fceeee;
-    color: #dc3545;
-    border-color: #f5c6cb;
-  }
-  
-  .delete-button:hover {
-    background-color: #dc3545;
-    color: white;
-  }
+/* ── Overlay ─────────────────────────────────────────────────────────── */
+.mam-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100;
+  padding: 20px;
+}
+
+/* ── Dialog box ──────────────────────────────────────────────────────── */
+.mam-content {
+  background: #fff;
+  border-radius: 10px;
+  width: min(92vw, 480px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.22);
+  overflow: hidden;
+  animation: mam-pop 0.18s ease;
+}
+
+@keyframes mam-pop {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* ── Header ──────────────────────────────────────────────────────────── */
+.mam-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.mam-title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #111827;
+  margin: 0;
+}
+
+.mam-close {
+  background: none;
+  border: none;
+  font-size: 1.6rem;
+  line-height: 1;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 0 2px;
+  transition: color 0.12s;
+}
+.mam-close:hover { color: #374151; }
+
+/* ── Body ────────────────────────────────────────────────────────────── */
+.mam-body {
+  padding: 20px 24px 24px;
+}
+
+.mam-sub {
+  font-size: 0.9rem;
+  color: #6b7280;
+  margin: 0 0 20px;
+}
+
+/* ── Feedback banners ────────────────────────────────────────────────── */
+.mam-alert {
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  margin-bottom: 16px;
+}
+.mam-alert--error {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fca5a5;
+}
+.mam-alert--success {
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #86efac;
+}
+
+/* ── Action buttons stack ────────────────────────────────────────────── */
+.mam-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Base button */
+.mam-btn {
+  width: 100%;
+  padding: 13px 16px;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s, background 0.15s;
+  border: 1px solid transparent;
+  text-align: center;
+}
+.mam-btn:hover:not(:disabled)  { opacity: 0.88; transform: translateY(-1px); }
+.mam-btn:active:not(:disabled) { transform: translateY(0); }
+.mam-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Set as Priority — outline/grey (inactive) */
+.mam-btn--outline {
+  background: #f8f9fa;
+  color: #333;
+  border-color: #e5e7eb;
+}
+
+/* Set as Priority — when this IS the current priority */
+.mam-btn--active-priority {
+  background: #fff8e1;
+  color: #92400e;
+  border-color: #fcd34d;
+}
+
+/* Set as Standard — green (matches image) */
+.mam-btn--green {
+  background: #28a745;
+  color: #fff;
+  border-color: #28a745;
+}
+
+/* Set as Standard — dimmer when it's already standard (already active) */
+.mam-btn--active-standard {
+  background: #1e7e34;
+  border-color: #1e7e34;
+}
+
+/* Delete — light red background, red text (matches image) */
+.mam-btn--delete {
+  background: #fdf2f2;
+  color: #dc3545;
+  border-color: #f5c6cb;
+}
+.mam-btn--delete:hover:not(:disabled) {
+  background: #dc3545;
+  color: #fff;
+  border-color: #dc3545;
+  opacity: 1;
+}

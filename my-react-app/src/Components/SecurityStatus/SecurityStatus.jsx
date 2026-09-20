@@ -159,7 +159,7 @@ const BANNER_META = {
   loading:  { label: 'Checking…',            color: '#6b7280', bg: '#f9fafb', dot: 'dot--loading'  },
 };
 
-function OverallBanner({ status, syncedAt, syncing, onSync }) {
+function OverallBanner({ status, syncedAt, syncing, onSync, onDownload }) {
   const meta = BANNER_META[status] || BANNER_META.loading;
   return (
     <div className="rt-banner" style={{ '--rt-color': meta.color, '--rt-bg': meta.bg }}>
@@ -187,13 +187,28 @@ function OverallBanner({ status, syncedAt, syncing, onSync }) {
           <SyncIcon spinning={syncing} />
           {syncing ? 'Syncing…' : 'Sync Now'}
         </button>
+        {onDownload && (
+          <button
+            className="rt-download-btn"
+            onClick={onDownload}
+            aria-label="Download security report PDF"
+            title="Download full security report as PDF"
+          >
+            <svg className="rt-download-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Download Report
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
 // ── Main Component ────────────────────────────────────────────────────────
-const SecurityStatus = ({ securityData, adminRequest }) => {
+const SecurityStatus = ({ securityData, adminRequest, onDownloadReport }) => {
   const [monitors,             setMonitors]             = useState([]);
   const [overallMonitorStatus, setOverallMonitorStatus] = useState('loading');
   const [syncedAt,             setSyncedAt]             = useState(null);
@@ -240,7 +255,7 @@ const SecurityStatus = ({ securityData, adminRequest }) => {
       ════════════════════════════════════════════════════════════════ */}
       <section className="rt-section">
 
-        {/* Header row — title + sync button side by side */}
+        {/* Header row — title + download button side by side */}
         <div className="rt-header">
           <div className="rt-header__title-wrap">
             <svg className="rt-header__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -258,6 +273,7 @@ const SecurityStatus = ({ securityData, adminRequest }) => {
           syncedAt={syncedAt}
           syncing={syncing}
           onSync={fetchMonitor}
+          onDownload={onDownloadReport}
         />
 
         {/* Error message */}

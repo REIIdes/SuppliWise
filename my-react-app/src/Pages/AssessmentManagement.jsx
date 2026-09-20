@@ -243,34 +243,17 @@ const AssessmentManagement = () => {
   };
 
   const deleteAssessment = async (assessmentId) => {
-    if (window.confirm('Are you sure you want to delete this assessment? This action cannot be undone.')) {
-      try {
-        await axios.delete(`/api/assessment/${assessmentId}`, {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem('adminToken')}`,
-          },
-        });
-        setModifiedAssessment(null);
-        await refreshAssessments(expandedUser);
-      } catch (error) {
-        console.error('Error deleting assessment:', error);
-      }
-    }
+    // Remove from local state immediately (modal already confirmed + called API)
+    setAssessments(prev => prev.filter(a => a._id !== assessmentId));
+    setModifiedAssessment(null);
   };
 
-  const saveModifiedAssessment = async (assessment) => {
-    try {
-      await axios.patch(`/api/assessment/${assessment._id}`, assessment, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('adminToken')}`,
-        },
-      });
-      setModifiedAssessment(null);
-      // Refresh assessments for the user
-      await refreshAssessments(expandedUser);
-    } catch (error) {
-      console.error('Error saving assessment:', error);
-    }
+  const saveModifiedAssessment = async (updatedAssessment) => {
+    // The modal already called the API — just update local state and close
+    setAssessments(prev =>
+      prev.map(a => a._id === updatedAssessment._id ? { ...a, ...updatedAssessment } : a)
+    );
+    setModifiedAssessment(null);
   };
 
   return (

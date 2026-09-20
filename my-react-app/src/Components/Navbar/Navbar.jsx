@@ -11,7 +11,7 @@ function Navbar() {
       <div className="navbar-left">
         <div className="navbar-logo-box">
           <svg width="30" height="30" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <rect width="100" height="100" rx="22" fill="#3dbf8a"/>
+            <rect width="100" height="100" rx="22" fill="#d46b35"/>
             <g transform="rotate(-40, 50, 50)">
               <rect x="22" y="36" width="56" height="28" rx="14" fill="none" stroke="white" strokeWidth="6"/>
               <line x1="50" y1="36" x2="50" y2="64" stroke="white" strokeWidth="6"/>

@@ -148,6 +148,39 @@ router.get('/me', protect, async (req, res) => {
   }
 });
 
+// @route   GET /api/assessment/user/:userId
+// @desc    Get all assessments for a specific user — admin only
+// @access  Private (Admin)
+router.get('/user/:userId', protect, async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Admin access required.' });
+  }
+  try {
+    const assessments = await Assessment.find({ user: req.params.userId }).sort({ createdAt: -1 });
+    res.json(assessments);
+  } catch (error) {
+    console.error('[assessment GET /user/:userId]', error.message);
+    res.status(500).json({ message: 'Could not load assessments. Please try again.' });
+  }
+});
+
+// @route   GET /api/assessment/results/:assessmentId
+// @desc    Get AI results for a specific assessment — admin only
+// @access  Private (Admin)
+router.get('/results/:assessmentId', protect, async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Admin access required.' });
+  }
+  try {
+    const assessment = await Assessment.findById(req.params.assessmentId);
+    if (!assessment) return res.status(404).json({ message: 'Assessment not found.' });
+    res.json(assessment.aiResults);
+  } catch (error) {
+    console.error('[assessment GET /results/:assessmentId]', error.message);
+    res.status(500).json({ message: 'Could not load assessment results. Please try again.' });
+  }
+});
+
 // @route   PATCH /api/assessment/:id/results
 // @desc    Store AI results on an existing assessment
 // @access  Private
@@ -166,74 +199,47 @@ router.patch('/:id/results', protect, async (req, res) => {
   }
 });
 
+// @route   PATCH /api/assessment/:id/priority
+// @desc    Set assessment priority — admin only
+// @access  Private (Admin)
+router.patch('/:id/priority', protect, async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Admin access required.' });
+  }
+  const { priority } = req.body;
+  if (!['Priority', 'Standard'].includes(priority)) {
+    return res.status(400).json({ message: 'Priority must be "Priority" or "Standard".' });
+  }
+  try {
+    const assessment = await Assessment.findByIdAndUpdate(
+      req.params.id,
+      { priority },
+      { new: true }
+    );
+    if (!assessment) return res.status(404).json({ message: 'Assessment not found.' });
+    res.json({ message: `Assessment set to ${priority}.`, assessment });
+  } catch (error) {
+    console.error('[assessment PATCH /:id/priority]', error.message);
+    res.status(500).json({ message: 'Could not update priority. Please try again.' });
+  }
+});
+
 // @route   DELETE /api/assessment/:id
-// @desc    Delete an assessment
+// @desc    Delete an assessment — owner or admin
 // @access  Private
 router.delete('/:id', protect, async (req, res) => {
   try {
-    const assessment = await Assessment.findOneAndDelete({
-      _id: req.params.id,
-      user: req.user._id,
-    });
+    // Admins can delete any assessment; regular users can only delete their own
+    const filter = req.user.role === 'admin'
+      ? { _id: req.params.id }
+      : { _id: req.params.id, user: req.user._id };
+
+    const assessment = await Assessment.findOneAndDelete(filter);
     if (!assessment) return res.status(404).json({ message: 'Assessment not found.' });
-    res.json({ message: 'Assessment deleted' });
+    res.json({ message: 'Assessment deleted.' });
   } catch (error) {
     console.error('[assessment DELETE /:id]', error.message);
     res.status(500).json({ message: 'Could not delete the assessment. Please try again.' });
-  }
-});
-
-// @route   GET /api/assessment/user/:userId
-// @desc    Get all assessments for a specific user (for admins)
-// @access  Private (Admin only)
-router.get('/user/:userId', protect, async (req, res) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ message: 'Not authorized' });
-  }
-  try {
-    const assessments = await Assessment.find({ user: req.params.userId }).sort({ createdAt: -1 });
-    res.json(assessments);
-  } catch (error) {
-    console.error('[assessment GET /user/:userId]', error.message);
-    res.status(500).json({ message: 'Could not load assessments. Please try again.' });
-  }
-});
-
-// @route   GET /api/assessment/results/:assessmentId
-// @desc    Get the results of a specific assessment (for admins)
-// @access  Private (Admin only)
-router.get('/results/:assessmentId', protect, async (req, res) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ message: 'Not authorized' });
-  }
-  try {
-    const assessment = await Assessment.findById(req.params.assessmentId);
-    if (!assessment) {
-      return res.status(404).json({ message: 'Assessment not found' });
-    }
-    res.json(assessment.aiResults);
-  } catch (error) {
-    console.error('[assessment GET /results/:assessmentId]', error.message);
-    res.status(500).json({ message: 'Could not load assessment results. Please try again.' });
-  }
-});
-
-// @desc    Delete an assessment
-// @access  Private (Admin only)
-router.delete('/:id', protect, async (req, res) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ message: 'Not authorized' });
-  }
-  try {
-    const assessment = await Assessment.findById(req.params.id);
-    if (!assessment) {
-      return res.status(404).json({ message: 'Assessment not found' });
-    }
-    await Assessment.findByIdAndDelete(req.params.id);
-    res.json({ message: 'Assessment removed' });
-  } catch (error) {
-    console.error('[assessment DELETE /:id]', error.message);
-    res.status(500).json({ message: 'Server Error' });
   }
 });
 

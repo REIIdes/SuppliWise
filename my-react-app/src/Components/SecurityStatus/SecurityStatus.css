@@ -151,6 +151,37 @@
 .rt-sync-btn:active:not(:disabled) { transform: translateY(0); }
 .rt-sync-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
+/* ── Download Report button ──────────────────────────────────────────── */
+.rt-download-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 16px;
+  border-radius: 6px;
+  border: 1.5px solid #166534;
+  background: #166534;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
+  white-space: nowrap;
+  user-select: none;
+}
+.rt-download-btn:hover {
+  background: #14532d;
+  border-color: #14532d;
+  box-shadow: 0 4px 12px rgba(22,101,52,.28);
+  transform: translateY(-1px);
+}
+.rt-download-btn:active { transform: translateY(0); }
+
+.rt-download-icon {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
 .rt-sync-icon {
   width: 15px;
   height: 15px;

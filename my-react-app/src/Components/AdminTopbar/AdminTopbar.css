@@ -1,0 +1,150 @@
+/* ── Admin Topbar ─────────────────────────────────────────────────────── */
+.admin-topbar {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #18342a;
+  padding: 0 24px;
+  height: 56px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  box-sizing: border-box;
+  position: sticky;
+  top: 0;
+  z-index: 150;
+  flex-shrink: 0;
+}
+
+/* ── Left: logo + name ──────────────────────────── */
+.admin-topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.admin-topbar__logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.admin-topbar__name {
+  font-size: 17px;
+  font-weight: 700;
+  color: #ed9a62;
+  font-family: sans-serif;
+  letter-spacing: -0.01em;
+}
+
+.admin-topbar__divider {
+  width: 1px;
+  height: 18px;
+  background: rgba(255,255,255,.2);
+  flex-shrink: 0;
+}
+
+.admin-topbar__panel {
+  font-size: 13px;
+  font-weight: 500;
+  color: #a8c4b4;
+  font-family: sans-serif;
+}
+
+/* ── Right: actions ─────────────────────────────── */
+.admin-topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Notification bell wrapper */
+.admin-topbar__notif-wrap {
+  position: relative;
+}
+
+/* Generic icon button (bell) */
+.admin-topbar__icon-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid rgba(255,255,255,.15);
+  border-radius: 8px;
+  background: rgba(255,255,255,.07);
+  color: #c6d8cc;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.admin-topbar__icon-btn:hover {
+  background: rgba(255,255,255,.14);
+  color: #fff;
+  border-color: rgba(255,255,255,.28);
+}
+
+/* Unread badge */
+.admin-topbar__badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 10px;
+  background: #d46b35;
+  color: #fff;
+  font: 700 10px Arial, sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+/* Profile button */
+.admin-topbar__profile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 4px 4px;
+  border: 1px solid rgba(255,255,255,.15);
+  border-radius: 8px;
+  background: rgba(255,255,255,.07);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.admin-topbar__profile:hover {
+  background: rgba(255,255,255,.14);
+  border-color: rgba(255,255,255,.28);
+}
+
+/* Avatar circle */
+.admin-topbar__avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #d46b35;
+  color: #fff;
+  font: 700 13px Arial, sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+/* Admin alias text */
+.admin-topbar__alias {
+  font: 500 13px/1 Arial, sans-serif;
+  color: #eff6ee;
+  white-space: nowrap;
+}
+
+/* ── Responsive ─────────────────────────────────── */
+@media (max-width: 480px) {
+  .admin-topbar__panel,
+  .admin-topbar__divider { display: none; }
+  .admin-topbar__alias   { display: none; }
+  .admin-topbar { padding: 0 14px; }
+}
