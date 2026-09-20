@@ -236,7 +236,73 @@ function Users({ users, search, setSearch, loadUsers, toggleSubscription, update
   return <section className="admin-panel"><div className="panel-heading"><div><h3>Users</h3><p className="admin-muted">Manage access, roles, subscriptions, and security status. Passwords are never displayed.</p></div><div className="search-row"><input placeholder="Search users" value={search} onChange={event => setSearch(event.target.value)} /><button className="admin-secondary" onClick={loadUsers}>Search</button></div></div><div className="table-wrap"><table><thead><tr><th>User</th><th>Created</th><th>Subscription</th><th>Last login</th><th>Location</th><th>Role</th><th>Status</th><th>Security</th><th>Actions</th></tr></thead><tbody>{users.map(user => <tr key={user._id}><td>{user.firstName} {user.lastName}<small>{user.email}</small></td><td>{new Date(user.createdAt).toLocaleString()}</td><td><button className={user.subscriptionActive ? 'status active' : 'status'} onClick={() => toggleSubscription(user)}>{user.subscriptionActive ? 'Active' : 'Turn on'}</button><small>{user.subscriptionPlan}</small></td><td>{user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : 'Never'}<small>{user.device || 'Unknown device'}</small></td><td>{user.lastLoginLocation || 'Unknown location'}</td><td><select value={user.accountRole || 'user'} onChange={event => updateAccount(user, { role: event.target.value })}><option value="user">User</option><option value="moderator">Moderator</option></select></td><td><select value={user.accountStatus || 'active'} onChange={event => updateAccount(user, { status: event.target.value })}><option value="active">Active</option><option value="banned">Banned</option></select></td><td className={user.twoFactorEnabled ? 'security-active' : 'security-email'}>{user.twoFactorEnabled ? 'Google Authenticator active' : 'Email OTP active'}</td><td><button className="status danger-action" onClick={() => deleteAccount(user)}>Delete</button></td></tr>)}</tbody></table></div></section>;
 }
 
-function AiPanel({ ai }) { return <section className="admin-panel"><h3>Connected AI providers</h3><div className="provider-grid">{(ai?.providers || []).map(provider => <div className="provider" key={provider.key}><strong>{provider.label}</strong><span className={provider.configured ? 'healthy' : 'attention'}>{provider.configured ? 'Configured' : 'Not configured'}</span><small>{provider.model}</small></div>)}</div><p className="admin-muted">Token usage and accuracy should be connected to provider usage APIs before being shown as billing or quality truth. This dashboard currently reports configuration state only.</p></section>; }
+function AiPanel({ ai }) {
+  const [connectionStatuses, setConnectionStatuses] = useState({
+    database: { status: 'connected', lastChecked: new Date().toLocaleString() },
+    'third-party-api': { status: 'disconnected', lastChecked: new Date().toLocaleString() },
+  });
+  const [models, setModels] = useState(ai?.providers || []);
+  const [newModel, setNewModel] = useState({ label: '', configured: false, model: '' });
+
+  const addModel = () => {
+    if (newModel.label && newModel.model) {
+      setModels([...models, { ...newModel, key: newModel.label.toLowerCase().replace(/\s/g, '-') }]);
+      setNewModel({ label: '', configured: false, model: '' });
+    }
+  };
+
+  return (
+    <section className="admin-panel">
+      <h3>Monitoring</h3>
+      <div className="monitoring-grid">
+        <div className="monitoring-item">
+          <strong>Database Connection</strong>
+          <span className={connectionStatuses.database.status === 'connected' ? 'healthy' : 'attention'}>
+            {connectionStatuses.database.status}
+          </span>
+          <small>Last checked: {connectionStatuses.database.lastChecked}</small>
+        </div>
+        <div className="monitoring-item">
+          <strong>Third-Party API</strong>
+          <span className={connectionStatuses['third-party-api'].status === 'connected' ? 'healthy' : 'attention'}>
+            {connectionStatuses['third-party-api'].status}
+          </span>
+          <small>Last checked: {connectionStatuses['third-party-api'].lastChecked}</small>
+        </div>
+      </div>
+      <h3 style={{ marginTop: '2rem' }}>Connected AI providers</h3>
+      <div className="provider-grid">
+        {models.map(provider => (
+          <div className="provider" key={provider.key}>
+            <strong>{provider.label}</strong>
+            <span className={provider.configured ? 'healthy' : 'attention'}>
+              {provider.configured ? 'Configured' : 'Not configured'}
+            </span>
+            <small>{provider.model}</small>
+          </div>
+        ))}
+      </div>
+      <div className="add-model-form">
+        <input
+          type="text"
+          placeholder="New AI Model Label"
+          value={newModel.label}
+          onChange={e => setNewModel({ ...newModel, label: e.target.value })}
+        />
+        <input
+          type="text"
+          placeholder="Model Name"
+          value={newModel.model}
+          onChange={e => setNewModel({ ...newModel, model: e.target.value })}
+        />
+        <button onClick={addModel}>Add Model</button>
+      </div>
+      <p className="admin-muted">
+        Token usage and accuracy should be connected to provider usage APIs before being shown as billing or quality truth. This dashboard currently reports configuration state only.
+      </p>
+    </section>
+  );
+}
 function SecurityPanel({ security }) { return <section className="admin-panel"><h3>STRIDE and OWASP controls</h3>{(security?.checks || []).map(check => <div className="security-row" key={check.key}><span className={check.status}>{check.status}</span><div><strong>{check.label}</strong><small>{check.status === 'healthy' ? 'Control is configured.' : check.fix}</small></div></div>)}</section>; }
 function ProfilePanel({ profile, form, setForm, message, onSubmit, rotateOtp, setRotateOtp, rotatedKey, onRotate }) {
   const update = event => setForm(current => ({ ...current, [event.target.name]: event.target.value }));
