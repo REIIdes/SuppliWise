@@ -105,13 +105,11 @@ export default defineConfig({
     })
   ],
   server: {
-    host: '0.0.0.0',
+    host: 'localhost',
     proxy: {
       '/api': {
         target: 'http://localhost:5000',
         changeOrigin: true,
-        timeout: 120000,
-        proxyTimeout: 120000,
       },
     },
   },
