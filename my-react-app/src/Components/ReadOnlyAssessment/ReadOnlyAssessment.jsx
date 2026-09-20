@@ -1,227 +1,197 @@
 import React from 'react';
 import './ReadOnlyAssessment.css';
 
+/* ── Helpers ──────────────────────────────────────────────────────── */
 function Field({ label, value }) {
   if (value === null || value === undefined || value === '') return null;
   return (
     <div className="card-field">
       <label>{label}</label>
-      <div className="field-value">{Array.isArray(value) ? value.join(', ') : String(value)}</div>
+      <div className="field-value">
+        {Array.isArray(value) ? value.join(', ') : String(value)}
+      </div>
     </div>
   );
 }
 
+function SeverityBadge({ severity }) {
+  if (!severity) return null;
+  const cls =
+    severity === 'Mild'     ? 'severity-badge--mild'
+    : severity === 'Moderate' ? 'severity-badge--moderate'
+    : severity === 'Severe'   ? 'severity-badge--severe'
+    : 'severity-badge--default';
+  return <span className={`severity-badge ${cls}`}>{severity}</span>;
+}
+
+function StepHeading({ children }) {
+  return (
+    <>
+      <p className="ro-step-heading">{children}</p>
+      <div className="ro-divider" />
+    </>
+  );
+}
+
+/* ── Main component ───────────────────────────────────────────────── */
 export default function ReadOnlyAssessment({ assessment, onClose }) {
   if (!assessment) return null;
 
-  // Helper to check if array has values other than "None"
-  const hasValues = (arr) => {
-    if (!arr || !Array.isArray(arr) || arr.length === 0) return false;
-    return !arr.every(item => item === 'None');
+  const hasValues = (arr) =>
+    Array.isArray(arr) && arr.length > 0 && !arr.every(i => i === 'None');
+
+  const filterNone = (arr) => {
+    if (!Array.isArray(arr)) return arr;
+    const f = arr.filter(i => i !== 'None');
+    return f.length > 0 ? f : null;
   };
 
-  // Helper to filter out "None" from arrays
-  const filterNone = (arr) => {
-    if (!arr || !Array.isArray(arr)) return arr;
-    const filtered = arr.filter(item => item !== 'None');
-    return filtered.length > 0 ? filtered : null;
-  };
+  const medicalConditions = filterNone(assessment.medicalConditions) || [];
+  const noSymptomsFor     = assessment.noSymptomsForConditions || [];
+  const symptomSeverity   = assessment.symptomSeverity || {};
+  const symptoms          = assessment.symptoms || [];
+
+  const generalSymptoms = symptoms
+    .filter(s => s.startsWith('General::'))
+    .map(s => s.replace('General::', ''));
 
   return (
     <div className="ro-box" onClick={e => e.stopPropagation()}>
+
+      {/* ── Header ─────────────────────────────────── */}
       <div className="ro-header">
         <h3>Assessment Information</h3>
-        {onClose && <button className="ro-close" onClick={onClose}>✕</button>}
+        {onClose && (
+          <button className="ro-close" onClick={onClose} aria-label="Close">✕</button>
+        )}
       </div>
 
+      {/* ── Body ───────────────────────────────────── */}
       <div className="step-body">
-          {/* Step 1: Basic Information */}
-          <div className="section-header-with-icon">
-            <h3 className="section-title">Step 1: Basic Information</h3>
+
+        {/* Step 1 */}
+        <StepHeading>Step 1 — Basic Information</StepHeading>
+        <div className="info-cards-row">
+          <div className="info-card">
+            <div className="card-header"><h4 className="card-title">Demographics</h4></div>
+            <Field label="Age"            value={assessment.age} />
+            <Field label="Gender"         value={assessment.gender} />
+            <Field label="Weight"         value={assessment.weight   ? `${assessment.weight} kg`  : null} />
+            <Field label="Height"         value={assessment.height   ? `${assessment.height} cm`  : null} />
+            <Field label="Activity Level" value={assessment.activityLevel} />
           </div>
-          <div className="section-divider"></div>
+        </div>
+
+        {/* Step 2 */}
+        <StepHeading>Step 2 — Diet &amp; Health Goals</StepHeading>
+        <div className="info-cards-row">
+          <div className="info-card">
+            <Field label="Diet Type"    value={assessment.dietType} />
+            <Field label="Health Goals" value={hasValues(assessment.healthGoals) ? filterNone(assessment.healthGoals) : 'None'} />
+          </div>
+        </div>
+
+        {/* Step 3 */}
+        <StepHeading>Step 3 — Current Symptoms</StepHeading>
+
+        {/* General symptoms */}
+        {generalSymptoms.length > 0 && (
           <div className="info-cards-row">
             <div className="info-card">
-              <div className="card-header"><h4 className="card-title">Demographics</h4></div>
-              <Field label="Age" value={assessment.age} />
-              <Field label="Gender" value={assessment.gender} />
-              <Field label="Weight" value={assessment.weight ? `${assessment.weight} kg` : null} />
-              <Field label="Height" value={assessment.height ? `${assessment.height} cm` : null} />
-              <Field label="Activity Level" value={assessment.activityLevel} />
-            </div>
-          </div>
-
-          {/* Step 2: Diet & Health Goals */}
-          <div className="section-header-with-icon" style={{ marginTop: 12 }}>
-            <h3 className="section-title">Step 2: Diet & Health Goals</h3>
-          </div>
-          <div className="section-divider"></div>
-          <div className="info-cards-row">
-            <div className="info-card">
-              <Field label="Diet Type" value={assessment.dietType} />
-              <Field label="Health Goals" value={hasValues(assessment.healthGoals) ? filterNone(assessment.healthGoals) : 'None'} />
-            </div>
-          </div>
-
-          {/* Step 3: Symptoms */}
-          <div className="section-header-with-icon" style={{ marginTop: 12 }}>
-            <h3 className="section-title">Step 3: Current Symptoms</h3>
-          </div>
-          <div className="section-divider"></div>
-          
-          {/* General Symptoms */}
-          {(() => {
-            const generalSymptoms = (assessment.symptoms || [])
-              .filter(s => s.startsWith('General::'))
-              .map(s => s.replace('General::', ''));
-            const symptomSeverity = assessment.symptomSeverity || {};
-            
-            if (generalSymptoms.length > 0) {
-              return (
-                <div className="info-cards-row">
-                  <div className="info-card">
-                    <div className="card-header"><h4 className="card-title">General Symptoms</h4></div>
-                    {generalSymptoms.map(symptom => {
-                      const severity = symptomSeverity[`General::${symptom}`];
-                      return (
-                        <div key={symptom} className="card-field">
-                          <label>{symptom}</label>
-                          <div className="field-value">
-                            {severity && <span style={{ 
-                              padding: '2px 8px', 
-                              borderRadius: '4px', 
-                              fontSize: '12px',
-                              fontWeight: 600,
-                              background: severity === 'Mild' ? '#fef3c7' : severity === 'Moderate' ? '#fed7aa' : '#fecaca',
-                              color: severity === 'Mild' ? '#92400e' : severity === 'Moderate' ? '#9a3412' : '#991b1b'
-                            }}>
-                              {severity}
-                            </span>}
-                          </div>
-                        </div>
-                      );
-                    })}
+              <div className="card-header"><h4 className="card-title">General Symptoms</h4></div>
+              {generalSymptoms.map(symptom => (
+                <div key={symptom} className="card-field">
+                  <label>{symptom}</label>
+                  <div className="field-value">
+                    <SeverityBadge severity={symptomSeverity[`General::${symptom}`]} />
                   </div>
                 </div>
-              );
-            }
-          })()}
-          
-          {/* Condition-Specific Symptoms */}
-          {(() => {
-            const medicalConditions = filterNone(assessment.medicalConditions) || [];
-            const noSymptomsFor = assessment.noSymptomsForConditions || [];
-            const symptomSeverity = assessment.symptomSeverity || {};
-            
-            if (Array.isArray(medicalConditions) && medicalConditions.length > 0) {
-              return medicalConditions.map(condition => {
-                const conditionSymptoms = (assessment.symptoms || [])
-                  .filter(s => s.startsWith(condition + '::'))
-                  .map(s => s.replace(condition + '::', ''));
-                
-                const hasNoSymptoms = noSymptomsFor.includes(condition);
-                
-                if (conditionSymptoms.length === 0 && !hasNoSymptoms) return null;
-                
-                return (
-                  <div key={condition} className="info-cards-row" style={{ marginTop: 8 }}>
-                    <div className="info-card">
-                      <div className="card-header">
-                        <h4 className="card-title">Symptoms for {condition}</h4>
-                      </div>
-                      {hasNoSymptoms ? (
-                        <div className="card-field">
-                          <div className="field-value" style={{ fontStyle: 'italic', color: '#6b7280' }}>
-                            No symptoms for {condition}
-                          </div>
-                        </div>
-                      ) : (
-                        conditionSymptoms.map(symptom => {
-                          const severity = symptomSeverity[`${condition}::${symptom}`];
-                          return (
-                            <div key={symptom} className="card-field">
-                              <label>{symptom}</label>
-                              <div className="field-value">
-                                {severity && <span style={{ 
-                                  padding: '2px 8px', 
-                                  borderRadius: '4px', 
-                                  fontSize: '12px',
-                                  fontWeight: 600,
-                                  background: severity === 'Mild' ? '#fef3c7' : severity === 'Moderate' ? '#fed7aa' : '#fecaca',
-                                  color: severity === 'Mild' ? '#92400e' : severity === 'Moderate' ? '#9a3412' : '#991b1b'
-                                }}>
-                                  {severity}
-                                </span>}
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Condition-specific symptoms */}
+        {medicalConditions.length > 0 && medicalConditions.map(condition => {
+          const condSymptoms = symptoms
+            .filter(s => s.startsWith(`${condition}::`))
+            .map(s => s.replace(`${condition}::`, ''));
+          const hasNone = noSymptomsFor.includes(condition);
+          if (condSymptoms.length === 0 && !hasNone) return null;
+          return (
+            <div key={condition} className="info-cards-row">
+              <div className="info-card">
+                <div className="card-header">
+                  <h4 className="card-title">Symptoms — {condition}</h4>
+                </div>
+                {hasNone ? (
+                  <p className="ro-empty-note">No symptoms reported for {condition}.</p>
+                ) : condSymptoms.map(symptom => (
+                  <div key={symptom} className="card-field">
+                    <label>{symptom}</label>
+                    <div className="field-value">
+                      <SeverityBadge severity={symptomSeverity[`${condition}::${symptom}`]} />
                     </div>
                   </div>
-                );
-              });
-            }
-          })()}
-          
-          {/* No Symptoms Selected */}
-          {(assessment.symptoms || []).includes('No current symptoms') && (
-            <div className="info-cards-row">
-              <div className="info-card">
-                <div className="card-field">
-                  <div className="field-value" style={{ fontStyle: 'italic', color: '#6b7280' }}>
-                    No current symptoms
-                  </div>
-                </div>
+                ))}
               </div>
             </div>
-          )}
-          
-          {/* Other Step 3 Fields */}
-          <div className="info-cards-row" style={{ marginTop: 8 }}>
-            <div className="info-card">
-              <div className="card-header"><h4 className="card-title">Additional Information</h4></div>
-              <Field label="Stress Level" value={assessment.stressLevel} />
-              <Field label="Sleep Quality" value={assessment.sleepQuality} />
-              <Field label="Water Intake" value={assessment.waterIntake} />
-            </div>
-          </div>
+          );
+        })}
 
-          {/* Step 4: Medical & Lifestyle */}
-          <div className="section-header-with-icon" style={{ marginTop: 12 }}>
-            <h3 className="section-title">Step 4: Medical & Lifestyle Information</h3>
-          </div>
-          <div className="section-divider"></div>
+        {/* No symptoms at all */}
+        {symptoms.includes('No current symptoms') && (
           <div className="info-cards-row">
             <div className="info-card">
-              <div className="card-header"><h4 className="card-title">Medical Information</h4></div>
-              <Field label="Medical Conditions" value={hasValues(assessment.medicalConditions) ? filterNone(assessment.medicalConditions) : 'None'} />
-              <Field label="Current Medications" value={assessment.currentMedications || 'None'} />
-              <Field label="Allergies" value={assessment.allergies || 'None'} />
-              {assessment.isPregnant === 'Yes' && <Field label="Pregnant" value="Yes" />}
-              {assessment.isBreastfeeding === 'Yes' && <Field label="Breastfeeding" value="Yes" />}
+              <p className="ro-empty-note">No current symptoms reported.</p>
             </div>
           </div>
+        )}
 
-          <div className="info-cards-row" style={{ marginTop: 8 }}>
-            <div className="info-card">
-              <div className="card-header"><h4 className="card-title">Lifestyle Information</h4></div>
-              <Field label="Lifestyle Habits" value={hasValues(assessment.lifestyleHabits) ? filterNone(assessment.lifestyleHabits) : 'None'} />
-              {assessment.recreationalDrugTypes && <Field label="Recreational Drug Types" value={assessment.recreationalDrugTypes} />}
-              <Field label="Sun Exposure" value={assessment.sunExposure} />
-              <Field label="Protein Intake" value={assessment.proteinIntake} />
-            </div>
+        {/* Additional Step 3 fields */}
+        <div className="info-cards-row">
+          <div className="info-card">
+            <div className="card-header"><h4 className="card-title">Additional Information</h4></div>
+            <Field label="Stress Level"  value={assessment.stressLevel} />
+            <Field label="Sleep Quality" value={assessment.sleepQuality} />
+            <Field label="Water Intake"  value={assessment.waterIntake} />
           </div>
+        </div>
 
-          <div className="info-cards-row" style={{ marginTop: 8 }}>
-            <div className="info-card">
-              <div className="card-header"><h4 className="card-title">Supplements & Tests</h4></div>
-              <Field label="Taking Supplements" value={assessment.takingSupplements || 'No'} />
-              {assessment.takingSupplements === 'Yes' && <Field label="Current Supplements" value={assessment.currentSupplements || 'None specified'} />}
-              <Field label="Recent Blood Test" value={assessment.recentBloodTest || 'No'} />
-              {assessment.recentBloodTest === 'Yes' && assessment.bloodTestResults && <Field label="Blood Test Results" value={assessment.bloodTestResults} />}
-            </div>
+        {/* Step 4 */}
+        <StepHeading>Step 4 — Medical &amp; Lifestyle</StepHeading>
+        <div className="info-cards-row">
+          <div className="info-card">
+            <div className="card-header"><h4 className="card-title">Medical Information</h4></div>
+            <Field label="Conditions"   value={hasValues(assessment.medicalConditions) ? filterNone(assessment.medicalConditions) : 'None'} />
+            <Field label="Medications"  value={assessment.currentMedications || 'None'} />
+            <Field label="Allergies"    value={assessment.allergies || 'None'} />
+            {assessment.isPregnant      === 'Yes' && <Field label="Pregnant"     value="Yes" />}
+            {assessment.isBreastfeeding === 'Yes' && <Field label="Breastfeeding" value="Yes" />}
           </div>
+        </div>
+
+        <div className="info-cards-row">
+          <div className="info-card">
+            <div className="card-header"><h4 className="card-title">Lifestyle Information</h4></div>
+            <Field label="Habits"       value={hasValues(assessment.lifestyleHabits) ? filterNone(assessment.lifestyleHabits) : 'None'} />
+            {assessment.recreationalDrugTypes && <Field label="Recreational Drugs" value={assessment.recreationalDrugTypes} />}
+            <Field label="Sun Exposure" value={assessment.sunExposure} />
+            <Field label="Protein Intake" value={assessment.proteinIntake} />
+          </div>
+        </div>
+
+        <div className="info-cards-row">
+          <div className="info-card">
+            <div className="card-header"><h4 className="card-title">Supplements &amp; Tests</h4></div>
+            <Field label="Taking Supplements" value={assessment.takingSupplements || 'No'} />
+            {assessment.takingSupplements === 'Yes' &&
+              <Field label="Current Supplements" value={assessment.currentSupplements || 'None specified'} />}
+            <Field label="Recent Blood Test" value={assessment.recentBloodTest || 'No'} />
+            {assessment.recentBloodTest === 'Yes' && assessment.bloodTestResults &&
+              <Field label="Blood Test Results" value={assessment.bloodTestResults} />}
+          </div>
+        </div>
 
       </div>
     </div>

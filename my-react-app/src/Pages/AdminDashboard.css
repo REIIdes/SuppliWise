@@ -153,19 +153,29 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 16px 20px 28px;
+  padding: 11px 10px 28px;
+  margin-left: 10px;
+  margin-right: 10px;
   font-size: 15px;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: 6px;
+  background: transparent;
   white-space: nowrap;
   overflow: hidden;
-  transition: color 0.15s, padding 0.25s;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
 }
-.sidebar-signout:hover { color: #fff; }
+.sidebar-signout:hover { color: #fff; background: rgba(255,255,255,.08); }
 .sidebar-signout .sidebar-nav-icon { opacity: 0.65; }
 .sidebar-signout:hover .sidebar-nav-icon { opacity: 1; }
 
 .admin-sidebar--collapsed .sidebar-signout {
   justify-content: center;
-  padding: 16px 0 28px;
+  padding: 11px 0 28px;
+  margin-left: 0;
+  margin-right: 0;
+  border-left-color: transparent;
 }
 .admin-main { flex: 1; min-width: 0; padding: 40px clamp(20px, 5vw, 72px); position: relative; }
 .admin-header { display: flex; justify-content: space-between; align-items: end; gap: 24px; margin-bottom: 34px; }
@@ -368,7 +378,6 @@
 .admin-primary { border: 0; background: var(--admin-accent); color: #fff; padding: 13px 17px; }
 .admin-secondary { border: 1px solid var(--admin-line); background: #fff; color: var(--admin-ink); padding: 11px 14px; }
 .admin-link { border: 0; background: transparent; color: inherit; padding: 8px 0; }
-.sidebar-signout { margin-top: auto; color: #bed3c5; text-align: left; }
 .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 13px; margin-bottom: 18px; }
 .metric, .admin-panel { border: 1px solid var(--admin-line); background: var(--admin-white); }
 .metric { padding: 20px; min-height: 105px; display: flex; flex-direction: column; justify-content: space-between; }
@@ -669,4 +678,71 @@
   .ov-metric-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
   .ov-metric      { padding: 14px; }
   .ov-metric__value { font-size: 24px; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Tab panel entrance animations
+══════════════════════════════════════════════════════════════════════════ */
+
+@keyframes tabFadeSlide {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Applied to the wrapper div around every tab's content */
+.admin-tab-panel {
+  animation: tabFadeSlide 0.22s ease both;
+}
+
+/* Sidebar nav button — subtle scale press feedback */
+.admin-sidebar nav button {
+  transform-origin: left center;
+}
+.admin-sidebar nav button:active {
+  transform: scale(0.97);
+}
+
+/* Sidebar nav button — active indicator slides in */
+.admin-sidebar nav button.active {
+  position: relative;
+}
+
+/* Hamburger button rotation when collapsing */
+.hamburger-btn svg {
+  transition: transform 0.25s ease;
+}
+.admin-sidebar--collapsed .hamburger-btn svg {
+  transform: rotate(180deg);
+}
+
+/* Topbar profile + bell — lift on hover */
+.admin-topbar__icon-btn,
+.admin-topbar__profile {
+  transition: background 0.15s, border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+.admin-topbar__icon-btn:hover,
+.admin-topbar__profile:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,.18);
+}
+
+/* Notification panel — fade + drop in */
+@keyframes notifDrop {
+  from { opacity: 0; transform: translateY(-8px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)   scale(1);    }
+}
+.admin-notif-panel {
+  animation: notifDrop 0.18s ease both;
+}
+
+/* User / assessment expand rows — smooth height reveal */
+.user-details,
+.am-assessment-list {
+  animation: tabFadeSlide 0.18s ease both;
 }

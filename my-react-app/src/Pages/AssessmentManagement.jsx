@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import { BASE_URL, parseJSON } from '../api';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import './AssessmentManagement.css';
@@ -7,35 +7,34 @@ import AssessmentResultsDisplay from '../Components/AssessmentResultsDisplay/Ass
 import ModifyAssessmentModal from '../Components/ModifyAssessmentModal/ModifyAssessmentModal';
 import ReadOnlyAssessment from '../Components/ReadOnlyAssessment/ReadOnlyAssessment';
 
-const AssessmentManagement = () => {
-  const [users, setUsers] = useState([]);
+const AssessmentManagement = ({ users: propUsers = [], adminRequest }) => {
+  const [users, setUsers] = useState(propUsers);
   const [selectedUser, setSelectedUser] = useState(null);
   const [assessments, setAssessments] = useState([]);
   const [selectedAssessment, setSelectedAssessment] = useState(null);
   const [modifiedAssessment, setModifiedAssessment] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [isLoadingAssessments, setIsLoadingAssessments] = useState(false);
   const [assessmentResults, setAssessmentResults] = useState(null);
-
   const [expandedUser, setExpandedUser] = useState(null);
 
+  // Hits /api/assessment/... directly with the admin token
+  const assessmentRequest = async (path) => {
+    const res = await fetch(`${BASE_URL}/assessment${path}`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('adminToken')}` },
+    });
+    const data = await parseJSON(res);
+    if (!res.ok) throw new Error(data?.message || 'Request failed');
+    return data;
+  };
+
+  // Sync if parent re-fetches and passes a new list
   useEffect(() => {
-    const fetchUsers = async () => {
-      try {
-        const res = await axios.get('/api/admin/users', {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem('adminToken')}`,
-          },
-        });
-        setUsers(res.data.users);
-      } catch (error) {
-        console.error('Error fetching users:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchUsers();
-  }, []);
+    if (propUsers && propUsers.length > 0) {
+      setUsers(propUsers);
+      setIsLoading(false);
+    }
+  }, [propUsers]);
 
   const handleUserToggle = async (userId) => {
     if (expandedUser === userId) {
@@ -45,12 +44,8 @@ const AssessmentManagement = () => {
       setExpandedUser(userId);
       setIsLoadingAssessments(true);
       try {
-        const res = await axios.get(`/api/assessment/user/${userId}`, {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem('adminToken')}`,
-          },
-        });
-        setAssessments(res.data);
+        const data = await assessmentRequest(`/user/${userId}`);
+        setAssessments(data);
       } catch (error) {
         console.error('Error fetching assessments:', error);
       } finally {
@@ -61,12 +56,8 @@ const AssessmentManagement = () => {
 
   const handleViewResults = async (assessmentId) => {
     try {
-      const res = await axios.get(`/api/assessment/results/${assessmentId}`, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('adminToken')}`,
-        },
-      });
-      setAssessmentResults(res.data);
+      const data = await assessmentRequest(`/results/${assessmentId}`);
+      setAssessmentResults(data);
     } catch (error) {
       console.error('Error fetching assessment results:', error);
     }
@@ -82,11 +73,8 @@ const AssessmentManagement = () => {
     // --- Fetch AI Results ---
     let assessmentResults;
     try {
-      const res = await axios.get(`/api/assessment/results/${assessment._id}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('adminToken')}` },
-      });
-      assessmentResults = res.data;
-      if (!assessmentResults) throw new Error("Empty results returned");
+      assessmentResults = await assessmentRequest(`/results/${assessment._id}`);
+      if (!assessmentResults) throw new Error('Empty results returned');
     } catch (error) {
       console.error('Error fetching assessment results for PDF:', error);
       doc.text("Failed to load AI analysis for this report.", 14, 14);
@@ -229,12 +217,8 @@ const AssessmentManagement = () => {
     if (!userId) return;
     setIsLoadingAssessments(true);
     try {
-      const res = await axios.get(`/api/assessment/user/${userId}`, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('adminToken')}`,
-        },
-      });
-      setAssessments(res.data);
+      const data = await assessmentRequest(`/user/${userId}`);
+      setAssessments(data);
     } catch (error) {
       console.error('Error fetching assessments:', error);
     } finally {

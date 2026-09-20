@@ -71,6 +71,7 @@ function AdminDashboard() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [overview, setOverview] = useState(null);
   const [users, setUsers] = useState([]);
+  const [allUsers, setAllUsers] = useState([]);
   const [ai, setAi] = useState(null);
   const [security, setSecurity] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -510,6 +511,12 @@ function AdminDashboard() {
 
   const handleTabClick = (item) => {
     setTab(item);
+    // Pre-fetch full user list the first time Assessment Management is opened
+    if (item === 'assessment-management' && allUsers.length === 0) {
+      request('/users?search=').then(data => {
+        setAllUsers(data.users || []);
+      }).catch(() => {});
+    }
   };
 
   const TAB_LABEL = {
@@ -637,12 +644,12 @@ function AdminDashboard() {
 
           {error && <div className="admin-alert danger">{error}</div>}
 
-          {tab === 'overview'               && overview && <Overview overview={overview} />}
-          {tab === 'users'                  && <Users users={users} search={search} setSearch={value => { searchRef.current = value; setSearch(value); }} loadUsers={loadUsers} toggleSubscription={toggleSubscription} updateAccount={updateAccount} deleteAccount={deleteAccount} expandedUser={expandedUser} setExpandedUser={setExpandedUser} />}
-          {tab === 'assessment-management'  && <AssessmentManagement />}
-          {tab === 'ai'                     && <AiPanel ai={ai} />}
-          {tab === 'security'               && <SecurityStatus securityData={security} adminRequest={request} onDownloadReport={() => downloadReportRef.current()} />}
-          {tab === 'profile'                && <ProfilePanel profile={profile} form={profileForm} setForm={setProfileForm} message={profileMessage} onSubmit={changePassword} rotateOtp={rotateOtp} setRotateOtp={setRotateOtp} rotatedKey={rotatedKey} onRotate={rotateAuthenticator} />}
+          {tab === 'overview'               && overview && <div className="admin-tab-panel"><Overview overview={overview} /></div>}
+          {tab === 'users'                  && <div className="admin-tab-panel"><Users users={users} search={search} setSearch={value => { searchRef.current = value; setSearch(value); }} loadUsers={loadUsers} toggleSubscription={toggleSubscription} updateAccount={updateAccount} deleteAccount={deleteAccount} expandedUser={expandedUser} setExpandedUser={setExpandedUser} /></div>}
+          {tab === 'assessment-management'  && <div className="admin-tab-panel"><AssessmentManagement users={allUsers} adminRequest={request} /></div>}
+          {tab === 'ai'                     && <div className="admin-tab-panel"><AiPanel ai={ai} /></div>}
+          {tab === 'security'               && <div className="admin-tab-panel"><SecurityStatus securityData={security} adminRequest={request} onDownloadReport={() => downloadReportRef.current()} /></div>}
+          {tab === 'profile'                && <div className="admin-tab-panel"><ProfilePanel profile={profile} form={profileForm} setForm={setProfileForm} message={profileMessage} onSubmit={changePassword} rotateOtp={rotateOtp} setRotateOtp={setRotateOtp} rotatedKey={rotatedKey} onRotate={rotateAuthenticator} /></div>}
         </main>
       </div>
     </div>

@@ -1,66 +1,208 @@
-.assessment-results-display {
-    padding: 1rem;
-    background-color: #fff;
-    color: #333;
-  }
-  
-  .assessment-results-display .section {
-    margin-bottom: 1.5rem;
-  }
-  
-  .assessment-results-display h3 {
-    font-size: 1.5rem;
-    color: #333;
-    border-bottom: 2px solid #f0f0f0;
-    padding-bottom: 0.5rem;
-    margin-bottom: 1rem;
-  }
-  
-  .consult-doctor-alert {
-    background-color: #fff3cd;
-    border: 1px solid #ffeeba;
-    color: #856404;
-    padding: 1rem;
-    border-radius: 0.25rem;
-    margin-top: 1rem;
-  }
-  
-  .recommendation-card {
-    background-color: #f8f9fa;
-    border: 1px solid #dee2e6;
-    border-radius: 0.25rem;
-    margin-bottom: 1rem;
-    padding: 1rem;
-  }
-  
-  .recommendation-card h4 {
-    font-size: 1.2rem;
-    color: #0056b3;
-    margin-top: 0;
-    margin-bottom: 0.75rem;
-  }
-  
-  .recommendation-details p {
-    margin: 0.25rem 0;
-    font-size: 0.9rem;
-    line-height: 1.5;
-  }
-  
-  .recommendation-details strong {
-    color: #495057;
-  }
-  
-  .priority-high {
-    color: #dc3545;
-    font-weight: bold;
-  }
-  
-  .priority-medium {
-    color: #ffc107;
-    font-weight: bold;
-  }
-  
-  .priority-low {
-    color: #28a745;
-    font-weight: bold;
-  }
+/* ══════════════════════════════════════════════════════════════════
+   AssessmentResultsDisplay  (ard- prefix)
+══════════════════════════════════════════════════════════════════ */
+
+.ard-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  font-family: Arial, sans-serif;
+  color: #111827;
+}
+
+/* ── Section heading ────────────────────────────────────────────── */
+.ard-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #d46b35;
+  margin: 0 0 10px;
+}
+
+.ard-divider {
+  height: 1px;
+  background: #e5e7eb;
+  margin-bottom: 16px;
+}
+
+/* ── Summary card ───────────────────────────────────────────────── */
+.ard-summary {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-left: 4px solid #18342a;
+  border-radius: 8px;
+  padding: 16px 18px;
+  margin-bottom: 20px;
+}
+
+.ard-summary p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.65;
+  color: #374151;
+}
+
+/* ── Consult-doctor alert ───────────────────────────────────────── */
+.ard-consult {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-top: 14px;
+  padding: 12px 16px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+}
+.ard-consult__icon {
+  font-size: 18px;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+.ard-consult__body { flex: 1; min-width: 0; }
+.ard-consult__title {
+  font: 700 13px/1.4 Arial, sans-serif;
+  color: #92400e;
+  margin: 0 0 4px;
+}
+.ard-consult__reason {
+  margin: 0;
+  font: 13px/1.5 Arial, sans-serif;
+  color: #78350f;
+}
+
+/* ── Recommendations grid ───────────────────────────────────────── */
+.ard-rec-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+/* ── Single recommendation card ─────────────────────────────────── */
+.ard-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  overflow: hidden;
+  transition: box-shadow 0.15s;
+}
+.ard-card:hover {
+  box-shadow: 0 2px 12px rgba(0,0,0,.07);
+}
+
+/* Card top bar */
+.ard-card__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  background: #18342a;
+}
+.ard-card__name {
+  margin: 0;
+  font: 700 14px/1.3 Arial, sans-serif;
+  color: #eff6ee;
+}
+
+/* Priority badge */
+.ard-priority {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font: 700 11px/1.4 Arial, sans-serif;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.ard-priority--high   { background: #fecaca; color: #991b1b; }
+.ard-priority--medium { background: #fed7aa; color: #9a3412; }
+.ard-priority--low    { background: #d1fae5; color: #065f46; }
+.ard-priority--default{ background: #f3f4f6; color: #374151; }
+
+/* Card body */
+.ard-card__body {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* Field row */
+.ard-field {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 5px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+.ard-field:last-child { border-bottom: none; }
+
+.ard-field__label {
+  flex-shrink: 0;
+  width: 120px;
+  font: 700 11px/1.5 Arial, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+}
+.ard-field__value {
+  flex: 1;
+  font: 13px/1.55 Arial, sans-serif;
+  color: #374151;
+  word-break: break-word;
+}
+
+/* ── Confidence bar ─────────────────────────────────────────────── */
+.ard-confidence {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+}
+.ard-confidence__label {
+  flex-shrink: 0;
+  width: 120px;
+  font: 700 11px/1.5 Arial, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+}
+.ard-confidence__track {
+  flex: 1;
+  height: 7px;
+  background: #e5e7eb;
+  border-radius: 20px;
+  overflow: hidden;
+}
+.ard-confidence__fill {
+  height: 100%;
+  border-radius: 20px;
+  background: linear-gradient(90deg, #18342a, #3dbf8a);
+  transition: width 0.5s ease;
+}
+.ard-confidence__pct {
+  flex-shrink: 0;
+  width: 34px;
+  text-align: right;
+  font: 700 12px/1 Arial, sans-serif;
+  color: #18342a;
+}
+
+/* ── Empty state ────────────────────────────────────────────────── */
+.ard-empty {
+  font: italic 13px Arial, sans-serif;
+  color: #9ca3af;
+  padding: 8px 0;
+}
+
+/* ── Responsive ─────────────────────────────────────────────────── */
+@media (max-width: 540px) {
+  .ard-field        { flex-direction: column; gap: 2px; }
+  .ard-field__label { width: auto; }
+  .ard-confidence   { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .ard-confidence__label { width: auto; }
+  .ard-confidence__track { width: 100%; }
+}

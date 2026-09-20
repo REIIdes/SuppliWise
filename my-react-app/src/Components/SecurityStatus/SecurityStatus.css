@@ -218,6 +218,7 @@
 .rt-table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 
 /* Column headers — uppercase small caps, same as image */
@@ -233,9 +234,9 @@
   border-bottom: 1px solid #e5e7eb;
   white-space: nowrap;
 }
-.rt-th--status { width: 110px; }
-.rt-th--fw     { width: 160px; }
-.rt-th--desc   { /* fills remaining */ }
+.rt-th--status { width: 120px; }
+.rt-th--fw     { width: 170px; }
+.rt-th--desc   { /* fills remaining width */ }
 
 /* ── Data rows ───────────────────────────────────────────────────────── */
 .rt-row {
@@ -272,6 +273,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  overflow: hidden;
 }
 
 /* Description cell inner */
@@ -280,15 +282,23 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
+  overflow: hidden;
 }
 .rt-desc strong {
   font-weight: 700;
   color: #111827;
   font-size: 0.875rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .rt-impl {
   font-size: 0.78rem;
   color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .rt-latency {
@@ -310,7 +320,7 @@
 .rt-detail-row:last-child { border-bottom: none; }
 
 .rt-detail-cell {
-  padding: 0 14px 14px 138px; /* indent under status col */
+  padding: 0 14px 14px 138px;
   background: #fafafa;
 }
 
@@ -319,6 +329,9 @@
   color: #374151;
   line-height: 1.6;
   margin: 10px 0 4px;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .rt-detail-ts {
