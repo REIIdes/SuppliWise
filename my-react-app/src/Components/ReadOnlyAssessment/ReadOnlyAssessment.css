@@ -35,3 +35,50 @@
   padding: 6px 0;
 }
 .card-field label { font-weight: 600; font-size: 13px; color: #374151; }
+
+.step-body {
+  padding: 16px;
+}
+
+.section-header-with-icon {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.section-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.section-divider {
+  height: 1px;
+  background-color: #e5e7eb;
+  margin: 16px 0;
+  width: 100%;
+  display: block;
+}
+
+.info-cards-row {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.info-card {
+  background-color: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.card-header {
+  margin-bottom: 12px;
+}
+
+.card-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1f2937;
+}
