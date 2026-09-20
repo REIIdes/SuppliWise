@@ -8,6 +8,137 @@
 .admin-main { flex: 1; min-width: 0; padding: 40px clamp(20px, 5vw, 72px); }
 .admin-header { display: flex; justify-content: space-between; align-items: end; gap: 24px; margin-bottom: 34px; }
 .admin-header-actions { display: flex; align-items: center; gap: 12px; position: relative; } .notification-wrap { position: relative; } .notification-button { position: relative; border: 1px solid var(--admin-line); background: #fff; color: var(--admin-ink); width: 42px; height: 42px; cursor: pointer; font-size: 18px; } .notification-button b { position: absolute; top: -7px; right: -7px; min-width: 18px; padding: 3px 4px; border-radius: 10px; background: var(--admin-accent); color: #fff; font: 700 10px Arial, sans-serif; } .notification-panel { position: absolute; z-index: 10; top: 50px; right: 0; width: min(360px, calc(100vw - 36px)); max-height: 420px; overflow-y: auto; padding: 18px; border: 1px solid var(--admin-line); background: #fff; box-shadow: 0 12px 30px rgba(23,35,31,.16); } .notification-panel h3 { margin-bottom: 10px; }
+
+.user-list {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.user-item {
+  background-color: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transition: all 0.3s ease;
+  overflow: hidden;
+}
+
+.user-item:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+}
+
+.user-header {
+  display: flex;
+  align-items: center;
+  padding: 20px;
+  cursor: pointer;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.profile-picture {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  margin-right: 20px;
+  object-fit: cover;
+  border: 2px solid #f0f0f0;
+}
+
+.user-info {
+  flex-grow: 1;
+}
+
+.user-info span {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #333;
+  display: block;
+}
+
+.user-info small {
+  font-size: 0.85rem;
+  color: #888;
+}
+
+.assessment-count {
+  font-size: 0.9rem;
+  color: #555;
+  background-color: #f0f0f0;
+  padding: 5px 12px;
+  border-radius: 15px;
+  margin-right: 20px;
+}
+
+.user-header span:last-child {
+  font-size: 1.2rem;
+  color: #888;
+  transition: transform 0.3s ease;
+}
+
+.user-header.expanded span:last-child {
+  transform: rotate(180deg);
+}
+
+.user-details {
+  padding: 20px;
+  background-color: #fafafa;
+  border-top: 1px solid #f0f0f0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 20px;
+}
+
+.user-detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.user-detail-item strong {
+  font-weight: 600;
+  color: #333;
+}
+
+.user-detail-item span {
+  color: #555;
+}
+
+.user-detail-item small {
+  font-size: 0.8rem;
+  color: #888;
+}
+
+.user-detail-item select {
+  padding: 8px;
+  border-radius: 5px;
+  border: 1px solid #ccc;
+}
+
+.user-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.subscription-toggle-button {
+  background-color: transparent;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.subscription-toggle-button.subscribed {
+  color: #28a745;
+  text-decoration: none;
+  font-weight: bold;
+}
+
 .admin-header h1 { font-size: clamp(28px, 4vw, 45px); line-height: 1; margin: 7px 0 0; font-weight: 500; }
 .admin-session-status { margin: -18px 0 22px; color: var(--admin-muted); font: 12px Arial, sans-serif; } .admin-session-status strong { color: var(--admin-green); margin-left: 5px; font-variant-numeric: tabular-nums; } .admin-session-status.warning strong { color: #b34b28; }
 .admin-session-warning { margin: -8px 0 22px; padding: 13px 16px; border: 1px solid #e7a58f; background: #fff1eb; color: #8c321b; font: 600 13px/1.45 Arial, sans-serif; } .admin-session-warning strong { font-variant-numeric: tabular-nums; }

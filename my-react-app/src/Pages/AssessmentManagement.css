@@ -1,27 +1,40 @@
 .user-list {
-  border: 1px solid #ccc;
-  border-radius: 5px;
-  padding: 10px;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 20px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background-color: #f9f9f9;
 }
 
 .user-item {
-  margin-bottom: 10px;
+  background-color: #ffffff;
+  margin-bottom: 15px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transition: all 0.3s ease;
+  overflow: hidden;
+}
+
+.user-item:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
 }
 
 .user-header {
   display: flex;
-  justify-content: space-between;
-  padding: 10px;
-  background-color: #f0f0f0;
-  cursor: pointer;
   align-items: center;
+  padding: 20px;
+  cursor: pointer;
+  border-bottom: 1px solid #f0f0f0;
 }
 
 .profile-picture {
-  width: 40px;
-  height: 40px;
+  width: 48px;
+  height: 48px;
   border-radius: 50%;
-  margin-right: 15px;
+  margin-right: 20px;
+  object-fit: cover;
+  border: 2px solid #f0f0f0;
 }
 
 .user-info {
@@ -29,175 +42,214 @@
 }
 
 .user-info span {
-  font-size: 1.5em;
-  font-weight: bold;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #333;
+  display: block;
 }
 
 .user-info small {
-  display: block;
-  color: #666;
+  font-size: 0.85rem;
+  color: #888;
 }
 
 .assessment-count {
-  margin-right: 15px;
+  font-size: 0.9rem;
+  color: #555;
+  background-color: #f0f0f0;
+  padding: 5px 12px;
+  border-radius: 15px;
+  margin-right: 20px;
+}
+
+.user-header span:last-child {
+  font-size: 1.2rem;
+  color: #888;
+  transition: transform 0.3s ease;
+}
+
+.user-header.expanded span:last-child {
+  transform: rotate(180deg);
 }
 
 .assessment-list {
-  padding: 10px;
+  padding: 0;
+  background-color: #fafafa;
+  border-top: 1px solid #f0f0f0;
 }
 
 .assessment-item {
-  border: 1px solid #ccc;
-  border-radius: 5px;
-  padding: 10px;
-  margin-bottom: 10px;
+  padding: 20px;
+  border-bottom: 1px solid #e9e9e9;
+  transition: background-color 0.2s ease;
+}
+
+.assessment-item:last-child {
+  border-bottom: none;
+}
+
+.assessment-item:hover {
+  background-color: #f5f5f5;
 }
 
 .assessment-header {
   display: flex;
   justify-content: space-between;
-  margin-bottom: 10px;
-}
-
-.assessment-item.priority {
-  border-left: 4px solid #ffc107;
+  align-items: center;
+  margin-bottom: 12px;
 }
 
 .active-status {
-  background-color: #6c757d;
+  background-color: #28a745;
   color: white;
-  padding: 3px 8px;
+  padding: 4px 10px;
   border-radius: 12px;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   font-weight: bold;
+  letter-spacing: 0.5px;
 }
 
-.assessment-item.priority .assessment-header .active-status {
-  background-color: #ffc107;
-  color: #333;
+.assessment-header span:last-child {
+  font-size: 0.85rem;
+  color: #888;
 }
 
-.symptoms-and-conditions {
-  margin-bottom: 0.75rem;
-}
-
-.symptoms-list {
-  margin: 0 0 0.5rem 0;
-  color: #333;
-  font-weight: 500;
-}
-
-.conditions-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.condition-tag {
-  background-color: #e9ecef;
-  color: #495057;
-  padding: 0.25rem 0.6rem;
-  border-radius: 15px;
-  font-size: 0.8rem;
-  font-weight: 500;
-}
-
-.condition-tag.mild {
-  background-color: #fff3cd;
-  color: #856404;
-}
-
-.condition-tag.moderate {
-  background-color: #ffeeba;
-  color: #856404;
-}
-
-.condition-tag.severe {
-  background-color: #f8d7da;
-  color: #721c24;
-}
-
-.assessment-body {
-  margin-bottom: 10px;
+.assessment-body p {
+  margin: 0 0 15px 0;
+  color: #555;
+  font-size: 0.95rem;
+  line-height: 1.5;
 }
 
 .tags {
   display: flex;
-  gap: 10px;
-  margin-top: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 15px;
+}
+
+.tags span {
+  background-color: #e9ecef;
+  color: #495057;
+  padding: 5px 12px;
+  border-radius: 15px;
+  font-size: 0.8rem;
 }
 
 .symptom-count {
-  background-color: #dc3545;
-  color: #fff;
-  padding: 2px 5px;
-  border-radius: 3px;
+  background-color: #d4edda !important;
+  color: #155724 !important;
 }
 
 .ai-analysis {
-  color: #28a745;
+  background-color: #cce5ff !important;
+  color: #004085 !important;
+  font-weight: 500;
 }
 
 .assessment-footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  font-size: 0.8rem;
+  color: #888;
 }
 
 .actions button {
-  background-color: #4CAF50; /* Green */
-  border: none;
+  background-color: #007bff;
   color: white;
-  padding: 10px 20px;
-  text-align: center;
-  text-decoration: none;
-  display: inline-block;
-  font-size: 16px;
-  margin: 4px 2px;
-  cursor: pointer;
+  border: none;
+  padding: 8px 15px;
   border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  margin-left: 8px;
+  transition: background-color 0.2s ease;
 }
 
 .actions button:hover {
-  background-color: #45a049;
+  background-color: #0056b3;
+}
+
+.actions button:first-child {
+  background-color: #6c757d;
+}
+
+.actions button:first-child:hover {
+  background-color: #5a6268;
 }
 
 .modal {
   position: fixed;
-  z-index: 1;
-  left: 0;
   top: 0;
+  left: 0;
   width: 100%;
   height: 100%;
-  overflow: auto;
-  background-color: rgba(0,0,0,0.4);
+  background-color: rgba(0, 0, 0, 0.6);
   display: flex;
-  align-items: center;
   justify-content: center;
+  align-items: center;
+  z-index: 1000;
 }
 
-.modal .modal-content {
-  background-color: #fff;
-  padding: 20px;
+.modal-content {
+  background-color: white;
+  padding: 25px;
   border-radius: 8px;
-  box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
   width: 90%;
-  max-width: 900px; /* Increased width for better viewing */
-  max-height: 80vh; /* Set a max height */
-  overflow-y: auto; /* Allow scrolling for long content */
+  max-width: 800px;
+  max-height: 90vh;
+  overflow-y: auto;
   position: relative;
 }
 
 .close {
-  color: #aaa;
-  float: right;
-  font-size: 28px;
+  position: absolute;
+  top: 15px;
+  right: 20px;
+  font-size: 1.8rem;
   font-weight: bold;
+  color: #888;
+  cursor: pointer;
 }
 
-.close:hover,
-.close:focus {
-  color: black;
-  text-decoration: none;
-  cursor: pointer;
+.close:hover {
+  color: #333;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .user-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .assessment-count {
+    margin-top: 10px;
+    margin-right: 0;
+  }
+
+  .user-header span:last-child {
+    align-self: flex-end;
+    margin-top: -30px;
+  }
+
+  .assessment-footer {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .actions {
+    width: 100%;
+    display: flex;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+
+  .actions button {
+    margin-left: 0;
+    flex-grow: 1;
+  }
 }

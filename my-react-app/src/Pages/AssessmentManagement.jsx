@@ -281,16 +281,16 @@ const AssessmentManagement = () => {
         ) : users && users.length > 0 ? (
           users.map((user) => (
             <div key={user._id} className="user-item">
-              <div className="user-header" onClick={() => handleUserToggle(user._id)}>
-                <img src={user.profilePicture || 'https://via.placeholder.com/40'} alt="Profile" className="profile-picture" />
+              <div className={`user-header ${expandedUser === user._id ? 'expanded' : ''}`} onClick={() => handleUserToggle(user._id)}>
+                <img src={user.profilePicture || 'https://i.pravatar.cc/48?u=' + user._id} alt="Profile" className="profile-picture" />
                 <div className="user-info">
                   <span>{user.firstName} {user.lastName}</span>
-                  <small>Created: {new Date(user.createdAt).toLocaleDateString()}</small>
+                  <small>Joined: {new Date(user.createdAt).toLocaleDateString()}</small>
                 </div>
                 <div className="assessment-count">
                   <span>{user.assessmentCount} assessments</span>
                 </div>
-                <span>{expandedUser === user._id ? '▲' : '▼'}</span>
+                <span>▼</span>
               </div>
               {expandedUser === user._id && (
                 <div className="assessment-list">
@@ -317,8 +317,8 @@ const AssessmentManagement = () => {
                           <span>Expires Sep 20, 2031, 12:39 PM</span>
                           <div className="actions">
                             <button onClick={() => handleViewAssessment(assessment)}>View</button>
-                            <button onClick={() => handleViewResults(assessment._id)}>View Results</button>
-                            <button onClick={() => generatePDF(assessment)}>Generate PDF</button>
+                            <button onClick={() => handleViewResults(assessment._id)}>Results</button>
+                            <button onClick={() => generatePDF(assessment)}>PDF</button>
                             <button onClick={() => setModifiedAssessment(assessment)}>Modify</button>
                           </div>
                         </div>

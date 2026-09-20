@@ -29,6 +29,7 @@ function AdminDashboard() {
   const [showNotifications, setShowNotifications] = useState(false);
   const [search, setSearch] = useState('');
   const [error, setError] = useState('');
+  const [expandedUser, setExpandedUser] = useState(null);
   const searchRef = useRef('');
   const [idleSeconds, setIdleSeconds] = useState(ADMIN_IDLE_LIMIT_SECONDS);
   const idleDeadlineRef = useRef(0);
@@ -215,7 +216,7 @@ function AdminDashboard() {
         {idleSeconds <= ADMIN_WARNING_SECONDS && <div className="admin-session-warning" role="alert" aria-live="assertive">Your admin session is about to expire. Move or focus on this page to stay signed in. Automatic logout in <strong>{formatIdleTime()}</strong>.</div>}
         {error && <div className="admin-alert danger">{error}</div>}
         {tab === 'overview' && overview && <Overview overview={overview} />}
-        {tab === 'users' && <Users users={users} search={search} setSearch={value => { searchRef.current = value; setSearch(value); }} loadUsers={loadUsers} toggleSubscription={toggleSubscription} updateAccount={updateAccount} deleteAccount={deleteAccount} />}
+        {tab === 'users' && <Users users={users} search={search} setSearch={value => { searchRef.current = value; setSearch(value); }} loadUsers={loadUsers} toggleSubscription={toggleSubscription} updateAccount={updateAccount} deleteAccount={deleteAccount} expandedUser={expandedUser} setExpandedUser={setExpandedUser} />}
         {tab === 'assessment-management' && <AssessmentManagement />}
         {tab === 'ai' && <AiPanel ai={ai} />}
         {tab === 'security' && <SecurityStatus securityData={security} />}
@@ -232,8 +233,84 @@ function Overview({ overview }) {
   </>;
 }
 
-function Users({ users, search, setSearch, loadUsers, toggleSubscription, updateAccount, deleteAccount }) {
-  return <section className="admin-panel"><div className="panel-heading"><div><h3>Users</h3><p className="admin-muted">Manage access, roles, subscriptions, and security status. Passwords are never displayed.</p></div><div className="search-row"><input placeholder="Search users" value={search} onChange={event => setSearch(event.target.value)} /><button className="admin-secondary" onClick={loadUsers}>Search</button></div></div><div className="table-wrap"><table><thead><tr><th>User</th><th>Created</th><th>Subscription</th><th>Last login</th><th>Location</th><th>Role</th><th>Status</th><th>Security</th><th>Actions</th></tr></thead><tbody>{users.map(user => <tr key={user._id}><td>{user.firstName} {user.lastName}<small>{user.email}</small></td><td>{new Date(user.createdAt).toLocaleString()}</td><td><button className={user.subscriptionActive ? 'status active' : 'status'} onClick={() => toggleSubscription(user)}>{user.subscriptionActive ? 'Active' : 'Turn on'}</button><small>{user.subscriptionPlan}</small></td><td>{user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : 'Never'}<small>{user.device || 'Unknown device'}</small></td><td>{user.lastLoginLocation || 'Unknown location'}</td><td><select value={user.accountRole || 'user'} onChange={event => updateAccount(user, { role: event.target.value })}><option value="user">User</option><option value="moderator">Moderator</option></select></td><td><select value={user.accountStatus || 'active'} onChange={event => updateAccount(user, { status: event.target.value })}><option value="active">Active</option><option value="banned">Banned</option></select></td><td className={user.twoFactorEnabled ? 'security-active' : 'security-email'}>{user.twoFactorEnabled ? 'Google Authenticator active' : 'Email OTP active'}</td><td><button className="status danger-action" onClick={() => deleteAccount(user)}>Delete</button></td></tr>)}</tbody></table></div></section>;
+function Users({ users, search, setSearch, loadUsers, toggleSubscription, updateAccount, deleteAccount, expandedUser, setExpandedUser }) {
+  const handleUserToggle = (userId) => {
+    setExpandedUser(expandedUser === userId ? null : userId);
+  };
+
+  return (
+    <section className="admin-panel">
+      <div className="panel-heading">
+        <div>
+          <h3>Users</h3>
+          <p className="admin-muted">Manage access, roles, subscriptions, and security status. Passwords are never displayed.</p>
+        </div>
+        <div className="search-row">
+          <input placeholder="Search users" value={search} onChange={event => setSearch(event.target.value)} />
+          <button className="admin-secondary" onClick={loadUsers}>Search</button>
+        </div>
+      </div>
+      <div className="user-list">
+        {users.map(user => (
+          <div key={user._id} className="user-item">
+            <div className={`user-header ${expandedUser === user._id ? 'expanded' : ''}`} onClick={() => handleUserToggle(user._id)}>
+              <div className="user-info">
+                <span>{user.firstName} {user.lastName}</span>
+                <small>Joined: {new Date(user.createdAt).toLocaleDateString()}</small>
+              </div>
+              <span>{expandedUser === user._id ? '▲' : '▼'}</span>
+            </div>
+            {expandedUser === user._id && (
+              <div className="user-details">
+                <div className="user-detail-item">
+                  <strong>Email:</strong>
+                  <span>{user.email}</span>
+                </div>
+                <div className="user-detail-item">
+                  <strong>Last Login:</strong>
+                  <span>{user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : 'Never'}</span>
+                  <small>{user.device || 'Unknown device'}</small>
+                </div>
+                <div className="user-detail-item">
+                  <strong>Location:</strong>
+                  <span>{user.lastLoginLocation || 'Unknown location'}</span>
+                </div>
+                <div className="user-detail-item">
+                  <strong>Subscription:</strong>
+                  <button
+                    className={`subscription-toggle-button ${user.subscriptionActive ? 'subscribed' : ''}`}
+                    onClick={() => toggleSubscription(user)}
+                  >
+                    {user.subscriptionActive ? 'Subscribed' : 'Free'}
+                  </button>
+                </div>
+                <div className="user-detail-item">
+                  <strong>Role:</strong>
+                  <span>{user.accountRole || 'user'}</span>
+                </div>
+                <div className="user-detail-item">
+                  <strong>Status:</strong>
+                  <select value={user.accountStatus || 'active'} onChange={event => updateAccount(user, { status: event.target.value })}>
+                    <option value="active">Active</option>
+                    <option value="banned">Banned</option>
+                  </select>
+                </div>
+                <div className="user-detail-item">
+                  <strong>Security:</strong>
+                  <span className={user.twoFactorEnabled ? 'security-active' : 'security-email'}>
+                    {user.twoFactorEnabled ? 'Google Authenticator active' : 'Email OTP active'}
+                  </span>
+                </div>
+                <div className="user-actions">
+                  <button className="status danger-action" onClick={() => deleteAccount(user)}>Delete</button>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function AiPanel({ ai }) {
