@@ -274,77 +274,155 @@ const AssessmentManagement = () => {
   };
 
   return (
-    <div>
-      <div className="user-list">
+    <div className="am-container">
+      <div className="am-user-list">
         {isLoading ? (
-          <p>Loading users...</p>
+          <p className="am-empty">Loading users…</p>
         ) : users && users.length > 0 ? (
-          users.map((user) => (
-            <div key={user._id} className="user-item">
-              <div className={`user-header ${expandedUser === user._id ? 'expanded' : ''}`} onClick={() => handleUserToggle(user._id)}>
-                <img src={user.profilePicture || 'https://i.pravatar.cc/48?u=' + user._id} alt="Profile" className="profile-picture" />
-                <div className="user-info">
-                  <span>{user.firstName} {user.lastName}</span>
-                  <small>Joined: {new Date(user.createdAt).toLocaleDateString()}</small>
-                </div>
-                <div className="assessment-count">
-                  <span>{user.assessmentCount} assessments</span>
-                </div>
-                <span>▼</span>
+          users.map((user) => {
+            const fullName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Unknown';
+            const initials = fullName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+            const isOpen = expandedUser === user._id;
+
+            // Deterministic avatar colour from name
+            const palette = ['#0891b2','#4f6bed','#2e9e6b','#d46b35','#7c4ddb','#e85d75','#b45309','#be185d'];
+            let hash = 0;
+            for (let i = 0; i < fullName.length; i++) hash = fullName.charCodeAt(i) + ((hash << 5) - hash);
+            const avatarBg = palette[Math.abs(hash) % palette.length];
+
+            return (
+              <div key={user._id} className={`am-user-item${isOpen ? ' am-user-item--open' : ''}`}>
+                {/* ── User row ──────────────────────────────────────── */}
+                <button
+                  className="am-user-row"
+                  onClick={() => handleUserToggle(user._id)}
+                  aria-expanded={isOpen}
+                >
+                  {/* Avatar */}
+                  {user.profilePicture ? (
+                    <img
+                      className="am-avatar"
+                      src={user.profilePicture}
+                      alt={fullName}
+                      onError={e => { e.currentTarget.style.display = 'none'; e.currentTarget.nextSibling.style.display = 'flex'; }}
+                    />
+                  ) : null}
+                  <span
+                    className="am-avatar am-avatar--initials"
+                    style={{ background: avatarBg, display: user.profilePicture ? 'none' : 'flex' }}
+                    aria-hidden="true"
+                  >
+                    {initials}
+                  </span>
+
+                  {/* Name + joined */}
+                  <span className="am-user-info">
+                    <span className="am-user-name">{fullName}</span>
+                    <span className="am-user-sub">Joined: {new Date(user.createdAt).toLocaleDateString()}</span>
+                  </span>
+
+                  {/* Assessment count pill */}
+                  <span className="am-count-pill">
+                    {user.assessmentCount ?? 0} {(user.assessmentCount ?? 0) === 1 ? 'assessment' : 'assessments'}
+                  </span>
+
+                  {/* Chevron */}
+                  <span className={`am-chevron${isOpen ? ' am-chevron--open' : ''}`} aria-hidden="true">▼</span>
+                </button>
+
+                {/* ── Assessment cards ───────────────────────────── */}
+                {isOpen && (
+                  <div className="am-assessment-list">
+                    {isLoadingAssessments ? (
+                      <p className="am-empty">Loading assessments…</p>
+                    ) : assessments.length === 0 ? (
+                      <p className="am-empty">No assessments found for this user.</p>
+                    ) : (
+                      assessments.map((assessment) => {
+                        // Real expiry — createdAt + 5 years, or assessment.expiresAt
+                        const expiryDate = assessment.expiresAt
+                          ? new Date(assessment.expiresAt)
+                          : (() => { const d = new Date(assessment.createdAt); d.setFullYear(d.getFullYear() + 5); return d; })();
+
+                        return (
+                          <div key={assessment._id} className="am-card">
+                            {/* Card header */}
+                            <div className="am-card__header">
+                              <span className="am-pill am-pill--active">ACTIVE</span>
+                              <span className="am-card__date">
+                                {new Date(assessment.createdAt).toLocaleString()}
+                              </span>
+                            </div>
+
+                            {/* Symptoms summary */}
+                            <p className="am-card__symptoms">
+                              {Array.isArray(assessment.symptoms) && assessment.symptoms.length > 0
+                                ? assessment.symptoms.join(', ')
+                                : 'No symptoms recorded'}
+                            </p>
+
+                            {/* Tag pills */}
+                            <div className="am-tags">
+                              {assessment.age && (
+                                <span className="am-tag">Age {assessment.age}</span>
+                              )}
+                              {assessment.dietType && (
+                                <span className="am-tag">{assessment.dietType}</span>
+                              )}
+                              {assessment.activityLevel && (
+                                <span className="am-tag">{assessment.activityLevel}</span>
+                              )}
+                              {Array.isArray(assessment.symptoms) && assessment.symptoms.length > 0 && (
+                                <span className="am-tag am-tag--green">
+                                  {assessment.symptoms.length} symptom{assessment.symptoms.length !== 1 ? 's' : ''}
+                                </span>
+                              )}
+                              {assessment.aiResults && (
+                                <span className="am-tag am-tag--blue">✓ AI Analysis</span>
+                              )}
+                            </div>
+
+                            {/* Footer */}
+                            <div className="am-card__footer">
+                              <span className="am-card__expiry">
+                                Expires {expiryDate.toLocaleString()}
+                              </span>
+                              <div className="am-actions">
+                                <button className="am-btn am-btn--grey"   onClick={() => handleViewAssessment(assessment)}>View</button>
+                                <button className="am-btn am-btn--blue"   onClick={() => handleViewResults(assessment._id)}>Results</button>
+                                <button className="am-btn am-btn--blue"   onClick={() => generatePDF(assessment)}>PDF</button>
+                                <button className="am-btn am-btn--blue"   onClick={() => setModifiedAssessment(assessment)}>Modify</button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
               </div>
-              {expandedUser === user._id && (
-                <div className="assessment-list">
-                  {isLoadingAssessments ? (
-                    <p>Loading assessments...</p>
-                  ) : (
-                    assessments.map((assessment) => (
-                      <div key={assessment._id} className="assessment-item">
-                        <div className="assessment-header">
-                          <span className="active-status">ACTIVE</span>
-                          <span>{new Date(assessment.createdAt).toLocaleString()}</span>
-                        </div>
-                        <div className="assessment-body">
-                          <p>{assessment.symptoms.join(', ')}</p>
-                          <div className="tags">
-                            <span>Age {assessment.age}</span>
-                            <span>{assessment.dietType}</span>
-                            <span>{assessment.activityLevel}</span>
-                            <span className="symptom-count">{assessment.symptoms.length} symptoms</span>
-                            <span className="ai-analysis">✓ AI Analysis</span>
-                          </div>
-                        </div>
-                        <div className="assessment-footer">
-                          <span>Expires Sep 20, 2031, 12:39 PM</span>
-                          <div className="actions">
-                            <button onClick={() => handleViewAssessment(assessment)}>View</button>
-                            <button onClick={() => handleViewResults(assessment._id)}>Results</button>
-                            <button onClick={() => generatePDF(assessment)}>PDF</button>
-                            <button onClick={() => setModifiedAssessment(assessment)}>Modify</button>
-                          </div>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-            </div>
-          ))
+            );
+          })
         ) : (
-          <p>No users found.</p>
+          <p className="am-empty">No users found.</p>
         )}
       </div>
+
+      {/* ── Modals ─────────────────────────────────────────────────── */}
       {selectedAssessment && (
-        <div className="modal">
-          <ReadOnlyAssessment 
-            assessment={selectedAssessment} 
-            onClose={() => setSelectedAssessment(null)} 
-          />
+        <div className="am-modal" onClick={e => e.target === e.currentTarget && setSelectedAssessment(null)}>
+          <div className="am-modal__content">
+            <ReadOnlyAssessment
+              assessment={selectedAssessment}
+              onClose={() => setSelectedAssessment(null)}
+            />
+          </div>
         </div>
       )}
       {assessmentResults && (
-        <div className="modal">
-          <div className="modal-content">
-            <span className="close" onClick={() => setAssessmentResults(null)}>&times;</span>
+        <div className="am-modal" onClick={e => e.target === e.currentTarget && setAssessmentResults(null)}>
+          <div className="am-modal__content">
+            <button className="am-modal__close" onClick={() => setAssessmentResults(null)} aria-label="Close">&times;</button>
             <AssessmentResultsDisplay results={assessmentResults} />
           </div>
         </div>

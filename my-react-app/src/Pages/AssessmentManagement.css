@@ -1,255 +1,290 @@
-.user-list {
-  max-width: 100%;
-  margin: 0 auto;
-  padding: 20px;
+/* ══════════════════════════════════════════════════════════════════════════
+   Assessment Management  (am- prefix)
+══════════════════════════════════════════════════════════════════════════ */
+
+.am-container {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  background-color: #f9f9f9;
 }
 
-.user-item {
-  background-color: #ffffff;
-  margin-bottom: 15px;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  transition: all 0.3s ease;
+/* ── Empty / loading text ─────────────────────────────────────────────── */
+.am-empty {
+  padding: 20px 0;
+  color: #6b7280;
+  font-size: 0.9rem;
+}
+
+/* ── User list ────────────────────────────────────────────────────────── */
+.am-user-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* User card wrapper */
+.am-user-item {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
   overflow: hidden;
+  transition: box-shadow 0.15s, border-color 0.15s;
+}
+.am-user-item:hover {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.07);
+  border-color: #d1d5db;
+}
+.am-user-item--open {
+  border-color: #c4cfc8;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.09);
 }
 
-.user-item:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
-}
-
-.user-header {
+/* ── User row (collapsed) ─────────────────────────────────────────────── */
+.am-user-row {
+  width: 100%;
   display: flex;
   align-items: center;
-  padding: 20px;
+  gap: 14px;
+  padding: 14px 18px;
+  background: none;
+  border: none;
   cursor: pointer;
-  border-bottom: 1px solid #f0f0f0;
+  text-align: left;
+  font-family: inherit;
+}
+.am-user-row:focus-visible {
+  outline: 2px solid #4f46e5;
+  outline-offset: -2px;
 }
 
-.profile-picture {
-  width: 48px;
-  height: 48px;
+/* Avatar */
+.am-avatar {
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
-  margin-right: 20px;
+  flex-shrink: 0;
   object-fit: cover;
-  border: 2px solid #f0f0f0;
+  border: 2px solid #e5e7eb;
+}
+.am-avatar--initials {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 700 15px/1 Arial, sans-serif;
+  color: #fff;
+  border: none;
+  user-select: none;
 }
 
-.user-info {
-  flex-grow: 1;
+/* Name block */
+.am-user-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.am-user-name {
+  font: 600 15px/1.2 Arial, sans-serif;
+  color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.am-user-sub {
+  font: 13px Arial, sans-serif;
+  color: #6b7280;
 }
 
-.user-info span {
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: #333;
-  display: block;
-}
-
-.user-info small {
-  font-size: 0.85rem;
-  color: #888;
-}
-
-.assessment-count {
-  font-size: 0.9rem;
+/* Assessment count pill */
+.am-count-pill {
+  font: 13px Arial, sans-serif;
   color: #555;
-  background-color: #f0f0f0;
-  padding: 5px 12px;
-  border-radius: 15px;
-  margin-right: 20px;
+  background: #f0f0f0;
+  padding: 5px 13px;
+  border-radius: 20px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
-.user-header span:last-child {
-  font-size: 1.2rem;
-  color: #888;
-  transition: transform 0.3s ease;
+/* Chevron */
+.am-chevron {
+  font-size: 11px;
+  color: #9ca3af;
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
 }
-
-.user-header.expanded span:last-child {
+.am-chevron--open {
   transform: rotate(180deg);
 }
 
-.assessment-list {
-  padding: 0;
-  background-color: #fafafa;
-  border-top: 1px solid #f0f0f0;
-}
-
-.assessment-item {
-  padding: 20px;
-  border-bottom: 1px solid #e9e9e9;
-  transition: background-color 0.2s ease;
-}
-
-.assessment-item:last-child {
-  border-bottom: none;
-}
-
-.assessment-item:hover {
-  background-color: #f5f5f5;
-}
-
-.assessment-header {
+/* ── Assessment list (expanded area) ──────────────────────────────────── */
+.am-assessment-list {
+  border-top: 1px solid #e5e7eb;
+  background: #fafafa;
+  padding: 12px 16px;
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── Assessment card ──────────────────────────────────────────────────── */
+.am-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 16px 18px;
+  transition: background 0.12s;
+}
+.am-card:hover {
+  background: #fafafa;
+}
+
+/* Card header row: ACTIVE pill + timestamp */
+.am-card__header {
+  display: flex;
   align-items: center;
-  margin-bottom: 12px;
+  justify-content: space-between;
+  margin-bottom: 10px;
 }
 
-.active-status {
-  background-color: #28a745;
-  color: white;
-  padding: 4px 10px;
-  border-radius: 12px;
-  font-size: 0.75rem;
-  font-weight: bold;
-  letter-spacing: 0.5px;
+.am-card__date {
+  font: 13px Arial, sans-serif;
+  color: #9ca3af;
 }
 
-.assessment-header span:last-child {
-  font-size: 0.85rem;
-  color: #888;
+/* Symptom summary text */
+.am-card__symptoms {
+  margin: 0 0 12px;
+  font: 14px/1.5 Arial, sans-serif;
+  color: #374151;
 }
 
-.assessment-body p {
-  margin: 0 0 15px 0;
-  color: #555;
-  font-size: 0.95rem;
-  line-height: 1.5;
-}
-
-.tags {
+/* ── Tag pills ────────────────────────────────────────────────────────── */
+.am-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 15px;
+  gap: 7px;
+  margin-bottom: 16px;
 }
 
-.tags span {
-  background-color: #e9ecef;
-  color: #495057;
-  padding: 5px 12px;
-  border-radius: 15px;
-  font-size: 0.8rem;
+.am-tag {
+  background: #f0f0f0;
+  color: #374151;
+  padding: 5px 13px;
+  border-radius: 20px;
+  font: 13px Arial, sans-serif;
+  white-space: nowrap;
 }
 
-.symptom-count {
-  background-color: #d4edda !important;
-  color: #155724 !important;
+/* Green — symptom count (matches image) */
+.am-tag--green {
+  background: #d4edda;
+  color: #155724;
 }
 
-.ai-analysis {
-  background-color: #cce5ff !important;
-  color: #004085 !important;
+/* Blue — AI Analysis (matches image) */
+.am-tag--blue {
+  background: #cce5ff;
+  color: #004085;
   font-weight: 500;
 }
 
-.assessment-footer {
+/* ── Card footer: expiry + actions ────────────────────────────────────── */
+.am-card__footer {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  align-items: center;
-  font-size: 0.8rem;
-  color: #888;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 12px;
+  border-top: 1px solid #f3f4f6;
 }
 
-.actions button {
-  background-color: #007bff;
-  color: white;
-  border: none;
-  padding: 8px 15px;
-  border-radius: 5px;
-  cursor: pointer;
-  font-size: 0.85rem;
-  margin-left: 8px;
-  transition: background-color 0.2s ease;
+.am-card__expiry {
+  font: 12px Arial, sans-serif;
+  color: #9ca3af;
 }
 
-.actions button:hover {
-  background-color: #0056b3;
-}
-
-.actions button:first-child {
-  background-color: #6c757d;
-}
-
-.actions button:first-child:hover {
-  background-color: #5a6268;
-}
-
-.modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(0, 0, 0, 0.6);
+/* Action buttons row */
+.am-actions {
   display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
-.modal-content {
-  background-color: white;
-  padding: 25px;
-  border-radius: 8px;
-  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
-  width: 90%;
-  max-width: 800px;
+.am-btn {
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font: 600 13px Arial, sans-serif;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+  white-space: nowrap;
+  color: #fff;
+}
+.am-btn:hover  { opacity: 0.88; transform: translateY(-1px); }
+.am-btn:active { transform: translateY(0); }
+
+.am-btn--grey { background: #6b7280; }
+.am-btn--blue { background: #2563eb; }
+
+/* ── ACTIVE status pill ───────────────────────────────────────────────── */
+.am-pill {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font: 700 11px/1.4 Arial, sans-serif;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.am-pill--active {
+  background: #28a745;
+  color: #fff;
+}
+
+/* ── Modals ───────────────────────────────────────────────────────────── */
+.am-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+.am-modal__content {
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  width: min(92vw, 820px);
   max-height: 90vh;
   overflow-y: auto;
   position: relative;
+  padding: 28px;
 }
-
-.close {
+.am-modal__close {
   position: absolute;
-  top: 15px;
-  right: 20px;
-  font-size: 1.8rem;
-  font-weight: bold;
-  color: #888;
+  top: 14px;
+  right: 18px;
+  background: none;
+  border: none;
+  font-size: 1.6rem;
+  line-height: 1;
+  color: #9ca3af;
   cursor: pointer;
 }
+.am-modal__close:hover { color: #374151; }
 
-.close:hover {
-  color: #333;
-}
-
-/* Responsive adjustments */
-@media (max-width: 768px) {
-  .user-header {
+/* ── Responsive ───────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .am-card__footer {
     flex-direction: column;
     align-items: flex-start;
   }
-
-  .assessment-count {
-    margin-top: 10px;
-    margin-right: 0;
-  }
-
-  .user-header span:last-child {
-    align-self: flex-end;
-    margin-top: -30px;
-  }
-
-  .assessment-footer {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 10px;
-  }
-
-  .actions {
+  .am-actions {
     width: 100%;
-    display: flex;
-    justify-content: flex-start;
-    gap: 8px;
   }
-
-  .actions button {
-    margin-left: 0;
-    flex-grow: 1;
+  .am-btn {
+    flex: 1;
   }
 }

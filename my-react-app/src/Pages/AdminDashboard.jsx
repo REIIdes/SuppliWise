@@ -219,7 +219,7 @@ function AdminDashboard() {
         {tab === 'users' && <Users users={users} search={search} setSearch={value => { searchRef.current = value; setSearch(value); }} loadUsers={loadUsers} toggleSubscription={toggleSubscription} updateAccount={updateAccount} deleteAccount={deleteAccount} expandedUser={expandedUser} setExpandedUser={setExpandedUser} />}
         {tab === 'assessment-management' && <AssessmentManagement />}
         {tab === 'ai' && <AiPanel ai={ai} />}
-        {tab === 'security' && <SecurityStatus securityData={security} />}
+        {tab === 'security' && <SecurityStatus securityData={security} adminRequest={request} />}
         {tab === 'profile' && <ProfilePanel profile={profile} form={profileForm} setForm={setProfileForm} message={profileMessage} onSubmit={changePassword} rotateOtp={rotateOtp} setRotateOtp={setRotateOtp} rotatedKey={rotatedKey} onRotate={rotateAuthenticator} />}
       </main>
     </div>
@@ -238,6 +238,14 @@ function Users({ users, search, setSearch, loadUsers, toggleSubscription, update
     setExpandedUser(expandedUser === userId ? null : userId);
   };
 
+  // Generate initials avatar colour from name (deterministic)
+  const avatarColor = (name = '') => {
+    const palette = ['#4f6bed','#e85d75','#2e9e6b','#d46b35','#7c4ddb','#0891b2','#b45309','#be185d'];
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    return palette[Math.abs(hash) % palette.length];
+  };
+
   return (
     <section className="admin-panel">
       <div className="panel-heading">
@@ -250,106 +258,151 @@ function Users({ users, search, setSearch, loadUsers, toggleSubscription, update
           <button className="admin-secondary" onClick={loadUsers}>Search</button>
         </div>
       </div>
+
       <div className="user-list">
-        {users.map(user => (
-          <div key={user._id} className="user-item">
-            <div className={`user-header ${expandedUser === user._id ? 'expanded' : ''}`} onClick={() => handleUserToggle(user._id)}>
-              <div className="user-info">
-                <span>{user.firstName} {user.lastName}</span>
-                <small>Joined: {new Date(user.createdAt).toLocaleDateString()}</small>
-              </div>
-              <span>{expandedUser === user._id ? '▲' : '▼'}</span>
-            </div>
-            {expandedUser === user._id && (
-              <div className="user-details">
-                <div className="user-detail-item">
-                  <strong>Email:</strong>
-                  <span>{user.email}</span>
-                </div>
-                <div className="user-detail-item">
-                  <strong>Last Login:</strong>
-                  <span>{user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : 'Never'}</span>
-                  <small>{user.device || 'Unknown device'}</small>
-                </div>
-                <div className="user-detail-item">
-                  <strong>Location:</strong>
-                  <span>{user.lastLoginLocation || 'Unknown location'}</span>
-                </div>
-                <div className="user-detail-item">
-                  <strong>Subscription:</strong>
-                  <button
-                    className={`subscription-toggle-button ${user.subscriptionActive ? 'subscribed' : ''}`}
-                    onClick={() => toggleSubscription(user)}
-                  >
-                    {user.subscriptionActive ? 'Subscribed' : 'Free'}
-                  </button>
-                </div>
-                <div className="user-detail-item">
-                  <strong>Role:</strong>
-                  <span>{user.accountRole || 'user'}</span>
-                </div>
-                <div className="user-detail-item">
-                  <strong>Status:</strong>
-                  <select value={user.accountStatus || 'active'} onChange={event => updateAccount(user, { status: event.target.value })}>
-                    <option value="active">Active</option>
-                    <option value="banned">Banned</option>
-                  </select>
-                </div>
-                <div className="user-detail-item">
-                  <strong>Security:</strong>
-                  <span className={user.twoFactorEnabled ? 'security-active' : 'security-email'}>
-                    {user.twoFactorEnabled ? 'Google Authenticator active' : 'Email OTP active'}
+        {users.length === 0 && (
+          <p className="admin-muted" style={{ padding: '20px 0' }}>No users found.</p>
+        )}
+        {users.map(user => {
+          const fullName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Unknown';
+          const initials = fullName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+          const isOpen = expandedUser === user._id;
+          const color = avatarColor(fullName);
+
+          return (
+            <div key={user._id} className={`user-item${isOpen ? ' user-item--open' : ''}`}>
+              {/* ── Collapsed row ───────────────────────────────────── */}
+              <button
+                className="user-row"
+                onClick={() => handleUserToggle(user._id)}
+                aria-expanded={isOpen}
+              >
+                {/* Avatar */}
+                {user.profilePicture ? (
+                  <img
+                    className="user-avatar"
+                    src={user.profilePicture}
+                    alt={fullName}
+                    onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
+                  />
+                ) : null}
+                <span
+                  className="user-avatar user-avatar--initials"
+                  style={{ background: color, display: user.profilePicture ? 'none' : 'flex' }}
+                  aria-hidden="true"
+                >
+                  {initials}
+                </span>
+
+                {/* Name + joined */}
+                <span className="user-row__info">
+                  <span className="user-row__name">{fullName}</span>
+                  <span className="user-row__sub">Joined: {new Date(user.createdAt).toLocaleDateString()}</span>
+                </span>
+
+                {/* Status badge */}
+                {user.accountStatus && user.accountStatus !== 'active' && (
+                  <span className={`user-status-badge user-status-badge--${user.accountStatus}`}>
+                    {user.accountStatus}
                   </span>
+                )}
+
+                {/* Assessments pill */}
+                {user.assessmentCount != null && (
+                  <span className="user-count-pill">
+                    {user.assessmentCount} {user.assessmentCount === 1 ? 'assessment' : 'assessments'}
+                  </span>
+                )}
+
+                {/* Chevron */}
+                <span className={`user-row__chevron${isOpen ? ' user-row__chevron--open' : ''}`} aria-hidden="true">▼</span>
+              </button>
+
+              {/* ── Expanded details ─────────────────────────────── */}
+              {isOpen && (
+                <div className="user-details">
+                  <div className="user-details__grid">
+                    <div className="user-detail-item">
+                      <strong>Email</strong>
+                      <span>{user.email}</span>
+                    </div>
+                    <div className="user-detail-item">
+                      <strong>Last Login</strong>
+                      <span>{user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : 'Never'}</span>
+                      <small>{user.device || 'Unknown device'}</small>
+                    </div>
+                    <div className="user-detail-item">
+                      <strong>Location</strong>
+                      <span>{user.lastLoginLocation || 'Unknown'}</span>
+                    </div>
+                    <div className="user-detail-item">
+                      <strong>Subscription</strong>
+                      <button
+                        className={`subscription-toggle-button${user.subscriptionActive ? ' subscribed' : ''}`}
+                        onClick={() => toggleSubscription(user)}
+                      >
+                        {user.subscriptionActive ? 'Subscribed ✓' : 'Free — click to activate'}
+                      </button>
+                    </div>
+                    <div className="user-detail-item">
+                      <strong>Role</strong>
+                      <span>{user.accountRole || 'user'}</span>
+                    </div>
+                    <div className="user-detail-item">
+                      <strong>Account status</strong>
+                      <select
+                        value={user.accountStatus || 'active'}
+                        onChange={event => updateAccount(user, { status: event.target.value })}
+                      >
+                        <option value="active">Active</option>
+                        <option value="banned">Banned</option>
+                      </select>
+                    </div>
+                    <div className="user-detail-item">
+                      <strong>2FA / Security</strong>
+                      <span className={user.twoFactorEnabled ? 'security-active' : 'security-email'}>
+                        {user.twoFactorEnabled ? 'Google Authenticator active' : 'Email OTP active'}
+                      </span>
+                    </div>
+                    {user.assessmentCount != null && (
+                      <div className="user-detail-item">
+                        <strong>Assessments</strong>
+                        <span>{user.assessmentCount}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="user-actions">
+                    <button className="status danger-action" onClick={() => deleteAccount(user)}>
+                      Delete account
+                    </button>
+                  </div>
                 </div>
-                <div className="user-actions">
-                  <button className="status danger-action" onClick={() => deleteAccount(user)}>Delete</button>
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
+              )}
+            </div>
+          );
+        })}
       </div>
     </section>
   );
 }
 
 function AiPanel({ ai }) {
-  const [connectionStatuses, setConnectionStatuses] = useState({
-    database: { status: 'connected', lastChecked: new Date().toLocaleString() },
-    'third-party-api': { status: 'disconnected', lastChecked: new Date().toLocaleString() },
-  });
-  const [models, setModels] = useState(ai?.providers || []);
-  const [newModel, setNewModel] = useState({ label: '', configured: false, model: '' });
-
-  const addModel = () => {
-    if (newModel.label && newModel.model) {
-      setModels([...models, { ...newModel, key: newModel.label.toLowerCase().replace(/\s/g, '-') }]);
-      setNewModel({ label: '', configured: false, model: '' });
-    }
-  };
+  const providers = ai?.providers || [];
 
   return (
     <section className="admin-panel">
-      <h3>Monitoring</h3>
-      <div className="monitoring-grid">
-        <div className="monitoring-item">
-          <strong>Database Connection</strong>
-          <span className={connectionStatuses.database.status === 'connected' ? 'healthy' : 'attention'}>
-            {connectionStatuses.database.status}
-          </span>
-          <small>Last checked: {connectionStatuses.database.lastChecked}</small>
-        </div>
-        <div className="monitoring-item">
-          <strong>Third-Party API</strong>
-          <span className={connectionStatuses['third-party-api'].status === 'connected' ? 'healthy' : 'attention'}>
-            {connectionStatuses['third-party-api'].status}
-          </span>
-          <small>Last checked: {connectionStatuses['third-party-api'].lastChecked}</small>
-        </div>
-      </div>
-      <h3 style={{ marginTop: '2rem' }}>Connected AI providers</h3>
+      <h3>AI Management and Control</h3>
+      <p className="admin-muted">
+        Configuration state of all AI providers used by SuppliWise. Database and API
+        connectivity are monitored live in the <strong>Security Center</strong> tab.
+      </p>
+
+      <h3 style={{ marginTop: '1.5rem' }}>Connected AI providers</h3>
       <div className="provider-grid">
-        {models.map(provider => (
+        {providers.length === 0 && (
+          <p className="admin-muted">No provider data available.</p>
+        )}
+        {providers.map(provider => (
           <div className="provider" key={provider.key}>
             <strong>{provider.label}</strong>
             <span className={provider.configured ? 'healthy' : 'attention'}>
@@ -359,23 +412,11 @@ function AiPanel({ ai }) {
           </div>
         ))}
       </div>
-      <div className="add-model-form">
-        <input
-          type="text"
-          placeholder="New AI Model Label"
-          value={newModel.label}
-          onChange={e => setNewModel({ ...newModel, label: e.target.value })}
-        />
-        <input
-          type="text"
-          placeholder="Model Name"
-          value={newModel.model}
-          onChange={e => setNewModel({ ...newModel, model: e.target.value })}
-        />
-        <button onClick={addModel}>Add Model</button>
-      </div>
+
       <p className="admin-muted">
-        Token usage and accuracy should be connected to provider usage APIs before being shown as billing or quality truth. This dashboard currently reports configuration state only.
+        Token usage and accuracy should be connected to provider usage APIs before being
+        shown as billing or quality truth. This dashboard currently reports configuration
+        state only.
       </p>
     </section>
   );
