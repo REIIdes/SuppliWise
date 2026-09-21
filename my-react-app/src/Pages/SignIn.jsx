@@ -51,13 +51,6 @@ function SignIn() {
 
   const fromAssessment = location.state?.fromAssessment;
 
-  // Generate years array (current year down to 100 years ago)
-  const currentYear = new Date().getFullYear();
-  const years = Array.from({ length: 100 }, (_, i) => currentYear - i);
-  
-  // Generate days array (1-31)
-  const days = Array.from({ length: 31 }, (_, i) => i + 1);
-  
   // Months array
   const months = [
     { value: '01', label: 'January' },
@@ -219,7 +212,9 @@ function SignIn() {
         dateOfBirth: data.dateOfBirth,
         age: data.age,
         profilePicture: data.profilePicture || '',
-        bannerPicture: data.bannerPicture || ''
+        bannerPicture: data.bannerPicture || '',
+        subscriptionActive: data.subscriptionActive === true,
+        subscriptionPlan: data.subscriptionPlan || 'free'
       }));
 
       const pending = sessionStorage.getItem(SESSION_KEY);

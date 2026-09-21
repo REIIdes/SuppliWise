@@ -23,13 +23,18 @@ const protect = async (req, res, next) => {
         return res.status(401).json({ message: 'Admin session expired after inactivity.' });
       }
       if (req.get('x-admin-background') !== 'true') {
-        admin.lastActivityAt = new Date();
-        await admin.save();
+        // Fire-and-forget heartbeat (no per-request document validation/save race)
+        AdminAccount.updateOne({ _id: admin._id }, { $set: { lastActivityAt: new Date() } }).exec()
+          .catch(() => {});
       }
       req.user = { _id: admin._id, role: 'admin', alias: admin.alias };
       return next();
     }
-    req.user = await User.findById(decoded.id).select('-password');
+    req.user = await User.findById(decoded.id)
+      // Pictures are base64 blobs (MBs) — never needed for auth; exclude them
+      // so every authenticated request stays light. Lean: no hydration overhead.
+      .select('-password -profilePicture -bannerPicture')
+      .lean();
     if (!req.user) {
       return res.status(401).json({ message: 'Not authorized, user not found' });
     }

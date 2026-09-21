@@ -2,13 +2,63 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import ConfirmModal from '../Components/ConfirmModal/ConfirmModal';
-import { BASE_URL } from '../api';
+import { BASE_URL, getMyProfile } from '../api';
 import './ProfilePage.css';
+
+// Plan labels (must match the admin console)
+const PLAN_LABELS = {
+  free: 'Basic Package',
+  monthly: 'Deluxe Package',
+  annual: 'Premium Package',
+  custom: 'Ultimate Package',
+};
+
+// Plan tiers: free < monthly < annual < custom(Ultimate).
+// Each feature declares the lowest tier that unlocks it.
+const PLAN_RANK = { free: 0, monthly: 1, annual: 2, custom: 3 };
+const PLAN_FEATURES = [
+  { icon: 'clipboard', title: 'AI Health Assessments', text: 'Guided 4-step assessments with instant results', tier: 'free' },
+  { icon: 'pill', title: 'Supplement Recommendations', text: 'Personalized AI picks with dosage & timing', tier: 'free' },
+  { icon: 'check', title: 'Daily Intake Tracking', text: 'Mark taken, streaks, calendar & adherence stats', tier: 'free' },
+  { icon: 'chart', title: 'Insights & Analytics', text: 'Wellness score, trends and phase guidance', tier: 'monthly' },
+  { icon: 'pdf', title: 'PDF Report Exports', text: 'Download & share full assessment reports', tier: 'monthly' },
+  { icon: 'history', title: '5-Year Record History', text: 'Every assessment kept, searchable anytime', tier: 'annual' },
+  { icon: 'flag', title: 'Priority Health Reviews', text: 'Severe cases flagged for fast admin review', tier: 'annual' },
+  { icon: 'spark', title: 'AI Chat Assistant', text: 'Ask anything about supplements & wellness', tier: 'custom' },
+];
+
+function FeatureIcon({ icon }) {
+  const paths = {
+    clipboard: (<><rect x="8" y="2" width="8" height="4" rx="1" ry="1" /><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /><path d="M9 14l2 2 4-4" /></>),
+    pill: (<><path d="M10.5 20.5 3.5 13.5a5 5 0 0 1 7-7l7 7a5 5 0 0 1-7 7z" /><line x1="7" y1="10" x2="14" y2="17" /></>),
+    check: (<><polyline points="22 4 12 14.01 9 11.01" /><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /></>),
+    chart: (<><polyline points="22 7 13.5 15.5 8.5 10.5 2 17" /><polyline points="16 7 22 7 22 13" /></>),
+    pdf: (<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></>),
+    history: (<><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></>),
+    flag: (<><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><line x1="4" y1="22" x2="4" y2="15" /></>),
+    spark: (<><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" /><circle cx="12" cy="12" r="3" /></>),
+    lock: (<><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></>),
+  };
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {paths[icon] || paths.spark}
+    </svg>
+  );
+}
 
 function ProfilePage() {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
   const bannerInputRef = useRef(null);
+  // One-time read of the cached user (localStorage is the source of truth here)
+  const [storedUser] = useState(() => {
+    try {
+      const raw = localStorage.getItem('user');
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -17,16 +67,16 @@ function ProfilePage() {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showDisable2FAConfirm, setShowDisable2FAConfirm] = useState(false);
   const [show2FASetup, setShow2FASetup] = useState(false);
-  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(() => storedUser.twoFactorEnabled === true);
   const [twoFactorQrCode, setTwoFactorQrCode] = useState('');
   const [twoFactorCode, setTwoFactorCode] = useState('');
   const [otp, setOtp] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
   const [pendingEmailChange, setPendingEmailChange] = useState('');
-  const [profilePicture, setProfilePicture] = useState('');
-  const [profilePicturePreview, setProfilePicturePreview] = useState('');
-  const [bannerPicture, setBannerPicture] = useState('');
-  const [bannerPicturePreview, setBannerPicturePreview] = useState('');
+  const [profilePicture, setProfilePicture] = useState(() => storedUser.profilePicture || '');
+  const [profilePicturePreview, setProfilePicturePreview] = useState(() => storedUser.profilePicture || '');
+  const [bannerPicture, setBannerPicture] = useState(() => storedUser.bannerPicture || '');
+  const [bannerPicturePreview, setBannerPicturePreview] = useState(() => storedUser.bannerPicture || '');
   const [resendCooldown, setResendCooldown] = useState(0);
   const [resendTimer, setResendTimer] = useState(null);
   const [otpTimeLeft, setOtpTimeLeft] = useState(600); // 10 minutes in seconds
@@ -35,12 +85,22 @@ function ProfilePage() {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
+  // Subscription status (fetched fresh; falls back to cached localStorage values)
+  const [subscription, setSubscription] = useState(() => ({
+    active: storedUser.subscriptionActive === true,
+    plan: storedUser.subscriptionPlan || 'free',
+    updatedAt: storedUser.subscriptionUpdatedAt || null,
+  }));
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileError, setProfileError] = useState('');
+  const profileLoadedRef = useRef(false);
+
   const [formData, setFormData] = useState({
-    firstName: '',
-    lastName: '',
-    email: '',
-    dateOfBirth: '',
-    gender: '',
+    firstName: storedUser.firstName || '',
+    lastName: storedUser.lastName || '',
+    email: storedUser.email || '',
+    dateOfBirth: storedUser.dateOfBirth ? new Date(storedUser.dateOfBirth).toISOString().split('T')[0] : '',
+    gender: storedUser.gender || '',
     currentPassword: '',
     newPassword: '',
     confirmPassword: '',
@@ -53,23 +113,55 @@ function ProfilePage() {
       return;
     }
 
-    // Load user data from localStorage
-    const userRaw = localStorage.getItem('user');
-    if (userRaw) {
-      const user = JSON.parse(userRaw);
-      setFormData(prev => ({
-        ...prev,
-        firstName: user.firstName || '',
-        lastName: user.lastName || '',
-        email: user.email || '',
-        dateOfBirth: user.dateOfBirth ? new Date(user.dateOfBirth).toISOString().split('T')[0] : '',
-        gender: user.gender || '',
-      }));
-      setProfilePicture(user.profilePicture || '');
-      setProfilePicturePreview(user.profilePicture || '');
-      setBannerPicture(user.bannerPicture || '');
-      setBannerPicturePreview(user.bannerPicture || '');
-      setTwoFactorEnabled(user.twoFactorEnabled === true);
+    // Refresh profile + subscription from the server once (cached values render instantly)
+    if (!profileLoadedRef.current) {
+      profileLoadedRef.current = true;
+      (async () => {
+        try {
+          setProfileLoading(true);
+          setProfileError('');
+          const fresh = await getMyProfile();
+          setFormData(prev => ({
+            ...prev,
+            firstName: fresh.firstName || prev.firstName,
+            lastName: fresh.lastName || prev.lastName,
+            email: fresh.email || prev.email,
+            dateOfBirth: fresh.dateOfBirth
+              ? new Date(fresh.dateOfBirth).toISOString().split('T')[0]
+              : prev.dateOfBirth,
+            gender: fresh.gender || prev.gender,
+          }));
+          setTwoFactorEnabled(fresh.twoFactorEnabled === true);
+          setSubscription({
+            active: fresh.subscriptionActive === true,
+            plan: fresh.subscriptionPlan || 'free',
+            updatedAt: fresh.subscriptionUpdatedAt || null,
+          });
+          // Keep the cache fresh (pictures stay untouched — /me excludes the blobs)
+          try {
+            const raw = localStorage.getItem('user');
+            const cached = raw ? JSON.parse(raw) : {};
+            localStorage.setItem('user', JSON.stringify({
+              ...cached,
+              firstName: fresh.firstName,
+              lastName: fresh.lastName,
+              name: fresh.name,
+              email: fresh.email,
+              dateOfBirth: fresh.dateOfBirth,
+              gender: fresh.gender,
+              twoFactorEnabled: fresh.twoFactorEnabled,
+              subscriptionActive: fresh.subscriptionActive,
+              subscriptionPlan: fresh.subscriptionPlan,
+              subscriptionUpdatedAt: fresh.subscriptionUpdatedAt,
+            }));
+          } catch { /* cache write best-effort */ }
+        } catch (err) {
+          // Cached values stay on screen; show a retry instead of hanging
+          setProfileError(err.message || 'Could not refresh your profile.');
+        } finally {
+          setProfileLoading(false);
+        }
+      })();
     }
 
     // Cleanup timer on unmount
@@ -273,34 +365,30 @@ function ProfilePage() {
   };
 
   const requestEmailOtp = async (newEmail) => {
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${BASE_URL}/auth/request-email-otp`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ newEmail }),
-      });
+    const token = localStorage.getItem('token');
+    const response = await fetch(`${BASE_URL}/auth/request-email-otp`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ newEmail }),
+    });
 
-      const data = await response.json();
-      if (!response.ok) {
-        // Handle rate limit specifically
-        if (response.status === 429 && data.remainingSeconds) {
-          startResendCooldown(data.remainingSeconds);
-        }
-        throw new Error(data.message || 'Failed to send OTP');
+    const data = await response.json();
+    if (!response.ok) {
+      // Handle rate limit specifically
+      if (response.status === 429 && data.remainingSeconds) {
+        startResendCooldown(data.remainingSeconds);
       }
-
-      // Start cooldown timer (60 seconds)
-      startResendCooldown(60);
-      startOtpExpiryTimer(); // Start OTP expiry countdown
-
-      return true;
-    } catch (err) {
-      throw err;
+      throw new Error(data.message || 'Failed to send OTP');
     }
+
+    // Start cooldown timer (60 seconds)
+    startResendCooldown(60);
+    startOtpExpiryTimer(); // Start OTP expiry countdown
+
+    return true;
   };
 
   const startResendCooldown = (seconds) => {
@@ -365,8 +453,6 @@ function ProfilePage() {
       }
 
       return true;
-    } catch (err) {
-      throw err;
     } finally {
       setOtpLoading(false);
     }
@@ -528,7 +614,16 @@ function ProfilePage() {
         profilePicture: data.profilePicture || '',
         bannerPicture: data.bannerPicture || '',
         twoFactorEnabled: twoFactorEnabled,
+        subscriptionActive: data.subscriptionActive,
+        subscriptionPlan: data.subscriptionPlan,
+        subscriptionUpdatedAt: data.subscriptionUpdatedAt,
       }));
+
+      setSubscription({
+        active: data.subscriptionActive === true,
+        plan: data.subscriptionPlan || 'free',
+        updatedAt: data.subscriptionUpdatedAt || null,
+      });
 
       setProfilePicture(data.profilePicture || '');
       setBannerPicture(data.bannerPicture || '');
@@ -646,17 +741,23 @@ function ProfilePage() {
               onChange={handleBannerPictureChange}
               style={{ display: 'none' }}
             />
-            <div 
-              className="profile-avatar-large" 
+            <div
+              className="profile-avatar-large"
               onClick={handleProfilePictureClick}
-              style={{ 
-                cursor: isEditing ? 'pointer' : 'default',
-                backgroundImage: profilePicturePreview ? `url(${profilePicturePreview})` : 'none',
-                backgroundSize: 'cover',
-                backgroundPosition: 'center',
-              }}
+              style={{ cursor: isEditing ? 'pointer' : 'default' }}
             >
-              {!profilePicturePreview && formData.firstName.charAt(0).toUpperCase()}
+              <span className="profile-avatar-initial" aria-hidden="true">
+                {(formData.firstName || 'U').charAt(0).toUpperCase()}
+              </span>
+              {profilePicturePreview && (
+                <img
+                  src={profilePicturePreview}
+                  alt=""
+                  aria-hidden="true"
+                  className="profile-avatar-img"
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                />
+              )}
               {isEditing && (
                 <div className="profile-avatar-overlay">
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -713,7 +814,13 @@ function ProfilePage() {
             )}
 
             <div className="profile-section">
-              <h2 className="profile-section-title">Personal Information</h2>
+              <h2 className="profile-section-title">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                  <circle cx="12" cy="7" r="4" />
+                </svg>
+                Personal Information
+              </h2>
               
               <div className="profile-form-row">
                 <div className="profile-form-group">
@@ -763,7 +870,7 @@ function ProfilePage() {
 
               <div className="profile-form-row">
                 <div className="profile-form-group">
-                  <label htmlFor="dateOfBirth">Date of Birth</label>
+                  <label htmlFor="dateOfBirth">Date of Birth{formData.dateOfBirth && calculateAge(formData.dateOfBirth) !== '' ? ` (Age ${calculateAge(formData.dateOfBirth)})` : ''}</label>
                   <input
                     type="date"
                     id="dateOfBirth"
@@ -793,9 +900,120 @@ function ProfilePage() {
               </div>
             </div>
 
+            <div className="profile-section">
+              <h2 className="profile-section-title">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect x="2" y="5" width="20" height="14" rx="2" />
+                  <line x1="2" y1="10" x2="22" y2="10" />
+                </svg>
+                Subscription Status
+              </h2>
+              <p className="profile-section-subtitle">Your Plan is based on what you purchase.</p>
+              {!profileLoading && (
+                <div className="plan-features">
+                  <p className="plan-features__heading">
+                    {subscription.active
+                      ? `Unlocked with ${PLAN_LABELS[subscription.plan] || 'your plan'}`
+                      : 'Included in Basic Package — upgrade to unlock more'}
+                  </p>
+                  <div className="plan-features__grid">
+                    {PLAN_FEATURES.map(f => {
+                      const rank = subscription.active ? (PLAN_RANK[subscription.plan] ?? 0) : 0;
+                      const unlocked = rank >= PLAN_RANK[f.tier];
+                      return (
+                        <div key={f.title} className={`plan-feature${unlocked ? ' plan-feature--on' : ' plan-feature--locked'}`}>
+                          <span className="plan-feature__icon"><FeatureIcon icon={unlocked ? f.icon : 'lock'} /></span>
+                          <div>
+                            <span className="plan-feature__title">{f.title}</span>
+                            <span className="plan-feature__text">{f.text}</span>
+                          </div>
+                          <span className="plan-feature__check" aria-label={unlocked ? 'Included' : 'Locked'}>
+                            {unlocked ? '✓' : <FeatureIcon icon="lock" />}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {(() => {
+                    const rank = subscription.active ? (PLAN_RANK[subscription.plan] ?? 0) : 0;
+                    return rank < PLAN_RANK.custom && (
+                      <p className="plan-features__note">Want more? Contact an administrator to upgrade your plan.</p>
+                    );
+                  })()}
+                </div>
+              )}
+              {profileLoading ? (
+                <div className="subscription-card subscription-card--loading" aria-live="polite">
+                  <span className="subscription-skeleton subscription-skeleton--badge" />
+                  <span className="subscription-skeleton subscription-skeleton--line" />
+                </div>
+              ) : (
+                <div className={`subscription-card${subscription.active ? ' subscription-card--active' : ''}`}>
+                  <span className={`subscription-badge${subscription.active ? ' subscription-badge--active' : ' subscription-badge--free'}`}>
+                    {subscription.active ? 'Active ✓' : 'Basic Package'}
+                  </span>
+                  <div className="subscription-details">
+                    <span className="subscription-plan">
+                      {subscription.active
+                        ? (PLAN_LABELS[subscription.plan] || 'Premium Package')
+                        : 'Basic Package — core assessments, recommendations & tracking included'}
+                    </span>
+                    {subscription.updatedAt && (
+                      <span className="subscription-updated">
+                        Updated {new Date(subscription.updatedAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+              {profileError && (
+                <div className="subscription-error" role="alert">
+                  <span>{profileError}</span>
+                  <button
+                    type="button"
+                    className="profile-btn profile-btn-secondary"
+                    disabled={profileLoading}
+                    onClick={() => {
+                      profileLoadedRef.current = false;
+                      setProfileError('');
+                      setProfileLoading(true);
+                      getMyProfile()
+                        .then((fresh) => {
+                          setSubscription({
+                            active: fresh.subscriptionActive === true,
+                            plan: fresh.subscriptionPlan || 'free',
+                            updatedAt: fresh.subscriptionUpdatedAt || null,
+                          });
+                          setFormData(prev => ({
+                            ...prev,
+                            firstName: fresh.firstName || prev.firstName,
+                            lastName: fresh.lastName || prev.lastName,
+                            email: fresh.email || prev.email,
+                            gender: fresh.gender || prev.gender,
+                          }));
+                        })
+                        .catch((err) => setProfileError(err.message || 'Could not refresh your profile.'))
+                        .finally(() => {
+                          profileLoadedRef.current = true;
+                          setProfileLoading(false);
+                        });
+                    }}
+                  >
+                    {profileLoading ? 'Retrying…' : 'Retry'}
+                  </button>
+                </div>
+              )}
+            </div>
+
             {isEditing && (
               <div className="profile-section">
-                <h2 className="profile-section-title">Change Password</h2>
+                <h2 className="profile-section-title">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect x="3" y="11" width="18" height="11" rx="2" />
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                  </svg>
+                  Change Password
+                </h2>
                 <p className="profile-section-subtitle">Leave blank to keep your current password</p>
 
                 <div className="profile-form-group">
@@ -902,7 +1120,12 @@ function ProfilePage() {
             )}
 
             <div className="profile-section">
-              <h2 className="profile-section-title">Account Security</h2>
+              <h2 className="profile-section-title">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                </svg>
+                Account Security
+              </h2>
               <p className="profile-section-subtitle">
                 {twoFactorEnabled ? 'Google Authenticator is active. It is the only second factor used at login.' : 'Email verification codes are used at login.'}
               </p>

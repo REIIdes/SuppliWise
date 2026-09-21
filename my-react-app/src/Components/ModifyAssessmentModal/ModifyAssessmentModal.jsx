@@ -1,6 +1,39 @@
-import React, { useState } from 'react';
-import axios from 'axios';
+import { useEffect, useState } from 'react';
+import { BASE_URL, parseJSON } from '../../api';
 import './ModifyAssessmentModal.css';
+
+// Request timeout so slow networks can't hang the modal actions forever
+const REQUEST_TIMEOUT_MS = 30000;
+
+async function adminFetch(path, options = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${BASE_URL}/assessment${path}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('adminToken')}`,
+        ...options.headers,
+      },
+      signal: controller.signal,
+    });
+    const data = await parseJSON(res);
+    if (!res.ok) {
+      const err = new Error(data?.message || 'Request failed');
+      err.status = res.status;
+      throw err;
+    }
+    return data;
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error('Request timed out. Please check your connection and try again.', { cause: err });
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 const ModifyAssessmentModal = ({ assessment, onClose, onSave, onDelete }) => {
   // Track the current priority optimistically so the active state updates immediately
@@ -11,6 +44,15 @@ const ModifyAssessmentModal = ({ assessment, onClose, onSave, onDelete }) => {
   const [error, setError]     = useState('');
   const [success, setSuccess] = useState('');
 
+  // Stay in sync if the assessment prop changes underneath (auto-lift/reflag,
+  // list refresh) so the buttons always reflect the live flagged review state
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional prop sync for live priority state
+    setCurrentPriority(assessment.priority || 'Standard');
+    setError('');
+    setSuccess('');
+  }, [assessment._id, assessment.priority]);
+
   // ── Set Priority / Standard ──────────────────────────────────────────
   const handleSetPriority = async (priority) => {
     if (loading) return;
@@ -18,19 +60,24 @@ const ModifyAssessmentModal = ({ assessment, onClose, onSave, onDelete }) => {
     setError('');
     setSuccess('');
     try {
-      const res = await axios.patch(
-        `/api/assessment/${assessment._id}/priority`,
-        { priority },
-        { headers: { Authorization: `Bearer ${localStorage.getItem('adminToken')}` } }
-      );
+      const data = await adminFetch(`/${assessment._id}/priority`, {
+        method: 'PATCH',
+        body: JSON.stringify({ priority }),
+      });
       setCurrentPriority(priority);
-      setSuccess(res.data.message || `Assessment set to ${priority}.`);
+      setSuccess(data.message || `Assessment set to ${priority}.`);
       // Notify parent so the card in the list reflects the new priority
       if (onSave) onSave({ ...assessment, priority });
     } catch (err) {
-      setError(
-        err.response?.data?.message || 'Failed to update priority. Please try again.'
-      );
+      setError(err.message || 'Failed to update priority. Please try again.');
+      // Expired admin session: send back to login instead of a dead error
+      if (err.status === 401) {
+        setTimeout(() => {
+          localStorage.removeItem('adminToken');
+          localStorage.removeItem('admin');
+          window.location.href = '/admin/login';
+        }, 1500);
+      }
     } finally {
       setLoading(null);
     }
@@ -44,17 +91,20 @@ const ModifyAssessmentModal = ({ assessment, onClose, onSave, onDelete }) => {
     setError('');
     setSuccess('');
     try {
-      await axios.delete(
-        `/api/assessment/${assessment._id}`,
-        { headers: { Authorization: `Bearer ${localStorage.getItem('adminToken')}` } }
-      );
+      await adminFetch(`/${assessment._id}`, { method: 'DELETE' });
       if (onDelete) onDelete(assessment._id);
       onClose();
     } catch (err) {
-      setError(
-        err.response?.data?.message || 'Failed to delete assessment. Please try again.'
-      );
-      setLoading(null);
+      setError(err.message || 'Failed to delete assessment. Please try again.');
+      if (err.status === 401) {
+        setTimeout(() => {
+          localStorage.removeItem('adminToken');
+          localStorage.removeItem('admin');
+          window.location.href = '/admin/login';
+        }, 1500);
+      } else {
+        setLoading(null);
+      }
     }
   };
 

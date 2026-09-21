@@ -4,6 +4,8 @@ import Navbar from '../Components/Navbar/Navbar';
 import ReadOnlyAssessment from '../Components/ReadOnlyAssessment/ReadOnlyAssessment';
 import { getHistory, deleteAssessment } from '../api';
 import { exportResultsToPDF } from '../utils/exportPDF';
+import { hasPlanAccess, getStoredPlan, FEATURE_TIERS } from '../utils/plan';
+import UpgradeModal from '../Components/UpgradeModal/UpgradeModal';
 import './HistoryPage.css';
 
 // Normalize special characters that may render as ? in some environments
@@ -19,8 +21,9 @@ function fixChars(str) {
     .replace(/[\u201C\u201D]/g, '"')
     // Ellipsis
     .replace(/\u2026/g, '...')
-    // Strip remaining unsafe non-ASCII
-    .replace(/[^\x00-\xFF]/g, '');
+    // Strip remaining unsafe non-ASCII (keep tab/LF/CR + printable Latin-1)
+    // eslint-disable-next-line no-control-regex -- character class intentionally covers control range
+    .replace(/[^\x09\x0A\x0D\x20-\xFF]/g, '');
 }
 
 // Detect placeholder/template evidence text the AI failed to fill in
@@ -246,8 +249,11 @@ function HistoryPage() {
   const [activeTab, setActiveTab] = useState({});
   const [toast, setToast] = useState('');
   const [showAllSupplements, setShowAllSupplements] = useState({});
+  const [upgradeInfo, setUpgradeInfo] = useState(null);
+  const [historyMeta, setHistoryMeta] = useState({ planLimit: null, pagination: null, currentPlan: null });
 
   const getExpirationDate = (item) => {
+    if (item.priority === 'Priority') return null; // flagged items never expire
     if (item.expiresAt) return new Date(item.expiresAt);
     const createdAt = new Date(item.createdAt);
     if (Number.isNaN(createdAt.getTime())) return null;
@@ -257,19 +263,18 @@ function HistoryPage() {
     return expirationDate;
   };
 
-  const toggleShowAllSupplements = (assessmentId) => {
-    setShowAllSupplements(prev => ({ ...prev, [assessmentId]: !prev[assessmentId] }));
+  // Expired assessments stay readable but are retired from active views.
+  // Priority assessments never expire while flagged.
+  const isExpired = (item) => {
+    if (!item || item.priority === 'Priority') return false;
+    const exp = getExpirationDate(item);
+    if (!exp || Number.isNaN(exp.getTime())) return false;
+    const ref = serverTime ? new Date(serverTime).getTime() : new Date().getTime();
+    return exp.getTime() <= ref;
   };
 
-  const isOlderThanFiveYears = (dateStr, referenceTime = new Date()) => {
-    if (!dateStr) return false;
-    const createdAt = new Date(dateStr);
-    const reference = new Date(referenceTime);
-    if (Number.isNaN(createdAt.getTime()) || Number.isNaN(reference.getTime())) return false;
-    // Check if 5 years have passed by comparing years and dates
-    const expirationDate = new Date(createdAt);
-    expirationDate.setFullYear(expirationDate.getFullYear() + 5);
-    return reference.getTime() >= expirationDate.getTime();
+  const toggleShowAllSupplements = (assessmentId) => {
+    setShowAllSupplements(prev => ({ ...prev, [assessmentId]: !prev[assessmentId] }));
   };
 
   useEffect(() => {
@@ -284,6 +289,7 @@ function HistoryPage() {
         }));
         setHistory(normalized);
         setServerTime(new Date(data.serverTime));
+        setHistoryMeta({ planLimit: data.planLimit || null, pagination: data.pagination || null, currentPlan: data.currentPlan || null });
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
@@ -309,7 +315,7 @@ function HistoryPage() {
       setExpanded(null);
       showToast('Assessment deleted successfully.');
       setDeleteTarget(null);
-    } catch (err) {
+    } catch {
       showToast('Failed to delete. Please try again.');
     } finally {
       setDeleting(false);
@@ -426,12 +432,20 @@ function HistoryPage() {
               <div className="history-card-header" onClick={() => setExpanded(expanded === i ? null : i)}>
                 <div className="history-card-header-left">
                   <div className="date-with-badge">
-                    {i === 0 && (
-                      <span 
-                        className="active-badge" 
+                    {i === 0 && !isExpired(item) && (
+                      <span
+                        className="active-badge"
                         title="This is your active assessment. Your Dashboard, Track Intake, and Insights use this data."
                       >
                         Active
+                      </span>
+                    )}
+                    {isExpired(item) && (
+                      <span
+                        className="expired-badge"
+                        title="This assessment has expired. Its record is kept below for reference."
+                      >
+                        Expired
                       </span>
                     )}
                     <span className="history-date">{fmt(item.createdAt)}</span>
@@ -444,6 +458,11 @@ function HistoryPage() {
                         : 'General Wellness Assessment'}
                   </div>
                   <div className="history-tags">
+                    {item.priority === 'Priority' && (
+                      <span className="tag tag-priority" title={(item.flagReasons || []).join('; ') || 'Flagged for priority review'}>
+                        ⚑ Priority
+                      </span>
+                    )}
                     {item.age && <span className="tag tag-blue">Age {item.age}</span>}
                     {item.dietType && <span className="tag">{item.dietType}</span>}
                     {item.activityLevel && <span className="tag">{ACTIVITY_LABELS[item.activityLevel] || item.activityLevel}</span>}
@@ -451,8 +470,16 @@ function HistoryPage() {
                       <span className="tag tag-red">{item.symptoms.length} symptom{item.symptoms.length > 1 ? 's' : ''}</span>
                     )}
                     {item.aiResults && <span className="tag tag-green">✓ AI Analysis</span>}
-                    {getExpirationDate(item) && (
-                      <span className="tag tag-gray">Expires {fmt(getExpirationDate(item))}</span>
+                    {item.priority === 'Priority' ? (
+                      <span className="tag tag-gray" title="Flagged assessments never expire while under review">
+                        No expiry — resolves on completion
+                      </span>
+                    ) : isExpired(item) && getExpirationDate(item) ? (
+                      <span className="tag tag-expired">Expired {fmt(getExpirationDate(item))}</span>
+                    ) : (
+                      getExpirationDate(item) && (
+                        <span className="tag tag-gray">Expires {fmt(getExpirationDate(item))}</span>
+                      )
                     )}
                   </div>
                 </div>
@@ -492,6 +519,11 @@ function HistoryPage() {
                       className="btn-download-pdf"
                       onClick={(e) => {
                         e.stopPropagation();
+                        if (!hasPlanAccess(FEATURE_TIERS.pdfExport)) {
+                          const stored = getStoredPlan();
+                          setUpgradeInfo({ requiresPlan: FEATURE_TIERS.pdfExport, currentPlan: stored.plan, feature: 'PDF Report Exports' });
+                          return;
+                        }
                         exportResultsToPDF(item.aiResults, item);
                       }}
                       title="Download PDF report"
@@ -503,14 +535,14 @@ function HistoryPage() {
                       </svg>
                     </button>
                   )}
-                  {isOlderThanFiveYears(item.createdAt) && (
+                  {isExpired(item) && (
                     <button
                       className="btn-delete"
                       onClick={(e) => {
                         e.stopPropagation();
                         setDeleteTarget(item);
                       }}
-                      title="Delete assessment"
+                      title="Delete expired assessment record"
                     >
                       🗑
                     </button>
@@ -847,7 +879,27 @@ function HistoryPage() {
             </div>
           ))}
         </div>
+        {historyMeta.pagination?.hasMore && !hasPlanAccess(FEATURE_TIERS.historyFull) && (
+          <div className="plan-locked" style={{ marginTop: '24px' }}>
+            <div className="plan-locked__icon">🔒</div>
+            <h3 className="plan-locked__title">More history is locked</h3>
+            <p className="plan-locked__body">Full 5-year history requires <strong>Premium Package</strong>. Your plan allows {historyMeta.planLimit || 5} per page.</p>
+            <p className="plan-locked__note">Contact an administrator to upgrade.</p>
+            <div className="plan-locked__actions">
+              <button type="button" className="upgrade-btn upgrade-btn-primary" onClick={() => navigate('/profile')}>View my plan</button>
+            </div>
+          </div>
+        )}
       </div>
+      {upgradeInfo && (
+        <UpgradeModal
+          feature={upgradeInfo.feature || 'PDF Report Exports'}
+          requiredPlan={upgradeInfo.requiresPlan}
+          currentPlan={upgradeInfo.currentPlan}
+          onClose={() => setUpgradeInfo(null)}
+          onViewPlans={() => navigate('/profile')}
+        />
+      )}
     </div>
   );
 }

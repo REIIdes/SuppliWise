@@ -4,6 +4,7 @@ const { protect } = require('../middleware/auth');
 const Assessment = require('../models/Assessment');
 const IntakeRecord = require('../models/IntakeRecord');
 const DashboardMetrics = require('../models/DashboardMetrics');
+const { notExpiredFilter } = require('../utils/assessments');
 
 // Helper: Get today's date in YYYY-MM-DD format
 const getTodayKey = () => {
@@ -81,14 +82,16 @@ router.get('/', protect, async (req, res) => {
     }
 
     // Get the latest assessment
-    const latestAssessment = await Assessment.findOne({ user: req.user._id })
+    const latestAssessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
       .sort({ createdAt: -1 });
 
     if (!latestAssessment) {
       // Return empty dashboard data for new users without assessment
-      return res.json({ 
+      return res.json({
         hasAssessment: false,
         isFirstVisit,
+        priorityBlock: { blocked: false, count: 0 },
+        priorityAssessments: [],
         assessment: null,
         todaysSupplements: [],
         stats: {
@@ -107,11 +110,12 @@ router.get('/', protect, async (req, res) => {
       });
     }
 
-    // Get or create dashboard metrics for this assessment
-    let metrics = await DashboardMetrics.findOne({
-      user: req.user._id,
-      assessment: latestAssessment._id,
-    });
+    // Metrics + today's records are independent — fetch in parallel (Atlas RTT ~0.5s each)
+    const todayKey = getTodayKey();
+    let [metrics, todayIntakeRecords] = await Promise.all([
+      DashboardMetrics.findOne({ user: req.user._id, assessment: latestAssessment._id }),
+      IntakeRecord.find({ user: req.user._id, assessment: latestAssessment._id, dayKey: todayKey }).lean(),
+    ]);
 
     if (!metrics) {
       // Create initial metrics for this assessment
@@ -133,18 +137,43 @@ router.get('/', protect, async (req, res) => {
     const recommendations = latestAssessment.aiResults?.recommendations || [];
     const dailySchedule = latestAssessment.aiResults?.dailySchedule || [];
 
+    // Daily plan snapshot: on the first load of a day with an empty plan,
+    // seed today's records from the AI recommendations so the day always
+    // lists what needed to be taken. Untouched days automatically read as
+    // MISSED (red) in the calendar and day-detail views.
+    if (todayIntakeRecords.length === 0 && recommendations.length > 0) {
+      const seeds = recommendations.slice(0, 20)
+        .map(rec => ({
+          user: req.user._id,
+          assessment: latestAssessment._id,
+          supplementName: rec.name || rec.supplement,
+          dosage: rec.dosage || '',
+          priority: ['High', 'Medium', 'Low'].includes(rec.priority) ? rec.priority : 'Medium',
+          scheduledTime: rec.timing || 'Anytime',
+          taken: false,
+          date: new Date(),
+          dayKey: todayKey,
+        }))
+        .filter(doc => doc.supplementName);
+      if (seeds.length > 0) {
+        // Per-supplement upserts: idempotent if two devices load at once
+        await Promise.all(seeds.map(doc =>
+          IntakeRecord.updateOne(
+            { user: doc.user, assessment: doc.assessment, supplementName: doc.supplementName, dayKey: doc.dayKey },
+            { $setOnInsert: doc },
+            { upsert: true }
+          ).exec()
+        ));
+        todayIntakeRecords = await IntakeRecord.find({
+          user: req.user._id,
+          assessment: latestAssessment._id,
+          dayKey: todayKey,
+        }).lean();
+      }
+    }
+
     // Get wellness baseline from assessment
     const wellnessBaseline = getWellnessBaseline(latestAssessment);
-
-    // Get today's intake records
-    const todayKey = getTodayKey();
-    let todayIntakeRecords = await IntakeRecord.find({
-      user: req.user._id,
-      assessment: latestAssessment._id,
-      dayKey: todayKey,
-    });
-
-    // Don't automatically create records - user must add supplements manually from recommendations
 
     // Calculate today's progress
     const totalToday = todayIntakeRecords.length;
@@ -168,6 +197,26 @@ router.get('/', protect, async (req, res) => {
     const aiInsights = latestAssessment.aiResults?.actionPlan || [];
     const currentPhase = aiInsights.length > 0 ? aiInsights[0] : null;
 
+    // Priority assessments needing review (cap 3, own recommendations each).
+    // These block new assessments until resolved and are surfaced on the dashboard.
+    const priorityDocs = await Assessment.find({ user: req.user._id, priority: 'Priority' })
+      .sort({ createdAt: -1 })
+      .limit(3)
+      .select('createdAt flagReasons flaggedAt aiResults.recommendations')
+      .lean();
+    const priorityAssessments = (priorityDocs || []).map(doc => ({
+      id: doc._id,
+      createdAt: doc.createdAt,
+      flaggedAt: doc.flaggedAt,
+      reasons: doc.flagReasons || [],
+      recommendations: (doc.aiResults?.recommendations || []).slice(0, 12).map(rec => ({
+        name: rec.name || rec.supplement,
+        dosage: rec.dosage || '',
+        priority: rec.priority || 'Medium',
+        timing: rec.timing || 'Anytime',
+      })),
+    }));
+
     // Map priority and timing from recommendations to intake records
     const priorityMap = {};
     const timingMap = {};
@@ -180,6 +229,11 @@ router.get('/', protect, async (req, res) => {
     res.json({
       hasAssessment: true,
       isFirstVisit,
+      priorityBlock: {
+        blocked: priorityAssessments.length > 0,
+        count: priorityAssessments.length,
+      },
+      priorityAssessments,
       assessment: {
         id: latestAssessment._id,
         createdAt: latestAssessment.createdAt,
@@ -239,37 +293,36 @@ router.post('/intake', protect, async (req, res) => {
       return res.status(404).json({ message: 'Intake record not found.' });
     }
 
+    // History is read-only: only today's records can change. This protects
+    // streak integrity and the priority lift/reflag lifecycle from back-dated edits.
+    if (record.dayKey !== getTodayKey()) {
+      return res.status(400).json({ message: 'Only today\u2019s supplements can be updated. Past days are read-only history.' });
+    }
+
     record.taken = taken;
     record.takenAt = taken ? new Date() : null;
     await record.save();
 
-    // Update metrics
+    // Update metrics — independent reads run in parallel
     const todayKey = getTodayKey();
-    const todayRecords = await IntakeRecord.find({
-      user: req.user._id,
-      assessment: record.assessment,
-      dayKey: todayKey,
-    });
+    const [todayRecords, metrics, totals, assessmentDoc] = await Promise.all([
+      IntakeRecord.find({ user: req.user._id, assessment: record.assessment, dayKey: todayKey }).select('taken').lean(),
+      DashboardMetrics.findOne({ user: req.user._id, assessment: record.assessment }),
+      Promise.all([
+        IntakeRecord.countDocuments({ user: req.user._id, assessment: record.assessment }),
+        IntakeRecord.countDocuments({ user: req.user._id, assessment: record.assessment, taken: true }),
+      ]),
+      // Only the slices needed downstream (wellness baseline + priority state)
+      Assessment.findById(record.assessment).select('aiResults.wellnessBaseline priority resolvedReason').lean(),
+    ]);
 
     const totalToday = todayRecords.length;
     const takenToday = todayRecords.filter(r => r.taken).length;
     const todayAdherence = calculateAdherence(takenToday, totalToday);
 
-    // Get all records for this assessment to calculate overall adherence
-    const allRecords = await IntakeRecord.find({
-      user: req.user._id,
-      assessment: record.assessment,
-    });
-
-    const totalAll = allRecords.length;
-    const takenAll = allRecords.filter(r => r.taken).length;
+    // Overall adherence via counted aggregation (no full-history load)
+    const [totalAll, takenAll] = totals;
     const overallAdherence = calculateAdherence(takenAll, totalAll);
-
-    // Calculate streak
-    const metrics = await DashboardMetrics.findOne({
-      user: req.user._id,
-      assessment: record.assessment,
-    });
 
     if (metrics) {
       const today = todayKey;
@@ -323,10 +376,78 @@ router.post('/intake', protect, async (req, res) => {
       metrics.lastTrackedDate = today;
 
       metrics.overallAdherence = overallAdherence;
+
+      // Auto-lift: all of today's AI-suggested supplements taken on a
+      // Priority assessment finishes its review (strict two-way gate below).
+      let priorityLifted = false;
+      let priorityReflagged = false;
+      const completedNow = takenToday === totalToday && totalToday > 0;
+      if (completedNow && assessmentDoc && assessmentDoc.priority === 'Priority') {
+        try {
+          await Assessment.findByIdAndUpdate(record.assessment, {
+            // Resolved by completion: Standard + expires immediately (record kept).
+            $set: { priority: 'Standard', resolvedAt: new Date(), resolvedReason: 'intake-complete', expiresAt: new Date() },
+          });
+          priorityLifted = true;
+          const UserNotification = require('../models/UserNotification');
+          const AdminEvent = require('../models/AdminEvent');
+          await UserNotification.create({
+            user: req.user._id,
+            type: 'info',
+            title: 'Priority review completed',
+            detail: 'All of today\u2019s supplements were taken, so the priority review on your assessment is finished. You can start a new assessment any time.',
+            assessmentId: record.assessment,
+          }).catch(() => {});
+          await AdminEvent.create({
+            type: 'resolved',
+            title: 'Priority auto-resolved (intake complete)',
+            detail: `User ${req.user._id} completed all of today\u2019s supplements for assessment ${record.assessment}. Flag lifted automatically.`,
+            user: req.user._id,
+            assessmentId: record.assessment,
+            linkUserId: req.user._id,
+          }).catch(() => {});
+        } catch (liftError) {
+          console.error('[dashboard POST /intake] priority auto-lift failed:', liftError.message);
+        }
+      } else if (!completedNow && assessmentDoc && assessmentDoc.priority === 'Standard' && assessmentDoc.resolvedReason === 'intake-complete') {
+        // Strict gate: undoing after an auto-lift breaks 100% completion,
+        // so the restriction comes back. Admin-resolved flags are never touched.
+        try {
+          await Assessment.findByIdAndUpdate(record.assessment, {
+            $set: {
+              priority: 'Priority',
+              flaggedAt: new Date(),
+              resolvedAt: null,
+              resolvedReason: '',
+              expiresAt: null,
+              flagReasons: ['Intake undone after auto-resolve — review reinstated'],
+            },
+          });
+          priorityReflagged = true;
+          const UserNotification = require('../models/UserNotification');
+          const AdminEvent = require('../models/AdminEvent');
+          await UserNotification.create({
+            user: req.user._id,
+            type: 'severe-flag',
+            title: 'Priority review reinstated',
+            detail: 'A supplement was marked not taken, so today\u2019s plan is incomplete again. The priority review is back in effect and new assessments are paused until it is finished.',
+            assessmentId: record.assessment,
+          }).catch(() => {});
+          await AdminEvent.create({
+            type: 'severe-flag',
+            title: 'Priority re-flagged (intake undone)',
+            detail: `User ${req.user._id} undid a supplement for assessment ${record.assessment} after auto-resolve. Restriction reinstated.`,
+            user: req.user._id,
+            assessmentId: record.assessment,
+            linkUserId: req.user._id,
+          }).catch(() => {});
+        } catch (reflagError) {
+          console.error('[dashboard POST /intake] priority re-flag failed:', reflagError.message);
+        }
+      }
       
-      // Get wellness baseline from assessment for calculation
-      const assessment = await Assessment.findById(record.assessment);
-      const wellnessBaseline = getWellnessBaseline(assessment);
+      // Wellness baseline from the already-fetched assessment slice
+      const wellnessBaseline = getWellnessBaseline(assessmentDoc);
       
       metrics.wellnessScore = calculateWellnessScore(
         wellnessBaseline,
@@ -337,6 +458,8 @@ router.post('/intake', protect, async (req, res) => {
 
       res.json({
         message: 'Intake updated',
+        priorityLifted,
+        priorityReflagged,
         record: {
           id: record._id,
           taken: record.taken,
@@ -381,7 +504,7 @@ router.post('/energy', protect, async (req, res) => {
     }
 
     // Get latest assessment
-    const latestAssessment = await Assessment.findOne({ user: req.user._id })
+    const latestAssessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
       .sort({ createdAt: -1 });
 
     if (!latestAssessment) {
@@ -458,6 +581,57 @@ router.post('/reset', protect, async (req, res) => {
   }
 });
 
+// @route   GET /api/dashboard/day/:dayKey
+// @desc    Full intake records for one day (YYYY-MM-DD) — powers the
+//          interactive calendar day-detail view. Read-only history; toggling
+//          past days is intentionally unsupported (protects streak integrity).
+// @access  Private
+router.get('/day/:dayKey', protect, async (req, res) => {
+  try {
+    const { dayKey } = req.params;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey || '')) {
+      return res.status(400).json({ message: 'Invalid date. Use YYYY-MM-DD.' });
+    }
+    const todayKey = getTodayKey();
+    if (dayKey > todayKey) {
+      return res.status(400).json({ message: 'Future dates have no records yet.' });
+    }
+
+    const latestAssessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
+      .sort({ createdAt: -1 })
+      .select('_id')
+      .lean();
+    if (!latestAssessment) {
+      return res.json({ dayKey, records: [] });
+    }
+
+    const records = await IntakeRecord.find({
+      user: req.user._id,
+      assessment: latestAssessment._id,
+      dayKey,
+    })
+      .select('supplementName dosage priority scheduledTime taken takenAt')
+      .sort({ scheduledTime: 1 })
+      .lean();
+
+    res.json({
+      dayKey,
+      records: records.map(rec => ({
+        id: rec._id,
+        name: rec.supplementName,
+        dosage: rec.dosage,
+        priority: rec.priority || 'Medium',
+        scheduledTime: rec.scheduledTime || 'Anytime',
+        taken: !!rec.taken,
+        takenAt: rec.takenAt,
+      })),
+    });
+  } catch (error) {
+    console.error('[dashboard GET /day/:dayKey]', error.message);
+    res.status(500).json({ message: 'Could not load that day. Please try again.' });
+  }
+});
+
 // @route   GET /api/dashboard/calendar/:year/:month
 // @desc    Get completion history for a specific month
 // @access  Private
@@ -474,7 +648,7 @@ router.get('/calendar/:year/:month', protect, async (req, res) => {
     }
 
     // Get the latest assessment
-    const latestAssessment = await Assessment.findOne({ user: req.user._id })
+    const latestAssessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
       .sort({ createdAt: -1 });
 
     if (!latestAssessment) {
@@ -489,12 +663,12 @@ router.get('/calendar/:year/:month', protect, async (req, res) => {
     const startKey = firstDay.toISOString().split('T')[0];
     const endKey = lastDay.toISOString().split('T')[0];
 
-    // Get all intake records for this month
+    // Get all intake records for this month (lean + minimal fields)
     const records = await IntakeRecord.find({
       user: req.user._id,
       assessment: latestAssessment._id,
       dayKey: { $gte: startKey, $lte: endKey },
-    });
+    }).select('dayKey taken').lean();
 
     // Group by day and calculate completion percentage
     const completionData = {};
@@ -542,7 +716,7 @@ router.get('/calendar/:year/:month', protect, async (req, res) => {
 router.get('/weekly-adherence', protect, async (req, res) => {
   try {
     // Get the latest assessment
-    const latestAssessment = await Assessment.findOne({ user: req.user._id })
+    const latestAssessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
       .sort({ createdAt: -1 });
 
     if (!latestAssessment) {
@@ -551,32 +725,41 @@ router.get('/weekly-adherence', protect, async (req, res) => {
 
     // Get the current week (last 7 days)
     const today = new Date();
-    const weekData = [];
-    
+    const dayKeys = [];
     for (let i = 6; i >= 0; i--) {
       const date = new Date(today);
       date.setDate(date.getDate() - i);
-      const dayKey = date.toISOString().split('T')[0];
-      const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
-      
-      // Get intake records for this day
-      const records = await IntakeRecord.find({
-        user: req.user._id,
-        assessment: latestAssessment._id,
-        dayKey: dayKey,
-      });
-      
-      const total = records.length;
-      const taken = records.filter(r => r.taken).length;
-      
-      weekData.push({
-        day: dayName,
-        date: dayKey,
-        completed: taken,
-        total: total,
-        percentage: total > 0 ? Math.round((taken / total) * 100) : 0,
+      dayKeys.push({
+        dayKey: date.toISOString().split('T')[0],
+        dayName: date.toLocaleDateString('en-US', { weekday: 'short' }),
       });
     }
+
+    // Single query for the whole week (avoids 7 sequential round-trips)
+    const records = await IntakeRecord.find({
+      user: req.user._id,
+      assessment: latestAssessment._id,
+      dayKey: { $in: dayKeys.map(d => d.dayKey) },
+    }).select('dayKey taken').lean();
+
+    const byDay = new Map();
+    for (const record of records) {
+      const entry = byDay.get(record.dayKey) || { total: 0, taken: 0 };
+      entry.total += 1;
+      if (record.taken) entry.taken += 1;
+      byDay.set(record.dayKey, entry);
+    }
+
+    const weekData = dayKeys.map(({ dayKey, dayName }) => {
+      const entry = byDay.get(dayKey) || { total: 0, taken: 0 };
+      return {
+        day: dayName,
+        date: dayKey,
+        completed: entry.taken,
+        total: entry.total,
+        percentage: entry.total > 0 ? Math.round((entry.taken / entry.total) * 100) : 0,
+      };
+    });
 
     // Calculate overall adherence
     const totalSupplements = weekData.reduce((sum, day) => sum + day.total, 0);
@@ -605,7 +788,7 @@ router.post('/add-supplement', protect, async (req, res) => {
     }
 
     // Get the latest assessment
-    const latestAssessment = await Assessment.findOne({ user: req.user._id })
+    const latestAssessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
       .sort({ createdAt: -1 });
 
     if (!latestAssessment) {
@@ -667,13 +850,11 @@ router.post('/add-supplement', protect, async (req, res) => {
         metrics.streakAwardedToday = false; // Reset flag to allow re-awarding when they complete all
       }
 
-      // Recalculate overall adherence
-      const allRecords = await IntakeRecord.find({
-        user: req.user._id,
-        assessment: latestAssessment._id,
-      });
-      const totalAll = allRecords.length;
-      const takenAll = allRecords.filter(r => r.taken).length;
+      // Recalculate overall adherence via counted aggregation (no full-history load)
+      const [totalAll, takenAll] = await Promise.all([
+        IntakeRecord.countDocuments({ user: req.user._id, assessment: latestAssessment._id }),
+        IntakeRecord.countDocuments({ user: req.user._id, assessment: latestAssessment._id, taken: true }),
+      ]);
       metrics.overallAdherence = calculateAdherence(takenAll, totalAll);
 
       // Recalculate wellness score
@@ -716,7 +897,7 @@ router.post('/remove-supplement', protect, async (req, res) => {
     }
 
     // Get the latest assessment
-    const latestAssessment = await Assessment.findOne({ user: req.user._id })
+    const latestAssessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
       .sort({ createdAt: -1 });
 
     if (!latestAssessment) {
@@ -752,7 +933,7 @@ router.post('/remove-supplement', protect, async (req, res) => {
 router.get('/my-plan', protect, async (req, res) => {
   try {
     // Get the latest assessment
-    const latestAssessment = await Assessment.findOne({ user: req.user._id })
+    const latestAssessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
       .sort({ createdAt: -1 });
 
     if (!latestAssessment) {

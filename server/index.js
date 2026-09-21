@@ -14,12 +14,19 @@ const supplementDetailRoutes = require('./routes/supplement_detail');
 const dashboardRoutes = require('./routes/dashboard');
 const insightsRoutes = require('./routes/insights');
 const adminRoutes = require('./routes/admin');
+const notificationRoutes = require('./routes/notifications');
 const AdminAccount = require('./models/AdminAccount');
 
 const app = express();
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'suppliwise_jwt_secret_key_change_in_production') {
   throw new Error('JWT_SECRET is missing or still uses the default placeholder value.');
+}
+
+// Production safeguard: OTP values must never be exposed in API responses.
+// Refuse to boot live with the dev override enabled.
+if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DEV_OTP_RESPONSE === 'true') {
+  throw new Error('ALLOW_DEV_OTP_RESPONSE must never be "true" in production.');
 }
 
 // ── Security headers ──────────────────────────────────────────────────────
@@ -63,7 +70,6 @@ const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: 'Too many attempts. Please wait 15 minutes and try again.' },
-  skip: (req) => process.env.NODE_ENV !== 'production' && req.path === '/login',
 });
 
 // Recommend: 15 requests per 10 min per IP (protects Groq quota)
@@ -75,16 +81,54 @@ const recommendLimiter = rateLimit({
   message: { message: 'Too many requests. Please wait a few minutes and try again.' },
 });
 
-// Routes
+// AI-adjacent endpoints: generous but bounded (protects OpenRouter quota)
+const aiLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: (req) => isLocalDevRequest(req) ? 300 : 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many requests. Please wait a few minutes and try again.' },
+});
+
+// General API abuse guard (dashboard/insights/assessment polling) — kept for future use
+const apiLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: (req) => isLocalDevRequest(req) ? 600 : 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many requests. Please slow down and try again.' },
+});
+
+// ── Dedicated rate limiters for Admins vs Users ───────────────────────────
+// Separate buckets so admin traffic never starves user traffic and vice-versa.
+// Production limits are stricter; local dev stays generous for testing/HMR.
+const userLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: (req) => isLocalDevRequest(req) ? 600 : 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many requests. Please slow down and try again.' },
+});
+
+const adminLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: (req) => isLocalDevRequest(req) ? 300 : 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many admin requests. Please slow down and try again.' },
+});
+
+// Routes — admin vs user buckets are isolated
 app.use('/api/auth', authLimiter, authRoutes);
-app.use('/api/assessment', assessmentRoutes);
+app.use('/api/assessment', userLimiter, assessmentRoutes);
 app.use('/api/recommend', recommendLimiter, recommendRoutes);
-app.use('/api/chat', chatRoutes);       // no rate limit — chat needs to feel instant
-app.use('/api/polish', polishRoutes);
-app.use('/api/supplement-detail', supplementDetailRoutes);
-app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/insights', insightsRoutes);
-app.use('/api/admin', adminRoutes);
+app.use('/api/chat', userLimiter, chatRoutes);
+app.use('/api/polish', aiLimiter, polishRoutes);
+app.use('/api/supplement-detail', aiLimiter, supplementDetailRoutes);
+app.use('/api/dashboard', userLimiter, dashboardRoutes);
+app.use('/api/insights', userLimiter, insightsRoutes);
+app.use('/api/notifications', userLimiter, notificationRoutes);
+app.use('/api/admin', adminLimiter, adminRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -128,7 +172,12 @@ mongoose
     }).filter(Boolean);
     const accounts = [...legacy, ...configuredAdmins];
     return Promise.all(accounts.map(account => AdminAccount.updateOne({ alias: account.alias }, { $setOnInsert: account }, { upsert: true })))
-      .then(() => app.listen(PORT, () => console.log(`Server running on port ${PORT}`)));
+      .then(() => app.listen(PORT, () => console.log(`Server running on port ${PORT}`)))
+      .then(() => {
+        // Non-blocking SMTP check — bad credentials surface in the log at boot
+        const { verifyEmailConfig } = require('./utils/email');
+        verifyEmailConfig().catch(() => {});
+      });
   })
   .catch((err) => {
     console.error('MongoDB connection error:', err.message);

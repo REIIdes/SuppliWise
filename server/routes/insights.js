@@ -1,9 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
+const { requirePlan } = require('../utils/plan');
 const Assessment = require('../models/Assessment');
 const IntakeRecord = require('../models/IntakeRecord');
 const DashboardMetrics = require('../models/DashboardMetrics');
+const { notExpiredFilter } = require('../utils/assessments');
 
 // Helper: Get date range for queries
 const getDateRange = (days) => {
@@ -20,11 +22,13 @@ const formatDate = (date) => {
 
 // @route   GET /api/insights
 // @desc    Get AI insights and tracking data for the active assessment
-// @access  Private
-router.get('/', protect, async (req, res) => {
+// @access  Private (Deluxe Package and above)
+// Insights & Analytics is a paid perk — free-tier users are stopped here
+// with a 403 + requiresPlan payload so the client can show an upgrade prompt.
+router.get('/', protect, requirePlan('monthly'), async (req, res) => {
   try {
-    // Get the latest assessment
-    const latestAssessment = await Assessment.findOne({ user: req.user._id })
+    // Latest assessment still in force (expired ones are retired from insights)
+    const latestAssessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
       .sort({ createdAt: -1 });
 
     if (!latestAssessment) {
@@ -35,11 +39,19 @@ router.get('/', protect, async (req, res) => {
       });
     }
 
-    // Get dashboard metrics
-    const metrics = await DashboardMetrics.findOne({
-      user: req.user._id,
-      assessment: latestAssessment._id,
-    });
+    // Independent reads run in parallel (Atlas RTT ~0.5s each — sequential was ~2.5s)
+    const { startDate } = getDateRange(30);
+    const todayKey = formatDate(new Date());
+    const [metrics, intakeRecords, todayIntakeRecords, totalAssessments] = await Promise.all([
+      DashboardMetrics.findOne({ user: req.user._id, assessment: latestAssessment._id }).lean(),
+      // Last 30 days only, lean + minimal fields
+      IntakeRecord.find({ user: req.user._id, assessment: latestAssessment._id, date: { $gte: startDate } })
+        .select('date taken')
+        .sort({ date: 1 })
+        .lean(),
+      IntakeRecord.find({ user: req.user._id, assessment: latestAssessment._id, dayKey: todayKey }).lean(),
+      Assessment.countDocuments({ user: req.user._id }),
+    ]);
 
     if (!metrics) {
       return res.json({
@@ -48,14 +60,6 @@ router.get('/', protect, async (req, res) => {
         message: 'Not enough tracking data yet. Start tracking your supplements to see insights.',
       });
     }
-
-    // Get intake records for the last 30 days
-    const { startDate } = getDateRange(30);
-    const intakeRecords = await IntakeRecord.find({
-      user: req.user._id,
-      assessment: latestAssessment._id,
-      date: { $gte: startDate },
-    }).sort({ date: 1 });
 
     // Calculate daily adherence
     const dailyAdherence = {};
@@ -82,15 +86,8 @@ router.get('/', protect, async (req, res) => {
     const aiInsights = latestAssessment.aiResults?.actionPlan || [];
     const lifestyleAdvice = latestAssessment.aiResults?.lifestyleAdvice || [];
 
-    // Get today's supplements
-    const todayKey = formatDate(new Date());
+    // Get today's supplements (already fetched above)
     const recommendations = latestAssessment.aiResults?.recommendations || [];
-    
-    let todayIntakeRecords = await IntakeRecord.find({
-      user: req.user._id,
-      assessment: latestAssessment._id,
-      dayKey: todayKey,
-    });
 
     // Don't automatically create records - user must add supplements manually from recommendations
 
@@ -107,9 +104,6 @@ router.get('/', protect, async (req, res) => {
     const daysSinceStart = Math.floor(
       (new Date() - new Date(latestAssessment.createdAt)) / (1000 * 60 * 60 * 24)
     );
-
-    // Get total number of assessments completed by the user
-    const totalAssessments = await Assessment.countDocuments({ user: req.user._id });
 
     // Determine current phase based on days
     let currentPhase = null;

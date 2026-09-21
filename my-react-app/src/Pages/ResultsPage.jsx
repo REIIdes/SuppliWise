@@ -3,6 +3,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import { exportResultsToPDF } from '../utils/exportPDF';
 import { getSupplementDetail } from '../api';
+import { hasPlanAccess, getStoredPlan, FEATURE_TIERS } from '../utils/plan';
+import UpgradeModal from '../Components/UpgradeModal/UpgradeModal';
 import './ResultsPage.css';
 
 // Normalize special characters that may render as ? in some environments
@@ -18,8 +20,9 @@ function fixChars(str) {
     .replace(/[\u201C\u201D]/g, '"')
     // Ellipsis
     .replace(/\u2026/g, '...')
-    // Strip remaining non-ASCII that aren't safe latin chars
-    .replace(/[^\x00-\xFF]/g, '');
+    // Strip remaining non-ASCII (keep tab/LF/CR + printable Latin-1)
+    // eslint-disable-next-line no-control-regex -- character class intentionally covers control range
+    .replace(/[^\x09\x0A\x0D\x20-\xFF]/g, '');
 }
 
 // Detect placeholder/template evidence text the AI failed to fill in
@@ -54,7 +57,6 @@ function cleanTriggeredBy(str) {
   });
 }
 const priorityColor = { High: '#16a34a', Medium: '#d97706', Low: '#374151' };const priorityIcon = { High: '🔴', Medium: '🟡', Low: '🟢' };
-const severityColor = { Severe: '#dc2626', Moderate: '#d97706', 'Mild to Moderate': '#f59e0b', Mild: '#22c55e', Preventive: '#6b7280' };
 
 const SUPPLEMENT_ICONS = {
   magnesium: '🧲', 'vitamin d': '☀️', 'vitamin b': '💉', 'b12': '💉',
@@ -86,6 +88,7 @@ function ConfidenceBar({ score, delay = 0 }) {
 
   // Count-up the number in sync with the bar
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset display when animation restarts
     if (width === 0) { setDisplayed(0); return; }
     const duration = 700; // ms — matches CSS transition
     const start = performance.now();
@@ -280,60 +283,54 @@ function EvidenceInfoModal({ onClose }) {
 }
 
 // ── Supplement Detail Modal ──────────────────────────────────────────────
+// 30-day cache TTL shared by the in-memory + localStorage detail cache.
+const SDM_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+// Helpers: read/write localStorage with expiry (module scope — pure w.r.t. render)
+function readSdmCache(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const { data, expiresAt } = JSON.parse(raw);
+    if (Date.now() > expiresAt) { localStorage.removeItem(key); return null; } // expired
+    return data;
+  } catch { return null; }
+}
+
+function writeSdmCache(key, data) {
+  try {
+    localStorage.setItem(key, JSON.stringify({ data, expiresAt: Date.now() + SDM_CACHE_TTL_MS }));
+  } catch { /* storage full — skip silently */ }
+}
+
 function SupplementDetailModal({ supplementName, assessmentId, context, cache, onClose }) {
-  const [detail, setDetail] = useState(null);
-  const [loading, setLoading] = useState(true);
+  // localStorage key — scoped to assessment ID so new assessments always fetch fresh from Groq
+  const storageKey = `sdm_${assessmentId}_${supplementName.toLowerCase().trim()}`;
+
+  // Resolve cache hits during init so cached details render instantly (no loading flash).
+  // Note: the shared in-memory session cache lives in a parent-owned ref on purpose.
+  const getCachedDetail = () => {
+    if (cache.current[storageKey]) return cache.current[storageKey];
+    const stored = readSdmCache(storageKey);
+    // eslint-disable-next-line react-hooks/immutability -- intentional shared session-cache warm on read
+    if (stored) cache.current[storageKey] = stored; // warm in-memory cache too
+    return stored;
+  };
+  const [detail, setDetail] = useState(getCachedDetail);
+  const [loading, setLoading] = useState(() => cache.current[storageKey] == null);
   const [error, setError] = useState('');
   const overlayRef = useRef(null);
 
-  // localStorage key — scoped to assessment ID so new assessments always fetch fresh from Groq
-  const storageKey = `sdm_${assessmentId}_${supplementName.toLowerCase().trim()}`;
-  const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
-
-  // Helpers: read/write localStorage with expiry
-  const readCache = (key) => {
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) return null;
-      const { data, expiresAt } = JSON.parse(raw);
-      if (Date.now() > expiresAt) { localStorage.removeItem(key); return null; } // expired
-      return data;
-    } catch { return null; }
-  };
-
-  const writeCache = (key, data) => {
-    try {
-      localStorage.setItem(key, JSON.stringify({ data, expiresAt: Date.now() + CACHE_TTL_MS }));
-    } catch { /* storage full — skip silently */ }
-  };
-
   useEffect(() => {
+    if (detail) return; // cache hit — nothing to fetch
     let cancelled = false;
 
-    // 1. Check in-memory cache first (fastest — same page session)
-    if (cache.current[storageKey]) {
-      setDetail(cache.current[storageKey]);
-      setLoading(false);
-      return;
-    }
-
-    // 2. Check localStorage (persists across browser restarts, expires after 30 days)
-    const stored = readCache(storageKey);
-    if (stored) {
-      cache.current[storageKey] = stored; // warm in-memory cache too
-      setDetail(stored);
-      setLoading(false);
-      return;
-    }
-
-    // 3. Cache miss — call Groq
-    setLoading(true);
-    setError('');
+    // Cache miss — call Groq
     getSupplementDetail(supplementName, context)
       .then(data => {
         if (!cancelled) {
           cache.current[storageKey] = data;
-          writeCache(storageKey, data);
+          writeSdmCache(storageKey, data);
           setDetail(data);
           setLoading(false);
         }
@@ -345,7 +342,7 @@ function SupplementDetailModal({ supplementName, assessmentId, context, cache, o
         }
       });
     return () => { cancelled = true; };
-  }, [supplementName, assessmentId, storageKey, context, cache]);
+  }, [supplementName, assessmentId, storageKey, context, cache, detail]);
 
   // Close on overlay click
   const handleOverlayClick = (e) => {
@@ -658,6 +655,7 @@ function ResultsPage() {
   const [showAllRecs, setShowAllRecs] = useState(false);
   const [detailSupplement, setDetailSupplement] = useState(null);
   const [showEvidenceInfo, setShowEvidenceInfo] = useState(false);
+  const [upgradeInfo, setUpgradeInfo] = useState(null);
   const detailCache = useRef({});  // cache: { [supplementName]: detailObject }
   const INITIAL_REC_COUNT = 6;
   
@@ -700,6 +698,11 @@ function ResultsPage() {
   };
 
   const handleExportPDF = async () => {
+    if (!hasPlanAccess(FEATURE_TIERS.pdfExport)) {
+      const stored = getStoredPlan();
+      setUpgradeInfo({ requiresPlan: FEATURE_TIERS.pdfExport, currentPlan: stored.plan, feature: 'PDF Report Exports' });
+      return;
+    }
     setExporting(true);
     try {
       exportResultsToPDF(r, assessment);
@@ -1073,7 +1076,15 @@ function ResultsPage() {
           <button className="btn-secondary" onClick={() => navigate('/assessment')}>Retake Assessment</button>
           <button className="btn-primary" onClick={() => navigate('/')}>Back to Home</button>
         </div>
-
+        {upgradeInfo && (
+          <UpgradeModal
+            feature={upgradeInfo.feature || 'PDF Report Exports'}
+            requiredPlan={upgradeInfo.requiresPlan}
+            currentPlan={upgradeInfo.currentPlan}
+            onClose={() => setUpgradeInfo(null)}
+            onViewPlans={() => navigate('/profile')}
+          />
+        )}
       </div>
     </div>
   );

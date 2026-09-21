@@ -127,24 +127,35 @@ function AdminDashboard() {
     try { searchRef.current = search; const data = await request(`/users?search=${encodeURIComponent(search)}`); setUsers(data.users || []); } catch (requestError) { setError(requestError.message); }
   };
 
-  const toggleSubscription = async (user) => {
+  const PLAN_LABELS = {
+    free: 'Basic Package',
+    monthly: 'Deluxe Package',
+    annual: 'Premium Package',
+    custom: 'Ultimate Package',
+  };
+
+  const setSubscriptionPlan = async (user, plan) => {
+    if (!['free', 'monthly', 'annual', 'custom'].includes(plan)) return;
+    const wasActive = !!user.subscriptionActive;
     try {
-      const data = await request(`/users/${user._id}/subscription`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active: !user.subscriptionActive, plan: user.subscriptionActive ? 'free' : 'custom' }) });
+      const data = await request(`/users/${user._id}/subscription`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active: plan !== 'free', plan }) });
       setUsers(current => current.map(item => item._id === data.user._id ? data.user : item));
+      const flipped = wasActive !== data.user.subscriptionActive;
       setOverview(current => current ? {
         ...current,
         metrics: {
           ...current.metrics,
-          activeSubscriptions: current.metrics.activeSubscriptions + (data.user.subscriptionActive ? 1 : -1),
-          inactiveSubscriptions: current.metrics.inactiveSubscriptions + (data.user.subscriptionActive ? -1 : 1),
+          activeSubscriptions: current.metrics.activeSubscriptions + (flipped ? (data.user.subscriptionActive ? 1 : -1) : 0),
+          inactiveSubscriptions: current.metrics.inactiveSubscriptions + (flipped ? (data.user.subscriptionActive ? -1 : 1) : 0),
         },
         recentUsers: current.recentUsers.map(item => item._id === data.user._id ? { ...item, ...data.user } : item),
       } : current);
-      load(true);
+      // NOTE: no load() here — it would replace the managed user list with
+      // recentUsers and wipe the just-saved plan from the UI.
     } catch (requestError) { setError(requestError.message); }
   };
 
-  const downloadReport = async () => {
+  const downloadReport = useCallback(async () => {
     const doc = new jsPDF({ unit: 'mm', format: 'a4' });
     const W = doc.internal.pageSize.getWidth();
     const H = doc.internal.pageSize.getHeight();
@@ -156,10 +167,8 @@ function AdminDashboard() {
 
     // ── Colour palette ──────────────────────────────────────────────────
     const GREEN  = [22,  101, 52];   // #166534
-    const GREEN2 = [34,  197, 94];   // #22c55e
     const RED    = [185, 28,  28];   // #b91c1c
     const AMBER  = [161, 98,  7];    // #a16207
-    const PURPLE = [109, 40,  217];  // #6d28d9
     const INK    = [17,  24,  39];   // #111827
     const MUTED  = [107, 114, 128];  // #6b7280
     const LINE   = [229, 231, 235];  // #e5e7eb
@@ -218,6 +227,14 @@ function AdminDashboard() {
       doc.setTextColor(...valueColor);
       doc.text(String(value), 60, y);
       y += 7;
+    };
+
+    // ── Helper: truncate at a word boundary so PDF cells never end mid-word ──
+    const truncateWords = (text, max) => {
+      if (!text || text.length <= max) return text || '';
+      const cut = text.slice(0, max);
+      const lastSpace = cut.lastIndexOf(' ');
+      return (lastSpace > max * 0.5 ? cut.slice(0, lastSpace) : cut) + '…';
     };
 
     // ── 1. Executive Summary ────────────────────────────────────────────
@@ -329,7 +346,8 @@ function AdminDashboard() {
             delete_account: 'OWASP', input_sanitization: 'OWASP',
             password_hashing: 'OWASP', salting: 'OWASP',
           }[m.key] || '—',
-          (m.detail || '').slice(0, 90) + ((m.detail || '').length > 90 ? '…' : ''),
+          // Truncate at a word boundary so cells never end mid-word
+          truncateWords(m.detail || '', 140),
           m.latencyMs != null ? `${m.latencyMs} ms` : '—',
         ]),
         headStyles: {
@@ -340,10 +358,10 @@ function AdminDashboard() {
         },
         columnStyles: {
           0: { cellWidth: 20, fontStyle: 'bold' },
-          1: { cellWidth: 40 },
+          1: { cellWidth: 36 },
           2: { cellWidth: 24 },
           3: { cellWidth: 'auto', fontSize: 7 },
-          4: { cellWidth: 18, halign: 'right' },
+          4: { cellWidth: 26, halign: 'right' },
         },
         bodyStyles: { fontSize: 7.5, textColor: INK },
         alternateRowStyles: { fillColor: [249, 250, 251] },
@@ -400,7 +418,7 @@ function AdminDashboard() {
 
     const dateStr = now.toISOString().slice(0, 10);
     doc.save(`suppliwise-security-report-${dateStr}.pdf`);
-  };
+  }, [overview, security, request]);
 
   // expose download so SecurityStatus can call it
   const downloadReportRef = useRef(downloadReport);
@@ -499,8 +517,32 @@ function AdminDashboard() {
     }
   };
 
+  const markAllAdminRead = async () => {
+    try {
+      await request('/notifications/read-all', { method: 'POST' });
+      setNotifications([]);
+      setUnreadCount(0);
+    } catch (requestError) {
+      setError(requestError.message);
+    }
+  };
+
+  const deleteAdminNotification = async (event, notificationId) => {
+    event.stopPropagation();
+    try {
+      await request(`/notifications/${notificationId}`, { method: 'DELETE' });
+      setNotifications(current => current.filter(n => n._id !== notificationId));
+      setUnreadCount(current => Math.max(0, current - 1));
+    } catch (requestError) {
+      setError(requestError.message);
+    }
+  };
+
   const handleNotificationClick = (notification) => {
-    if (notification.type === 'security') {
+    // Severe flags deep-link to Assessment Management (user list pre-fetches there)
+    if (notification.type === 'severe-flag') {
+      handleTabClick('assessment-management');
+    } else if (notification.type === 'security') {
       setTab('security');
     }
     if (notification._id) {
@@ -605,16 +647,41 @@ function AdminDashboard() {
           {/* Notification panel (rendered here so it overlays main, not topbar) */}
           {showNotifications && (
             <div className="notification-panel admin-notif-panel">
-              <h3>System notifications</h3>
+              <div className="admin-notif-panel__header">
+                <h3>System notifications</h3>
+                {notifications.length > 0 && (
+                  <button
+                    type="button"
+                    className="admin-notif-panel__action"
+                    onClick={markAllAdminRead}
+                  >
+                    Mark all as read
+                  </button>
+                )}
+              </div>
               {notifications.length
                 ? notifications.map((notification, index) => (
                     <div
-                      className="notification"
+                      className={`notification${notification.type === 'severe-flag' ? ' notification--flag' : ''}`}
                       key={`${notification.title}-${index}`}
                       onClick={() => handleNotificationClick(notification)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleNotificationClick(notification);
+                      }}
+                      title={notification.type === 'severe-flag' ? 'Open Assessment Management' : notification.type === 'security' ? 'Open Security tab' : 'Dismiss'}
                     >
                       <strong>{notification.title}</strong>
                       <span>{notification.detail}</span>
+                      <button
+                        type="button"
+                        className="notification__delete"
+                        aria-label="Delete notification"
+                        onClick={(e) => notification._id && deleteAdminNotification(e, notification._id)}
+                      >
+                        ×
+                      </button>
                     </div>
                   ))
                 : <p className="admin-muted">No new notifications.</p>
@@ -651,10 +718,10 @@ function AdminDashboard() {
           {error && <div className="admin-alert danger">{error}</div>}
 
           {tab === 'overview'               && overview && <div className="admin-tab-panel"><Overview overview={overview} /></div>}
-          {tab === 'users'                  && <div className="admin-tab-panel"><Users users={users} search={search} setSearch={value => { searchRef.current = value; setSearch(value); }} loadUsers={loadUsers} toggleSubscription={toggleSubscription} updateAccount={updateAccount} deleteAccount={deleteAccount} expandedUser={expandedUser} setExpandedUser={setExpandedUser} /></div>}
-          {tab === 'assessment-management'  && <div className="admin-tab-panel"><AssessmentManagement users={allUsers} adminRequest={request} /></div>}
+          {tab === 'users'                  && <div className="admin-tab-panel"><Users users={users} search={search} setSearch={value => { searchRef.current = value; setSearch(value); }} loadUsers={loadUsers} setSubscriptionPlan={setSubscriptionPlan} planLabels={PLAN_LABELS} updateAccount={updateAccount} deleteAccount={deleteAccount} expandedUser={expandedUser} setExpandedUser={setExpandedUser} /></div>}
+          {tab === 'assessment-management'  && <div className="admin-tab-panel"><AssessmentManagement users={allUsers} /></div>}
           {tab === 'ai'                     && <div className="admin-tab-panel"><AiPanel ai={ai} /></div>}
-          {tab === 'security'               && <div className="admin-tab-panel"><SecurityStatus securityData={security} adminRequest={request} onDownloadReport={() => downloadReportRef.current()} /></div>}
+          {tab === 'security'               && <div className="admin-tab-panel"><SecurityStatus adminRequest={request} onDownloadReport={() => downloadReportRef.current()} /></div>}
           {tab === 'profile'                && <div className="admin-tab-panel"><ProfilePanel profile={profile} form={profileForm} setForm={setProfileForm} message={profileMessage} onSubmit={changePassword} rotateOtp={rotateOtp} setRotateOtp={setRotateOtp} rotatedKey={rotatedKey} onRotate={rotateAuthenticator} /></div>}
         </main>
       </div>
@@ -705,10 +772,6 @@ const METRIC_COLOR = {
 };
 
 function Overview({ overview }) {
-  const secureCount   = (overview.security || []).filter(c => c.status === 'Secure').length;
-  const totalChecks   = (overview.security || []).length;
-  const allSecure     = totalChecks > 0 && secureCount === totalChecks;
-
   return (
     <>
       {/* ── Metric cards ──────────────────────────────────────────── */}
@@ -765,7 +828,7 @@ function Overview({ overview }) {
                     <td className="ov-nowrap">{new Date(user.createdAt).toLocaleDateString()}</td>
                     <td>
                       <span className={`ov-sub-badge${user.subscriptionActive ? ' ov-sub-badge--active' : ''}`}>
-                        {user.subscriptionActive ? 'Active' : 'Free'}
+                        {user.subscriptionActive ? 'Active' : 'Basic Package'}
                       </span>
                     </td>
                     <td>
@@ -814,7 +877,14 @@ function Overview({ overview }) {
   );
 }
 
-function Users({ users, search, setSearch, loadUsers, toggleSubscription, updateAccount, deleteAccount, expandedUser, setExpandedUser }) {
+// Display helper: strip IPv6-mapped IPv4 prefix from stored IPs
+function formatIp(raw) {
+  if (!raw) return '';
+  const ip = String(raw).trim();
+  return ip.startsWith('::ffff:') ? ip.slice('::ffff:'.length) : ip;
+}
+
+function Users({ users, search, setSearch, loadUsers, setSubscriptionPlan, planLabels, updateAccount, deleteAccount, expandedUser, setExpandedUser }) {
   const handleUserToggle = (userId) => {
     setExpandedUser(expandedUser === userId ? null : userId);
   };
@@ -910,20 +980,38 @@ function Users({ users, search, setSearch, loadUsers, toggleSubscription, update
                     <div className="user-detail-item">
                       <strong>Last Login</strong>
                       <span>{user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : 'Never'}</span>
-                      <small>{user.device || 'Unknown device'}</small>
+                      <small>
+                        {user.device && user.device !== 'Unknown device'
+                          ? user.device
+                          : (user.lastLoginIp ? `IP ${formatIp(user.lastLoginIp)}` : 'Unknown device')}
+                      </small>
                     </div>
                     <div className="user-detail-item">
                       <strong>Location</strong>
                       <span>{user.lastLoginLocation || 'Unknown'}</span>
+                      {(!user.lastLoginLocation || user.lastLoginLocation === 'Unknown location') && user.lastLoginIp && (
+                        <small>IP {formatIp(user.lastLoginIp)}</small>
+                      )}
                     </div>
                     <div className="user-detail-item">
                       <strong>Subscription</strong>
-                      <button
-                        className={`subscription-toggle-button${user.subscriptionActive ? ' subscribed' : ''}`}
-                        onClick={() => toggleSubscription(user)}
+                      <span className={`subscription-status-badge${user.subscriptionActive ? ' subscription-status-badge--active' : ''}`}>
+                        {user.subscriptionActive ? 'Subscribed ✓' : 'Basic Package'}
+                      </span>
+                      <label className="subscription-plan-label" htmlFor={`plan-${user._id}`}>
+                        Plan — select to change
+                      </label>
+                      <select
+                        id={`plan-${user._id}`}
+                        className="subscription-plan-select"
+                        value={user.subscriptionPlan || 'free'}
+                        onChange={event => setSubscriptionPlan(user, event.target.value)}
                       >
-                        {user.subscriptionActive ? 'Subscribed ✓' : 'Free — click to activate'}
-                      </button>
+                        <option value="free">{planLabels.free}</option>
+                        <option value="monthly">{planLabels.monthly}</option>
+                        <option value="annual">{planLabels.annual}</option>
+                        <option value="custom">{planLabels.custom}</option>
+                      </select>
                     </div>
                     <div className="user-detail-item">
                       <strong>Role</strong>
@@ -1002,7 +1090,19 @@ function AiPanel({ ai }) {
     </section>
   );
 }
-function SecurityPanel({ security }) { return <section className="admin-panel"><h3>STRIDE and OWASP controls</h3>{(security?.checks || []).map(check => <div className="security-row" key={check.key}><span className={check.status}>{check.status}</span><div><strong>{check.label}</strong><small>{check.status === 'healthy' ? 'Control is configured.' : check.fix}</small></div></div>)}</section>; }
+function EyeIcon({ open }) {
+  return open ? (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+      <line x1="1" y1="1" x2="23" y2="23" />
+    </svg>
+  );
+}
+
 function ProfilePanel({ profile, form, setForm, message, onSubmit, rotateOtp, setRotateOtp, rotatedKey, onRotate }) {
   const [showCurrent,  setShowCurrent]  = useState(false);
   const [showNew,      setShowNew]      = useState(false);
@@ -1029,18 +1129,7 @@ function ProfilePanel({ profile, form, setForm, message, onSubmit, rotateOtp, se
     setRotLoading(false);
   };
 
-  // Eye icon
-  const EyeIcon = ({ open }) => open ? (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
-    </svg>
-  ) : (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
-      <line x1="1" y1="1" x2="23" y2="23"/>
-    </svg>
-  );
-
+  // Eye icon (module scope — creating it inside ProfilePanel resets state on every render)
   return (
     <div className="profile-page">
 

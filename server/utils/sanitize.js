@@ -53,6 +53,31 @@ const SPELLING_FIXES = {
   takot: 'anxiety', kinakabahan: 'nervousness',
 };
 
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Pre-compiled replacement rules (built once at module load so hot-path
+// sanitize calls don't rebuild ~100 RegExp objects on every request).
+function buildRules(map) {
+  return Object.entries(map)
+    .sort((a, b) => b[0].length - a[0].length)
+    .map(([from, to]) => ({ regex: new RegExp(`\\b${escapeRegExp(from)}\\b`, 'gi'), to }));
+}
+
+let SPELLING_RULES = null;
+let SLANG_RULES = null;
+function getRules() {
+  if (!SPELLING_RULES) SPELLING_RULES = buildRules(SPELLING_FIXES);
+  if (!SLANG_RULES) SLANG_RULES = buildRules(SLANG_TO_CLINICAL);
+  return { SPELLING_RULES, SLANG_RULES };
+}
+
+function applyRules(cleaned, rules) {
+  for (const { regex, to } of rules) {
+    cleaned = cleaned.replace(regex, to);
+  }
+  return cleaned;
+}
+
 const SLANG_TO_CLINICAL = {
   'super tired': 'significant fatigue',
   'really tired': 'significant fatigue',
@@ -227,9 +252,34 @@ function isGarbage(text) {
  * - Returns { value: '', garbage: true } if garbage detected
  * - Returns { value: cleanedText, garbage: false } otherwise
  */
+// Strip HTML/XML tags so stored text can never carry markup into admin
+// views, PDFs, or AI prompts (stored-XSS defense in depth — React already
+// escapes on render, but stored data should be clean too).
+function stripTags(text) {
+  return String(text).replace(/<[^>]*>/g, '');
+}
+
+// Removes prototype-pollution keys from parsed JSON bodies before they are
+// persisted (e.g. Mixed aiResults blobs). Mutates nothing outside `value`.
+function scrubKeys(value, depth = 0) {
+  if (depth > 10 || value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) value[i] = scrubKeys(value[i], depth + 1);
+    return value;
+  }
+  for (const key of Object.keys(value)) {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+      delete value[key];
+    } else {
+      value[key] = scrubKeys(value[key], depth + 1);
+    }
+  }
+  return value;
+}
+
 function sanitizeTextField(text) {
   if (!text || typeof text !== 'string') return { value: '', garbage: false };
-  const trimmed = text.trim();
+  const trimmed = stripTags(text).trim();
   if (!trimmed) return { value: '', garbage: false };
   if (isGarbage(trimmed)) return { value: '', garbage: true };
 
@@ -240,18 +290,10 @@ function sanitizeTextField(text) {
   cleaned = cleaned.replace(/\s+/g, ' ').trim();
 
   // Apply spelling fixes (longer phrases first)
-  const spellingEntries = Object.entries(SPELLING_FIXES).sort((a, b) => b[0].length - a[0].length);
-  for (const [wrong, correct] of spellingEntries) {
-    const regex = new RegExp(`\\b${wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
-    cleaned = cleaned.replace(regex, correct);
-  }
+  cleaned = applyRules(cleaned, getRules().SPELLING_RULES);
 
   // Apply slang → clinical (longer phrases first)
-  const slangEntries = Object.entries(SLANG_TO_CLINICAL).sort((a, b) => b[0].length - a[0].length);
-  for (const [slang, clinical] of slangEntries) {
-    const regex = new RegExp(`\\b${slang.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
-    cleaned = cleaned.replace(regex, clinical);
-  }
+  cleaned = applyRules(cleaned, getRules().SLANG_RULES);
 
   // Remove repeated characters (sooooo → so)
   cleaned = cleaned.replace(/(.)\1{3,}/g, '$1$1');
@@ -267,22 +309,18 @@ function sanitizeTextField(text) {
  */
 function sanitizeShortField(text) {
   if (!text || typeof text !== 'string') return { value: text || '', garbage: false };
-  const trimmed = text.trim();
+  const trimmed = stripTags(text).trim();
   if (!trimmed) return { value: '', garbage: false };
   if (isGarbage(trimmed)) return { value: '', garbage: true };
 
   let cleaned = trimmed.replace(/\s+/g, ' ');
 
-  const spellingEntries = Object.entries(SPELLING_FIXES).sort((a, b) => b[0].length - a[0].length);
-  for (const [wrong, correct] of spellingEntries) {
-    const regex = new RegExp(`\\b${wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
-    cleaned = cleaned.replace(regex, correct);
-  }
+  cleaned = applyRules(cleaned, getRules().SPELLING_RULES);
 
   return { value: cleaned.trim(), garbage: false };
 }
 
-module.exports = { sanitizeTextField, sanitizeShortField, isGarbage, preprocessUserInput, sanitizeMedicalField };
+module.exports = { sanitizeTextField, sanitizeShortField, isGarbage, preprocessUserInput, sanitizeMedicalField, stripTags, scrubKeys };
 
 // ── preprocessUserInput ────────────────────────────────────────────────────
 // Normalises free-text before it is sent to the AI prompt.
@@ -290,7 +328,7 @@ module.exports = { sanitizeTextField, sanitizeShortField, isGarbage, preprocessU
 function preprocessUserInput(text) {
   if (!text || typeof text !== 'string') return '';
 
-  let cleaned = text.trim();
+  let cleaned = stripTags(text).trim();
   cleaned = cleaned.replace(/\s+/g, ' ');
 
   // Remove filler words
@@ -298,18 +336,10 @@ function preprocessUserInput(text) {
   cleaned = cleaned.replace(/\s+/g, ' ').trim();
 
   // Apply spelling fixes (longer phrases first to avoid partial matches)
-  const spellingEntries = Object.entries(SPELLING_FIXES).sort((a, b) => b[0].length - a[0].length);
-  for (const [wrong, correct] of spellingEntries) {
-    const regex = new RegExp(`\\b${wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
-    cleaned = cleaned.replace(regex, correct);
-  }
+  cleaned = applyRules(cleaned, getRules().SPELLING_RULES);
 
   // Apply slang → clinical (longer phrases first)
-  const slangEntries = Object.entries(SLANG_TO_CLINICAL).sort((a, b) => b[0].length - a[0].length);
-  for (const [slang, clinical] of slangEntries) {
-    const regex = new RegExp(`\\b${slang.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
-    cleaned = cleaned.replace(regex, clinical);
-  }
+  cleaned = applyRules(cleaned, getRules().SLANG_RULES);
 
   // Collapse repeated characters (sooooo → so)
   cleaned = cleaned.replace(/(.)\1{3,}/g, '$1$1');

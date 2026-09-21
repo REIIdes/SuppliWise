@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
+const SupplementDetail = require('../models/SupplementDetail');
 
 const OPENROUTER_MODEL = 'deepseek/deepseek-v4-flash-0731';
 
@@ -30,6 +31,18 @@ router.post('/', protect, async (req, res) => {
 
   const patientProfile = buildPatientProfile(context);
   const isPersonalized = !!patientProfile;
+
+  // Non-personalized guides are identical for every user — serve from the DB
+  // cache instead of burning an AI call on each request.
+  const nameKey = supplementName.toLowerCase().trim();
+  if (!isPersonalized) {
+    try {
+      const cached = await SupplementDetail.findOne({ nameKey }).select('detail').lean();
+      if (cached?.detail) return res.json({ ...cached.detail, cached: true });
+    } catch (cacheError) {
+      console.error('[supplement_detail] cache read failed:', cacheError.message);
+    }
+  }
 
   const prompt = isPersonalized
     ? `You are an expert clinical nutritionist and pharmacologist. A patient has been recommended "${supplementName}" based on their health assessment. Write a detailed, personalized supplement guide tailored specifically to this patient.
@@ -150,6 +163,16 @@ Rules:
     }
 
     const detail = JSON.parse(jsonMatch[0]);
+
+    // Populate the cache for future non-personalized requests (best-effort)
+    if (!isPersonalized) {
+      SupplementDetail.updateOne(
+        { nameKey },
+        { $set: { name: detail.name || supplementName, detail } },
+        { upsert: true }
+      ).exec().catch((cacheError) => console.error('[supplement_detail] cache write failed:', cacheError.message));
+    }
+
     return res.json(detail);
 
   } catch (err) {

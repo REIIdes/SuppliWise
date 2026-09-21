@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { BASE_URL, parseJSON } from '../api';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -7,9 +7,8 @@ import AssessmentResultsDisplay from '../Components/AssessmentResultsDisplay/Ass
 import ModifyAssessmentModal from '../Components/ModifyAssessmentModal/ModifyAssessmentModal';
 import ReadOnlyAssessment from '../Components/ReadOnlyAssessment/ReadOnlyAssessment';
 
-const AssessmentManagement = ({ users: propUsers = [], adminRequest }) => {
+const AssessmentManagement = ({ users: propUsers = [] }) => {
   const [users, setUsers] = useState(propUsers);
-  const [selectedUser, setSelectedUser] = useState(null);
   const [assessments, setAssessments] = useState([]);
   const [selectedAssessment, setSelectedAssessment] = useState(null);
   const [modifiedAssessment, setModifiedAssessment] = useState(null);
@@ -17,6 +16,7 @@ const AssessmentManagement = ({ users: propUsers = [], adminRequest }) => {
   const [isLoadingAssessments, setIsLoadingAssessments] = useState(false);
   const [assessmentResults, setAssessmentResults] = useState(null);
   const [expandedUser, setExpandedUser] = useState(null);
+  const [listError, setListError] = useState('');
 
   // Hits /api/assessment/... directly with the admin token
   const assessmentRequest = async (path) => {
@@ -28,13 +28,67 @@ const AssessmentManagement = ({ users: propUsers = [], adminRequest }) => {
     return data;
   };
 
+  // Self-sufficient user list — the standalone /admin/assessment-management
+  // route renders this component with no props, so fetch when none provided.
+  const loadUsers = async () => {
+    setIsLoading(true);
+    setListError('');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30000);
+    try {
+      const res = await fetch(`${BASE_URL}/admin/users?search=`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('adminToken')}` },
+        signal: controller.signal,
+      });
+      const data = await parseJSON(res);
+      if (!res.ok) throw new Error(data?.message || 'Could not load users.');
+      setUsers(data.users || []);
+    } catch (err) {
+      setListError(err.name === 'AbortError'
+        ? 'Loading users timed out. Please check your connection and retry.'
+        : (err.message || 'Could not load users.'));
+    } finally {
+      clearTimeout(timer);
+      setIsLoading(false);
+    }
+  };
+
+  // Initial load when the parent did not supply a user list
+  useEffect(() => {
+    if (!propUsers || propUsers.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional initial list load on mount
+      loadUsers();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Sync if parent re-fetches and passes a new list
   useEffect(() => {
     if (propUsers && propUsers.length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional prop sync when parent reloads
       setUsers(propUsers);
       setIsLoading(false);
     }
   }, [propUsers]);
+
+  // Realtime sync: re-pull the expanded user's assessments when the tab
+  // regains focus (catches auto-lift/reflag that happened elsewhere)
+  const expandedRef = useRef(null);
+  useEffect(() => {
+    expandedRef.current = expandedUser;
+  }, [expandedUser]);
+  useEffect(() => {
+    const onVisible = () => {
+      const id = expandedRef.current;
+      if (document.visibilityState === 'visible' && id) {
+        assessmentRequest(`/user/${id}`)
+          .then(data => setAssessments(data))
+          .catch(() => {});
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []);
 
   const handleUserToggle = async (userId) => {
     if (expandedUser === userId) {
@@ -42,6 +96,7 @@ const AssessmentManagement = ({ users: propUsers = [], adminRequest }) => {
       setAssessments([]);
     } else {
       setExpandedUser(userId);
+      setAssessments([]); // clear previous user's list immediately — never show stale data
       setIsLoadingAssessments(true);
       try {
         const data = await assessmentRequest(`/user/${userId}`);
@@ -213,19 +268,6 @@ const AssessmentManagement = ({ users: propUsers = [], adminRequest }) => {
     setSelectedAssessment(assessment);
   };
 
-  const refreshAssessments = async (userId) => {
-    if (!userId) return;
-    setIsLoadingAssessments(true);
-    try {
-      const data = await assessmentRequest(`/user/${userId}`);
-      setAssessments(data);
-    } catch (error) {
-      console.error('Error fetching assessments:', error);
-    } finally {
-      setIsLoadingAssessments(false);
-    }
-  };
-
   const deleteAssessment = async (assessmentId) => {
     // Remove from local state immediately (modal already confirmed + called API)
     setAssessments(prev => prev.filter(a => a._id !== assessmentId));
@@ -242,6 +284,20 @@ const AssessmentManagement = ({ users: propUsers = [], adminRequest }) => {
 
   return (
     <div className="am-container">
+      <div className="am-list-header">
+        <span className="am-list-count">
+          {users.length} {users.length === 1 ? 'user' : 'users'}
+        </span>
+        <button
+          type="button"
+          className="am-refresh-btn"
+          onClick={loadUsers}
+          disabled={isLoading}
+          title="Reload the user list"
+        >
+          {isLoading ? 'Loading…' : '↻ Refresh'}
+        </button>
+      </div>
       <div className="am-user-list">
         {isLoading ? (
           <p className="am-empty">Loading users…</p>
@@ -315,11 +371,30 @@ const AssessmentManagement = ({ users: propUsers = [], adminRequest }) => {
                           <div key={assessment._id} className="am-card">
                             {/* Card header */}
                             <div className="am-card__header">
-                              <span className="am-pill am-pill--active">ACTIVE</span>
+                              {assessment.priority !== 'Priority' && assessment.expiresAt && new Date(assessment.expiresAt).getTime() <= Date.now() ? (
+                                <span className="am-pill am-pill--expired" title="Expired — record kept for reference">EXPIRED</span>
+                              ) : (
+                                <span className="am-pill am-pill--active">ACTIVE</span>
+                              )}
+                              {assessment.priority === 'Priority' && (
+                                <span
+                                  className="am-pill am-pill--priority"
+                                  title={(assessment.flagReasons || []).join('; ') || 'Flagged as priority'}
+                                >
+                                  ⚑ PRIORITY
+                                </span>
+                              )}
                               <span className="am-card__date">
                                 {new Date(assessment.createdAt).toLocaleString()}
                               </span>
                             </div>
+                            {assessment.priority === 'Priority' &&
+                              Array.isArray(assessment.flagReasons) &&
+                              assessment.flagReasons.length > 0 && (
+                              <p className="am-card__flag-reasons">
+                                Flagged: {assessment.flagReasons.join('; ')}
+                              </p>
+                            )}
 
                             {/* Symptoms summary */}
                             <p className="am-card__symptoms">
@@ -370,6 +445,13 @@ const AssessmentManagement = ({ users: propUsers = [], adminRequest }) => {
               </div>
             );
           })
+        ) : listError ? (
+          <div className="am-empty">
+            <p>{listError}</p>
+            <button type="button" className="am-retry-btn" onClick={loadUsers} disabled={isLoading}>
+              {isLoading ? 'Retrying…' : 'Retry'}
+            </button>
+          </div>
         ) : (
           <p className="am-empty">No users found.</p>
         )}

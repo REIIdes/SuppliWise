@@ -70,8 +70,8 @@ function cleanText(str) {
     .replace(/½/g, '1/2')
     .replace(/¼/g, '1/4')
     .replace(/¾/g, '3/4')
-    // Strip any remaining non-ASCII
-    .replace(/[^\x00-\x7F]/g, '');
+    // Strip any remaining non-ASCII (keep printable ASCII only; control chars break jsPDF)
+    .replace(/[^\x20-\x7E]/g, '');
 }
 
 function addPage(doc) {
@@ -104,34 +104,6 @@ function sectionHeading(doc, label, y) {
   doc.line(ML, y + 9, ML + CW, y + 9);
 
   return y + 14;
-}
-
-// Draws a small key-value row inline
-function kvRow(doc, key, value, y, keyW = 42) {
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8.5);
-  doc.setTextColor(...C.grayMid);
-  doc.text(cleanText(key), ML, y);
-
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(...C.grayDark);
-  const lines = doc.splitTextToSize(cleanText(String(value || '')), CW - keyW);
-  doc.text(lines, ML + keyW, y);
-  return y + lines.length * 5 + 1.5;
-}
-
-// Pill badge (coloured rounded rect + text)
-function pill(doc, text, x, y, rgb) {
-  const w = doc.getTextWidth(text) + 6;
-  doc.setFillColor(rgb[0], rgb[1], rgb[2], 0.12);
-  doc.setDrawColor(...rgb);
-  doc.setLineWidth(0.3);
-  doc.roundedRect(x, y - 3.5, w, 5.5, 1.5, 1.5, 'FD');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
-  doc.setTextColor(...rgb);
-  doc.text(text, x + 3, y + 0.5);
-  return x + w + 3;
 }
 
 // ── Footer on every page ───────────────────────────────────────────────────

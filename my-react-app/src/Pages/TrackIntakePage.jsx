@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import Toast from '../Components/Toast/Toast';
-import { getDashboard, updateIntake, getCalendarData, getWeeklyAdherence } from '../api';
+import { getDashboard, updateIntake, getCalendarData, getWeeklyAdherence, getDayRecords } from '../api';
 import './TrackIntakePage.css';
 
 function TrackIntakePage() {
@@ -18,34 +18,57 @@ function TrackIntakePage() {
   });
   const [streak, setStreak] = useState(0);
   const [longestStreak, setLongestStreak] = useState(0);
-  const [adherenceRate, setAdherenceRate] = useState(0);
   const [completionData, setCompletionData] = useState({});
   const [showCompletionToast, setShowCompletionToast] = useState(false);
+  const [priorityLifted, setPriorityLifted] = useState(false);
   const [markTakenToastMessage, setMarkTakenToastMessage] = useState('');
   const [markTakenToastKey, setMarkTakenToastKey] = useState(0);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
 
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      navigate('/login');
+  // Interactive calendar: selected past day + its records (read-only history)
+  const [selectedDay, setSelectedDay] = useState(null); // 'YYYY-MM-DD' or null (= today)
+  const [dayRecords, setDayRecords] = useState([]);
+  const [dayLoading, setDayLoading] = useState(false);
+  const [dayError, setDayError] = useState('');
+
+  const todayKey = () => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  };
+
+  const loadDay = async (key) => {
+    setSelectedDay(key);
+    setDayRecords([]);
+    setDayError('');
+    setDayLoading(true);
+    try {
+      const data = await getDayRecords(key);
+      setDayRecords(data.records || []);
+    } catch (err) {
+      setDayError(err.message || 'Could not load that day.');
+    } finally {
+      setDayLoading(false);
+    }
+  };
+
+  const handleDayClick = (day) => {
+    const key = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    // Today or future: no detail view (today uses the live list above)
+    if (key >= todayKey()) {
+      setSelectedDay(null);
+      setDayRecords([]);
+      setDayError('');
       return;
     }
-
-    fetchTrackingData();
-
-    // Add resize listener for responsive toast
-    const handleResize = () => {
-      setIsMobile(window.innerWidth <= 768);
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [navigate]);
-
-  useEffect(() => {
-    // Fetch calendar data whenever the displayed month changes
-    fetchCalendarData();
-  }, [currentDate]);
+    // Toggle off when clicking the already-selected day
+    if (selectedDay === key) {
+      setSelectedDay(null);
+      setDayRecords([]);
+      setDayError('');
+      return;
+    }
+    loadDay(key);
+  };
 
   const fetchCalendarData = async () => {
     try {
@@ -72,7 +95,6 @@ function TrackIntakePage() {
         setTodaysSupplements([]);
         setStreak(0);
         setLongestStreak(0);
-        setAdherenceRate(0);
         setWeeklyAdherence({ percentage: 0, days: [] });
         setLoading(false);
         return;
@@ -116,7 +138,6 @@ function TrackIntakePage() {
       setTodaysSupplements(sortedSupplements);
       setStreak(data.stats.daysStreak || 0);
       setLongestStreak(data.stats.longestStreak || 0);
-      setAdherenceRate(data.stats.adherenceRate || 0);
 
       // Fetch real weekly adherence data
       try {
@@ -141,6 +162,45 @@ function TrackIntakePage() {
       setLoading(false);
     }
   };
+
+  // Initial load on mount + auth guard + responsive toast
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      navigate('/login');
+      return;
+    }
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional initial tracking load on mount
+    fetchTrackingData();
+
+    // Add resize listener for responsive toast
+    const handleResize = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+    window.addEventListener('resize', handleResize);
+    // Realtime: refresh the moment the user returns to the tab
+    const handleVisible = () => {
+      if (document.visibilityState === 'visible' && localStorage.getItem('token')) {
+        fetchTrackingData();
+        fetchCalendarData();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisible);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      document.removeEventListener('visibilitychange', handleVisible);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigate]);
+
+  useEffect(() => {
+    // Fetch calendar data whenever the displayed month changes
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional refetch on month change
+    fetchCalendarData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentDate]);
+
 
   const handleMarkTaken = async (supplementId) => {
     const supplement = todaysSupplements.find(s => s.id === supplementId);
@@ -189,20 +249,21 @@ function TrackIntakePage() {
 
     try {
       const result = await updateIntake(supplementId, true);
-      
+
       if (result.stats) {
         setStreak(result.stats.daysStreak);
-        setAdherenceRate(result.stats.overallAdherence);
         setWeeklyAdherence(prev => ({
           ...prev,
           percentage: result.stats.overallAdherence,
         }));
-        
+
         // Check if all supplements are now taken
-        if (result.stats.todaysProgress.taken === result.stats.todaysProgress.total && 
+        if (result.stats.todaysProgress.taken === result.stats.todaysProgress.total &&
             result.stats.todaysProgress.total > 0) {
           // Hide the "marked as taken" toast immediately
           setMarkTakenToastMessage('');
+          // Flag auto-lifted when the last supplement completed the plan
+          setPriorityLifted(!!result.priorityLifted);
           // Show completion toast
           setShowCompletionToast(true);
           // Auto-hide after 4 seconds
@@ -212,6 +273,18 @@ function TrackIntakePage() {
           // Increment key to force re-render even if previous toast is still showing
           setMarkTakenToastKey(prev => prev + 1);
           setMarkTakenToastMessage('Supplement marked as taken');
+        }
+
+        // Realtime: refresh calendar colors + weekly stats immediately
+        fetchCalendarData();
+        try {
+          const weeklyData = await getWeeklyAdherence();
+          setWeeklyAdherence({
+            percentage: weeklyData.overallAdherence || 0,
+            days: weeklyData.weeklyDays || [],
+          });
+        } catch {
+          // Weekly panel keeps previous values on failure
         }
       }
     } catch (err) {
@@ -272,14 +345,29 @@ function TrackIntakePage() {
 
     try {
       const result = await updateIntake(supplementId, false);
-      
+
       if (result.stats) {
         setStreak(result.stats.daysStreak);
-        setAdherenceRate(result.stats.overallAdherence);
         setWeeklyAdherence(prev => ({
           ...prev,
           percentage: result.stats.overallAdherence,
         }));
+      }
+      // Strict gate: undo after an auto-lift reinstates the restriction
+      if (result.priorityReflagged) {
+        setMarkTakenToastKey(prev => prev + 1);
+        setMarkTakenToastMessage('Priority review reinstated — new assessments paused again.');
+      }
+      // Realtime: refresh calendar colors + weekly stats immediately
+      fetchCalendarData();
+      try {
+        const weeklyData = await getWeeklyAdherence();
+        setWeeklyAdherence({
+          percentage: weeklyData.overallAdherence || 0,
+          days: weeklyData.weeklyDays || [],
+        });
+      } catch {
+        // Weekly panel keeps previous values on failure
       }
     } catch (err) {
       console.error('Error undoing supplement:', err);
@@ -306,55 +394,70 @@ function TrackIntakePage() {
     
     // Actual days
     const today = new Date();
+    const todayKeyStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     for (let day = 1; day <= daysInMonth; day++) {
-      const isToday = day === today.getDate() && 
-                      month === today.getMonth() && 
+      const isToday = day === today.getDate() &&
+                      month === today.getMonth() &&
                       year === today.getFullYear();
-      
+      const cellKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const isFuture = cellKey > todayKeyStr;
+      const isSelected = selectedDay === cellKey;
+
       // Check completion status for this day
       const dayData = completionData[day];
       let dayClass = '';
-      let tooltipText = '';
-      
+      let tooltipText;
+
       if (isToday) {
         dayClass = 'today';
-        tooltipText = 'Today';
+        tooltipText = 'Today — use the list above';
+      } else if (isFuture) {
+        dayClass = 'future';
+        tooltipText = 'Future date';
       } else if (dayData) {
         if (dayData.percentage === 100) {
           dayClass = 'completed';
-          tooltipText = `${dayData.taken}/${dayData.total} supplements taken (100%)`;
+          tooltipText = `${dayData.taken}/${dayData.total} supplements taken (100%) — click to view`;
         } else if (dayData.percentage > 0) {
           dayClass = 'partial';
-          tooltipText = `${dayData.taken}/${dayData.total} supplements taken (${dayData.percentage}%)`;
+          tooltipText = `${dayData.taken}/${dayData.total} supplements taken (${dayData.percentage}%) — click to view`;
         } else {
           dayClass = 'missed';
-          tooltipText = `${dayData.taken}/${dayData.total} supplements taken (0%)`;
+          tooltipText = `${dayData.taken}/${dayData.total} supplements taken (0%) — click to view`;
         }
+      } else {
+        tooltipText = 'No records — click to view';
       }
-      
+
       days.push(
-        <div 
-          key={day} 
-          className={`calendar-day ${dayClass}`}
+        <button
+          type="button"
+          key={day}
+          className={`calendar-day ${dayClass}${isSelected ? ' selected' : ''}`}
           title={tooltipText}
+          aria-label={`${monthNames[month]} ${day}, ${year}${tooltipText ? ` — ${tooltipText}` : ''}`}
+          aria-pressed={isSelected}
+          disabled={isFuture}
+          onClick={() => handleDayClick(day)}
         >
           {day}
           {dayData && dayData.percentage === 100 && (
-            <svg 
-              className="completion-checkmark" 
-              width="12" 
-              height="12" 
-              viewBox="0 0 24 24" 
-              fill="none" 
-              stroke="currentColor" 
-              strokeWidth="3" 
-              strokeLinecap="round" 
+            <svg
+              className="completion-checkmark"
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="3"
+              strokeLinecap="round"
               strokeLinejoin="round"
+              aria-hidden="true"
             >
               <polyline points="20 6 9 17 4 12"/>
             </svg>
           )}
-        </div>
+        </button>
       );
     }
     
@@ -362,10 +465,16 @@ function TrackIntakePage() {
   };
 
   const goToPreviousMonth = () => {
+    setSelectedDay(null);
+    setDayRecords([]);
+    setDayError('');
     setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1));
   };
 
   const goToNextMonth = () => {
+    setSelectedDay(null);
+    setDayRecords([]);
+    setDayError('');
     setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1));
   };
 
@@ -448,15 +557,19 @@ function TrackIntakePage() {
               color: 'white',
               lineHeight: '1.4'
             }}>
-              Great job! You completed today's supplement plan.
+              {priorityLifted
+                ? 'Priority review completed! New assessments are unlocked.'
+                : "Great job! You completed today's supplement plan."}
             </h3>
-            <p style={{ 
-              margin: 0, 
+            <p style={{
+              margin: 0,
               fontSize: isMobile ? '12px' : '14px',
               color: 'rgba(255, 255, 255, 0.9)',
               lineHeight: '1.4'
             }}>
-              Your adherence and streak have been updated.
+              {priorityLifted
+                ? 'All supplements taken — the flag on your assessment has been lifted.'
+                : 'Your adherence and streak have been updated.'}
             </p>
           </div>
           <button 
@@ -655,6 +768,74 @@ function TrackIntakePage() {
                 </div>
               )}
             </div>
+
+            {/* Selected-day detail (interactive calendar history, read-only) */}
+            {selectedDay && (
+              <div className="track-section day-detail">
+                <div className="day-detail__header">
+                  <h2 className="section-title">
+                    {new Date(`${selectedDay}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+                  </h2>
+                  <button
+                    type="button"
+                    className="day-detail__close"
+                    onClick={() => { setSelectedDay(null); setDayRecords([]); setDayError(''); }}
+                    aria-label="Close day details"
+                  >
+                    ×
+                  </button>
+                </div>
+                {dayLoading ? (
+                  <p className="day-detail__status">Loading that day…</p>
+                ) : dayError ? (
+                  <div className="day-detail__error" role="alert">
+                    <span>{dayError}</span>
+                    <button
+                      type="button"
+                      className="day-detail__retry"
+                      onClick={() => selectedDay && loadDay(selectedDay)}
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : dayRecords.length === 0 ? (
+                  <p className="day-detail__status">No supplements were on the plan that day.</p>
+                ) : (
+                  <>
+                    <p className="day-detail__summary">
+                      {dayRecords.filter(r => r.taken).length} of {dayRecords.length} taken
+                      {dayRecords.length > 0 && dayRecords.every(r => r.taken) ? ' — perfect day 🎉' : ''}
+                    </p>
+                    <div className="day-detail__list">
+                      {dayRecords.map(rec => (
+                        <div key={rec.id} className={`day-detail__row${rec.taken ? ' day-detail__row--taken' : ''}`}>
+                          <span
+                            className={`priority-indicator priority-${(rec.priority || 'medium').toLowerCase()}`}
+                            title={`${rec.priority} Priority`}
+                          >
+                            <svg width="6" height="6" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                              <circle cx="12" cy="12" r="12" />
+                            </svg>
+                          </span>
+                          <div className="day-detail__info">
+                            <span className="day-detail__name">{rec.name}</span>
+                            <span className="day-detail__meta">
+                              {rec.dosage}
+                              {rec.taken && rec.takenAt
+                                ? ` · Taken at ${new Date(rec.takenAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
+                                : ` · Best time: ${rec.scheduledTime}`}
+                            </span>
+                          </div>
+                          <span className={`day-detail__pill${rec.taken ? ' day-detail__pill--taken' : ' day-detail__pill--missed'}`}>
+                            {rec.taken ? '✓ Taken' : 'Not taken'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
 
             {/* This Week's Adherence */}
             <div className="track-section">

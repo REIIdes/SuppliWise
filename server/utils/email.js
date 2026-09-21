@@ -14,6 +14,11 @@ const getTransporter = () => {
     try {
       transporter = nodemailer.createTransport({
         service: process.env.EMAIL_SERVICE || 'gmail',
+        // Pooled connections: reuse the SMTP session instead of a full
+        // TLS handshake per OTP (major send-latency win on repeated logins)
+        pool: true,
+        maxConnections: 3,
+        maxMessages: 100,
         auth: {
           user: process.env.EMAIL_USER,
           pass: String(process.env.EMAIL_PASSWORD).replace(/\s+/g, ''),
@@ -201,4 +206,20 @@ This is an automated message from SuppliWise.
 
 module.exports = {
   sendOtpEmail,
+  // Verifies SMTP credentials at startup so a bad app-password shows up in
+  // the server log immediately instead of as mysterious login failures.
+  verifyEmailConfig,
 };
+
+async function verifyEmailConfig() {
+  const transport = getTransporter();
+  if (!transport) return false;
+  try {
+    await transport.verify();
+    console.log('[Email] SMTP connection verified — OTP delivery ready');
+    return true;
+  } catch (error) {
+    console.error('[Email] SMTP verification failed:', error.message);
+    return false;
+  }
+}

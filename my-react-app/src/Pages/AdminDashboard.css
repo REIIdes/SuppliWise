@@ -211,7 +211,45 @@
   box-shadow: 0 12px 30px rgba(23,35,31,.16);
   border-radius: 8px;
 }
-.admin-notif-panel h3 { margin-bottom: 10px; }
+.admin-notif-panel h3 { margin-bottom: 0; }
+.admin-notif-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.admin-notif-panel__action {
+  background: none;
+  border: none;
+  color: #24734e;
+  font: 700 12px Arial, sans-serif;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.admin-notif-panel__action:hover {
+  background: #eef7f0;
+}
+.notification--flag {
+  border-left-color: #b91c1c !important;
+  background: #fef2f2;
+  border-radius: 0 6px 6px 0;
+}
+.notification__delete {
+  float: right;
+  background: none;
+  border: none;
+  color: #9aa0a6;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0 0 8px;
+}
+.notification__delete:hover {
+  color: #b91c1c;
+}
 
 /* ── User list ───────────────────────────────────────────────────────── */
 .user-list {
@@ -368,21 +406,38 @@
   border-top: 1px solid var(--admin-line);
 }
 
-/* Subscription toggle */
-.subscription-toggle-button {
-  font: 13px Arial, sans-serif;
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  color: var(--admin-muted);
-  text-decoration: underline;
-  text-align: left;
+/* Subscription status badge + plan selector */
+.subscription-status-badge {
+  display: inline-block;
+  font: 700 12px Arial, sans-serif;
+  background: #eef0f4;
+  color: #5b6472;
+  border-radius: 999px;
+  padding: 4px 12px;
+  width: fit-content;
 }
-.subscription-toggle-button.subscribed {
+.subscription-status-badge--active {
+  background: #e3f5e9;
   color: #24734e;
-  font-weight: 700;
-  text-decoration: none;
+}
+.subscription-plan-label {
+  font: 12px Arial, sans-serif;
+  color: var(--admin-muted);
+  margin-top: 10px;
+}
+.subscription-plan-select {
+  font: 14px Arial, sans-serif;
+  color: var(--admin-ink, #1f2937);
+  background: #fff;
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  max-width: 260px;
+  cursor: pointer;
+}
+.subscription-plan-select:focus {
+  outline: 2px solid #4f6bed;
+  outline-offset: 1px;
 }
 
 .admin-header h1 { font-size: clamp(28px, 4vw, 45px); line-height: 1; margin: 7px 0 0; font-weight: 500; }

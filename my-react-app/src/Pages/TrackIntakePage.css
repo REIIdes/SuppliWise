@@ -360,20 +360,41 @@
   align-items: center;
   justify-content: center;
   font-size: 14px;
+  font-family: inherit;
   color: #374151;
+  background: none;
+  border: none;
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s ease;
   position: relative;
+  padding: 0;
 }
 
-.calendar-day:not(.empty):hover {
+.calendar-day:not(.empty):not(:disabled):hover {
   background: #f0fdf4;
   color: #10b981;
 }
 
 .calendar-day.empty {
   cursor: default;
+}
+
+.calendar-day.future {
+  color: #d1d5db;
+  cursor: default;
+}
+
+.calendar-day:disabled {
+  cursor: default;
+}
+
+.calendar-day.selected {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px #10b981;
+}
+
+.calendar-day.today.selected {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px #065f46;
 }
 
 .calendar-day.today {
@@ -715,3 +736,25 @@
   background: rgba(255, 255, 255, 0.3);
   transform: scale(1.1);
 }
+
+/* Interactive day-detail panel (calendar history) */
+.day-detail{border-color:#a7f3d0}
+.day-detail__header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px}
+.day-detail__header .section-title{margin:0}
+.day-detail__close{background:#f3f4f6;border:none;color:#6b7280;font-size:20px;line-height:1;width:32px;height:32px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.day-detail__close:hover{background:#e5e7eb;color:#111827}
+.day-detail__status{color:#6b7280;font-size:14px;padding:12px 0;margin:0}
+.day-detail__error{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:10px;padding:10px 14px;font-size:.9rem}
+.day-detail__retry{background:#b91c1c;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-weight:700;cursor:pointer;white-space:nowrap}
+.day-detail__summary{font-size:14px;font-weight:600;color:#065f46;margin:0 0 12px}
+.day-detail__list{display:flex;flex-direction:column;gap:10px}
+.day-detail__row{display:flex;align-items:flex-start;gap:10px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;padding:12px 14px}
+.day-detail__row--taken{background:#f0fdf4;border-color:#bbf7d0}
+.day-detail__row .priority-indicator{margin-top:4px}
+.day-detail__info{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
+.day-detail__name{font-weight:700;color:#111827;font-size:14px}
+.day-detail__meta{font-size:12.5px;color:#6b7280}
+.day-detail__pill{flex-shrink:0;font-size:11.5px;font-weight:700;padding:5px 10px;border-radius:999px;white-space:nowrap}
+.day-detail__pill--taken{background:#16a34a;color:#fff}
+.day-detail__pill--missed{background:#fee2e2;color:#b91c1c}
+@media (max-width:480px){.day-detail__row{flex-wrap:wrap}}

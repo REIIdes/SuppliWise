@@ -28,7 +28,7 @@ const userSchema = new mongoose.Schema(
       unique: true,
       lowercase: true,
       trim: true,
-      match: [/^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,6}$/, 'Please enter a valid email address.'],
+      match: [/^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/, 'Please enter a valid email address.'],
     },
     password: {
       type: String,
@@ -125,6 +125,10 @@ const userSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Admin panels sort/filter by recency and login activity
+userSchema.index({ createdAt: -1 });
+userSchema.index({ lastLoginAt: -1 });
+
 // Virtual for full name
 userSchema.virtual('fullName').get(function() {
   return `${this.firstName} ${this.lastName}`;
@@ -154,9 +158,9 @@ userSchema.pre('save', async function (next) {
     this.name = `${this.firstName} ${this.lastName}`;
   }
   
-  // Hash password
+  // Hash password (cost 12 — matches the Security center claim + admin hashes)
   if (!this.isModified('password')) return next();
-  const salt = await bcrypt.genSalt(10);
+  const salt = await bcrypt.genSalt(12);
   this.password = await bcrypt.hash(this.password, salt);
   next();
 });
@@ -166,18 +170,30 @@ userSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
-// Cascade delete — remove all assessments when a user is deleted
+// Cascade delete — remove assessments + tracking data when a user is deleted
 userSchema.post('findOneAndDelete', async function (doc) {
   if (doc) {
     const Assessment = require('./Assessment');
-    await Assessment.deleteMany({ user: doc._id });
+    const IntakeRecord = require('./IntakeRecord');
+    const DashboardMetrics = require('./DashboardMetrics');
+    await Promise.all([
+      Assessment.deleteMany({ user: doc._id }),
+      IntakeRecord.deleteMany({ user: doc._id }),
+      DashboardMetrics.deleteMany({ user: doc._id }),
+    ]);
     console.log(`Cascade deleted assessments for user ${doc._id}`);
   }
 });
 
 userSchema.post('deleteOne', { document: true, query: false }, async function () {
   const Assessment = require('./Assessment');
-  await Assessment.deleteMany({ user: this._id });
+  const IntakeRecord = require('./IntakeRecord');
+  const DashboardMetrics = require('./DashboardMetrics');
+  await Promise.all([
+    Assessment.deleteMany({ user: this._id }),
+    IntakeRecord.deleteMany({ user: this._id }),
+    DashboardMetrics.deleteMany({ user: this._id }),
+  ]);
   console.log(`Cascade deleted assessments for user ${this._id}`);
 });
 

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import './SecurityStatus.css';
 
 // ── Status pill — matches the existing Security Checks pill style ──────────
@@ -208,7 +208,7 @@ function OverallBanner({ status, syncedAt, syncing, onSync, onDownload }) {
 }
 
 // ── Main Component ────────────────────────────────────────────────────────
-const SecurityStatus = ({ securityData, adminRequest, onDownloadReport }) => {
+const SecurityStatus = ({ adminRequest, onDownloadReport }) => {
   const [monitors,             setMonitors]             = useState([]);
   const [overallMonitorStatus, setOverallMonitorStatus] = useState('loading');
   const [syncedAt,             setSyncedAt]             = useState(null);
@@ -216,12 +216,12 @@ const SecurityStatus = ({ securityData, adminRequest, onDownloadReport }) => {
   const [monitorError,         setMonitorError]         = useState('');
   const intervalRef = useRef(null);
 
-  const fetchMonitor = useCallback(async () => {
+  const fetchMonitor = useCallback(async (force = false) => {
     if (!adminRequest) return;
     setSyncing(true);
     setMonitorError('');
     try {
-      const data = await adminRequest('/security/monitor');
+      const data = await adminRequest(`/security/monitor${force ? '?fresh=1' : ''}`);
       setMonitors(data.monitors || []);
       setOverallMonitorStatus(data.overallMonitorStatus || 'healthy');
       setSyncedAt(data.syncedAt || new Date().toISOString());
@@ -234,12 +234,13 @@ const SecurityStatus = ({ securityData, adminRequest, onDownloadReport }) => {
 
   // Initial load + auto-refresh every 30 s
   useEffect(() => {
-    fetchMonitor();
-    intervalRef.current = window.setInterval(fetchMonitor, 30000);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional initial data fetch on mount
+    fetchMonitor(false);
+    intervalRef.current = window.setInterval(() => fetchMonitor(false), 30000);
     return () => window.clearInterval(intervalRef.current);
   }, [fetchMonitor]);
 
-  // (securityData kept as prop for future use / API compatibility)
+  // (adminRequest-based live monitor is the source of truth)
 
   // Build ordered rows — include skeleton placeholders while loading
   const orderedMonitors = MONITOR_ORDER.map(key => {
@@ -272,7 +273,7 @@ const SecurityStatus = ({ securityData, adminRequest, onDownloadReport }) => {
           status={overallMonitorStatus}
           syncedAt={syncedAt}
           syncing={syncing}
-          onSync={fetchMonitor}
+          onSync={() => fetchMonitor(true)}
           onDownload={onDownloadReport}
         />
 

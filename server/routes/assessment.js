@@ -2,8 +2,41 @@ const express = require('express');
 const router = express.Router();
 const Assessment = require('../models/Assessment');
 const DashboardMetrics = require('../models/DashboardMetrics');
+const UserNotification = require('../models/UserNotification');
+const AdminEvent = require('../models/AdminEvent');
 const { protect } = require('../middleware/auth');
-const { sanitizeTextField, sanitizeShortField } = require('../utils/sanitize');
+const { sanitizeTextField, sanitizeShortField, scrubKeys } = require('../utils/sanitize');
+const { historyLimitFor, tierOf } = require('../utils/plan');
+const { analyzeSeverity } = require('../utils/severity');
+
+// Flag an assessment as Priority + notify the user and admins (best-effort,
+// never fails the surrounding request). Idempotent per assessment.
+async function flagSevereAssessment(assessment, reasons, userEmail) {
+  try {
+    const label = reasons.length > 0 ? reasons.join('; ') : 'Severe case detected';
+    await Assessment.findByIdAndUpdate(assessment._id, {
+      // Priority assessments never expire while flagged (expiresAt: null)
+      $set: { priority: 'Priority', flagReasons: reasons.slice(0, 5), flaggedAt: new Date(), expiresAt: null, resolvedAt: null, resolvedReason: '' },
+    });
+    await UserNotification.create({
+      user: assessment.user,
+      type: 'severe-flag',
+      title: 'Health review flagged for your assessment',
+      detail: `Our review flagged possible severe concerns (${label}). An administrator has been notified. If you feel unwell, please seek medical care promptly.`,
+      assessmentId: assessment._id,
+    });
+    await AdminEvent.create({
+      type: 'severe-flag',
+      title: 'Severe case flagged',
+      detail: `${userEmail || 'A user'} — ${label}`,
+      user: assessment.user,
+      assessmentId: assessment._id,
+      linkUserId: assessment.user,
+    }).catch(() => {});
+  } catch (err) {
+    console.error('[severity-flag]', err.message);
+  }
+}
 
 // @route   POST /api/assessment
 // @desc    Save a completed health assessment
@@ -51,6 +84,23 @@ router.post('/', protect, async (req, res) => {
     if (suppsResult.garbage)     garbageFields.push({ field: 'currentSupplements',   label: 'Current Supplements',  value: currentSupplements });
     if (bloodResult.garbage)     garbageFields.push({ field: 'bloodTestResults',     label: 'Blood Test Results',   value: req.body.bloodTestResults });
 
+    // ── Priority gate: while a Priority assessment is unresolved the user
+    // must finish it first (admin resolves via Standard, or it is deleted).
+    // This keeps severe cases from being buried under newer assessments.
+    const blockingPriority = await Assessment.findOne({ user: req.user._id, priority: 'Priority' })
+      .select('_id createdAt flagReasons flaggedAt')
+      .lean();
+    if (blockingPriority) {
+      return res.status(403).json({
+        message: 'You have a prioritized assessment that needs to finish first. Please complete its review before starting a new assessment.',
+        priorityAssessment: {
+          id: blockingPriority._id,
+          createdAt: blockingPriority.createdAt,
+          reasons: blockingPriority.flagReasons || [],
+        },
+      });
+    }
+
     const assessment = await Assessment.create({
       user: req.user._id,
       userEmail: req.user.email,
@@ -74,6 +124,19 @@ router.post('/', protect, async (req, res) => {
     });
 
     console.log('Assessment saved to DB, id:', assessment._id);
+
+    // Auto-flag severe cases (Priority + user/admin notifications, best-effort)
+    const severity = analyzeSeverity(req.body);
+    let severityFlag = { flagged: false, reasons: [] };
+    if (severity.flagged) {
+      severityFlag = severity;
+      await flagSevereAssessment(assessment, severity.reasons, req.user.email);
+      // Reflect the flag in this response (the created doc predates the update)
+      assessment.priority = 'Priority';
+      assessment.flagReasons = severity.reasons.slice(0, 5);
+      assessment.flaggedAt = new Date();
+      assessment.expiresAt = null;
+    }
     
     // Deactivate all previous dashboard metrics
     await DashboardMetrics.updateMany(
@@ -93,33 +156,73 @@ router.post('/', protect, async (req, res) => {
     });
     
     console.log('Dashboard metrics reset for new assessment');
-    res.status(201).json({ message: 'Assessment saved', assessment, garbageFields });
+    res.status(201).json({ message: 'Assessment saved', assessment, garbageFields, severityFlag });
   } catch (error) {
     console.error('[assessment POST]', error.message);
     res.status(500).json({ message: 'Could not save your assessment. Please try again.' });
   }
 });
 
+// @route   GET /api/assessment/priority-status
+// @desc    Whether the user is blocked from new assessments + the blocking items
+// @access  Private
+router.get('/priority-status', protect, async (req, res) => {
+  try {
+    const items = await Assessment.find({ user: req.user._id, priority: 'Priority' })
+      .sort({ createdAt: -1 })
+      .limit(3)
+      .select('createdAt flagReasons flaggedAt')
+      .lean();
+    res.json({
+      blocked: items.length > 0,
+      assessments: items.map(a => ({
+        id: a._id,
+        createdAt: a.createdAt,
+        flaggedAt: a.flaggedAt,
+        reasons: a.flagReasons || [],
+      })),
+    });
+  } catch (error) {
+    console.error('[assessment GET /priority-status]', error.message);
+    res.status(500).json({ message: 'Could not check priority status.' });
+  }
+});
+
 // @route   GET /api/assessment/history
 // @desc    Get all assessments for the current user (newest first, paginated)
-// @access  Private
+// @access  Private (page size capped by subscription tier:
+//          free = 5, monthly = 10, annual/ultimate = 20 — full 5-year
+//          record history is an annual+ perk)
 router.get('/history', protect, async (req, res) => {
   try {
+    const planLimit = historyLimitFor(req.user);
     const page  = Math.max(1, parseInt(req.query.page)  || 1);
-    const limit = Math.min(20, Math.max(1, parseInt(req.query.limit) || 10));
+    const requested = Math.max(1, parseInt(req.query.limit) || 10);
+    const limit = Math.min(requested, planLimit, 20);
     const skip  = (page - 1) * limit;
+    // Lightweight mode for the recommendations page — only the fields it reads,
+    // instead of the full ~500 KB aiResults blob per assessment.
+    const light = req.query.fields === 'recommendations';
+    const projection = light ? 'aiResults.recommendations createdAt' : null;
+
+    const historyQuery = Assessment.find({ user: req.user._id })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      // Lean: skip Mongoose hydration (aiResults docs can be ~500 KB)
+      .lean();
+    if (projection) historyQuery.select(projection);
 
     const [assessments, total] = await Promise.all([
-      Assessment.find({ user: req.user._id })
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit),
+      historyQuery,
       Assessment.countDocuments({ user: req.user._id }),
     ]);
 
     res.json({
       serverTime: new Date().toISOString(),
       assessments,
+      planLimit,
+      currentPlan: tierOf(req.user),
       pagination: {
         total,
         page,
@@ -184,15 +287,43 @@ router.get('/results/:assessmentId', protect, async (req, res) => {
 // @route   PATCH /api/assessment/:id/results
 // @desc    Store AI results on an existing assessment
 // @access  Private
+const MAX_AI_RESULTS_BYTES = 500 * 1024; // 500 KB — prevents DB bloat from oversized payloads
 router.patch('/:id/results', protect, async (req, res) => {
   try {
+    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+      return res.status(400).json({ message: 'Invalid results payload.' });
+    }
+    // Strip prototype-pollution keys before persisting the Mixed blob
+    scrubKeys(req.body);
+    let size = 0;
+    try {
+      size = Buffer.byteLength(JSON.stringify(req.body), 'utf8');
+    } catch {
+      return res.status(400).json({ message: 'Invalid results payload.' });
+    }
+    if (size > MAX_AI_RESULTS_BYTES) {
+      return res.status(413).json({ message: 'Results payload is too large.' });
+    }
     const assessment = await Assessment.findOneAndUpdate(
       { _id: req.params.id, user: req.user._id },
       { aiResults: req.body },
       { new: true }
     );
     if (!assessment) return res.status(404).json({ message: 'Assessment not found.' });
-    res.json({ message: 'Results saved', assessment });
+    // Re-run severe-case detection now that AI results exist (warnings scan).
+    // Only flags when the assessment isn't already Priority (idempotent).
+    let severityFlag = { flagged: false, reasons: [] };
+    if (assessment.priority !== 'Priority') {
+      const severity = analyzeSeverity(
+        assessment.toObject ? assessment.toObject() : assessment,
+        req.body
+      );
+      if (severity.flagged) {
+        severityFlag = severity;
+        await flagSevereAssessment(assessment, severity.reasons, assessment.userEmail);
+      }
+    }
+    res.json({ message: 'Results saved', assessment, severityFlag });
   } catch (error) {
     console.error('[assessment PATCH /:id/results]', error.message);
     res.status(500).json({ message: 'Could not save results. Please try again.' });
@@ -211,9 +342,14 @@ router.patch('/:id/priority', protect, async (req, res) => {
     return res.status(400).json({ message: 'Priority must be "Priority" or "Standard".' });
   }
   try {
+    const { expiryDateFromNow } = require('../utils/assessments');
+    // Priority suspends expiration; resolving restores a fresh 5-year window.
+    const update = priority === 'Priority'
+      ? { priority, flaggedAt: new Date(), expiresAt: null, resolvedAt: null, resolvedReason: '' }
+      : { priority, expiresAt: expiryDateFromNow(), resolvedAt: new Date(), resolvedReason: 'admin-resolved' };
     const assessment = await Assessment.findByIdAndUpdate(
       req.params.id,
-      { priority },
+      update,
       { new: true }
     );
     if (!assessment) return res.status(404).json({ message: 'Assessment not found.' });
@@ -236,6 +372,17 @@ router.delete('/:id', protect, async (req, res) => {
 
     const assessment = await Assessment.findOneAndDelete(filter);
     if (!assessment) return res.status(404).json({ message: 'Assessment not found.' });
+    // Clean up orphaned tracking data (intake records + metrics reference the assessment)
+    try {
+      const IntakeRecord = require('../models/IntakeRecord');
+      const DashboardMetrics = require('../models/DashboardMetrics');
+      await Promise.all([
+        IntakeRecord.deleteMany({ assessment: assessment._id }),
+        DashboardMetrics.deleteMany({ assessment: assessment._id }),
+      ]);
+    } catch (cleanupError) {
+      console.error('[assessment DELETE /:id] orphan cleanup failed:', cleanupError.message);
+    }
     res.json({ message: 'Assessment deleted.' });
   } catch (error) {
     console.error('[assessment DELETE /:id]', error.message);

@@ -10,43 +10,11 @@ function RecommendationsPage() {
   const [loading, setLoading] = useState(true);
   const [recommendations, setRecommendations] = useState(null);
   const [activeTab, setActiveTab] = useState('all');
-  const [error, setError] = useState('');
   const [addedSupplements, setAddedSupplements] = useState(new Set());
   const [addingSupplementId, setAddingSupplementId] = useState(null);
   const [toast, setToast] = useState('');
   const [toastKey, setToastKey] = useState(0);
   const toastTimerRef = useRef(null);
-
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      navigate('/login');
-      return;
-    }
-
-    // Fetch both in parallel and wait for both to complete
-    const fetchData = async () => {
-      setLoading(true);
-      setRecommendations(null); // Clear old data immediately
-      setAddedSupplements(new Set()); // Clear old "added" state immediately
-      
-      await Promise.all([
-        fetchLatestRecommendations(),
-        fetchMyPlan()
-      ]);
-      
-      setLoading(false); // Only set loading false after BOTH complete
-    };
-    
-    fetchData();
-    
-    // Cleanup timer on unmount
-    return () => {
-      if (toastTimerRef.current) {
-        clearTimeout(toastTimerRef.current);
-      }
-    };
-  }, [navigate]);
 
   const fetchMyPlan = async () => {
     try {
@@ -61,11 +29,12 @@ function RecommendationsPage() {
 
   const fetchLatestRecommendations = async () => {
     try {
-      const historyData = await getHistory(1, 1);
-      
+      // Lightweight fetch — only recommendations, not the full AI blob
+      const historyData = await getHistory(1, 1, 'recommendations');
+
       if (historyData.assessments && historyData.assessments.length > 0) {
         const latestAssessment = historyData.assessments[0];
-        
+
         if (latestAssessment.aiResults?.recommendations) {
           setRecommendations(latestAssessment.aiResults.recommendations);
         } else {
@@ -82,6 +51,38 @@ function RecommendationsPage() {
       setRecommendations([]);
     }
   };
+
+  // Initial parallel load on mount + auth guard
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      navigate('/login');
+      return;
+    }
+
+    // Fetch both in parallel and wait for both to complete
+    const fetchData = async () => {
+      setLoading(true);
+      setRecommendations(null); // Clear old data immediately
+      setAddedSupplements(new Set()); // Clear old "added" state immediately
+
+      await Promise.all([
+        fetchLatestRecommendations(),
+        fetchMyPlan()
+      ]);
+
+      setLoading(false); // Only set loading false after BOTH complete
+    };
+
+    fetchData();
+
+    // Cleanup timer on unmount
+    return () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, [navigate]);
 
   const getFilteredRecommendations = () => {
     if (!recommendations) return [];

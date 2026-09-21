@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
-import { saveAssessment, getRecommendations, saveAssessmentResults } from '../api';
+import { saveAssessment, getRecommendations, saveAssessmentResults, getPriorityStatus } from '../api';
 import './AssessmentPage.css';
 
 const TOTAL_STEPS = 4;
@@ -185,15 +185,14 @@ function Step1({ data, onChange, errors }) {
   const showActivityLevel = age === 0 || age >= 13;
   const [openActivity, setOpenActivity] = useState(null);
   const [openTooltip, setOpenTooltip] = useState(null);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isLoggedIn] = useState(() => !!localStorage.getItem('user'));
 
   // Calculate age and load gender from user's data stored in localStorage (only for logged-in users)
   useEffect(() => {
     const userStr = localStorage.getItem('user');
-    if (userStr) {
-      setIsLoggedIn(true);
-      try {
-        const user = JSON.parse(userStr);
+    if (!userStr) return;
+    try {
+      const user = JSON.parse(userStr);
         
         // Auto-calculate age from dateOfBirth
         if (user.dateOfBirth) {
@@ -217,9 +216,7 @@ function Step1({ data, onChange, errors }) {
       } catch (err) {
         console.error('Error loading user data:', err);
       }
-    } else {
-      setIsLoggedIn(false);
-    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Run once on mount
 
   useEffect(() => {
@@ -1207,29 +1204,17 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.gender]);
 
-  const showPregnancy = data.gender === 'Female';
-
   // ── Symptoms ──
   const selectedSymptoms = data.symptoms || [];
   const symptomSeverity = data.symptomSeverity || {};
   const gender = data.gender || '';
   const isPregnantOrBreastfeeding = data.isPregnant === 'Yes' || data.isBreastfeeding === 'Yes';
-  const visibleSymptoms = ALL_SYMPTOMS.filter(s => {
-    // Gender filter
-    if (s.genders.length > 0 && !s.genders.includes(gender) && gender !== '') return false;
-    if (s.name === 'Low Libido' && isPregnantOrBreastfeeding) return false;
-    // Condition-specific: only show if no conditions restriction OR if user selected a matching condition
-    if (s.conditions && s.conditions.length > 0) {
-      const selectedConditions = (data.medicalConditions || []).filter(c => c !== 'None');
-      return s.conditions.some(c => selectedConditions.includes(c));
-    }
-    return true; // general symptom — always show
-  });
   const [severityErrors, setSeverityErrors] = useState([]);
 
   // Sync parent-level errors (from clicking Next) into local severityErrors state
   useEffect(() => {
     if (errors.symptomSeverity && errors.symptomSeverity.length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional error-prop sync
       setSeverityErrors(errors.symptomSeverity);
     }
   }, [errors.symptomSeverity]);
@@ -1265,10 +1250,10 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
     onChange('symptoms', next);
     if (isChecked) {
       const newSev = { ...symptomSeverity };
-      delete newSev[s];
+      delete newSev[symptomKey];
       onChange('symptomSeverity', newSev);
       // Clear error for this symptom when it's unchecked
-      setSeverityErrors(prev => prev.filter(e => e !== s));
+      setSeverityErrors(prev => prev.filter(e => e !== symptomKey));
     }
   };
 
@@ -1519,9 +1504,6 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
 
 // ── Step 4: Lifestyle & Medical Information ───────────────────────────────
 function Step4Lifestyle({ data, onChange, errors, isReadOnly = false }) {
-  const [showMedicationsInput, setShowMedicationsInput] = useState(false);
-  const [showAllergiesInput, setShowAllergiesInput] = useState(false);
-
   const toggleLifestyle = (habit) => {
     const current = data.lifestyleHabits || [];
     if (habit === 'None') {
@@ -1538,38 +1520,6 @@ function Step4Lifestyle({ data, onChange, errors, isReadOnly = false }) {
       onChange('recreationalDrugTypes', '');
     }
   };
-
-  // Toggle "None" checkbox for medications
-  const handleMedicationsNoneChange = (checked) => {
-    if (checked) {
-      onChange('currentMedications', 'None');
-      setShowMedicationsInput(false);
-    } else {
-      onChange('currentMedications', '');
-      setShowMedicationsInput(true);
-    }
-  };
-
-  // Toggle "None" checkbox for allergies
-  const handleAllergiesNoneChange = (checked) => {
-    if (checked) {
-      onChange('allergies', 'None');
-      setShowAllergiesInput(false);
-    } else {
-      onChange('allergies', '');
-      setShowAllergiesInput(true);
-    }
-  };
-
-  // Initialize state based on existing data
-  useEffect(() => {
-    if (data.currentMedications && data.currentMedications.trim() && data.currentMedications !== 'None') {
-      setShowMedicationsInput(true);
-    }
-    if (data.allergies && data.allergies.trim() && data.allergies !== 'None') {
-      setShowAllergiesInput(true);
-    }
-  }, [data.currentMedications, data.allergies]);
 
   return (
     <div className="step-body">
@@ -1779,10 +1729,10 @@ function Step4Lifestyle({ data, onChange, errors, isReadOnly = false }) {
               onChange={(e) => {
                 if (e.target.checked) {
                   onChange('currentMedications', 'None');
-                  setShowMedicationsInput(false);
+                  
                 } else {
                   onChange('currentMedications', '');
-                  setShowMedicationsInput(true);
+                  
                 }
               }}
             />
@@ -1813,10 +1763,10 @@ function Step4Lifestyle({ data, onChange, errors, isReadOnly = false }) {
               onChange={(e) => {
                 if (e.target.checked) {
                   onChange('allergies', 'None');
-                  setShowAllergiesInput(false);
+                  
                 } else {
                   onChange('allergies', '');
-                  setShowAllergiesInput(true);
+                  
                 }
               }}
             />
@@ -2150,6 +2100,24 @@ function AssessmentPage() {
 
   const [isReadOnly] = useState(routeReadOnly);
 
+  // Priority gate — a new assessment is blocked while a Priority review is open
+  // (read-only history views are never blocked)
+  const [priorityGate, setPriorityGate] = useState({ checking: !routeReadOnly, blocked: false, items: [] });
+  useEffect(() => {
+    if (routeReadOnly) return;
+    let cancelled = false;
+    getPriorityStatus()
+      .then(data => {
+        if (!cancelled) setPriorityGate({ checking: false, blocked: !!data.blocked, items: data.assessments || [] });
+      })
+      .catch(() => {
+        // Fail open on network error — the server re-checks on submit (403)
+        if (!cancelled) setPriorityGate({ checking: false, blocked: false, items: [] });
+      });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Clear sessionStorage only when explicitly starting fresh after viewing history
   useEffect(() => {
     // If we just viewed history (routeAssessment exists) and user wants to start fresh
@@ -2161,6 +2129,7 @@ function AssessmentPage() {
       if (userRaw) {
         try {
           const user = JSON.parse(userRaw);
+          // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time draft reset with profile preserve
           setFormData({
             ...EMPTY_FORM,
             age: user.age || '',
@@ -2178,6 +2147,7 @@ function AssessmentPage() {
     if (location.state?.clearDraft) {
       window.history.replaceState({}, document.title);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -2194,7 +2164,7 @@ function AssessmentPage() {
     if (!container) return;
     // Disable form controls
     const controls = container.querySelectorAll('input, select, textarea');
-    controls.forEach((c) => { try { c.disabled = true; c.setAttribute('aria-readonly', 'true'); } catch (e) {} });
+    controls.forEach((c) => { try { c.disabled = true; c.setAttribute('aria-readonly', 'true'); } catch { /* DOM guard — safe to ignore */ } });
     // Disable interactive buttons inside the step body (but not footer nav)
     const buttons = container.querySelectorAll('.step-body button');
     const prevButtonStates = [];
@@ -2208,7 +2178,7 @@ function AssessmentPage() {
         prevButtonStates[idx] = b.disabled;
         b.disabled = true;
         b.setAttribute('aria-hidden', 'true');
-      } catch (e) {}
+      } catch { /* DOM guard — safe to ignore */ }
     });
     // Remove contentEditable if present
     const editable = container.querySelectorAll('[contenteditable]');
@@ -2217,13 +2187,13 @@ function AssessmentPage() {
       try {
         prevEditable[idx] = el.getAttribute('contenteditable');
         el.setAttribute('contenteditable', 'false');
-      } catch (e) {}
+      } catch { /* DOM guard — safe to ignore */ }
     });
 
     return () => {
-      controls.forEach((c) => { try { c.disabled = false; c.removeAttribute('aria-readonly'); } catch (e) {} });
-      buttons.forEach((b, idx) => { try { b.disabled = prevButtonStates[idx] || false; b.removeAttribute('aria-hidden'); } catch (e) {} });
-      editable.forEach((el, idx) => { try { if (prevEditable[idx] !== null && prevEditable[idx] !== undefined) el.setAttribute('contenteditable', prevEditable[idx]); else el.removeAttribute('contenteditable'); } catch (e) {} });
+      controls.forEach((c) => { try { c.disabled = false; c.removeAttribute('aria-readonly'); } catch { /* DOM guard — safe to ignore */ } });
+      buttons.forEach((b, idx) => { try { b.disabled = prevButtonStates[idx] || false; b.removeAttribute('aria-hidden'); } catch { /* DOM guard — safe to ignore */ } });
+      editable.forEach((el, idx) => { try { if (prevEditable[idx] !== null && prevEditable[idx] !== undefined) el.setAttribute('contenteditable', prevEditable[idx]); else el.removeAttribute('contenteditable'); } catch { /* DOM guard — safe to ignore */ } });
     };
   }, [isReadOnly]);
 
@@ -2246,6 +2216,7 @@ function AssessmentPage() {
         // Remove Low Libido from symptoms if pregnant or breastfeeding
         if (pregnant === 'Yes' || breastfeeding === 'Yes') {
           updated.symptoms = (updated.symptoms || []).filter(s => s !== 'Low Libido');
+          // eslint-disable-next-line no-unused-vars
           const { 'Low Libido': _removed, ...restSeverity } = updated.symptomSeverity || {};
           updated.symptomSeverity = restSeverity;
         }
@@ -2373,6 +2344,10 @@ function AssessmentPage() {
           if (assessmentId) break;
         } catch (saveErr) {
           console.error(`Assessment save attempt ${attempt} failed:`, saveErr.message);
+          // Priority block must surface immediately — never retry past it
+          if (/prioritized|needs to finish|finish first/i.test(saveErr.message || '')) {
+            throw saveErr;
+          }
         }
       }
 
@@ -2405,6 +2380,33 @@ function AssessmentPage() {
   return (
     <div className="assessment-wrapper">
       <Navbar />
+      {priorityGate.blocked && !isReadOnly ? (
+        <div className="assessment-container">
+          <div className="priority-gate" role="alert">
+            <div className="priority-gate__icon" aria-hidden="true">⚑</div>
+            <h2 className="priority-gate__title">New Assessments Paused</h2>
+            <p className="priority-gate__text">
+              You have {priorityGate.items.length} prioritized assessment{priorityGate.items.length === 1 ? '' : 's'} that
+              must finish review first. Please follow your current plan — once an administrator
+              resolves the review, you can start a new assessment.
+            </p>
+            {priorityGate.items.slice(0, 2).map(item => (
+              <p key={item.id} className="priority-gate__item">
+                Flagged {item.flaggedAt ? new Date(item.flaggedAt).toLocaleDateString() : new Date(item.createdAt).toLocaleDateString()}
+                {(item.reasons || []).length > 0 ? ` — ${(item.reasons || []).slice(0, 2).join('; ')}` : ''}
+              </p>
+            ))}
+            <div className="priority-gate__actions">
+              <button type="button" className="priority-gate__btn priority-gate__btn--primary" onClick={() => navigate('/history')}>
+                View in History
+              </button>
+              <button type="button" className="priority-gate__btn priority-gate__btn--secondary" onClick={() => navigate('/dashboard')}>
+                Back to Dashboard
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
       <div className={`assessment-container ${isReadOnly ? 'readonly' : ''}`}>
         <div className="assessment-header">
           <div>
@@ -2472,6 +2474,7 @@ function AssessmentPage() {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }

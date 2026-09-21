@@ -1,5 +1,8 @@
 ﻿import { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { sendChatMessage } from '../api';
+import { hasPlanAccess, getStoredPlan, FEATURE_TIERS, PLAN_LABELS } from '../utils/plan';
+import UpgradeModal from '../Components/UpgradeModal/UpgradeModal';
 import './ChatAssistant.css';
 
 // ── Markdown renderer (no external deps) ──────────────────────────────────
@@ -135,8 +138,9 @@ const QUICK_PROMPTS = [
 
 // ── Main component ─────────────────────────────────────────────────────────
 export default function ChatAssistant({ recommendations }) {
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isLoggedIn] = useState(() => !!localStorage.getItem('token'));
   const [messages, setMessages] = useState([{
     role: 'assistant',
     text: "Hi! I'm **SuppliWise AI** — your health and wellness assistant.\n\nI can help with:\n- Your supplement recommendations and results\n- Supplements, nutrition, vitamins, and wellness questions\n- How to use any feature on SuppliWise\n- Symptoms, diet, sleep, and lifestyle advice\n\nWhat would you like to know?",
@@ -144,17 +148,14 @@ export default function ChatAssistant({ recommendations }) {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [upgradeInfo, setUpgradeInfo] = useState(null);
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const chatWindowRef = useRef(null);
   const fabRef = useRef(null);
 
-  // Check if user is logged in
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    setIsLoggedIn(!!token);
-  }, []);
+  // (login state is initialised lazily from localStorage above)
 
   const getRecs = () => {
     if (recommendations && recommendations.length) return recommendations;
@@ -166,7 +167,7 @@ export default function ChatAssistant({ recommendations }) {
 
   useEffect(() => {
     if (recommendations && recommendations.length) {
-      try { sessionStorage.setItem('latest_recommendations', JSON.stringify(recommendations)); } catch {}
+      try { sessionStorage.setItem('latest_recommendations', JSON.stringify(recommendations)); } catch { /* storage unavailable — skip */ }
     }
   }, [recommendations]);
 
@@ -242,6 +243,12 @@ export default function ChatAssistant({ recommendations }) {
   const send = async (text) => {
     const q = (text || input).trim();
     if (!q || loading) return;
+    // Client-side Ultimate gate — prevents wasted request for under-tier users
+    if (!hasPlanAccess(FEATURE_TIERS.chat)) {
+      const stored = getStoredPlan();
+      setUpgradeInfo({ requiresPlan: FEATURE_TIERS.chat, currentPlan: stored.plan });
+      return;
+    }
     setInput('');
 
     const newUserMsg = { role: 'user', text: q };
@@ -261,10 +268,17 @@ export default function ChatAssistant({ recommendations }) {
         role: 'assistant',
         text: data.reply || "I couldn't find an answer. Try rephrasing your question.",
       }]);
-    } catch {
+    } catch (err) {
+      if (err.requiresPlan) {
+        const stored = getStoredPlan();
+        setUpgradeInfo({ requiresPlan: err.requiresPlan, currentPlan: err.currentPlan || stored.plan });
+        // Remove the optimistic user message if blocked (so chat doesn't look sent)
+        setMessages(prev => prev.slice(0, -1));
+        return;
+      }
       setMessages(prev => [...prev, {
         role: 'assistant',
-        text: "I'm having trouble connecting right now. Please try again in a moment.",
+        text: err.message || "I'm having trouble connecting right now. Please try again in a moment.",
       }]);
     } finally {
       setLoading(false);
@@ -380,6 +394,26 @@ export default function ChatAssistant({ recommendations }) {
                 </div>
               </div>
             </div>
+          ) : !hasPlanAccess(FEATURE_TIERS.chat) ? (
+            // Subscription gate — Ultimate Package only
+            <div className="chat-auth-required">
+              <div className="auth-required-content">
+                <div className="auth-required-icon" style={{ color: '#16a34a' }}>🔒</div>
+                <h3 className="auth-required-title">AI Chat is an Ultimate Package perk</h3>
+                <p className="auth-required-message">
+                  The AI Chat Assistant requires the <strong>Ultimate Package</strong>.
+                </p>
+                <p className="auth-required-description">
+                  Your current plan is <strong>{PLAN_LABELS[getStoredPlan().plan] || 'Basic Package'}</strong>. Contact an administrator to upgrade and unlock AI chat.
+                </p>
+                <div className="auth-required-buttons">
+                  <button className="auth-btn auth-btn-primary" onClick={() => { setOpen(false); navigate('/profile'); }}>
+                    View my plan
+                  </button>
+                  <button className="auth-btn auth-btn-secondary" onClick={() => setOpen(false)}>Maybe later</button>
+                </div>
+              </div>
+            </div>
           ) : (
             // Normal Chat Interface
             <>
@@ -464,6 +498,15 @@ export default function ChatAssistant({ recommendations }) {
             </>
           )}
         </div>
+      )}
+      {upgradeInfo && (
+        <UpgradeModal
+          feature="AI Chat Assistant"
+          requiredPlan={upgradeInfo.requiresPlan}
+          currentPlan={upgradeInfo.currentPlan}
+          onClose={() => setUpgradeInfo(null)}
+          onViewPlans={() => { setUpgradeInfo(null); window.location.href = '/profile'; }}
+        />
       )}
     </>
   );

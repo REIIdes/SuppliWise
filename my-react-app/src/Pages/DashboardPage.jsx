@@ -8,7 +8,14 @@ import './DashboardPage.css';
 
 function DashboardPage() {
   const navigate = useNavigate();
-  const [userData, setUserData] = useState(null);
+  const [userData] = useState(() => {
+    try {
+      const raw = localStorage.getItem('user');
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [todaysSupplements, setTodaysSupplements] = useState([]);
@@ -19,38 +26,16 @@ function DashboardPage() {
     energyLevel: 'Medium',
     todaysProgress: { taken: 0, total: 0 },
   });
-  const [insights, setInsights] = useState(null);
   const [showCompletionToast, setShowCompletionToast] = useState(false);
+  const [priorityLifted, setPriorityLifted] = useState(false);
   const [markTakenToastMessage, setMarkTakenToastMessage] = useState('');
   const [markTakenToastKey, setMarkTakenToastKey] = useState(0);
   const [showNewAssessmentConfirm, setShowNewAssessmentConfirm] = useState(false);
+  const [showPriorityBlock, setShowPriorityBlock] = useState(false);
+  const [priorityBlock, setPriorityBlock] = useState({ blocked: false, count: 0 });
+  const [priorityAssessments, setPriorityAssessments] = useState([]);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
   const [isFirstLogin, setIsFirstLogin] = useState(false);
-
-  useEffect(() => {
-    // Get user data from localStorage
-    const userRaw = localStorage.getItem('user');
-    const token = localStorage.getItem('token');
-    
-    if (!token) {
-      navigate('/login');
-      return;
-    }
-
-    if (userRaw) {
-      const user = JSON.parse(userRaw);
-      setUserData(user);
-    }
-
-    fetchDashboardData();
-
-    // Add resize listener for responsive toast
-    const handleResize = () => {
-      setIsMobile(window.innerWidth <= 768);
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [navigate]);
 
   const fetchDashboardData = async () => {
     try {
@@ -73,7 +58,8 @@ function DashboardPage() {
           energyLevel: 'Medium',
           todaysProgress: { taken: 0, total: 0 },
         });
-        setInsights(null);
+        setPriorityBlock(data.priorityBlock || { blocked: false, count: 0 });
+        setPriorityAssessments(data.priorityAssessments || []);
         setLoading(false);
         return;
       }
@@ -119,7 +105,8 @@ function DashboardPage() {
         energyLevel: data.stats.energyLevel || 'Medium',
         todaysProgress: data.stats.todaysProgress || { taken: 0, total: 0 },
       });
-      setInsights(data.insights);
+      setPriorityBlock(data.priorityBlock || { blocked: false, count: 0 });
+      setPriorityAssessments(data.priorityAssessments || []);
       setLoading(false);
     } catch (err) {
       console.error('Error fetching dashboard:', err);
@@ -127,6 +114,38 @@ function DashboardPage() {
       setLoading(false);
     }
   };
+
+  // Initial dashboard load + auth guard + responsive toast
+  useEffect(() => {
+    // Get user data from localStorage
+    const token = localStorage.getItem('token');
+
+    if (!token) {
+      navigate('/login');
+      return;
+    }
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional initial dashboard load
+    fetchDashboardData();
+
+    // Add resize listener for responsive toast
+    const handleResize = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+    window.addEventListener('resize', handleResize);
+    // Realtime: refresh the moment the user returns to the tab
+    const handleVisible = () => {
+      if (document.visibilityState === 'visible' && localStorage.getItem('token')) {
+        fetchDashboardData();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisible);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      document.removeEventListener('visibilitychange', handleVisible);
+    };
+  }, [navigate]);
+
 
   const handleSupplementToggle = async (id) => {
     const supplement = todaysSupplements.find(s => s.id === id);
@@ -193,10 +212,22 @@ function DashboardPage() {
         setWellnessScore(result.stats.wellnessScore);
         
         // Check if all supplements are now taken
-        if (result.stats.todaysProgress.taken === result.stats.todaysProgress.total && 
+        if (result.stats.todaysProgress.taken === result.stats.todaysProgress.total &&
             result.stats.todaysProgress.total > 0) {
           // Hide the "marked as taken" toast immediately
           setMarkTakenToastMessage('');
+          // Flag auto-lifted when the last supplement completed the plan
+          setPriorityLifted(!!result.priorityLifted);
+          if (result.priorityLifted) {
+            // Refresh the gate + banner state right away
+            fetchDashboardData();
+          }
+          // Strict gate: undo after an auto-lift reinstates the restriction
+          if (result.priorityReflagged) {
+            setMarkTakenToastKey(prev => prev + 1);
+            setMarkTakenToastMessage('Priority review reinstated — new assessments paused again.');
+            fetchDashboardData();
+          }
           // Show completion toast
           setShowCompletionToast(true);
           // Auto-hide after 4 seconds
@@ -221,7 +252,12 @@ function DashboardPage() {
 
   const navigateToCard = (cardName) => {
     switch (cardName) {
-      case 'assessment':
+      case 'assessment': {
+        // Priority gate: an unresolved Priority assessment must finish first
+        if (priorityBlock.blocked) {
+          setShowPriorityBlock(true);
+          break;
+        }
         // Check if user has supplements that haven't been taken today
         const hasUnfinishedSupplements = todaysSupplements.some(s => !s.taken);
         if (hasUnfinishedSupplements && todaysSupplements.length > 0) {
@@ -231,6 +267,7 @@ function DashboardPage() {
           navigate('/assessment');
         }
         break;
+      }
       case 'recommendations':
         navigate('/recommendations');
         break;
@@ -299,6 +336,22 @@ function DashboardPage() {
         />
       )}
 
+      {/* Priority Block Modal — new assessments locked until review finishes */}
+      {showPriorityBlock && (
+        <ConfirmModal
+          title="Priority Review In Progress"
+          message={`You have ${priorityBlock.count} prioritized assessment${priorityBlock.count === 1 ? '' : 's'} that must finish review first. New assessments are paused until an administrator resolves it. Please follow your current plan and check your notifications.`}
+          confirmText="View in History"
+          cancelText="Close"
+          type="warning"
+          onConfirm={() => {
+            setShowPriorityBlock(false);
+            navigate('/history');
+          }}
+          onCancel={() => setShowPriorityBlock(false)}
+        />
+      )}
+
       {/* Completion Toast */}
       {showCompletionToast && (
         <div 
@@ -344,15 +397,19 @@ function DashboardPage() {
               color: 'white',
               lineHeight: '1.4'
             }}>
-              Great job! You completed today's supplement plan.
+              {priorityLifted
+                ? 'Priority review completed! New assessments are unlocked.'
+                : "Great job! You completed today's supplement plan."}
             </h3>
-            <p style={{ 
-              margin: 0, 
+            <p style={{
+              margin: 0,
               fontSize: isMobile ? '12px' : '14px',
               color: 'rgba(255, 255, 255, 0.9)',
               lineHeight: '1.4'
             }}>
-              Your adherence and streak have been updated.
+              {priorityLifted
+                ? 'All supplements taken — the flag on your assessment has been lifted.'
+                : 'Your adherence and streak have been updated.'}
             </p>
           </div>
           <button 
@@ -406,9 +463,41 @@ function DashboardPage() {
           </p>
         </div>
 
+        {/* Priority Review Banner — surfaced whenever an assessment is flagged */}
+        {priorityAssessments.length > 0 && (
+          <div className="priority-banner" role="alert">
+            <div className="priority-banner__icon" aria-hidden="true">⚑</div>
+            <div className="priority-banner__body">
+              <strong>
+                Priority review{priorityAssessments.length === 1 ? '' : 's'} in progress ({priorityAssessments.length})
+              </strong>
+              {priorityAssessments.slice(0, 2).map(item => (
+                <span key={item.id} className="priority-banner__item">
+                  Flagged {item.flaggedAt ? new Date(item.flaggedAt).toLocaleDateString() : new Date(item.createdAt).toLocaleDateString()}
+                  {(item.reasons || []).length > 0 ? ` — ${(item.reasons || []).slice(0, 2).join('; ')}` : ''}
+                </span>
+              ))}
+              <span className="priority-banner__hint">
+                Finish this review first — new assessments are paused until it is resolved.
+              </span>
+            </div>
+            <button
+              type="button"
+              className="priority-banner__btn"
+              onClick={() => navigate('/history')}
+            >
+              View
+            </button>
+          </div>
+        )}
+
         {/* Action Cards */}
         <div className="dashboard-cards">
-          <div className="dashboard-card card-green" onClick={() => navigateToCard('assessment')}>
+          <div
+            className={`dashboard-card card-green${priorityBlock.blocked ? ' dashboard-card--blocked' : ''}`}
+            onClick={() => navigateToCard('assessment')}
+            title={priorityBlock.blocked ? 'Paused until the priority review finishes' : 'Start a new assessment'}
+          >
             <div className="card-icon">
               <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
@@ -417,6 +506,7 @@ function DashboardPage() {
               </svg>
             </div>
             <h3 className="card-title">New Assessment</h3>
+            {priorityBlock.blocked && <span className="card-blocked-tag">Paused</span>}
           </div>
 
           <div className="dashboard-card card-blue" onClick={() => navigateToCard('recommendations')}>

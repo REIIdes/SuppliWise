@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import { getInsights } from '../api';
+import { getStoredPlan, PLAN_LABELS } from '../utils/plan';
 import './InsightsPage.css';
 
 function InsightsPage() {
@@ -9,8 +10,8 @@ function InsightsPage() {
   const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [hasData, setHasData] = useState(false);
   const [hasAssessment, setHasAssessment] = useState(false);
+  const [upgradeInfo, setUpgradeInfo] = useState(null); // { requiresPlan, currentPlan }
   
   // Overview data
   const [overviewStats, setOverviewStats] = useState([]);
@@ -25,25 +26,15 @@ function InsightsPage() {
   const [todaysSupplements, setTodaysSupplements] = useState([]);
   const [todaysStats, setTodaysStats] = useState({ taken: 0, total: 0, percentage: 0 });
 
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      navigate('/login');
-      return;
-    }
-
-    fetchInsightsData();
-  }, [navigate]);
-
   const fetchInsightsData = async () => {
     try {
       setLoading(true);
       setError('');
+      setUpgradeInfo(null);
       const data = await getInsights();
 
       if (!data.hasData) {
         // Set empty state for new users
-        setHasData(true); // Show UI instead of error
         setHasAssessment(data.hasAssessment !== undefined ? data.hasAssessment : false);
         setOverviewStats([
           { icon: 'trophy', label: 'Longest Streak', value: 'None Yet', color: 'purple' },
@@ -61,7 +52,6 @@ function InsightsPage() {
         return;
       }
 
-      setHasData(true);
       setHasAssessment(true);
 
       // Set overview stats
@@ -111,9 +101,16 @@ function InsightsPage() {
 
       setLoading(false);
     } catch (err) {
+      // Plan-gated 403 is expected for Basic Package — don't spam console as error
+      if (err.requiresPlan) {
+        const stored = getStoredPlan();
+        setUpgradeInfo({ requiresPlan: err.requiresPlan, currentPlan: err.currentPlan || stored.plan });
+        setLoading(false);
+        return;
+      }
       console.error('Error fetching insights:', err);
-      // Set empty state instead of error
-      setHasData(true); // Show UI instead of error
+      // Show error banner but still render empty-state UI below
+      setError(err.message || 'Could not load insights. Please try again.');
       setHasAssessment(false); // No assessment on error
       setOverviewStats([
         { icon: 'trophy', label: 'Longest Streak', value: 'None Yet', color: 'purple' },
@@ -130,6 +127,17 @@ function InsightsPage() {
       setLoading(false);
     }
   };
+
+  // Initial data load on mount + auth guard — server is source of truth for plan gating
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      navigate('/login');
+      return;
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on mount is intentional
+    fetchInsightsData();
+  }, [navigate]);
 
   const getIconSvg = (iconType) => {
     switch (iconType) {
@@ -209,6 +217,23 @@ function InsightsPage() {
 
   const renderOverview = () => (
     <>
+      {/* Overview stat cards */}
+      {overviewStats.length > 0 && (
+        <div className="insights-section">
+          <h3 className="insights-section-title">At a Glance</h3>
+          <div className="overview-stats-grid">
+            {overviewStats.map((stat) => (
+              <div key={stat.label} className={`overview-stat-card stat-${stat.color}`}>
+                <div className="overview-stat-icon">{getIconSvg(stat.icon)}</div>
+                <div className="overview-stat-body">
+                  <span className="overview-stat-value">{stat.value}</span>
+                  <span className="overview-stat-label">{stat.label}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {/* Current Phase Insights */}
       {currentPhase ? (
         <div className="insights-section">
@@ -577,10 +602,38 @@ function InsightsPage() {
 
         {/* Content */}
         <div className="insights-content">
-          {activeTab === 'overview' && renderOverview()}
-          {activeTab === 'progress' && renderTodaysProgress()}
-          {activeTab === 'adherence' && renderAdherence()}
-          {activeTab === 'ai' && renderAIInsight()}
+          {upgradeInfo ? (
+            <div className="plan-locked">
+              <div className="plan-locked__icon">🔒</div>
+              <h3 className="plan-locked__title">Insights & Analytics is locked</h3>
+              <p className="plan-locked__body">
+                Insights & Analytics requires the <strong>{PLAN_LABELS[upgradeInfo.requiresPlan] || upgradeInfo.requiresPlan}</strong>.
+                Your current plan is <strong>{PLAN_LABELS[upgradeInfo.currentPlan] || upgradeInfo.currentPlan || 'Basic Package'}</strong>.
+              </p>
+              <p className="plan-locked__note">Contact an administrator to upgrade your plan and unlock this feature.</p>
+              <div className="plan-locked__actions">
+                <button type="button" className="upgrade-btn upgrade-btn-secondary" onClick={() => navigate('/dashboard')}>Back to Dashboard</button>
+                <button type="button" className="upgrade-btn upgrade-btn-primary" onClick={() => navigate('/profile')}>View my plan</button>
+              </div>
+            </div>
+          ) : loading ? (
+            <div className="empty-state-message" style={{ textAlign: 'center', padding: '60px 20px' }}>
+              <p style={{ color: '#6b7280' }}>Loading your insights…</p>
+            </div>
+          ) : (
+            <>
+              {error && (
+                <div className="insights-error" role="alert">
+                  <p>{error}</p>
+                  <button type="button" onClick={fetchInsightsData}>Try again</button>
+                </div>
+              )}
+              {activeTab === 'overview' && renderOverview()}
+              {activeTab === 'progress' && renderTodaysProgress()}
+              {activeTab === 'adherence' && renderAdherence()}
+              {activeTab === 'ai' && renderAIInsight()}
+            </>
+          )}
         </div>
       </div>
     </div>

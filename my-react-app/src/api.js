@@ -30,6 +30,25 @@ export const parseJSON = async (res) => {
   }
 };
 
+// fetch with a hard timeout so a stalled network can never spin loaders forever.
+// AI calls get a longer budget via the timeoutMs argument.
+const apiFetch = async (path, options = {}, timeoutMs = 30000) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(`${BASE_URL}${path}`, { ...options, signal: controller.signal });
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      const timeoutError = new Error('Request timed out. Please check your connection and try again.');
+      timeoutError.isTimeout = true;
+      throw timeoutError;
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 // Check if token is expired before making requests
 const isTokenExpired = () => {
   const token = localStorage.getItem('token');
@@ -81,9 +100,19 @@ const friendlyError = (status, serverMessage, isLoginAttempt = false) => {
   }
 };
 
+// Build an Error that also carries plan-gate info (403 requiresPlan/currentPlan)
+// so gated pages can show an upgrade prompt instead of a generic message.
+const throwFriendly = (status, data, isLoginAttempt = false) => {
+  const err = new Error(friendlyError(status, data?.message, isLoginAttempt));
+  if (data?.requiresPlan) err.requiresPlan = data.requiresPlan;
+  if (data?.currentPlan) err.currentPlan = data.currentPlan;
+  err.status = status;
+  throw err;
+};
+
 // Register a new user
 export const registerUser = async (firstName, lastName, gender, dateOfBirth, email, password) => {
-  const res = await fetch(`${BASE_URL}/auth/register`, {
+  const res = await apiFetch('/auth/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ firstName, lastName, gender, dateOfBirth, email, password }),
@@ -98,7 +127,7 @@ export const loginUser = async (email, password) => {
   try {
     console.log('Login attempt:', { BASE_URL, email });
     
-    const res = await fetch(`${BASE_URL}/auth/login`, {
+    const res = await apiFetch('/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
@@ -131,7 +160,7 @@ export const saveAssessment = async (assessmentData) => {
     throw new Error('Your session has expired. Please sign in again.');
   }
   
-  const res = await fetch(`${BASE_URL}/assessment`, {
+  const res = await apiFetch('/assessment', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -152,26 +181,31 @@ export const getRecommendations = async (assessmentData) => {
     throw new Error('Your session has expired. Please sign in again.');
   }
   
-  const res = await fetch(`${BASE_URL}/recommend`, {
+  // AI generation can take minutes — budget 150s (server caps at 180s)
+  const res = await apiFetch('/recommend', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       ...authHeader(),
     },
     body: JSON.stringify(assessmentData),
-  });
+  }, 150000);
   const data = await parseJSON(res);
-  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  if (!res.ok) throwFriendly(res.status, data);
   return data;
 };
 
 // Get assessment history for logged-in user
-export const getHistory = async (page = 1, limit = 10) => {
-  const res = await fetch(`${BASE_URL}/assessment/history?page=${page}&limit=${limit}`, {
+// (page size is capped server-side by subscription tier;
+// the response may include planLimit/currentPlan for upgrade hints)
+export const getHistory = async (page = 1, limit = 10, fields = '') => {
+  const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (fields) params.set('fields', fields);
+  const res = await apiFetch(`/assessment/history?${params.toString()}`, {
     headers: { ...authHeader() },
   });
   const data = await parseJSON(res);
-  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  if (!res.ok) throwFriendly(res.status, data);
   if (Array.isArray(data)) {
     return {
       serverTime: new Date().toISOString(),
@@ -183,16 +217,18 @@ export const getHistory = async (page = 1, limit = 10) => {
     serverTime: data.serverTime || new Date().toISOString(),
     assessments: data.assessments || [],
     pagination: data.pagination || null,
+    planLimit: data.planLimit || null,
+    currentPlan: data.currentPlan || null,
   };
 };
 
 // Save AI results to an assessment record
 export const saveAssessmentResults = async (assessmentId, results) => {
-  const res = await fetch(`${BASE_URL}/assessment/${assessmentId}/results`, {
+  const res = await apiFetch(`/assessment/${assessmentId}/results`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
     body: JSON.stringify(results),
-  });
+  }, 60000);
   const data = await parseJSON(res);
   if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
   return data;
@@ -200,7 +236,7 @@ export const saveAssessmentResults = async (assessmentId, results) => {
 
 // Delete an assessment
 export const deleteAssessment = async (assessmentId) => {
-  const res = await fetch(`${BASE_URL}/assessment/${assessmentId}`, {
+  const res = await apiFetch(`/assessment/${assessmentId}`, {
     method: 'DELETE',
     headers: { ...authHeader() },
   });
@@ -209,24 +245,82 @@ export const deleteAssessment = async (assessmentId) => {
   return data;
 };
 
-// Send a chat message to the AI assistant
+// Send a chat message to the AI assistant (Ultimate Package only — 403 carries requiresPlan)
 export const sendChatMessage = async (message, context = [], history = []) => {
-  const res = await fetch(`${BASE_URL}/chat`, {
+  const res = await apiFetch('/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
     body: JSON.stringify({ message, context, history }),
+  }, 45000);
+  const data = await parseJSON(res);
+  if (!res.ok) throwFriendly(res.status, data);
+  return data;
+};
+
+// Fetch detailed supplement information (assessment-aware)
+export const getSupplementDetail = async (supplementName, context = null) => {
+  const res = await apiFetch('/supplement-detail', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify({ supplementName, context }),
+  }, 45000);
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// Get current user profile incl. subscription status (lightweight, no image blobs)
+export const getMyProfile = async (timeoutMs = 15000) => {
+  const res = await apiFetch('/auth/me', { headers: { ...authHeader() } }, timeoutMs);
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// ── User notifications ────────────────────────────────────────────────
+export const getNotifications = async (limit = 20) => {
+  const res = await apiFetch(`/notifications?limit=${limit}`, {
+    headers: { ...authHeader() },
   });
   const data = await parseJSON(res);
   if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
   return data;
 };
 
-// Fetch detailed supplement information (assessment-aware)
-export const getSupplementDetail = async (supplementName, context = null) => {
-  const res = await fetch(`${BASE_URL}/supplement-detail`, {
+export const markNotificationRead = async (notificationId) => {
+  const res = await apiFetch(`/notifications/${notificationId}/read`, {
+    method: 'PATCH',
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+export const markAllNotificationsRead = async () => {
+  const res = await apiFetch('/notifications/read-all', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeader() },
-    body: JSON.stringify({ supplementName, context }),
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+export const deleteNotification = async (notificationId) => {
+  const res = await apiFetch(`/notifications/${notificationId}`, {
+    method: 'DELETE',
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// Check whether new assessments are blocked by unresolved Priority items
+export const getPriorityStatus = async () => {
+  const res = await apiFetch('/assessment/priority-status', {
+    headers: { ...authHeader() },
   });
   const data = await parseJSON(res);
   if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
@@ -235,7 +329,7 @@ export const getSupplementDetail = async (supplementName, context = null) => {
 
 // Get dashboard data (latest assessment metrics)
 export const getDashboard = async () => {
-  const res = await fetch(`${BASE_URL}/dashboard`, {
+  const res = await apiFetch('/dashboard', {
     headers: { ...authHeader() },
   });
   const data = await parseJSON(res);
@@ -245,7 +339,7 @@ export const getDashboard = async () => {
 
 // Mark supplement as taken or undo
 export const updateIntake = async (recordId, taken) => {
-  const res = await fetch(`${BASE_URL}/dashboard/intake`, {
+  const res = await apiFetch('/dashboard/intake', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
     body: JSON.stringify({ recordId, taken }),
@@ -257,7 +351,7 @@ export const updateIntake = async (recordId, taken) => {
 
 // Update energy level
 export const updateEnergyLevel = async (energyLevel) => {
-  const res = await fetch(`${BASE_URL}/dashboard/energy`, {
+  const res = await apiFetch('/dashboard/energy', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
     body: JSON.stringify({ energyLevel }),
@@ -267,9 +361,19 @@ export const updateEnergyLevel = async (energyLevel) => {
   return data;
 };
 
-// Get insights and tracking data
+// Get insights and tracking data (Deluxe/Monthly plan and above)
 export const getInsights = async () => {
-  const res = await fetch(`${BASE_URL}/insights`, {
+  const res = await apiFetch('/insights', {
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throwFriendly(res.status, data);
+  return data;
+};
+
+// Get full intake records for one day (interactive calendar detail)
+export const getDayRecords = async (dayKey) => {
+  const res = await apiFetch(`/dashboard/day/${dayKey}`, {
     headers: { ...authHeader() },
   });
   const data = await parseJSON(res);
@@ -279,7 +383,7 @@ export const getInsights = async () => {
 
 // Get calendar completion history for a specific month
 export const getCalendarData = async (year, month) => {
-  const res = await fetch(`${BASE_URL}/dashboard/calendar/${year}/${month}`, {
+  const res = await apiFetch(`/dashboard/calendar/${year}/${month}`, {
     headers: { ...authHeader() },
   });
   const data = await parseJSON(res);
@@ -289,7 +393,7 @@ export const getCalendarData = async (year, month) => {
 
 // Add supplement to user's daily plan
 export const addSupplementToPlan = async (supplementData) => {
-  const res = await fetch(`${BASE_URL}/dashboard/add-supplement`, {
+  const res = await apiFetch('/dashboard/add-supplement', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
     body: JSON.stringify(supplementData),
@@ -301,7 +405,7 @@ export const addSupplementToPlan = async (supplementData) => {
 
 // Remove supplement from user's daily plan
 export const removeSupplementFromPlan = async (supplementName) => {
-  const res = await fetch(`${BASE_URL}/dashboard/remove-supplement`, {
+  const res = await apiFetch('/dashboard/remove-supplement', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
     body: JSON.stringify({ supplementName }),
@@ -313,7 +417,7 @@ export const removeSupplementFromPlan = async (supplementName) => {
 
 // Get user's personalized supplement plan
 export const getMyPlan = async () => {
-  const res = await fetch(`${BASE_URL}/dashboard/my-plan`, {
+  const res = await apiFetch('/dashboard/my-plan', {
     headers: { ...authHeader() },
   });
   const data = await parseJSON(res);
@@ -323,7 +427,7 @@ export const getMyPlan = async () => {
 
 // Get weekly adherence data
 export const getWeeklyAdherence = async () => {
-  const res = await fetch(`${BASE_URL}/dashboard/weekly-adherence`, {
+  const res = await apiFetch('/dashboard/weekly-adherence', {
     headers: { ...authHeader() },
   });
   const data = await parseJSON(res);

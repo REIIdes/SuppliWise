@@ -1,21 +1,32 @@
 import { BrowserRouter, Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-dom';
-import { Component, useEffect, useState } from 'react';
+import { Component, lazy, Suspense, useEffect, useState } from 'react';
 
 import HomePage from './Pages/HomePage';
-import DashboardPage from './Pages/DashboardPage';
-import RecommendationsPage from './Pages/RecommendationsPage';
-import TrackIntakePage from './Pages/TrackIntakePage';
-import InsightsPage from './Pages/InsightsPage';
-import LogIn from './Pages/LogIn';
-import SignIn from './Pages/SignIn';
-import AssessmentPage from './Pages/AssessmentPage';
-import ResultsPage from './Pages/ResultsPage';
-import HistoryPage from './Pages/HistoryPage';
-import ProfilePage from './Pages/ProfilePage';
-import ChatAssistant from './Pages/ChatAssistant';
-import AdminLogin from './Pages/AdminLogin';
-import AdminDashboard from './Pages/AdminDashboard';
-import AssessmentManagement from './Pages/AssessmentManagement';
+
+// Route-level code splitting — keeps the initial bundle small; each page loads on demand
+const DashboardPage = lazy(() => import('./Pages/DashboardPage'));
+const RecommendationsPage = lazy(() => import('./Pages/RecommendationsPage'));
+const TrackIntakePage = lazy(() => import('./Pages/TrackIntakePage'));
+const InsightsPage = lazy(() => import('./Pages/InsightsPage'));
+const LogIn = lazy(() => import('./Pages/LogIn'));
+const SignIn = lazy(() => import('./Pages/SignIn'));
+const AssessmentPage = lazy(() => import('./Pages/AssessmentPage'));
+const ResultsPage = lazy(() => import('./Pages/ResultsPage'));
+const HistoryPage = lazy(() => import('./Pages/HistoryPage'));
+const ProfilePage = lazy(() => import('./Pages/ProfilePage'));
+const ChatAssistant = lazy(() => import('./Pages/ChatAssistant'));
+const AdminLogin = lazy(() => import('./Pages/AdminLogin'));
+const AdminDashboard = lazy(() => import('./Pages/AdminDashboard'));
+const AssessmentManagement = lazy(() => import('./Pages/AssessmentManagement'));
+
+// Minimal loading fallback for lazy routes
+function RouteFallback() {
+  return (
+    <div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280' }}>
+      Loading…
+    </div>
+  );
+}
 
 import AdminProtectedRoute from './Components/AdminProtectedRoute';
 import SessionRevalidator from './Components/SessionRevalidator';
@@ -114,7 +125,11 @@ function DocumentTitle() {
 function GlobalChat() {
   const location = useLocation();
   if (CHAT_HIDDEN_ROUTES.includes(location.pathname)) return null;
-  return <ChatAssistant />;
+  return (
+    <Suspense fallback={null}>
+      <ChatAssistant />
+    </Suspense>
+  );
 }
 
 function UserSessionGuard() {
@@ -188,6 +203,7 @@ function App() {
         <DocumentTitle />
         <UserSessionGuard />
         <SessionRevalidator />
+        <Suspense fallback={<RouteFallback />}>
         <Routes>
           {/* Landing route - shows HomePage for guests, redirects to Dashboard for logged-in users */}
           <Route path="/" element={<LandingRoute />} />
@@ -221,6 +237,7 @@ function App() {
           <Route path="/history" element={<ProtectedRoute><HistoryPage /></ProtectedRoute>} />
           <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
         </Routes>
+        </Suspense>
         <GlobalChat />
       </BrowserRouter>
     </ErrorBoundary>

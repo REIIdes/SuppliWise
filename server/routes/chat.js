@@ -1,5 +1,7 @@
 ﻿const express = require('express');
 const router = express.Router();
+const { protect } = require('../middleware/auth');
+const { requirePlan } = require('../utils/plan');
 
 // ── System prompt ──────────────────────────────────────────────────────────
 function buildSystemPrompt(recContext) {
@@ -117,7 +119,10 @@ ${recContext ? `\n## USER'S CURRENT RECOMMENDATIONS\n${recContext}` : ''}`;
 }
 
 // ── POST /api/chat ──────────────────────────────────────────────────────────
-router.post('/', async (req, res) => {
+// @access  Private (Ultimate/custom package only — AI Chat is the top-tier perk).
+// Requires login AND an active Ultimate subscription; otherwise 401/403 with
+// a requiresPlan payload so the client can show an upgrade prompt.
+router.post('/', protect, requirePlan('custom'), async (req, res) => {
   try {
     const { message, context, history } = req.body;
 
@@ -126,6 +131,10 @@ router.post('/', async (req, res) => {
     }
 
     const q = message.trim();
+    // Bound prompt size — prevents quota burn from oversized payloads
+    if (q.length > 1000) {
+      return res.status(400).json({ reply: 'Please keep messages under 1000 characters.' });
+    }
     const t = q.toLowerCase();
 
     // ── Off-topic pre-filter ───────────────────────────────────────────────
@@ -176,7 +185,8 @@ router.post('/', async (req, res) => {
     if (history && Array.isArray(history)) {
       for (const msg of history.slice(-8)) {
         if (msg.role === 'user' || msg.role === 'assistant') {
-          messages.push({ role: msg.role, content: msg.text || msg.content || '' });
+          const content = String(msg.text || msg.content || '').slice(0, 500);
+          messages.push({ role: msg.role, content });
         }
       }
     }

@@ -7,6 +7,7 @@ const AdminEvent = require('../models/AdminEvent');
 const bcrypt = require('bcryptjs');
 const speakeasy = require('speakeasy');
 const { protect, adminOnly } = require('../middleware/auth');
+const { verifyTotpOnce } = require('../utils/totp');
 
 const router = express.Router();
 router.use(protect, adminOnly);
@@ -57,8 +58,11 @@ function securityChecks() {
     {
       key: 'production',
       label: 'Production environment safeguards',
-      status: process.env.NODE_ENV === 'production' && process.env.ALLOW_DEV_OTP_RESPONSE !== 'true',
-      fix: 'Use NODE_ENV=production and keep ALLOW_DEV_OTP_RESPONSE disabled.',
+      // The live control is the flag itself: OTP values must never be
+      // exposed in API responses (unit-tested). NODE_ENV only changes
+      // rate-limit generosity, so dev without the flag is Secure too.
+      status: process.env.ALLOW_DEV_OTP_RESPONSE !== 'true',
+      fix: 'Keep ALLOW_DEV_OTP_RESPONSE disabled (never set it to "true"), and run live deployments with NODE_ENV=production.',
       framework: 'OWASP',
       implementation: 'server.js',
     },
@@ -124,43 +128,38 @@ router.get('/overview', async (req, res) => {
 
 router.get('/users', async (req, res) => {
   try {
-    const search = String(req.query.search || '').trim();
-    const filter = search ? { $or: [
-      { email: { $regex: search, $options: 'i' } },
-      { firstName: { $regex: search, $options: 'i' } },
-      { lastName: { $regex: search, $options: 'i' } },
+    const search = String(req.query.search || '').trim().slice(0, 64);
+    // Escape regex metacharacters so the search box cannot build ReDoS patterns
+    const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const filter = escaped ? { $or: [
+      { email: { $regex: escaped, $options: 'i' } },
+      { firstName: { $regex: escaped, $options: 'i' } },
+      { lastName: { $regex: escaped, $options: 'i' } },
     ] } : {};
-    const users = await User.aggregate([
-      { $match: filter },
-      { $sort: { createdAt: -1 } },
-      { $limit: 100 },
-      {
-        $lookup: {
-          from: 'assessments',
-          localField: '_id',
-          foreignField: 'user',
-          as: 'assessments',
-        },
-      },
-      {
-        $addFields: {
-          assessmentCount: { $size: '$assessments' },
-        },
-      },
-      {
-        $project: {
-          assessments: 0,
-          password: 0,
-          twoFactorSecret: 0,
-          lastLoginIp: 0,
-          lastLoginUserAgent: 0,
-        },
-      },
-    ]);
-    const normalizedUsers = users.map(user => {
+    // Lean user rows (no blobs) + assessment counts from a grouped query.
+    // The old $lookup pulled entire assessments incl. ~500 KB aiResults each,
+    // which stalled this endpoint ("Loading users..." forever).
+    const users = await User.find(filter)
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .select('firstName lastName email createdAt subscriptionActive subscriptionPlan twoFactorEnabled lastLoginAt lastLoginIp lastLoginLocation lastLoginUserAgent accountRole accountStatus profilePicture')
+      .lean();
+    let countMap = new Map();
+    if (users.length > 0) {
+      const counts = await Assessment.aggregate([
+        { $match: { user: { $in: users.map(u => u._id) } } },
+        { $group: { _id: '$user', count: { $sum: 1 } } },
+      ]);
+      countMap = new Map(counts.map(c => [String(c._id), c.count]));
+    }
+    const withCounts = users.map(user => ({ ...user, assessmentCount: countMap.get(String(user._id)) || 0 }));
+    // Heal unknown locations in the background (IP geo lookup never blocks this response)
+    const { backfillLocations } = require('../utils/geo');
+    backfillLocations(withCounts);
+    const normalizedUsers = withCounts.map(user => {
       const { lastLoginUserAgent, ...rest } = user;
       const device = lastLoginUserAgent
-        ? lastLoginUserAgent.split(' ').slice(0, 3).join(' ')
+        ? String(lastLoginUserAgent).split(' ').slice(0, 3).join(' ')
         : 'Unknown device';
       return { ...rest, device };
     });
@@ -219,17 +218,33 @@ router.patch('/users/:id/subscription', async (req, res) => {
 
 // ── Real-time Security Monitor ────────────────────────────────────────────
 // Each probe runs independently; failures in one never block the others.
+// Results are cached for 60 s so the 30 s frontend auto-refresh (and the
+// OpenRouter network probe) cannot pile up expensive calls.
+let monitorCache = { at: 0, payload: null };
+const MONITOR_CACHE_TTL_MS = 60 * 1000;
+
 router.get('/security/monitor', async (req, res) => {
+  const forceFresh = req.query.fresh === '1';
+  if (!forceFresh && monitorCache.payload && Date.now() - monitorCache.at < MONITOR_CACHE_TTL_MS) {
+    return res.json({ ...monitorCache.payload, cached: true });
+  }
   const at = new Date().toISOString();
 
-  // Helper: wrap an async probe so it always resolves to a result object
+  // Helper: wrap an async probe so it always resolves to a result object.
+  // Each probe is capped at 10 s so one stalled check can never hang the
+  // whole monitor response (or inflate its own latency into the 30 s range).
+  const PROBE_TIMEOUT_MS = 10000;
   async function probe(key, label, category, fn) {
     const t0 = Date.now();
     try {
-      const result = await fn();
+      const result = await Promise.race([
+        fn(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Probe timed out after 10 s.')), PROBE_TIMEOUT_MS)),
+      ]);
       return { key, label, category, status: result.status, detail: result.detail, latencyMs: Date.now() - t0, checkedAt: at };
     } catch (err) {
-      return { key, label, category, status: 'error', detail: err.message || 'Probe threw an unexpected error.', latencyMs: Date.now() - t0, checkedAt: at };
+      const timedOut = /timed out/.test(err.message || '');
+      return { key, label, category, status: timedOut ? 'warning' : 'error', detail: err.message || 'Probe threw an unexpected error.', latencyMs: Date.now() - t0, checkedAt: at };
     }
   }
 
@@ -344,8 +359,9 @@ router.get('/security/monitor', async (req, res) => {
     probe('password_hashing', 'Password Hashing (bcrypt)', 'password_hashing', async () => {
       const adminHashOk = /^\$2[aby]?\$\d{2}\$/.test(process.env.ADMIN_PASSWORD_HASH || '') ||
         String(process.env.ADMIN_ACCOUNTS || '').includes('|$2');
-      // Sample one user to check hash format
-      const sampleUser = await User.findOne({ password: { $exists: true, $ne: null } }).select('+password').lean();
+      // Minimal projection + lean: user docs carry MBs of base64 pictures —
+      // fetching the full document here stalled this probe for ~30 s.
+      const sampleUser = await User.findOne({ password: { $exists: true, $ne: null } }).select('password').lean();
       const userHashOk = sampleUser ? /^\$2[aby]?\$\d{2}\$/.test(sampleUser.password || '') : true;
       if (!adminHashOk) return { status: 'critical', detail: 'Admin password is not stored as a bcrypt hash — this is a critical misconfiguration.' };
       if (!userHashOk) return { status: 'critical', detail: 'At least one user password is not stored as a bcrypt hash.' };
@@ -372,7 +388,9 @@ router.get('/security/monitor', async (req, res) => {
   const hasWarning = results.some(r => r.status === 'warning');
   const overallMonitorStatus = hasCritical ? 'critical' : hasWarning ? 'warning' : 'healthy';
 
-  res.json({ monitors: results, overallMonitorStatus, syncedAt: at });
+  const payload = { monitors: results, overallMonitorStatus, syncedAt: at };
+  monitorCache = { at: Date.now(), payload };
+  res.json(payload);
 });
 
 router.get('/security', (req, res) => {
@@ -420,44 +438,64 @@ router.get('/ai', (req, res) => {
 });
 
 router.get('/profile', async (req, res) => {
-  if (!mongoose.isValidObjectId(req.user._id)) return res.json({ alias: req.user.alias, createdAt: null, lastLoginAt: null });
-  const account = await AdminAccount.findById(req.user._id).select('alias createdAt lastLoginAt').lean();
-  res.json({ alias: account?.alias || req.user.alias, createdAt: account?.createdAt || null, lastLoginAt: account?.lastLoginAt || null });
+  try {
+    if (!mongoose.isValidObjectId(req.user._id)) return res.json({ alias: req.user.alias, createdAt: null, lastLoginAt: null });
+    const account = await AdminAccount.findById(req.user._id).select('alias createdAt lastLoginAt').lean();
+    res.json({ alias: account?.alias || req.user.alias, createdAt: account?.createdAt || null, lastLoginAt: account?.lastLoginAt || null });
+  } catch (error) {
+    console.error('[admin/profile]', error.message);
+    res.status(500).json({ message: 'Unable to load the admin profile.' });
+  }
 });
 
 router.patch('/profile/password', async (req, res) => {
-  const { currentPassword, newPassword, otp } = req.body || {};
-  if (!currentPassword || !newPassword || !/^\d{6}$/.test(String(otp || ''))) return res.status(400).json({ message: 'Current password, new password, and authenticator code are required.' });
-  if (newPassword.length < 8 || !/[A-Z]/.test(newPassword) || !/[0-9]/.test(newPassword)) return res.status(400).json({ message: 'New password must be at least 8 characters with a capital letter and number.' });
-  if (!mongoose.isValidObjectId(req.user._id)) return res.status(409).json({ message: 'Please sign in again before changing the admin password.' });
-  const account = await AdminAccount.findById(req.user._id).select('+passwordHash +totpSecret');
-  if (!account) return res.status(404).json({ message: 'Admin account not found.' });
-  if (!await bcrypt.compare(currentPassword, account.passwordHash)) return res.status(401).json({ message: 'Current password is incorrect.' });
-  const verified = speakeasy.totp.verify({ secret: account.totpSecret, encoding: 'base32', token: String(otp), window: 1 });
-  if (!verified) return res.status(401).json({ message: 'Invalid authenticator code.' });
-  account.passwordHash = await bcrypt.hash(newPassword, 12);
-  await account.save();
-  res.json({ message: 'Admin password changed successfully.' });
+  try {
+    const { currentPassword, newPassword, otp } = req.body || {};
+    if (!currentPassword || !newPassword || !/^\d{6}$/.test(String(otp || ''))) return res.status(400).json({ message: 'Current password, new password, and authenticator code are required.' });
+    if (newPassword.length < 8 || !/[A-Z]/.test(newPassword) || !/[0-9]/.test(newPassword)) return res.status(400).json({ message: 'New password must be at least 8 characters with a capital letter and number.' });
+    if (!mongoose.isValidObjectId(req.user._id)) return res.status(409).json({ message: 'Please sign in again before changing the admin password.' });
+    const account = await AdminAccount.findById(req.user._id).select('+passwordHash +totpSecret');
+    if (!account) return res.status(404).json({ message: 'Admin account not found.' });
+    if (!await bcrypt.compare(currentPassword, account.passwordHash)) return res.status(401).json({ message: 'Current password is incorrect.' });
+    const verified = verifyTotpOnce(account.totpSecret, otp);
+    if (!verified) return res.status(401).json({ message: 'Invalid authenticator code.' });
+    account.passwordHash = await bcrypt.hash(newPassword, 12);
+    await account.save();
+    res.json({ message: 'Admin password changed successfully.' });
+  } catch (error) {
+    console.error('[admin/profile/password]', error.message);
+    res.status(500).json({ message: 'Unable to change the admin password.' });
+  }
 });
 
 router.post('/profile/authenticator/rotate', async (req, res) => {
-  const { otp } = req.body || {};
-  if (!mongoose.isValidObjectId(req.user._id)) return res.status(409).json({ message: 'Please sign in again before rotating your authenticator key.' });
-  const account = await AdminAccount.findById(req.user._id).select('+totpSecret');
-  if (!account) return res.status(404).json({ message: 'Admin account not found.' });
-  if (!/^\d{6}$/.test(String(otp || '')) || !speakeasy.totp.verify({ secret: account.totpSecret, encoding: 'base32', token: String(otp), window: 1 })) return res.status(401).json({ message: 'Invalid current authenticator code.' });
-  const secret = speakeasy.generateSecret({ name: `SuppliWise Admin (${account.alias})`, issuer: 'SuppliWise' });
-  account.totpSecret = secret.base32;
-  await account.save();
-  res.json({ qrCode: await require('qrcode').toDataURL(secret.otpauth_url), secret: secret.base32, message: 'New authenticator key generated. Add it before signing out.' });
+  try {
+    const { otp } = req.body || {};
+    if (!mongoose.isValidObjectId(req.user._id)) return res.status(409).json({ message: 'Please sign in again before rotating your authenticator key.' });
+    const account = await AdminAccount.findById(req.user._id).select('+totpSecret');
+    if (!account) return res.status(404).json({ message: 'Admin account not found.' });
+    if (!/^\d{6}$/.test(String(otp || '')) || !verifyTotpOnce(account.totpSecret, otp)) return res.status(401).json({ message: 'Invalid current authenticator code.' });
+    const secret = speakeasy.generateSecret({ name: `SuppliWise Admin (${account.alias})`, issuer: 'SuppliWise' });
+    account.totpSecret = secret.base32;
+    await account.save();
+    res.json({ qrCode: await require('qrcode').toDataURL(secret.otpauth_url), secret: secret.base32, message: 'New authenticator key generated. Add it before signing out.' });
+  } catch (error) {
+    console.error('[admin/profile/authenticator/rotate]', error.message);
+    res.status(500).json({ message: 'Unable to rotate the authenticator key.' });
+  }
 });
 
 router.get('/notifications', async (req, res) => {
-  const security = securityChecks()
-    .filter(check => check.status !== 'Secure')
-    .map(check => ({ type: 'security', title: check.label, detail: check.fix || '', createdAt: new Date() }));
-  const events = await AdminEvent.find().sort({ createdAt: -1 }).limit(30).lean();
-  res.json({ unreadCount: events.filter(event => !event.readBy.some(id => String(id) === String(req.user._id))).length + security.length, notifications: [...security, ...events] });
+  try {
+    const security = securityChecks()
+      .filter(check => check.status !== 'Secure')
+      .map(check => ({ type: 'security', title: check.label, detail: check.fix || '', createdAt: new Date() }));
+    const events = await AdminEvent.find().sort({ createdAt: -1 }).limit(30).lean();
+    res.json({ unreadCount: events.filter(event => !event.readBy.some(id => String(id) === String(req.user._id))).length + security.length, notifications: [...security, ...events] });
+  } catch (error) {
+    console.error('[admin/notifications]', error.message);
+    res.status(500).json({ message: 'Unable to load notifications.' });
+  }
 });
 
 router.post('/notifications/read', async (req, res) => {
@@ -469,6 +507,31 @@ router.post('/notifications/read', async (req, res) => {
   } catch (error) {
     console.error('[admin/notifications/read]', error.message);
     res.status(500).json({ message: 'Unable to mark notifications as read.' });
+  }
+});
+
+router.post('/notifications/read-all', async (req, res) => {
+  try {
+    await AdminEvent.updateMany(
+      { readBy: { $ne: req.user._id } },
+      { $addToSet: { readBy: req.user._id } }
+    );
+    res.json({ message: 'All notifications marked as read.' });
+  } catch (error) {
+    console.error('[admin/notifications/read-all]', error.message);
+    res.status(500).json({ message: 'Unable to mark notifications as read.' });
+  }
+});
+
+router.delete('/notifications/:id', async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid notification.' });
+    const event = await AdminEvent.findByIdAndDelete(req.params.id);
+    if (!event) return res.status(404).json({ message: 'Notification not found.' });
+    res.json({ message: 'Notification deleted.' });
+  } catch (error) {
+    console.error('[admin/notifications/:id]', error.message);
+    res.status(500).json({ message: 'Unable to delete the notification.' });
   }
 });
 

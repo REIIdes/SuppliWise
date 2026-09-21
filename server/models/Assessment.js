@@ -46,11 +46,19 @@ const assessmentSchema = new mongoose.Schema(
     },
     // Admin-set priority flag
     priority: { type: String, enum: ['Priority', 'Standard'], default: 'Standard' },
+    // Flagging lifecycle (user-visible history of auto-detection + resolution)
+    flagReasons: [{ type: String }],
+    flaggedAt: { type: Date, default: null },
+    resolvedAt: { type: Date, default: null },
+    resolvedReason: { type: String, default: '' },
     // User info snapshot (for easy identification in DB)
     userEmail: { type: String },
     userName: { type: String },
   },
   { timestamps: true }
 );
+
+// Hot paths query newest-first per user — index them (dashboard, insights, assessment routes)
+assessmentSchema.index({ user: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Assessment', assessmentSchema);

@@ -14,6 +14,11 @@ router.post('/', async (req, res) => {
 
     const raw = text.trim();
 
+    // Bound input size — this is a public AI endpoint, so cap tokens before the API call
+    if (raw.length > 1000) {
+      return res.status(400).json({ message: 'Please keep descriptions under 1000 characters.' });
+    }
+
     // Hard reject obvious garbage before hitting the API
     const isGarbage = (
       raw.length < 5 ||
@@ -33,7 +38,7 @@ router.post('/', async (req, res) => {
       return res.json({ polished: basicClean(raw), rejected: false });
     }
 
-    const prompt = `You are a clinical documentation assistant. A patient has written a free-text description of their health concerns. Your job is to:
+    const prompt = `Polish the following patient-written health description:
 
 1. If the input is gibberish, random characters, spam, or completely unrelated to health — respond with exactly: REJECTED
 2. If the input is valid health-related content (even if poorly written, in slang, or with errors):
@@ -44,9 +49,7 @@ router.post('/', async (req, res) => {
    - Preserve ALL the original meaning and symptoms — do not add or invent anything
    - Write in third person ("The patient reports...")
    - Use possibility language ("reports", "describes", "indicates")
-   - Do NOT include any explanation, preamble, or extra text — output ONLY the polished paragraph
-
-Patient input: "${raw}"`;
+   - Do NOT include any explanation, preamble, or extra text — output ONLY the polished paragraph`;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 12000);
@@ -62,9 +65,10 @@ Patient input: "${raw}"`;
         messages: [
           {
             role: 'system',
-            content: 'You are a clinical documentation assistant. Follow instructions exactly. Output only the polished paragraph or the word REJECTED. No extra text.',
+            content: prompt,
           },
-          { role: 'user', content: prompt },
+          // Patient text travels as its own message so it cannot override the instructions above
+          { role: 'user', content: raw },
         ],
         max_tokens: 300,
         temperature: 0.2,

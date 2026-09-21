@@ -1,14 +1,14 @@
 import { useState } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
-import { BASE_URL, loginUser, saveAssessment, getRecommendations, saveAssessmentResults, parseJSON } from '../api';
+import { BASE_URL, saveAssessment, getRecommendations, saveAssessmentResults, parseJSON } from '../api';
 import './LogIn.css';
 import './ProfilePage.css'; // Import for OTP modal styles
 
 const SESSION_KEY = 'pending_assessment';
 
-// Strict email regex — requires a proper TLD (2–6 letters)
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,6}$/;
+// Strict email regex — requires a proper TLD (2+ letters; long TLDs allowed)
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/;
 const SUSPICIOUS_TLDS = ['.con', '.cmo', '.ocm', '.nte', '.ogr', '.cpm'];
 
 function validateEmail(email) {
@@ -35,7 +35,6 @@ function LogIn() {
   const [resendCooldown, setResendCooldown] = useState(0);
   const [resendTimer, setResendTimer] = useState(null);
   const [success, setSuccess] = useState('');
-  const [otpExpiresAt, setOtpExpiresAt] = useState(null);
   const [otpTimeLeft, setOtpTimeLeft] = useState(600); // 10 minutes in seconds
   const [otpExpiryTimer, setOtpExpiryTimer] = useState(null);
   const [requiresTwoFactor, setRequiresTwoFactor] = useState(false);
@@ -50,7 +49,7 @@ function LogIn() {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false);
   const [resetUserId, setResetUserId] = useState('');
-  const [otpVerified, setOtpVerified] = useState(false);
+  const [, setOtpVerified] = useState(false); // write-only flag: reset once verified
   
   const navigate = useNavigate();
   const location = useLocation();
@@ -258,7 +257,9 @@ function LogIn() {
       age: data.age,
       twoFactorEnabled: data.twoFactorEnabled === true,
       profilePicture: data.profilePicture || '',
-      bannerPicture: data.bannerPicture || ''
+      bannerPicture: data.bannerPicture || '',
+      subscriptionActive: data.subscriptionActive === true,
+      subscriptionPlan: data.subscriptionPlan || 'free'
     }));
 
     // Check for pending assessment saved before login
@@ -278,7 +279,7 @@ function LogIn() {
         }
         sessionStorage.removeItem(SESSION_KEY);
         navigate('/results', { state: { recommendations, assessment: formData } });
-      } catch (err) {
+      } catch {
         // If recommendations fail, just go home — don't block login
         sessionStorage.removeItem(SESSION_KEY);
         navigate('/');
@@ -359,6 +360,15 @@ function LogIn() {
           startResendCooldown(data.remainingSeconds);
         }
         throw new Error(data.message || 'Failed to send verification code');
+      }
+
+      // Anti-enumeration: the server reports success even for unknown emails,
+      // but only returns a userId when an account actually exists. Stay on the
+      // email step unless we can proceed to verification.
+      if (!data.userId) {
+        setSuccess('If an account exists with this email, a verification code has been sent. Please check your inbox (and spam folder).');
+        setTimeout(() => setSuccess(''), 6000);
+        return;
       }
 
       setResetUserId(data.userId);
@@ -585,7 +595,9 @@ function LogIn() {
             {!requiresTwoFactor && <p className="profile-modal-email">{email}</p>}
             <p className="profile-modal-note">Please enter the code to complete your login.</p>
             
-            {/* OTP Expiry Timer */}
+            {/* Email-OTP expiry timer — hidden for Google Authenticator
+                (TOTP codes rotate every 30s in the app itself) */}
+            {!requiresTwoFactor && (
             <div className="otp-expiry-timer">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <circle cx="12" cy="12" r="10"/>
@@ -595,6 +607,7 @@ function LogIn() {
                 Code expires in {formatTimeLeft(otpTimeLeft)}
               </span>
             </div>
+            )}
             
             <input
               type="text"
@@ -607,7 +620,7 @@ function LogIn() {
                 setError('');
               }}
               maxLength="6"
-              disabled={otpLoading || otpTimeLeft === 0}
+              disabled={otpLoading || (!requiresTwoFactor && otpTimeLeft === 0)}
               autoFocus
             />
 
@@ -649,7 +662,7 @@ function LogIn() {
                 type="button"
                 className="profile-modal-btn profile-modal-btn-primary"
                 onClick={handleOtpSubmit}
-                disabled={otpLoading || otp.length !== 6 || otpTimeLeft === 0}
+                disabled={otpLoading || otp.length !== 6 || (!requiresTwoFactor && otpTimeLeft === 0)}
               >
                 {otpLoading ? 'Verifying...' : 'Verify & Sign In'}
               </button>
