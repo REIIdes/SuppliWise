@@ -674,8 +674,7 @@
 }
 
 .admin-header h1 { font-size: clamp(28px, 4vw, 45px); line-height: 1; margin: 7px 0 0; font-weight: 500; }
-.admin-session-status { margin: -18px 0 22px; color: var(--admin-muted); font: 12px Arial, sans-serif; } .admin-session-status strong { color: var(--admin-green); margin-left: 5px; font-variant-numeric: tabular-nums; } .admin-session-status.warning strong { color: #b34b28; }
-.admin-session-warning { margin: -8px 0 22px; padding: 13px 16px; border: 1px solid #e7a58f; background: #fff1eb; color: #8c321b; font: 600 13px/1.45 Arial, sans-serif; } .admin-session-warning strong { font-variant-numeric: tabular-nums; }
+
 .admin-kicker { color: #df8650; letter-spacing: .12em; font: 700 11px Arial, sans-serif; margin: 0; }
 .admin-muted { color: var(--admin-muted); font: 14px/1.55 Arial, sans-serif; }
 .admin-primary, .admin-secondary, .admin-link { cursor: pointer; font: 600 13px Arial, sans-serif; }

@@ -105,8 +105,13 @@ const otpRateLimitMap = new Map(); // Format: { userId: lastRequestTime }
 const OTP_COOLDOWN_MS = 30000; // 30 seconds cooldown
 
 // Generate JWT
-const generateToken = (id, claims = {}) => {
-  return jwt.sign({ id, ...claims }, process.env.JWT_SECRET, { expiresIn: '12h' });
+const generateToken = (id, claims = {}, options = {}) => {
+  const defaultOptions = { expiresIn: '30m' };
+  const finalOptions = { ...defaultOptions, ...options };
+  if (finalOptions.expiresIn === null) {
+    delete finalOptions.expiresIn;
+  }
+  return jwt.sign({ id, ...claims }, process.env.JWT_SECRET, finalOptions);
 };
 
 const adminChallenges = new Map();
@@ -121,7 +126,7 @@ function legacyAdminConfiguration() {
 }
 
 function adminToken(account) {
-  return generateToken(String(account._id), { role: 'admin', alias: account.alias, adminId: String(account._id) });
+  return generateToken(String(account._id), { role: 'admin', alias: account.alias, adminId: String(account._id) }, { expiresIn: '5m' });
 }
 
 // Email regex — requires a real TLD (2+ letters), rejects .con, .cmo, etc.
@@ -258,7 +263,7 @@ router.post('/register', async (req, res) => {
       bannerPicture: user.bannerPicture,
       subscriptionActive: user.subscriptionActive,
       subscriptionPlan: user.subscriptionPlan,
-      token: generateToken(user._id),
+      token: generateToken(user._id, {}, { expiresIn: null }),
     });
   } catch (error) {
     console.error('[register]', error.message);
@@ -515,7 +520,7 @@ router.post('/verify-login-otp', async (req, res) => {
       bannerPicture: user.bannerPicture,
       subscriptionActive: user.subscriptionActive,
       subscriptionPlan: user.subscriptionPlan,
-      token: generateToken(user._id),
+      token: generateToken(user._id, {}, { expiresIn: null }),
     });
   } catch (error) {
     console.error('[verify-login-otp]', error.message);

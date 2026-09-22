@@ -17,8 +17,11 @@ const ADMIN_REFRESH_INTERVAL_MS = 10 * 1000;
 // Owns its 1 s ticker so the rest of the dashboard does NOT re-render every
 // second (previously the whole page re-rendered 210× per idle session).
 // Memoized: only this badge updates as the countdown ticks.
-const AdminIdleStatus = memo(function AdminIdleStatus({ deadlineRef, onExpire }) {
+import SessionExpiryModal from '../components/SessionExpiryModal/SessionExpiryModal';
+
+const AdminIdleStatus = memo(function AdminIdleStatus({ deadlineRef, onExpire, onActivity }) {
   const [remaining, setRemaining] = useState(ADMIN_IDLE_LIMIT_SECONDS);
+  const [showModal, setShowModal] = useState(false);
   const onExpireRef = useRef(null);
   useEffect(() => {
     onExpireRef.current = onExpire;
@@ -27,34 +30,37 @@ const AdminIdleStatus = memo(function AdminIdleStatus({ deadlineRef, onExpire })
   useEffect(() => {
     const timer = window.setInterval(() => {
       const left = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
-      setRemaining(prev => {
-        if (prev === left) return prev; // skip render when second hasn't changed
-        return left;
-      });
+      setRemaining(left);
+
+      if (left <= ADMIN_WARNING_SECONDS && !showModal) {
+        setShowModal(true);
+      }
+
       if (left === 0) {
         window.clearInterval(timer);
         onExpireRef.current();
       }
     }, 500);
     return () => window.clearInterval(timer);
-  }, [deadlineRef]);
+  }, [deadlineRef, showModal]);
 
-  const format = () => `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`;
-  const warning = remaining <= ADMIN_WARNING_SECONDS;
+  const handleStayLoggedIn = () => {
+    setShowModal(false);
+    onActivity();
+  };
+
+  const handleLogout = () => {
+    onExpireRef.current();
+  };
 
   return (
-    <>
-      <div className={`admin-session-status${warning ? ' warning' : ''}`}>
-        {warning
-          ? <><strong>Session expiry warning:</strong> signing out in <strong>{format()}</strong> due to inactivity.</>
-          : <>Admin session expires after 3 minutes of inactivity, followed by a 30-second warning. <strong>{format()}</strong></>}
-      </div>
-      {warning && (
-        <div className="admin-session-warning" role="alert" aria-live="assertive">
-          Your admin session is about to expire. Move or focus on this page to stay signed in. Automatic logout in <strong>{format()}</strong>.
-        </div>
-      )}
-    </>
+    showModal && (
+      <SessionExpiryModal
+        remainingTime={remaining}
+        onStayLoggedIn={handleStayLoggedIn}
+        onLogout={handleLogout}
+      />
+    )
   );
 });
 
@@ -577,7 +583,7 @@ function AdminDashboard() {
   const downloadReportRef = useRef(downloadReport);
   useEffect(() => { downloadReportRef.current = downloadReport; }, [downloadReport]);
 
-  const signOut = useCallback(() => { localStorage.removeItem('adminToken'); localStorage.removeItem('admin'); localStorage.removeItem('token'); navigate('/admin/login'); }, [navigate]);
+  const signOut = useCallback(() => { localStorage.removeItem('adminToken'); localStorage.removeItem('admin'); navigate('/admin/login'); }, [navigate]);
   const signOutRef = useRef(signOut);
   useEffect(() => {
     signOutRef.current = signOut;
@@ -870,7 +876,7 @@ function AdminDashboard() {
             </div>
           </header>
 
-          <AdminIdleStatus deadlineRef={idleDeadlineRef} onExpire={handleIdleExpire} />
+          <AdminIdleStatus deadlineRef={idleDeadlineRef} onExpire={handleIdleExpire} onActivity={handleIdleExpire} />
 
           {error && <div className="admin-alert danger">{error}</div>}
 

@@ -1,0 +1,74 @@
+.session-expiry-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.session-expiry-modal {
+  background-color: #fff;
+  padding: 30px;
+  border-radius: 8px;
+  text-align: center;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+  width: 90%;
+  max-width: 400px;
+}
+
+.session-expiry-modal h2 {
+  margin-top: 0;
+  font-size: 1.5rem;
+  color: #333;
+}
+
+.session-expiry-modal p {
+  margin-bottom: 20px;
+  font-size: 1rem;
+  color: #666;
+}
+
+.session-expiry-timer {
+  font-size: 3rem;
+  font-weight: bold;
+  color: #d9534f;
+  margin-bottom: 25px;
+}
+
+.session-expiry-actions {
+  display: flex;
+  justify-content: space-around;
+}
+
+.session-expiry-actions button {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: bold;
+  transition: background-color 0.3s ease;
+}
+
+.btn-stay-logged-in {
+  background-color: #5cb85c;
+  color: white;
+}
+
+.btn-stay-logged-in:hover {
+  background-color: #4cae4c;
+}
+
+.btn-logout {
+  background-color: #f0ad4e;
+  color: white;
+}
+
+.btn-logout:hover {
+  background-color: #ec971f;
+}
