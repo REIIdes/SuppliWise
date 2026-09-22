@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
+const { hashPassword, verifyPassword, needsRehash } = require('../utils/password');
 
 const userSchema = new mongoose.Schema(
   {
@@ -158,16 +158,18 @@ userSchema.pre('save', async function (next) {
     this.name = `${this.firstName} ${this.lastName}`;
   }
   
-  // Hash password (cost 12 — matches the Security center claim + admin hashes)
+  // Hash password with argon2id (legacy bcrypt hashes verify + upgrade on login).
+  // Skip when the value is already an argon2id hash (transparent-upgrade path
+  // assigns a finished hash — hashing it again would lock the user out).
   if (!this.isModified('password')) return next();
-  const salt = await bcrypt.genSalt(12);
-  this.password = await bcrypt.hash(this.password, salt);
+  if (!needsRehash(this.password)) return next();
+  this.password = await hashPassword(this.password);
   next();
 });
 
-// Compare password method
+// Compare password method (argon2id current, bcrypt legacy)
 userSchema.methods.matchPassword = async function (enteredPassword) {
-  return await bcrypt.compare(enteredPassword, this.password);
+  return await verifyPassword(enteredPassword, this.password);
 };
 
 // Cascade delete — remove assessments + tracking data when a user is deleted

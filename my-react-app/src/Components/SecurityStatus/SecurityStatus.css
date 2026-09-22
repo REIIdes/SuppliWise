@@ -374,3 +374,41 @@
   .rt-detail-cell  { padding-left: 14px; }
   .status-overview { flex-direction: column; }
 }
+
+/* ══ VIBRANT THEME REFRESH ══ */
+.rt-section {
+  background: linear-gradient(180deg, #ffffff 0%, #f4faf6 100%);
+  border: 1px solid #d9efe1;
+  border-radius: 18px;
+  box-shadow: 0 8px 24px rgba(6, 95, 70, 0.08);
+  padding: 22px;
+}
+.rt-header__title {
+  font-weight: 800 !important;
+  letter-spacing: -0.01em !important;
+  background: linear-gradient(92deg, #14532d, #15803d 55%, #4f6bed);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent !important;
+}
+.rt-row {
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.rt-row:hover {
+  background: #f0fdf4 !important;
+}
+.rt-banner {
+  border-radius: 16px !important;
+  box-shadow: 0 8px 22px rgba(6, 95, 70, 0.10);
+}
+.rt-sync-btn, .rt-download-btn {
+  transition: transform 0.15s ease, box-shadow 0.2s ease !important;
+}
+.rt-sync-btn:hover:not(:disabled), .rt-download-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 18px rgba(6, 95, 70, 0.20);
+}
+.rt-pill { box-shadow: inset 0 1px 0 rgba(255,255,255,0.5); }
+@media (prefers-reduced-motion: reduce) {
+  .rt-row, .rt-sync-btn, .rt-download-btn { transition: none; }
+}

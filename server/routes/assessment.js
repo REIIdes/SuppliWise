@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const router = express.Router();
 const Assessment = require('../models/Assessment');
 const DashboardMetrics = require('../models/DashboardMetrics');
@@ -125,10 +126,14 @@ router.post('/', protect, async (req, res) => {
 
     console.log('Assessment saved to DB, id:', assessment._id);
 
-    // Auto-flag severe cases (Priority + user/admin notifications, best-effort)
+    // Auto-flag severe cases (Priority + user/admin notifications, best-effort).
+    // Priority Health Reviews is a Premium Package+ perk: lower tiers save
+    // as Standard with no flag, no notifications, and no new-assessment block.
+    // (A manual admin Priority flag still applies to any tier.)
+    const { tierRank, PLAN_RANK } = require('../utils/plan');
     const severity = analyzeSeverity(req.body);
     let severityFlag = { flagged: false, reasons: [] };
-    if (severity.flagged) {
+    if (severity.flagged && tierRank(req.user) >= PLAN_RANK.annual) {
       severityFlag = severity;
       await flagSevereAssessment(assessment, severity.reasons, req.user.email);
       // Reflect the flag in this response (the created doc predates the update)
@@ -258,6 +263,9 @@ router.get('/user/:userId', protect, async (req, res) => {
   if (req.user.role !== 'admin') {
     return res.status(403).json({ message: 'Admin access required.' });
   }
+  if (!mongoose.isValidObjectId(req.params.userId)) {
+    return res.status(400).json({ message: 'Invalid user account.' });
+  }
   try {
     const assessments = await Assessment.find({ user: req.params.userId }).sort({ createdAt: -1 });
     res.json(assessments);
@@ -273,6 +281,9 @@ router.get('/user/:userId', protect, async (req, res) => {
 router.get('/results/:assessmentId', protect, async (req, res) => {
   if (req.user.role !== 'admin') {
     return res.status(403).json({ message: 'Admin access required.' });
+  }
+  if (!mongoose.isValidObjectId(req.params.assessmentId)) {
+    return res.status(400).json({ message: 'Invalid assessment.' });
   }
   try {
     const assessment = await Assessment.findById(req.params.assessmentId);
@@ -311,9 +322,11 @@ router.patch('/:id/results', protect, async (req, res) => {
     );
     if (!assessment) return res.status(404).json({ message: 'Assessment not found.' });
     // Re-run severe-case detection now that AI results exist (warnings scan).
-    // Only flags when the assessment isn't already Priority (idempotent).
+    // Only flags when the assessment isn't already Priority (idempotent) and
+    // the owner holds Premium Package+ (Priority reviews are tier-gated).
     let severityFlag = { flagged: false, reasons: [] };
-    if (assessment.priority !== 'Priority') {
+    const { tierRank: resultsTierRank, PLAN_RANK: RESULTS_PLAN_RANK } = require('../utils/plan');
+    if (assessment.priority !== 'Priority' && resultsTierRank(req.user) >= RESULTS_PLAN_RANK.annual) {
       const severity = analyzeSeverity(
         assessment.toObject ? assessment.toObject() : assessment,
         req.body

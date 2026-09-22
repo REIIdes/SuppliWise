@@ -757,4 +757,128 @@
 .day-detail__pill{flex-shrink:0;font-size:11.5px;font-weight:700;padding:5px 10px;border-radius:999px;white-space:nowrap}
 .day-detail__pill--taken{background:#16a34a;color:#fff}
 .day-detail__pill--missed{background:#fee2e2;color:#b91c1c}
+.day-detail__pill--taken{background:#16a34a;color:#fff}
+.day-detail__pill--missed{background:#fee2e2;color:#b91c1c}
 @media (max-width:480px){.day-detail__row{flex-wrap:wrap}}
+
+/* ════════════════════════════════════════════════════════════════════
+   VIBRANT THEME REFRESH
+   ════════════════════════════════════════════════════════════════════ */
+.track-intake-wrapper {
+  background:
+    radial-gradient(900px 340px at 5% -80px, rgba(16, 185, 129, 0.16), transparent 60%),
+    radial-gradient(760px 300px at 96% -40px, rgba(168, 85, 247, 0.12), transparent 60%),
+    radial-gradient(820px 480px at 50% 115%, rgba(59, 130, 246, 0.10), transparent 60%),
+    linear-gradient(180deg, #eefbf1 0%, #f4faf6 100%);
+}
+
+.track-intake-title {
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  background: linear-gradient(92deg, #065f46 10%, #059669 45%, #7c3aed 90%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.track-section {
+  border-radius: 20px;
+  border: 1px solid #bbf7d0;
+  box-shadow: 0 8px 24px rgba(6, 95, 70, 0.08);
+  animation: track-section-in 0.45s ease both;
+}
+.track-intake-left .track-section:nth-child(2) { animation-delay: 0.08s; }
+.track-intake-left .track-section:nth-child(3) { animation-delay: 0.14s; }
+@keyframes track-section-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.supplement-card {
+  border-radius: 16px;
+  border: 1.5px solid #d1fae5;
+  box-shadow: 0 3px 10px rgba(6, 95, 70, 0.06);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.supplement-card:hover {
+  transform: translateX(4px);
+  box-shadow: 0 10px 22px rgba(6, 95, 70, 0.12);
+}
+.supplement-card.taken {
+  background: linear-gradient(180deg, #ecfdf4, #d1fae5);
+  border-color: #34d399;
+  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.18);
+}
+
+.btn-mark-taken {
+  background: linear-gradient(135deg, #34d399, #059669) !important;
+  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.30);
+  transition: transform 0.15s ease, box-shadow 0.2s ease !important;
+}
+.btn-mark-taken:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 10px 22px rgba(16, 185, 129, 0.38) !important;
+}
+.btn-mark-taken:active { transform: scale(0.96) !important; }
+.btn-undo {
+  transition: transform 0.15s ease, background 0.2s ease !important;
+}
+.btn-undo:hover { transform: translateY(-1px); }
+
+/* Streak hero */
+.streak-section {
+  background: linear-gradient(135deg, #f59e0b 0%, #f97316 55%, #ea580c 100%) !important;
+  border: none !important;
+  box-shadow: 0 12px 30px rgba(249, 115, 22, 0.30) !important;
+}
+.streak-section .section-title,
+.streak-section .streak-text,
+.streak-section .streak-number {
+  color: #fff !important;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+.streak-icon {
+  background: rgba(255, 255, 255, 0.25) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  animation: streak-flicker 2.2s ease-in-out infinite;
+}
+@keyframes streak-flicker {
+  0%, 100% { transform: scale(1) rotate(0deg); }
+  50% { transform: scale(1.1) rotate(-4deg); }
+}
+
+/* Adherence bar shimmer */
+.adherence-box {
+  border-radius: 14px;
+  background: linear-gradient(180deg, #f8fafc, #eef2ff);
+  border: 1px solid #e0e7ff;
+}
+
+/* Calendar days pop */
+.calendar-day:not(.empty):not(:disabled):hover {
+  transform: scale(1.12);
+  box-shadow: 0 6px 14px rgba(16, 185, 129, 0.25);
+  z-index: 1;
+}
+.calendar-day.completed {
+  background: linear-gradient(180deg, #a7f3d0, #6ee7b7) !important;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.30);
+}
+.calendar-day.today {
+  background: linear-gradient(135deg, #34d399, #059669) !important;
+  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.40), 0 0 0 3px rgba(16, 185, 129, 0.25) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .track-section,
+  .streak-icon {
+    animation: none;
+  }
+  .supplement-card,
+  .btn-mark-taken,
+  .btn-undo,
+  .calendar-day {
+    transition: none;
+  }
+}

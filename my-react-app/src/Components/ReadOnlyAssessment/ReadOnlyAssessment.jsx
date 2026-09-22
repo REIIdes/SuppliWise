@@ -33,7 +33,7 @@ function StepHeading({ children }) {
 }
 
 /* ── Main component ───────────────────────────────────────────────── */
-export default function ReadOnlyAssessment({ assessment, onClose }) {
+export default function ReadOnlyAssessment({ assessment, onClose, inline }) {
   if (!assessment) return null;
 
   const hasValues = (arr) =>
@@ -55,7 +55,7 @@ export default function ReadOnlyAssessment({ assessment, onClose }) {
     .map(s => s.replace('General::', ''));
 
   return (
-    <div className="ro-box" onClick={e => e.stopPropagation()}>
+    <div className={`ro-box${inline ? ' ro-box--inline' : ''}`} onClick={e => e.stopPropagation()}>
 
       {/* ── Header ─────────────────────────────────── */}
       <div className="ro-header">

@@ -14,7 +14,7 @@ ADMIN_TOTP_SECRET=replace_with_a_base32_authenticator_secret
 
 This workspace is already configured locally with the example alias `AdminDevs` and password `Devs101`. Change that password before using the app outside local development. The generated TOTP secret is in `server/.env`; add it to an authenticator app before signing in.
 
-Additional local aliases are configured: `AdminJoma` / `Joma123`, `AdminPoli` / `Poli123`, `AdminJohn` / `John123`, and `AdminShMa` / `ShMa123`. Each account has its own TOTP secret in `ADMIN_ACCOUNTS`; add each secret to the appropriate authenticator app.
+Additional local aliases are configured: `AdminJoma` / `Joma123`, `AdminPoli` / `Poli123`, `AdminJohn` / `John123`, `AdminShMa` / `ShMa123`, and `AdminRaNe` / `RaNe123`. Each account has its own TOTP secret in `ADMIN_ACCOUNTS` (see `AdminNames.md`); add each secret to the appropriate authenticator app.
 
 Generate a password hash from the `server` directory:
 
@@ -43,4 +43,4 @@ Open `/admin/login`, enter the alias and password, then enter the current authen
 - Security center: JWT, MFA, bcrypt, email OTP, and production safeguard checks.
 - Security report: browser-generated PDF with STRIDE/OWASP-oriented control results.
 
-Passwords remain one-way bcrypt hashes. They cannot be decrypted or displayed; password reset is the correct recovery operation.
+Passwords remain one-way argon2id hashes (legacy bcrypt accepted, auto-upgraded on next sign-in). They cannot be decrypted or displayed; password reset is the correct recovery operation.

@@ -1,10 +1,17 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
 const Assessment = require('../models/Assessment');
 const IntakeRecord = require('../models/IntakeRecord');
 const DashboardMetrics = require('../models/DashboardMetrics');
 const { notExpiredFilter } = require('../utils/assessments');
+
+// Coerce any JSON value to a plain string for DB equality filters.
+// Objects (e.g. {"$ne": "x"}) would otherwise become NoSQL operators and
+// match/delete the wrong records — String() neutralizes them to literals.
+const str = (value) => (typeof value === 'string' ? value : value == null ? '' : String(value));
+const cleanSupplementName = (value) => str(value).trim().slice(0, 200);
 
 // Helper: Get today's date in YYYY-MM-DD format
 const getTodayKey = () => {
@@ -283,6 +290,10 @@ router.post('/intake', protect, async (req, res) => {
     if (!recordId || typeof taken !== 'boolean') {
       return res.status(400).json({ message: 'Record ID and taken status are required.' });
     }
+    // Reject operator objects before they reach the _id filter (CastError → 500)
+    if (!mongoose.isValidObjectId(recordId)) {
+      return res.status(400).json({ message: 'Invalid record.' });
+    }
 
     const record = await IntakeRecord.findOne({
       _id: recordId,
@@ -553,6 +564,10 @@ router.post('/reset', protect, async (req, res) => {
     if (!assessmentId) {
       return res.status(400).json({ message: 'Assessment ID is required.' });
     }
+    // Reject operator objects before they reach the document reference
+    if (!mongoose.isValidObjectId(assessmentId)) {
+      return res.status(400).json({ message: 'Invalid assessment.' });
+    }
 
     // Deactivate all previous metrics
     await DashboardMetrics.updateMany(
@@ -781,7 +796,8 @@ router.get('/weekly-adherence', protect, async (req, res) => {
 // @access  Private
 router.post('/add-supplement', protect, async (req, res) => {
   try {
-    const { name, dosage, timing, priority } = req.body;
+    const { dosage, timing, priority } = req.body;
+    const name = cleanSupplementName(req.body.name);
 
     if (!name) {
       return res.status(400).json({ message: 'Supplement name is required.' });
@@ -890,7 +906,7 @@ router.post('/add-supplement', protect, async (req, res) => {
 // @access  Private
 router.post('/remove-supplement', protect, async (req, res) => {
   try {
-    const { supplementName } = req.body;
+    const supplementName = cleanSupplementName(req.body.supplementName);
 
     if (!supplementName) {
       return res.status(400).json({ message: 'Supplement name is required.' });

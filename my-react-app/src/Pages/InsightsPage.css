@@ -1181,3 +1181,52 @@
 .overview-stat-label{font-size:.8rem;color:#6b7280}
 .insights-error{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:10px;padding:10px 14px;margin-bottom:14px}
 .insights-error button{background:#b91c1c;color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer}
+
+/* ════════════════════════════════════════════════════════════════════
+   VIBRANT THEME REFRESH
+   ════════════════════════════════════════════════════════════════════ */
+.insights-wrapper {
+  background:
+    radial-gradient(850px 320px at 6% -70px, rgba(16, 185, 129, 0.15), transparent 60%),
+    radial-gradient(720px 300px at 96% 0%, rgba(168, 85, 247, 0.12), transparent 60%) !important;
+}
+.insights-title {
+  font-weight: 800 !important;
+  letter-spacing: -0.02em !important;
+  background: linear-gradient(92deg, #065f46 10%, #059669 45%, #7c3aed 90%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent !important;
+}
+.insights-tab {
+  border-radius: 999px !important;
+  transition: all 0.2s ease !important;
+}
+.insights-tab:hover { transform: translateY(-2px); }
+.insights-tab.active {
+  background: linear-gradient(135deg, #10b981, #059669) !important;
+  box-shadow: 0 8px 20px rgba(16, 185, 129, 0.32) !important;
+  transform: translateY(-1px);
+}
+.overview-stat-card {
+  border-radius: 16px !important;
+  box-shadow: 0 4px 14px rgba(6, 95, 70, 0.07);
+  transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+  animation: insights-rise 0.4s ease both;
+}
+.overview-stat-card:hover {
+  transform: translateY(-4px) !important;
+  box-shadow: 0 12px 26px rgba(6, 95, 70, 0.13) !important;
+}
+@keyframes insights-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.current-phase-card {
+  border-radius: 18px !important;
+  box-shadow: 0 8px 24px rgba(124, 58, 237, 0.10);
+}
+@media (prefers-reduced-motion: reduce) {
+  .overview-stat-card { animation: none; }
+  .insights-tab, .overview-stat-card { transition: none; }
+}

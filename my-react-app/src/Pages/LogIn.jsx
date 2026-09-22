@@ -203,7 +203,10 @@ function LogIn() {
       await completeLogin(data);
     } catch (err) {
       console.error('[DEBUG] Login error:', err);
-      setError(err.message);
+      const message = err.lockedBy === 'network'
+        ? 'Too many attempts from this network. Please wait a few minutes or switch networks and try again.'
+        : err.message;
+      setError(message);
       setLoading(false);
     }
   };

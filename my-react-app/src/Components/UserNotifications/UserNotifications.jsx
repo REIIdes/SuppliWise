@@ -5,6 +5,7 @@ import {
   markNotificationRead,
   markAllNotificationsRead,
   deleteNotification,
+  isSecurityNotification,
 } from '../../api';
 import './UserNotifications.css';
 
@@ -92,8 +93,13 @@ export default function UserNotifications() {
       }
     }
     setOpen(false);
-    // Deep link: flagged assessments open in History; everything else too
-    navigate('/history');
+    // Deep link: security notices open Profile → Account Security so users
+    // land where they can act (password/2FA); flagged assessments open History.
+    if (isSecurityNotification(item)) {
+      navigate('/profile?section=security');
+    } else {
+      navigate('/history');
+    }
   };
 
   const handleMarkAll = async () => {

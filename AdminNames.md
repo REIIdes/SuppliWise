@@ -11,6 +11,7 @@ The entries below match the active admin configuration in `server/.env`.
 | `AdminPoli` | `MRKCGSJKOBSTGYK6FQUV2V3SOBGCQVCJ` | Add as a SuppliWise admin account in Google Authenticator |
 | `AdminJohn` | `LJXUEQ3TN5TTQWBVGZMEIXLJH4RWMYZF` | Add as a SuppliWise admin account in Google Authenticator |
 | `AdminShMa` | `NFWFEL26EERWCQTVJVRX2JRYENDSKQCQ` | Add as a SuppliWise admin account in Google Authenticator |
+| `AdminRaNe` | `SGQ5ZASCMJRYYXPOC53A` | Add as a SuppliWise admin account in Google Authenticator |
 
 ## Manual setup
 

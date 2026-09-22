@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BASE_URL, parseJSON } from '../api';
 import jsPDF from 'jspdf';
@@ -8,10 +8,55 @@ import AssessmentManagement from './AssessmentManagement';
 import SecurityStatus from '../Components/SecurityStatus/SecurityStatus';
 import AdminTopbar from '../Components/AdminTopbar/AdminTopbar';
 
-const tabs = ['overview', 'users', 'assessment-management', 'ai', 'profile', 'security'];
+const tabs = ['overview', 'users', 'admins', 'assessment-management', 'ai', 'profile', 'security'];
 const ADMIN_IDLE_LIMIT_SECONDS = 3 * 60 + 30;
 const ADMIN_WARNING_SECONDS = 30;
 const ADMIN_REFRESH_INTERVAL_MS = 10 * 1000;
+
+// ── Idle countdown badge ───────────────────────────────────────────────
+// Owns its 1 s ticker so the rest of the dashboard does NOT re-render every
+// second (previously the whole page re-rendered 210× per idle session).
+// Memoized: only this badge updates as the countdown ticks.
+const AdminIdleStatus = memo(function AdminIdleStatus({ deadlineRef, onExpire }) {
+  const [remaining, setRemaining] = useState(ADMIN_IDLE_LIMIT_SECONDS);
+  const onExpireRef = useRef(null);
+  useEffect(() => {
+    onExpireRef.current = onExpire;
+  }, [onExpire]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const left = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
+      setRemaining(prev => {
+        if (prev === left) return prev; // skip render when second hasn't changed
+        return left;
+      });
+      if (left === 0) {
+        window.clearInterval(timer);
+        onExpireRef.current();
+      }
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [deadlineRef]);
+
+  const format = () => `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`;
+  const warning = remaining <= ADMIN_WARNING_SECONDS;
+
+  return (
+    <>
+      <div className={`admin-session-status${warning ? ' warning' : ''}`}>
+        {warning
+          ? <><strong>Session expiry warning:</strong> signing out in <strong>{format()}</strong> due to inactivity.</>
+          : <>Admin session expires after 3 minutes of inactivity, followed by a 30-second warning. <strong>{format()}</strong></>}
+      </div>
+      {warning && (
+        <div className="admin-session-warning" role="alert" aria-live="assertive">
+          Your admin session is about to expire. Move or focus on this page to stay signed in. Automatic logout in <strong>{format()}</strong>.
+        </div>
+      )}
+    </>
+  );
+});
 
 /* ── Tab icons ────────────────────────────────────────────────────────── */
 const TAB_ICONS = {
@@ -27,6 +72,12 @@ const TAB_ICONS = {
       <circle cx="9" cy="7" r="4"/>
       <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
       <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+    </svg>
+  ),
+  admins: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+      <polyline points="9 12 11 14 15 10"/>
     </svg>
   ),
   'assessment-management': (
@@ -73,6 +124,14 @@ function AdminDashboard() {
   );
   const [overview, setOverview] = useState(null);
   const [users, setUsers] = useState([]);
+  const [admins, setAdmins] = useState([]);
+  // Timestamp of the last admins-list fetch (anchors the lockout countdown,
+  // same pattern as usersFetchedAt).
+  const [adminsFetchedAt, setAdminsFetchedAt] = useState(() => Date.now());
+  // Timestamp (ms) of the last users-list fetch. The lockout countdown ticks
+  // locally every second against fetchedAt + remainingSeconds, so the badge
+  // stays live between 15 s server polls instead of freezing or vanishing.
+  const [usersFetchedAt, setUsersFetchedAt] = useState(() => Date.now());
   const [allUsers, setAllUsers] = useState([]);
   const [ai, setAi] = useState(null);
   const [security, setSecurity] = useState(null);
@@ -85,10 +144,18 @@ function AdminDashboard() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
   const [search, setSearch] = useState('');
+  const [adminSearch, setAdminSearch] = useState('');
   const [error, setError] = useState('');
   const [expandedUser, setExpandedUser] = useState(null);
+  const [expandedAdmin, setExpandedAdmin] = useState(null);
   const searchRef = useRef('');
-  const [idleSeconds, setIdleSeconds] = useState(ADMIN_IDLE_LIMIT_SECONDS);
+  const adminSearchRef = useRef('');
+  const tabRef = useRef(tab);
+  useEffect(() => {
+    tabRef.current = tab;
+  }, [tab]);
+
+  // Initialized by the idle effect on mount (avoids impure Date.now() in render)
   const idleDeadlineRef = useRef(0);
 
   const request = useCallback(async (path, options = {}) => {
@@ -100,13 +167,73 @@ function AdminDashboard() {
     return data;
   }, [navigate]);
 
+  const loadUsers = useCallback(async () => {
+    try {
+      const q = (searchRef.current || '').trim();
+      const data = await request(`/users?search=${encodeURIComponent(q)}`);
+      setUsers(data.users || []);
+      setUsersFetchedAt(Date.now());
+    } catch (requestError) { setError(requestError.message); }
+  }, [request]);
+
+  const loadAdmins = useCallback(async () => {
+    try {
+      const q = (adminSearchRef.current || '').trim();
+      const data = await request(`/admins?search=${encodeURIComponent(q)}`);
+      setAdmins(data.admins || []);
+      setAdminsFetchedAt(Date.now());
+    } catch (requestError) { setError(requestError.message); }
+  }, [request]);
+
+  const toggleAdmin = useCallback(async (admin) => {
+    try {
+      const data = await request(`/admins/${admin._id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !admin.enabled }),
+      });
+      setAdmins(current => current.map(item => item._id === data.admin._id ? { ...item, ...data.admin, lockout: item.lockout } : item));
+      setError('');
+    } catch (requestError) { setError(requestError.message); }
+  }, [request]);
+
+  const unlockAdmin = useCallback(async (admin) => {
+    try {
+      const data = await request(`/admins/${admin._id}/lockout`, { method: 'DELETE' });
+      // Re-fetch authoritative state instead of optimistic "Clear" — same as users.
+      await loadAdmins();
+      setError('');
+      return data;
+    } catch (requestError) {
+      setError(requestError.message);
+      return null;
+    }
+  }, [request, loadAdmins]);
+
   const load = useCallback(async (background = false) => {
     try {
       setError('');
       const [overviewData, aiData, securityData, profileData, notificationData] = await Promise.all([request('/overview', { background }), request('/ai', { background }), request('/security', { background }), request('/profile', { background }), request('/notifications', { background })]);
       setOverview(overviewData); setAi(aiData); setSecurity(securityData); setProfile(profileData);
       setNotifications(notificationData.notifications || []); setUnreadCount(notificationData.unreadCount || 0);
-      if (!searchRef.current.trim()) setUsers(overviewData.recentUsers || []);
+      // Users tab needs the authoritative /users list (100 rows + live
+      // lockout). recentUsers (8 rows) is only a dashboard preview — using
+      // it here used to shrink the table and show stale "Clear" badges.
+      if ((searchRef.current || '').trim()) return;
+      if (tabRef.current === 'users') {
+        const q = (searchRef.current || '').trim();
+        try {
+          const userData = await request(`/users?search=${encodeURIComponent(q)}`);
+          setUsers(userData.users || []);
+          setUsersFetchedAt(Date.now());
+        } catch {
+          setUsers(overviewData.recentUsers || []);
+          setUsersFetchedAt(Date.now());
+        }
+      } else {
+        setUsers(overviewData.recentUsers || []);
+        setUsersFetchedAt(Date.now());
+      }
     } catch (requestError) { setError(requestError.message); }
   }, [request]);
 
@@ -123,9 +250,28 @@ function AdminDashboard() {
     return () => window.clearTimeout(initialLoad);
   }, [navigate]);
 
-  const loadUsers = async () => {
-    try { searchRef.current = search; const data = await request(`/users?search=${encodeURIComponent(search)}`); setUsers(data.users || []); } catch (requestError) { setError(requestError.message); }
-  };
+  // Live lists: refresh users/admins state while their tab is open
+  // (15 s poll + on tab focus/visibility), never clobbering a search.
+  useEffect(() => {
+    const maybeRefresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (tabRef.current === 'users') {
+        if ((searchRef.current || '').trim() !== '') return;
+        loadUsers();
+      } else if (tabRef.current === 'admins') {
+        if ((adminSearchRef.current || '').trim() !== '') return;
+        loadAdmins();
+      }
+    };
+    const timer = window.setInterval(maybeRefresh, 15000);
+    document.addEventListener('visibilitychange', maybeRefresh);
+    window.addEventListener('focus', maybeRefresh);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', maybeRefresh);
+      window.removeEventListener('focus', maybeRefresh);
+    };
+  }, [loadUsers, loadAdmins]);
 
   const PLAN_LABELS = {
     free: 'Basic Package',
@@ -345,6 +491,13 @@ function AdminDashboard() {
             database: 'Infrastructure', openrouter: 'AI / API',
             delete_account: 'OWASP', input_sanitization: 'OWASP',
             password_hashing: 'OWASP', salting: 'OWASP',
+            xss_stored: 'OWASP', nosql_injection: 'OWASP',
+            path_traversal: 'OWASP', prototype_pollution: 'OWASP',
+            auth_bruteforce: 'STRIDE', csrf_stateless: 'OWASP',
+            prompt_injection: 'AI / OWASP', pii_ai_prompts: 'AI / Privacy',
+            ai_quota: 'AI / API', jwt_security: 'Auth / JWT',
+            headers_security: 'OWASP', email_enumeration: 'OWASP',
+            sensitive_data: 'OWASP', rate_limit_lockout: 'STRIDE',
           }[m.key] || '—',
           // Truncate at a word boundary so cells never end mid-word
           truncateWords(m.detail || '', 140),
@@ -430,31 +583,28 @@ function AdminDashboard() {
     signOutRef.current = signOut;
   }, [signOut]);
 
+  // Stable expire callback for the countdown badge (avoids re-subscribing it)
+  const handleIdleExpire = useCallback(() => {
+    signOutRef.current();
+  }, []);
+
   useEffect(() => {
     if (!localStorage.getItem('admin') || !localStorage.getItem('adminToken')) {
       navigate('/admin/login');
       return undefined;
     }
 
+    // Activity only pushes the shared deadline — the memoized badge
+    // re-renders on its own ticker, not the whole dashboard.
     const resetIdleTimer = () => {
       idleDeadlineRef.current = Date.now() + ADMIN_IDLE_LIMIT_SECONDS * 1000;
-      setIdleSeconds(ADMIN_IDLE_LIMIT_SECONDS);
     };
     const activityEvents = ['keydown', 'mousedown', 'mousemove', 'scroll', 'touchstart', 'pointerdown', 'focus'];
     const handleActivity = () => resetIdleTimer();
     resetIdleTimer();
-    const timer = window.setInterval(() => {
-      const remaining = Math.max(0, Math.ceil((idleDeadlineRef.current - Date.now()) / 1000));
-      setIdleSeconds(remaining);
-      if (remaining === 0) {
-        window.clearInterval(timer);
-        signOutRef.current();
-      }
-    }, 1000);
 
     activityEvents.forEach(eventName => window.addEventListener(eventName, handleActivity, { passive: true }));
     return () => {
-      window.clearInterval(timer);
       activityEvents.forEach(eventName => window.removeEventListener(eventName, handleActivity));
     };
   }, [navigate]);
@@ -501,6 +651,20 @@ function AdminDashboard() {
   const deleteAccount = async user => {
     if (!window.confirm(`Disable ${user.email}?`)) return;
     try { await request(`/users/${user._id}`, { method: 'DELETE' }); await loadUsers(); } catch (requestError) { setError(requestError.message); }
+  };
+
+  const unlockUser = async (user) => {
+    try {
+      const data = await request(`/users/${user._id}/lockout`, { method: 'DELETE' });
+      // Re-fetch authoritative state instead of optimistic "Clear" — if a
+      // network-level hold remains, the row must keep showing Locked.
+      await loadUsers();
+      setError('');
+      return data;
+    } catch (requestError) {
+      setError(requestError.message);
+      return null;
+    }
   };
 
   const markAsRead = async (notificationId) => {
@@ -551,21 +715,23 @@ function AdminDashboard() {
     setShowNotifications(false);
   };
 
-  const formatIdleTime = () => `${Math.floor(idleSeconds / 60)}:${String(idleSeconds % 60).padStart(2, '0')}`;
-
   const handleTabClick = (item) => {
     setTab(item);
-    // Pre-fetch full user list the first time Assessment Management is opened
+    // Pre-fetch full lists the first time heavy tabs are opened
     if (item === 'assessment-management' && allUsers.length === 0) {
       request('/users?search=').then(data => {
         setAllUsers(data.users || []);
       }).catch(() => {});
+    }
+    if (item === 'admins' && admins.length === 0) {
+      loadAdmins();
     }
   };
 
   const TAB_LABEL = {
     overview: 'Overview',
     users: 'User management',
+    admins: 'Admin management',
     'assessment-management': 'Assessment Management',
     ai: 'AI management',
     profile: 'Profile',
@@ -602,14 +768,14 @@ function AdminDashboard() {
               })}
             >
               {sidebarCollapsed ? (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <polyline points="9 18 15 12 9 6"/>
-                </svg>
-              ) : (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <svg key="menu" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="hamburger-icon">
                   <line x1="3" y1="6"  x2="21" y2="6"/>
                   <line x1="3" y1="12" x2="21" y2="12"/>
                   <line x1="3" y1="18" x2="21" y2="18"/>
+                </svg>
+              ) : (
+                <svg key="back" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="hamburger-icon">
+                  <polyline points="15 18 9 12 15 6"/>
                 </svg>
               )}
             </button>
@@ -696,6 +862,7 @@ function AdminDashboard() {
                 {tab === 'overview'             ? 'System overview'
                   : tab === 'ai'               ? 'AI management and control'
                   : tab === 'users'            ? 'User management'
+                  : tab === 'admins'           ? 'Admin management'
                   : tab === 'security'         ? 'Security center'
                   : tab === 'profile'          ? 'Administrator profile'
                   : 'Assessment Management'}
@@ -703,22 +870,13 @@ function AdminDashboard() {
             </div>
           </header>
 
-          <div className={`admin-session-status${idleSeconds <= ADMIN_WARNING_SECONDS ? ' warning' : ''}`}>
-            {idleSeconds <= ADMIN_WARNING_SECONDS
-              ? <><strong>Session expiry warning:</strong> signing out in <strong>{formatIdleTime()}</strong> due to inactivity.</>
-              : <>Admin session expires after 3 minutes of inactivity, followed by a 30-second warning. <strong>{formatIdleTime()}</strong></>}
-          </div>
-
-          {idleSeconds <= ADMIN_WARNING_SECONDS && (
-            <div className="admin-session-warning" role="alert" aria-live="assertive">
-              Your admin session is about to expire. Move or focus on this page to stay signed in. Automatic logout in <strong>{formatIdleTime()}</strong>.
-            </div>
-          )}
+          <AdminIdleStatus deadlineRef={idleDeadlineRef} onExpire={handleIdleExpire} />
 
           {error && <div className="admin-alert danger">{error}</div>}
 
           {tab === 'overview'               && overview && <div className="admin-tab-panel"><Overview overview={overview} /></div>}
-          {tab === 'users'                  && <div className="admin-tab-panel"><Users users={users} search={search} setSearch={value => { searchRef.current = value; setSearch(value); }} loadUsers={loadUsers} setSubscriptionPlan={setSubscriptionPlan} planLabels={PLAN_LABELS} updateAccount={updateAccount} deleteAccount={deleteAccount} expandedUser={expandedUser} setExpandedUser={setExpandedUser} /></div>}
+          {tab === 'users'                  && <div className="admin-tab-panel"><Users users={users} usersFetchedAt={usersFetchedAt} search={search} setSearch={value => { searchRef.current = value; setSearch(value); }} loadUsers={loadUsers} setSubscriptionPlan={setSubscriptionPlan} planLabels={PLAN_LABELS} updateAccount={updateAccount} deleteAccount={deleteAccount} unlockUser={unlockUser} expandedUser={expandedUser} setExpandedUser={setExpandedUser} /></div>}
+          {tab === 'admins'                 && <div className="admin-tab-panel"><Admins admins={admins} adminsFetchedAt={adminsFetchedAt} search={adminSearch} setSearch={value => { adminSearchRef.current = value; setAdminSearch(value); }} loadAdmins={loadAdmins} toggleAdmin={toggleAdmin} unlockAdmin={unlockAdmin} currentAdminId={profile && profile._id} expandedAdmin={expandedAdmin} setExpandedAdmin={setExpandedAdmin} /></div>}
           {tab === 'assessment-management'  && <div className="admin-tab-panel"><AssessmentManagement users={allUsers} /></div>}
           {tab === 'ai'                     && <div className="admin-tab-panel"><AiPanel ai={ai} /></div>}
           {tab === 'security'               && <div className="admin-tab-panel"><SecurityStatus adminRequest={request} onDownloadReport={() => downloadReportRef.current()} /></div>}
@@ -772,6 +930,17 @@ const METRIC_COLOR = {
 };
 
 function Overview({ overview }) {
+  const analytics = overview.analytics || {};
+  const trend = Array.isArray(overview.assessmentTrend) ? overview.assessmentTrend : [];
+  const trendMax = Math.max(1, ...trend.map(t => t.count || 0));
+  const plans = analytics.planBreakdown || {};
+  const planTotal = Math.max(1, (plans.free || 0) + (plans.monthly || 0) + (plans.annual || 0) + (plans.custom || 0));
+  const planRows = [
+    { key: 'free', label: 'Basic', value: plans.free || 0, color: '#9ca3af' },
+    { key: 'monthly', label: 'Deluxe', value: plans.monthly || 0, color: '#4f6bed' },
+    { key: 'annual', label: 'Premium', value: plans.annual || 0, color: '#0891b2' },
+    { key: 'custom', label: 'Ultimate', value: plans.custom || 0, color: '#16a34a' },
+  ];
   return (
     <>
       {/* ── Metric cards ──────────────────────────────────────────── */}
@@ -794,6 +963,83 @@ function Overview({ overview }) {
             </div>
           );
         })}
+      </section>
+
+      {/* ── Analytics ─────────────────────────────────────────────── */}
+      <section className="ov-analytics-grid">
+
+        {/* Assessment activity (14 days) */}
+        <div className="admin-panel ov-analytics">
+          <div className="ov-panel-header">
+            <h3>Assessment activity</h3>
+            <span className="ov-panel-count">14 days</span>
+          </div>
+          {trend.length === 0 ? (
+            <p className="ov-empty">No assessments yet.</p>
+          ) : (
+            <div className="ov-bars" role="img" aria-label={`Assessments per day, peak ${trendMax}`}>
+              {trend.map(day => (
+                <div className="ov-bar-col" key={day._id} title={`${day._id}: ${day.count}`}>
+                  <div className="ov-bar-track">
+                    <div
+                      className="ov-bar-fill"
+                      style={{ height: `${Math.max(4, Math.round(((day.count || 0) / trendMax) * 100))}%` }}
+                    />
+                  </div>
+                  <span className="ov-bar-value">{day.count || 0}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Plan mix */}
+        <div className="admin-panel ov-analytics">
+          <div className="ov-panel-header">
+            <h3>Plan mix</h3>
+            <span className="ov-panel-count">{planTotal} total</span>
+          </div>
+          <div className="ov-plans">
+            {planRows.map(plan => (
+              <div className="ov-plan-row" key={plan.key}>
+                <span className="ov-plan-label">{plan.label}</span>
+                <div className="ov-plan-track">
+                  <div
+                    className="ov-plan-fill"
+                    style={{ width: `${Math.round((plan.value / planTotal) * 100)}%`, background: plan.color }}
+                  />
+                </div>
+                <strong className="ov-plan-value">{plan.value}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Security & growth */}
+        <div className="admin-panel ov-analytics">
+          <div className="ov-panel-header">
+            <h3>Security &amp; growth</h3>
+          </div>
+          <div className="ov-stats">
+            <div className="ov-stat">
+              <strong className="ov-stat__value">{analytics.twoFactorPct ?? 0}%</strong>
+              <span className="ov-stat__label">2FA adoption</span>
+            </div>
+            <div className="ov-stat">
+              <strong className="ov-stat__value">{analytics.lockedAccounts ?? 0}</strong>
+              <span className="ov-stat__label">Locked now</span>
+            </div>
+            <div className="ov-stat">
+              <strong className="ov-stat__value">{analytics.signups7d ?? 0}</strong>
+              <span className="ov-stat__label">New (7d)</span>
+            </div>
+            <div className="ov-stat">
+              <strong className="ov-stat__value">{analytics.signups30d ?? 0}</strong>
+              <span className="ov-stat__label">New (30d)</span>
+            </div>
+          </div>
+        </div>
+
       </section>
 
       {/* ── Bottom grid: activity + notifications ─────────────────── */}
@@ -884,17 +1130,81 @@ function formatIp(raw) {
   return ip.startsWith('::ffff:') ? ip.slice('::ffff:'.length) : ip;
 }
 
-function Users({ users, search, setSearch, loadUsers, setSubscriptionPlan, planLabels, updateAccount, deleteAccount, expandedUser, setExpandedUser }) {
+// Deterministic avatar colour from a display name (shared by Users + Admins)
+function avatarColorFor(name = '') {
+  const palette = ['#4f6bed', '#e85d75', '#2e9e6b', '#d46b35', '#7c4ddb', '#0891b2', '#b45309', '#be185d'];
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  return palette[Math.abs(hash) % palette.length];
+}
+
+// Live lockout badge: ticks every second against fetchedAt + remainingSeconds
+// so the countdown is realtime between server polls. It never disappears on
+// its own — when it hits zero it asks the server for fresh state, and only
+// flips to Clear once the server confirms the lock is gone.
+function LockoutCountdown({ remainingSeconds, fetchedAt, lockedBy, ips, onExpired }) {
+  // expiresAt derives purely from props (fetchedAt is a timestamp number, so
+  // no Date.now() in render). `now` starts via lazy initializer and advances
+  // on a 1 s subscription — both linter-safe patterns.
+  const expiresAt = (Number(fetchedAt) || 0) + Math.max(0, Number(remainingSeconds) || 0) * 1000;
+  const [now, setNow] = useState(() => Date.now());
+  const expiredRef = useRef(false);
+  const onExpiredRef = useRef(onExpired);
+  useEffect(() => {
+    onExpiredRef.current = onExpired;
+  }, [onExpired]);
+  useEffect(() => {
+    expiredRef.current = false;
+  }, [fetchedAt, remainingSeconds]);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const leftSec = Math.max(0, Math.ceil((expiresAt - now) / 1000));
+  useEffect(() => {
+    if (leftSec <= 0 && !expiredRef.current) {
+      expiredRef.current = true;
+      if (onExpiredRef.current) onExpiredRef.current();
+    }
+  }, [leftSec]);
+  const label = leftSec >= 90
+    ? `Locked · ${Math.ceil(leftSec / 60)} min left`
+    : leftSec >= 60
+      ? 'Locked · 1 min left'
+      : `Locked · ${leftSec}s left`;
+  return (
+    <span
+      className="lockout-badge lockout-badge--locked"
+      title={(ips && ips.length > 0 ? `IPs: ${ips.join(', ')}` : 'IP logging pending') + (lockedBy === 'network' ? ' — network-level hold' : ' — rotating IPs will not bypass this account lock')}
+    >
+      {label}
+    </span>
+  );
+}
+
+function Users({ users, usersFetchedAt, search, setSearch, loadUsers, setSubscriptionPlan, planLabels, updateAccount, deleteAccount, unlockUser, expandedUser, setExpandedUser }) {
   const handleUserToggle = (userId) => {
     setExpandedUser(expandedUser === userId ? null : userId);
   };
 
-  // Generate initials avatar colour from name (deterministic)
-  const avatarColor = (name = '') => {
-    const palette = ['#4f6bed','#e85d75','#2e9e6b','#d46b35','#7c4ddb','#0891b2','#b45309','#be185d'];
-    let hash = 0;
-    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
-    return palette[Math.abs(hash) % palette.length];
+  // Generate initials avatar colour from name (deterministic, shared helper)
+  const avatarColor = avatarColorFor;
+
+  // Netflix-style instant search: fetch as they type (400 ms debounce).
+  // Skips the first render (the list already loads with the dashboard).
+  const firstRender = useRef(true);
+  const debounceTimer = useRef(null);
+  useEffect(() => {
+    if (firstRender.current) { firstRender.current = false; return undefined; }
+    window.clearTimeout(debounceTimer.current);
+    debounceTimer.current = window.setTimeout(() => { loadUsers(); }, 400);
+    return () => window.clearTimeout(debounceTimer.current);
+  }, [search, loadUsers]);
+
+  // Search button: run immediately instead of waiting for the debounce.
+  const flushSearch = () => {
+    window.clearTimeout(debounceTimer.current);
+    loadUsers();
   };
 
   return (
@@ -906,7 +1216,7 @@ function Users({ users, search, setSearch, loadUsers, setSubscriptionPlan, planL
         </div>
         <div className="search-row">
           <input placeholder="Search users" value={search} onChange={event => setSearch(event.target.value)} />
-          <button className="admin-secondary" onClick={loadUsers}>Search</button>
+          <button className="admin-secondary" onClick={flushSearch}>Search</button>
         </div>
       </div>
 
@@ -955,13 +1265,6 @@ function Users({ users, search, setSearch, loadUsers, setSubscriptionPlan, planL
                 {user.accountStatus && user.accountStatus !== 'active' && (
                   <span className={`user-status-badge user-status-badge--${user.accountStatus}`}>
                     {user.accountStatus}
-                  </span>
-                )}
-
-                {/* Assessments pill */}
-                {user.assessmentCount != null && (
-                  <span className="user-count-pill">
-                    {user.assessmentCount} {user.assessmentCount === 1 ? 'assessment' : 'assessments'}
                   </span>
                 )}
 
@@ -1015,7 +1318,7 @@ function Users({ users, search, setSearch, loadUsers, setSubscriptionPlan, planL
                     </div>
                     <div className="user-detail-item">
                       <strong>Role</strong>
-                      <span>{user.accountRole || 'User'}</span>
+                      <span style={{ textTransform: 'capitalize' }}>{user.accountRole || 'User'}</span>
                     </div>
                     <div className="user-detail-item">
                       <strong>Account status</strong>
@@ -1033,18 +1336,203 @@ function Users({ users, search, setSearch, loadUsers, setSubscriptionPlan, planL
                         {user.twoFactorEnabled ? 'Google Authenticator active' : 'Email OTP active'}
                       </span>
                     </div>
-                    {user.assessmentCount != null && (
-                      <div className="user-detail-item">
-                        <strong>Assessments</strong>
-                        <span>{user.assessmentCount}</span>
-                      </div>
-                    )}
+                    <div className="user-detail-item">
+                      <strong>Lockout Status</strong>
+                      {user.lockout && user.lockout.locked ? (
+                        <>
+                          <LockoutCountdown
+                            remainingSeconds={user.lockout.remainingSeconds || 0}
+                            fetchedAt={usersFetchedAt}
+                            lockedBy={user.lockout.lockedBy}
+                            ips={user.lockout.ips}
+                            onExpired={loadUsers}
+                          />
+                          <button
+                            type="button"
+                            className="lockout-unlock-btn"
+                            onClick={() => unlockUser(user)}
+                          >
+                            Unlock now
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <span className="lockout-badge lockout-badge--clear">Clear — can sign in</span>
+                          <button
+                            type="button"
+                            className="lockout-reset-btn"
+                            title="Clear any accumulated failed-attempt strikes for this account"
+                            onClick={() => unlockUser(user)}
+                          >
+                            Reset attempts
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
                   <div className="user-actions">
                     <button className="status danger-action" onClick={() => deleteAccount(user)}>
                       Delete account
                     </button>
                   </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+// Same card-box UI as Users, but for administrator accounts. Passwords and
+// authenticator secrets are never sent by the server, so they can't display.
+function Admins({ admins, adminsFetchedAt, search, setSearch, loadAdmins, toggleAdmin, unlockAdmin, currentAdminId, expandedAdmin, setExpandedAdmin }) {
+  const handleAdminToggle = (adminId) => {
+    setExpandedAdmin(expandedAdmin === adminId ? null : adminId);
+  };
+
+  // Netflix-style instant search: fetch as they type (400 ms debounce).
+  // Skips the first render (the list already loads when the tab opens).
+  const firstRender = useRef(true);
+  const debounceTimer = useRef(null);
+  useEffect(() => {
+    if (firstRender.current) { firstRender.current = false; return undefined; }
+    window.clearTimeout(debounceTimer.current);
+    debounceTimer.current = window.setTimeout(() => { loadAdmins(); }, 400);
+    return () => window.clearTimeout(debounceTimer.current);
+  }, [search, loadAdmins]);
+
+  // Search button: run immediately instead of waiting for the debounce.
+  const flushSearch = () => {
+    window.clearTimeout(debounceTimer.current);
+    loadAdmins();
+  };
+
+  return (
+    <section className="admin-panel">
+      <div className="panel-heading">
+        <div>
+          <h3>Admins</h3>
+          <p className="admin-muted">Manage administrator access. Passwords and authenticator secrets are never displayed.</p>
+        </div>
+        <div className="search-row">
+          <input placeholder="Search admins" value={search} onChange={event => setSearch(event.target.value)} />
+          <button className="admin-secondary" onClick={flushSearch}>Search</button>
+        </div>
+      </div>
+
+      <div className="user-list">
+        {admins.length === 0 && (
+          <p className="admin-muted" style={{ padding: '20px 0' }}>No administrators found.</p>
+        )}
+        {admins.map(admin => {
+          const name = admin.alias || 'Unknown';
+          const initials = name.slice(0, 2).toUpperCase();
+          const isOpen = expandedAdmin === admin._id;
+          const isSelf = currentAdminId && String(admin._id) === String(currentAdminId);
+
+          return (
+            <div key={admin._id} className={`user-item${isOpen ? ' user-item--open' : ''}`}>
+              {/* ── Collapsed row ───────────────────────────────────── */}
+              <button
+                className="user-row"
+                onClick={() => handleAdminToggle(admin._id)}
+                aria-expanded={isOpen}
+              >
+                {/* Avatar */}
+                <span
+                  className="user-avatar user-avatar--initials"
+                  style={{ background: avatarColorFor(name), display: 'flex' }}
+                  aria-hidden="true"
+                >
+                  {initials}
+                </span>
+
+                {/* Name + joined */}
+                <span className="user-row__info">
+                  <span className="user-row__name">{name}{isSelf ? ' (you)' : ''}</span>
+                  <span className="user-row__sub">Joined: {admin.createdAt ? new Date(admin.createdAt).toLocaleDateString() : '—'}</span>
+                </span>
+
+                {/* Status badge */}
+                {!admin.enabled && (
+                  <span className="user-status-badge user-status-badge--disabled">
+                    disabled
+                  </span>
+                )}
+
+                {/* Chevron */}
+                <span className={`user-row__chevron${isOpen ? ' user-row__chevron--open' : ''}`} aria-hidden="true">▼</span>
+              </button>
+
+              {/* ── Expanded details ─────────────────────────────── */}
+              {isOpen && (
+                <div className="user-details">
+                  <div className="user-details__grid">
+                    <div className="user-detail-item">
+                      <strong>Alias</strong>
+                      <span>{name}</span>
+                    </div>
+                    <div className="user-detail-item">
+                      <strong>Status</strong>
+                      <span className={admin.enabled ? 'security-active' : 'security-email'}>
+                        {admin.enabled ? 'Enabled — can sign in' : 'Disabled — cannot sign in'}
+                      </span>
+                    </div>
+                    <div className="user-detail-item">
+                      <strong>Last Login</strong>
+                      <span>{admin.lastLoginAt ? new Date(admin.lastLoginAt).toLocaleString() : 'Never'}</span>
+                    </div>
+                    <div className="user-detail-item">
+                      <strong>Last Activity</strong>
+                      <span>{admin.lastActivityAt ? new Date(admin.lastActivityAt).toLocaleString() : 'Never'}</span>
+                    </div>
+                    <div className="user-detail-item">
+                      <strong>Lockout Status</strong>
+                      {admin.lockout && admin.lockout.locked ? (
+                        <>
+                          <LockoutCountdown
+                            remainingSeconds={admin.lockout.remainingSeconds || 0}
+                            fetchedAt={adminsFetchedAt}
+                            lockedBy="account"
+                            ips={admin.lockout.ips}
+                            onExpired={loadAdmins}
+                          />
+                          <button
+                            type="button"
+                            className="lockout-unlock-btn"
+                            onClick={() => unlockAdmin(admin)}
+                          >
+                            Unlock now
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <span className="lockout-badge lockout-badge--clear">Clear — can sign in</span>
+                          <button
+                            type="button"
+                            className="lockout-reset-btn"
+                            title="Clear any accumulated failed-attempt strikes for this administrator"
+                            onClick={() => unlockAdmin(admin)}
+                          >
+                            Reset attempts
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {!isSelf && (
+                    <div className="user-actions">
+                      <button
+                        className={admin.enabled ? 'status danger-action' : 'admin-secondary'}
+                        onClick={() => toggleAdmin(admin)}
+                        title={admin.enabled ? 'Disable this administrator (they will be signed out)' : 'Re-enable this administrator'}
+                      >
+                        {admin.enabled ? 'Disable admin' : 'Enable admin'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

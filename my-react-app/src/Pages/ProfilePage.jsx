@@ -1,13 +1,26 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import ConfirmModal from '../Components/ConfirmModal/ConfirmModal';
-import { BASE_URL, getMyProfile } from '../api';
+import { BASE_URL, getMyProfile, getNotifications, markNotificationRead, isSecurityNotification } from '../api';
 import './ProfilePage.css';
 
+// Relative time for the security activity feed
+function secTimeAgo(iso) {
+  if (!iso) return '';
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (seconds < 60) return 'Just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
 // Plan labels (must match the admin console)
-const PLAN_LABELS = {
-  free: 'Basic Package',
+const PLAN_LABELS = {  free: 'Basic Package',
   monthly: 'Deluxe Package',
   annual: 'Premium Package',
   custom: 'Ultimate Package',
@@ -84,6 +97,13 @@ function ProfilePage() {
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  // Recent security activity (lockouts, 2FA changes, password changes…)
+  const [securityItems, setSecurityItems] = useState([]);
+  const [secLoading, setSecLoading] = useState(true);
+  const [secFlash, setSecFlash] = useState(false);
+  const securityRef = useRef(null);
+  const [searchParams] = useSearchParams();
 
   // Subscription status (fetched fresh; falls back to cached localStorage values)
   const [subscription, setSubscription] = useState(() => ({
@@ -174,6 +194,36 @@ function ProfilePage() {
       }
     };
   }, [navigate, resendTimer, otpExpiryTimer]);
+
+  // Recent security activity: newest security notices first (max 5 shown)
+  useEffect(() => {
+    if (!localStorage.getItem('token')) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await getNotifications(20);
+        if (cancelled) return;
+        setSecurityItems((data.notifications || []).filter(isSecurityNotification).slice(0, 5));
+      } catch {
+        if (!cancelled) setSecurityItems([]);
+      } finally {
+        if (!cancelled) setSecLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Deep link from notification bell (?section=security): scroll the Account
+  // Security card into view and flash it so users land where they can act.
+  useEffect(() => {
+    if (searchParams.get('section') !== 'security') return;
+    const timer = window.setTimeout(() => {
+      securityRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setSecFlash(true);
+      window.setTimeout(() => setSecFlash(false), 2200);
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [searchParams]);
 
   const startOtpExpiryTimer = () => {
     setOtpTimeLeft(600); // Reset to 10 minutes
@@ -1119,7 +1169,11 @@ function ProfilePage() {
               </div>
             )}
 
-            <div className="profile-section">
+            <div
+              className={`profile-section${secFlash ? ' profile-section--flash' : ''}`}
+              ref={securityRef}
+              id="account-security"
+            >
               <h2 className="profile-section-title">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
@@ -1138,6 +1192,52 @@ function ProfilePage() {
                   Turn Off Google Authenticator
                 </button>
               )}
+
+              {/* Recent security activity — lockouts, 2FA and password events */}
+              <div className="security-activity">
+                <h3 className="security-activity__title">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                  </svg>
+                  Recent security activity
+                </h3>
+                {secLoading ? (
+                  <p className="security-activity__empty">Loading…</p>
+                ) : securityItems.length === 0 ? (
+                  <p className="security-activity__empty">No recent security activity. Lockouts, password changes and authenticator updates will appear here.</p>
+                ) : (
+                  <ul className="security-activity__list">
+                    {securityItems.map(item => (
+                      <li
+                        key={item._id}
+                        className={`security-activity__item${item.read ? '' : ' security-activity__item--unread'}`}
+                        onClick={async () => {
+                          if (!item.read) {
+                            try {
+                              await markNotificationRead(item._id);
+                              setSecurityItems(prev => prev.map(n => (n._id === item._id ? { ...n, read: true } : n)));
+                            } catch { /* display-only; read receipt best-effort */ }
+                          }
+                        }}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') e.currentTarget.click();
+                        }}
+                        title={item.read ? item.title : 'Mark as read'}
+                      >
+                        {!item.read && <span className="security-activity__dot" aria-hidden="true" />}
+                        <div className="security-activity__body">
+                          <span className="security-activity__name">{item.title}</span>
+                          {item.detail && <span className="security-activity__detail">{item.detail}</span>}
+                          <span className="security-activity__time">{secTimeAgo(item.createdAt)}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
 
             {error && (

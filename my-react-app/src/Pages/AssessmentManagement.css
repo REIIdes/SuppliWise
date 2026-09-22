@@ -213,19 +213,42 @@
 
 .am-btn {
   border: none;
-  padding: 8px 16px;
-  border-radius: 6px;
-  font: 600 13px Arial, sans-serif;
+  padding: 9px 18px;
+  border-radius: 10px;
+  font: 700 13px Arial, sans-serif;
   cursor: pointer;
-  transition: opacity 0.15s, transform 0.1s;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.15s ease;
   white-space: nowrap;
   color: #fff;
+  position: relative;
+  overflow: hidden;
 }
-.am-btn:hover  { opacity: 0.88; transform: translateY(-1px); }
-.am-btn:active { transform: translateY(0); }
+.am-btn::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -70%;
+  width: 45%;
+  height: 100%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+  transform: skewX(-18deg);
+  transition: left 0.45s ease;
+  pointer-events: none;
+}
+.am-btn:hover::after { left: 130%; }
+.am-btn:hover  { transform: translateY(-2px); }
+.am-btn:active { transform: scale(0.96); }
 
-.am-btn--grey { background: #6b7280; }
-.am-btn--blue { background: #2563eb; }
+.am-btn--grey {
+  background: linear-gradient(135deg, #9ca3af, #6b7280 60%, #4b5563);
+  box-shadow: 0 4px 12px rgba(107, 114, 128, 0.30);
+}
+.am-btn--grey:hover { box-shadow: 0 8px 18px rgba(107, 114, 128, 0.38); }
+.am-btn--blue {
+  background: linear-gradient(135deg, #60a5fa, #2563eb 60%, #1d4ed8);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.32);
+}
+.am-btn--blue:hover { box-shadow: 0 8px 18px rgba(37, 99, 235, 0.42); }
 
 /* ── ACTIVE status pill ───────────────────────────────────────────────── */
 .am-pill {
@@ -262,6 +285,18 @@
   position: relative;
   padding: 28px;
 }
+/* The read-only assessment is already a complete dialog box — when nested
+   here, drop the wrapper chrome (padding + frame) so the 860px card can't
+   overflow and clip sideways. */
+.am-modal__content:has(> .ro-box) {
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+  width: min(94vw, 860px);
+}
+/* Fallback for browsers without :has() — the card itself stays fluid */
+.am-modal__content > .ro-box { max-width: 100%; }
 .am-modal__close {
   position: absolute;
   top: 14px;
@@ -306,3 +341,31 @@
 .am-refresh-btn:disabled{opacity:.6;cursor:default}
 
 .am-pill--expired{background:#f3f4f6;color:#6b7280;border:1px solid #d1d5db}
+
+/* ══ VIBRANT THEME REFRESH ══ */
+.am-user-item, .am-card {
+  border-radius: 16px !important;
+  box-shadow: 0 3px 12px rgba(6, 95, 70, 0.06);
+  transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+  animation: am-rise 0.35s ease both;
+}
+.am-user-item:hover, .am-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 26px rgba(6, 95, 70, 0.12) !important;
+}
+@keyframes am-rise {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.am-btn {
+  border-radius: 10px !important;
+  transition: transform 0.15s ease, box-shadow 0.2s ease !important;
+}
+.am-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.22);
+}
+@media (prefers-reduced-motion: reduce) {
+  .am-user-item, .am-card { animation: none; transition: none; }
+  .am-btn { transition: none; }
+}

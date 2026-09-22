@@ -3,6 +3,45 @@
 Date: 2026-09-21 · Environment: local dev (Atlas DB) · Method: live black-box
 tests against `http://localhost:5000` + code audit. Result: **33/33 checks pass**.
 
+## Session 2 — 2026-09-22: database + HTTP-layer hardening (23/23 + 13/13 live checks pass)
+
+Re-ran the same method after the patches below. Throwaway pentest scripts
+(`pentest-db.cjs`, `verify-layers.cjs`) were removed after passing; the
+patterns are preserved here so they can be re-created in minutes.
+
+### DB pentest results (all passing, throwaway user + signed JWTs, self-cleaned)
+
+| # | Test | Result |
+|---|------|--------|
+| 1 | NoSQL login bypass (`{"email":{"$gt":""},"password":{"$gt":""}}`) → 400, no token | PASS |
+| 2 | Login `$ne` password → 400/401 | PASS |
+| 3–8 | Unauthenticated `/notifications`, `/dashboard/*`, `/admin/*`, `/assessment/user/:id` → 401 | PASS |
+| 9 | Seeded-record `$ne` delete attempt → 404, record intact (was: matched + deleted) | PASS |
+| 10–11 | Operator `_id`/`assessmentId` objects → 400 (was: CastError 500) | PASS |
+| 12–15 | `scrubKeys` strips `$` keys, dotted keys, keeps data, still blocks `__proto__` | PASS |
+| 16 | `/auth/me` leaks no `password`/`twoFactorSecret` | PASS |
+| 17–18 | Admin `notifications/read` garbage/empty `$in` → 400 | PASS |
+| 19–20 | Garbage admin assessment IDs → 400 (was: 500) | PASS |
+| 21 | Search operator `?search[$gt]=` → 200, escaped | PASS |
+| 22 | `/admin/users` leaks no secrets | PASS |
+| 23 | User JWT on admin assessment route → 403 | PASS |
+
+### HTTP-layer results (all passing)
+
+| # | Test | Result |
+|---|------|--------|
+| 1 | Health 200 | PASS |
+| 2 | `X-Powered-By` removed | PASS |
+| 3–5 | Helmet `X-DNS-Prefetch-Control`, `X-Frame-Options`, `X-Content-Type-Options` | PASS |
+| 6–7 | Strict CSP `default-src 'none'` + `frame-ancestors 'none'` | PASS |
+| 8 | API `Cache-Control: no-store` | PASS |
+| 9 | CORS allows `localhost:5173`, rejects `evil.example.com` | PASS |
+| 10–11 | 401/400 bodies are JSON with no stack/DB internals | PASS |
+| 12 | Rate-limit headers live on `/auth` (health intentionally unlimited) | PASS |
+
+`npm audit`: **0 vulnerabilities** in `server/` and `my-react-app/`.
+`npm test`: 1/1 pass. Frontend `eslint`: 0 errors. `npm run build`: passes.
+
 ## How to re-run
 
 ```powershell
@@ -75,11 +114,41 @@ npm test               # unit: login never leaks OTPs in JSON
 | V-16 | Medium | **Single global auth limiter** — login, OTP verify, and admin login shared one budget with no per-step throttling. | `sensitiveLimiter` (60/10 min) on admin-login, both 2FA verifies, and all OTP/email-code verify routes, layered over the existing limiter. |
 | V-17 | Low | **Stored markup**: free-text fields kept HTML tags into DB/admin views/PDFs/AI prompts. | `stripTags()` in `sanitizeTextField`/`sanitizeShortField`/`preprocessUserInput` (verified: `<script>`/`<b>` stripped, clinical mapping intact). |
 | V-18 | Low | **NoSQL type-crash 500s**: object-typed `email`/`password`/`otp` crashed `.trim()` (live log: `email.trim is not a function`). | `str()` coercion at all 17 auth entry points + `typeof` guards → clean 400s. Re-tested live: 400, no bypass. |
+| V-19 | Medium | **Prompt injection into AI assessment prompts**: user free-text interpolated into one big instruction message. | `promptSafe()` neutralizer (delimiter-breakers + override phrases stripped) on all interpolated fields; patient block wrapped in `<patient_data>` with ignore-instructions guard (rule 16). |
+| V-20 | Low | **PII to third-party AI**: verified clean, locked with a tripwire. | Prompt builder carries only age/gender/health; live probe scans `recommend.js` for identity-field interpolation every monitor run. |
+| V-21 | Medium | **Flat rate limits, no account lockout**: a single 15-min window repeated forever; credential-stuffing an account had no per-account consequence. | Escalating lockout (`utils/lockout.js`): every 429 climbs IP ladder **15 min → 1 h → 6 h → 24 h** with `Retry-After`; failed logins/admin-logins/OTP failures climb a per-account ladder; success clears it. Live `Rate-Limit Lockouts` probe shows ladder + current holds. |
 
-## Residual / accepted risks
+## Attack coverage in the Security Center monitor (24 live probes)
 
-- **NoSQL operators in other JSON bodies**: Mongoose string fields cast safely; `str()` covers auth entry points. Admin `notificationIds` array is ObjectId-validated by Mongoose (`$in` cast error → 500 handled, no leak).
+System probes: Login, Account Creation, Email OTP, TOTP, Database, OpenRouter,
+Delete Account, Sanitization, Hashing, Salting.
+Attack probes: XSS Stored, NoSQL Injection, Path Traversal, Prototype
+Pollution, Auth Brute Force + Replay, CSRF Stateless, **Prompt Injection (AI),
+PII in AI Prompts, AI Quota Abuse, JWT Strength & Lifetime, Security Headers
+(Live), Email Enumeration, Sensitive Data Exposure**. AI probes are
+behavioral (neutralizer self-test, source tripwire, rate-limit headers over
+HTTP, token decode, header assertion, enumeration check, projection check).
+
+## Vulnerabilities found and patched (session 2 — 2026-09-22)
+
+| ID | Severity | Finding | Patch |
+|----|----------|---------|-------|
+| V-22 | High | **Operator injection in supplement filters** (`dashboard.js` add/remove-supplement): raw `name`/`supplementName` reached Mongoose equality filters — `{"$ne":"x"}` matched and could delete the wrong intake record. Proved live with a seeded record. | `str()` coercion + 200-char cap (`cleanSupplementName`) on both routes; objects neutralize to `"[object Object]"` literals that match nothing. Verified live (404 + record intact). |
+| V-23 | Medium | **Unvalidated `$in` array** (`POST /admin/notifications/read`): `notificationIds` flowed raw into `{_id:{$in}}`. | Bounded array (1–100) + every element must pass `isValidObjectId` → 400. Verified live. |
+| V-24 | Low | **CastError 500s on garbage IDs**: operator objects/strings in `_id` filters (`dashboard.js` intake/reset, `assessment.js` admin `:userId`/`:assessmentId`) crashed to HTTP 500. | `isValidObjectId` guards → clean 400s. Verified live (no 500s). |
+| V-25 | Low | **`$`/dotted keys persisted into Mixed blobs**: `scrubKeys()` stripped only proto keys; dotted keys crash Mongo writes, `$` keys store junk. | `scrubKeys()` now also strips `$`-leading and dotted keys (attack-probe proto test still passes). Verified live. |
+| V-26 | Info | **CSP disabled** (`helmet({contentSecurityPolicy:false})`). | Strict `default-src 'none'` + `frame-ancestors 'none'` (safe: API serves JSON only, never HTML). Verified live in response headers. |
+| V-27 | Info | **Bare `mongoose.connect()`**: no pool bounds, boot hung forever on unreachable hosts, no guard on missing `MONGO_URI`. | `maxPoolSize:10`, 10 s server-selection + 30 s socket timeouts, refuse-to-boot without `MONGO_URI`, no credentials in logs. |
+| V-28 | Info | **bcrypt-only password storage** (GPU-crackable cost 12, 72-byte truncation). | argon2id migration (`server/utils/password.js`, OWASP profile 19 MiB/2 iter): all new passwords argon2id; bcrypt still verifies (zero downtime) + transparent upgrade on next login; pre-save skips finished hashes (no double-hash). 17/17 live checks pass. |
+
+## Residual / accepted risks (updated 2026-09-22)
+
+- Admin `notificationIds` array is now strictly validated (V-23) — the old
+  Mongoose-cast note above no longer applies.
 - **Rate-limit volume test** (600 req burst) not executed live; limits use standard `express-rate-limit` v7 config, OTP layer tested directly.
 - **File upload**: images are base64-in-JSON with byte caps, not multipart; no executable upload path exists.
 - **Secrets**: `.env` is git-ignored (`server/.env`); `JWT_SECRET` hard-fails boot when default; transporter password whitespace-tolerant for Gmail app passwords.
 - **PII in logs**: login emails appear in server logs; acceptable for self-hosted dev, rotate before sharing logs.
+- **Legacy bcrypt hashes** remain until each account's next login (transparent upgrade); `ADMIN_ACCOUNTS` bcrypt entries keep working and upgrade on next admin sign-in.
+- **HSTS** is set by Helmet but only effective over HTTPS; local dev is HTTP.
+- **CORS** allows LAN origins (`192.168.*` regex, `capacitor://`) for mobile testing — tighten to exact domains in production.

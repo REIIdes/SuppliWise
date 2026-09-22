@@ -4,7 +4,6 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
-const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const AdminAccount = require('../models/AdminAccount');
 const AdminEvent = require('../models/AdminEvent');
@@ -12,9 +11,29 @@ const { protect } = require('../middleware/auth');
 const { sendOtpEmail } = require('../utils/email');
 const { normalizeIp, ipKind, resolveLoginLocation } = require('../utils/geo');
 const { verifyTotpOnce } = require('../utils/totp');
+const { newChallenge, verifyCaptcha } = require('../utils/captcha');
+
+// Math CAPTCHA challenge for registration (bot-resistant signup).
+// Public but rate-limited with the rest of /api/auth.
+router.get('/captcha', (req, res) => {
+  res.json(newChallenge());
+});
+const { recordOffense, recordAccountFailure, lockRemainingMs, clearOffenses, clearAccountState, accountKey, limitReachedHandler, reportAccountLockout, deviceFingerprint, noteIpAccountFailure } = require('../utils/lockout');
+
+// Evidence bundle attached to lockout entries (IP + device fingerprint +
+// UA) so rotating IPs can't dodge an account lock unnoticed.
+function lockMeta(req, ip) {
+  const cleanIp = ip || (req && req.ip) || '';
+  return {
+    ip: cleanIp,
+    fp: deviceFingerprint(req, cleanIp),
+    agent: String((req && req.get && req.get('user-agent')) || '').slice(0, 120),
+  };
+}
 
 // Stricter brute-force guard for the most sensitive auth steps (admin login,
-// 2FA and OTP verification). Layered on top of the global /api/auth limiter.
+// 2FA and OTP verification). Layered on top of the global /api/auth limiter;
+// every 429 climbs the 15 min → 1 day lockout ladder.
 const rateLimit = require('express-rate-limit');
 const sensitiveLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
@@ -22,6 +41,7 @@ const sensitiveLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: 'Too many attempts. Please wait 10 minutes and try again.' },
+  handler: limitReachedHandler('Too many attempts. Lockout escalated — please wait and try again.'),
 });
 router.use(
   ['/admin-login', '/verify-admin-2fa', '/login-2fa', '/verify-login-otp', '/verify-password-reset-otp', '/verify-email-otp'],
@@ -119,9 +139,13 @@ function isValidEmail(email) {
 // @desc    Register a new user
 // @access  Public
 router.post('/register', async (req, res) => {
-  const { firstName, lastName, name, email, password, dateOfBirth, gender } = req.body;
+  const { firstName, lastName, name, email, password, dateOfBirth, gender, captchaId, captchaAnswer } = req.body;
 
   try {
+    // Bot check: server-issued math CAPTCHA, single-use
+    if (!verifyCaptcha(captchaId, captchaAnswer)) {
+      return res.status(400).json({ message: 'Please solve the math challenge correctly.', captchaFailed: true });
+    }
     if (password !== undefined && typeof password !== 'string') {
       return res.status(400).json({ message: 'Please provide a valid password.' });
     }
@@ -145,7 +169,10 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ message: 'Please fill in all fields.' });
     }
 
-    // Name validation
+    // Name validation (control characters stripped — logs, PDFs and UI stay clean)
+    const cleanName = (value) => str(value).replace(/[\x00-\x1F\x7F]/g, '').trim();
+    first = cleanName(first);
+    last = cleanName(last);
     if (first.length < 2) {
       return res.status(400).json({ message: 'First name must be at least 2 characters.' });
     }
@@ -164,13 +191,16 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ message: 'Please select a valid gender.' });
     }
 
-    // Email validation
+    // Email validation (RFC 5321: 254 chars max)
     const trimmedEmail = str(email).trim().toLowerCase();
-    if (!isValidEmail(trimmedEmail)) {
+    if (trimmedEmail.length > 254 || !isValidEmail(trimmedEmail)) {
       return res.status(400).json({ message: 'Please enter a valid email address (e.g. name@example.com).' });
     }
 
-    // Date of birth validation
+    // Date of birth validation (must be an ISO date string, not a timestamp/object)
+    if (typeof dateOfBirth !== 'string') {
+      return res.status(400).json({ message: 'Please enter a valid date of birth.' });
+    }
     const birthDate = new Date(dateOfBirth);
     if (isNaN(birthDate.getTime())) {
       return res.status(400).json({ message: 'Please enter a valid date of birth.' });
@@ -185,9 +215,12 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ message: 'Please enter a valid date of birth (age must be between 1 and 120).' });
     }
 
-    // Password validation
+    // Password validation (length capped — keeps hashing inputs bounded)
     if (password.length < 8) {
       return res.status(400).json({ message: 'Your password is too short — please use at least 8 characters.' });
+    }
+    if (password.length > 128) {
+      return res.status(400).json({ message: 'Your password must be 128 characters or fewer.' });
     }
     if (!/[A-Z]/.test(password)) {
       return res.status(400).json({ message: 'Add at least one capital letter to make your password stronger.' });
@@ -234,6 +267,10 @@ router.post('/register', async (req, res) => {
       const msg = Object.values(error.errors).map(e => e.message).join(' ');
       return res.status(400).json({ message: msg });
     }
+    // Registration race (two simultaneous signups): friendly duplicate message
+    if (error.code === 11000) {
+      return res.status(400).json({ message: 'Email already registered.' });
+    }
     res.status(500).json({ message: 'Something went wrong. Please try again later.' });
   }
 });
@@ -254,6 +291,19 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ message: 'Please enter a valid email address.' });
     }
 
+    // Account lockout: continuous failures escalate 15 min → 1 day
+    const emailLockKey = accountKey('email', trimmedEmail);
+    const emailLockedMs = lockRemainingMs(emailLockKey);
+    if (emailLockedMs > 0) {
+      reportAccountLockout({ email: trimmedEmail, minutes: Math.ceil(emailLockedMs / 60000), lockKey: emailLockKey });
+      return res.status(429).json({
+        message: `Too many failed attempts. Try again in ${Math.ceil(emailLockedMs / 60000)} minute(s).`,
+        remainingSeconds: Math.ceil(emailLockedMs / 1000),
+        escalated: true,
+        lockedBy: 'account',
+      });
+    }
+
     const user = await User.findOne({ email: trimmedEmail });
     if (!user) {
       return res.status(401).json({ message: 'Invalid email or password.' });
@@ -264,8 +314,18 @@ router.post('/login', async (req, res) => {
 
     const isMatch = await user.matchPassword(password);
     if (!isMatch) {
+      recordAccountFailure(emailLockKey, lockMeta(req, req.ip));
+      noteIpAccountFailure(req.ip, trimmedEmail);
       return res.status(401).json({ message: 'Invalid email or password.' });
     }
+    // Correct password resets strikes and ladder locks
+    clearAccountState(emailLockKey);
+    // Transparent hash upgrade: legacy bcrypt → argon2id on successful login
+    try {
+      const { upgradeHashIfLegacy } = require('../utils/password');
+      const upgraded = await upgradeHashIfLegacy(password, user.password);
+      if (upgraded) user.password = upgraded;
+    } catch { /* upgrade best-effort; login already succeeded */ }
 
     const previousUserAgent = user.lastLoginUserAgent;
     const loginIp = req.ip;
@@ -321,11 +381,24 @@ router.post('/login', async (req, res) => {
 });
 
 // Admin credentials are deliberately isolated from public user accounts.
-// ADMIN_PASSWORD_HASH must be a bcrypt hash; plaintext admin passwords are never accepted.
+// ADMIN_PASSWORD_HASH must be an argon2id (or legacy bcrypt) hash; plaintext admin passwords are never accepted.
 router.post('/admin-login', async (req, res) => {
   const { alias, password } = req.body || {};
   if (typeof alias !== 'string' || typeof password !== 'string') {
     return res.status(401).json({ message: 'Invalid admin credentials.' });
+  }
+
+  // Account lockout: continuous failures escalate 15 min → 1 day
+  const aliasLockKey = accountKey('admin', alias);
+  const aliasLockedMs = lockRemainingMs(aliasLockKey);
+  if (aliasLockedMs > 0) {
+    reportAccountLockout({ alias: str(alias).trim(), minutes: Math.ceil(aliasLockedMs / 60000), lockKey: aliasLockKey });
+    return res.status(429).json({
+      message: `Too many failed attempts. Try again in ${Math.ceil(aliasLockedMs / 60000)} minute(s).`,
+      remainingSeconds: Math.ceil(aliasLockedMs / 1000),
+      escalated: true,
+      lockedBy: 'account',
+    });
   }
 
   let account = await AdminAccount.findOne({ alias: str(alias).trim(), enabled: true }).select('+passwordHash +totpSecret');
@@ -334,8 +407,22 @@ router.post('/admin-login', async (req, res) => {
     if (legacy.alias !== str(alias).trim() || !legacy.passwordHash || !legacy.totpSecret) return res.status(401).json({ message: 'Invalid admin credentials.' });
     account = legacy;
   }
-  const passwordMatches = await bcrypt.compare(password, account.passwordHash).catch(() => false);
-  if (!passwordMatches) return res.status(401).json({ message: 'Invalid admin credentials.' });
+  const { verifyPassword, upgradeHashIfLegacy } = require('../utils/password');
+  const passwordMatches = await verifyPassword(password, account.passwordHash);
+  if (!passwordMatches) {
+    recordAccountFailure(aliasLockKey, lockMeta(req, req.ip));
+    noteIpAccountFailure(req.ip, alias);
+    return res.status(401).json({ message: 'Invalid admin credentials.' });
+  }
+  // Correct password resets strikes and ladder locks
+  clearAccountState(aliasLockKey);
+  // Transparent hash upgrade: legacy bcrypt → argon2id (DB accounts only)
+  try {
+    if (account._id && account._id !== 'admin') {
+      const upgraded = await upgradeHashIfLegacy(password, account.passwordHash);
+      if (upgraded) await AdminAccount.findByIdAndUpdate(account._id, { passwordHash: upgraded }).exec();
+    }
+  } catch { /* upgrade best-effort; login already succeeded */ }
 
   const challengeId = crypto.randomBytes(24).toString('hex');
   adminChallenges.set(challengeId, { accountId: account._id, alias: account.alias, totpSecret: account.totpSecret, expiresAt: Date.now() + ADMIN_CHALLENGE_TTL_MS });
@@ -369,6 +456,19 @@ router.post('/verify-login-otp', async (req, res) => {
       return res.status(400).json({ message: 'User ID and OTP are required' });
     }
 
+    // Account lockout: repeated OTP failures escalate 15 min → 1 day
+    const otpLockKey = accountKey('otp-user', userId);
+    const otpLockedMs = lockRemainingMs(otpLockKey);
+    if (otpLockedMs > 0) {
+      reportAccountLockout({ userId, minutes: Math.ceil(otpLockedMs / 60000), lockKey: otpLockKey });
+      return res.status(429).json({
+        message: `Too many incorrect attempts. Try again in ${Math.ceil(otpLockedMs / 60000)} minute(s).`,
+        remainingSeconds: Math.ceil(otpLockedMs / 1000),
+        escalated: true,
+        lockedBy: 'account',
+      });
+    }
+
     const user = await User.findById(userId);
     if (!user) {
       return res.status(401).json({ message: 'User not found' });
@@ -391,6 +491,7 @@ router.post('/verify-login-otp', async (req, res) => {
     if (storedData.otp !== str(otp).trim()) {
       const outcome = registerOtpAttempt(otpKey, storedData);
       if (outcome === 'locked') {
+        recordOffense(accountKey('otp-user', userId));
         return res.status(429).json({ message: 'Too many incorrect attempts. Please request a new code.' });
       }
       return res.status(400).json({ message: 'Invalid verification code. Please try again.' });
@@ -398,6 +499,7 @@ router.post('/verify-login-otp', async (req, res) => {
 
     // OTP is valid, remove from store
     otpStore.delete(otpKey);
+    clearOffenses(accountKey('otp-user', userId));
 
     // Return user data and token
     res.json({
@@ -444,6 +546,16 @@ router.post('/verify-2fa', protect, async (req, res) => {
     if (!verified) return res.status(401).json({ message: 'Invalid verification code.' });
     user.twoFactorEnabled = true;
     await user.save();
+    // Security trail: enabling 2FA shows up in Recent security activity
+    try {
+      const UserNotification = require('../models/UserNotification');
+      await UserNotification.create({
+        user: user._id,
+        type: 'info',
+        title: 'Two-factor authentication enabled',
+        detail: 'Google Authenticator is now required at sign-in. If this wasn\'t you, disable it and change your password immediately.',
+      }).catch(() => {});
+    } catch { /* best-effort */ }
     res.json({ message: 'Two-factor authentication enabled successfully.', twoFactorEnabled: true });
   } catch (error) {
     res.status(401).json({ message: 'Unable to verify the authentication code.' });
@@ -454,8 +566,24 @@ router.post('/login-2fa', async (req, res) => {
   try {
     const user = await User.findById(req.body.userId).select('+twoFactorSecret');
     if (!user || !user.twoFactorEnabled || !user.twoFactorSecret) return res.status(401).json({ message: 'Two-factor authentication is not enabled.' });
+    // Account lockout check + failure recording (ladder 15 min → 1 day)
+    const tfaLockKey = accountKey('otp-user', req.body.userId);
+    if (lockRemainingMs(tfaLockKey) > 0) {
+      const left = lockRemainingMs(tfaLockKey);
+      reportAccountLockout({ userId: req.body.userId, minutes: Math.ceil(left / 60000), lockKey: tfaLockKey });
+      return res.status(429).json({
+        message: `Too many incorrect attempts. Try again in ${Math.ceil(left / 60000)} minute(s).`,
+        remainingSeconds: Math.ceil(left / 1000),
+        escalated: true,
+        lockedBy: 'account',
+      });
+    }
     const verified = verifyTotpOnce(user.twoFactorSecret, req.body.otp);
-    if (!verified) return res.status(401).json({ message: 'Invalid Google Authenticator code.' });
+    if (!verified) {
+      recordAccountFailure(tfaLockKey, lockMeta(req, req.ip));
+      return res.status(401).json({ message: 'Invalid Google Authenticator code.' });
+    }
+    clearAccountState(tfaLockKey);
     res.json({ _id: user._id, firstName: user.firstName, lastName: user.lastName, name: user.fullName, email: user.email, dateOfBirth: user.dateOfBirth, age: user.age, gender: user.gender, profilePicture: user.profilePicture, bannerPicture: user.bannerPicture, twoFactorEnabled: true, subscriptionActive: user.subscriptionActive, subscriptionPlan: user.subscriptionPlan, token: generateToken(user._id) });
   } catch (error) {
     res.status(401).json({ message: 'Unable to verify the 2FA code.' });
@@ -471,6 +599,16 @@ router.post('/disable-2fa', protect, async (req, res) => {
     user.twoFactorEnabled = false;
     user.twoFactorSecret = '';
     await user.save();
+    // Security trail: disabling 2FA shows up in Recent security activity
+    try {
+      const UserNotification = require('../models/UserNotification');
+      await UserNotification.create({
+        user: user._id,
+        type: 'info',
+        title: 'Two-factor authentication disabled',
+        detail: 'Google Authenticator was turned off. If this wasn\'t you, re-enable it and change your password immediately.',
+      }).catch(() => {});
+    } catch { /* best-effort */ }
     res.json({ message: 'Google Authenticator has been disabled successfully.', twoFactorEnabled: false });
   } catch (error) {
     res.status(401).json({ message: 'Your session has expired or the code is invalid.' });
@@ -603,6 +741,19 @@ router.post('/verify-password-reset-otp', async (req, res) => {
       return res.status(400).json({ message: 'User ID and OTP are required' });
     }
 
+    // Account lockout: repeated OTP failures escalate 15 min → 1 day
+    const resetLockKey = accountKey('otp-user', userId);
+    const resetLockedMs = lockRemainingMs(resetLockKey);
+    if (resetLockedMs > 0) {
+      reportAccountLockout({ userId, minutes: Math.ceil(resetLockedMs / 60000), lockKey: resetLockKey });
+      return res.status(429).json({
+        message: `Too many incorrect attempts. Try again in ${Math.ceil(resetLockedMs / 60000)} minute(s).`,
+        remainingSeconds: Math.ceil(resetLockedMs / 1000),
+        escalated: true,
+        lockedBy: 'account',
+      });
+    }
+
     const user = await User.findById(userId);
     if (!user) {
       return res.status(401).json({ message: 'Invalid request' });
@@ -625,6 +776,7 @@ router.post('/verify-password-reset-otp', async (req, res) => {
     if (storedData.otp !== str(otp).trim()) {
       const outcome = registerOtpAttempt(otpKey, storedData);
       if (outcome === 'locked') {
+        recordOffense(accountKey('otp-user', userId));
         return res.status(429).json({ message: 'Too many incorrect attempts. Please request a new code.' });
       }
       return res.status(400).json({ message: 'Invalid verification code. Please try again.' });
@@ -632,6 +784,7 @@ router.post('/verify-password-reset-otp', async (req, res) => {
 
     // OTP is valid - return success but DON'T delete OTP yet
     // We'll delete it after password is actually reset
+    clearOffenses(accountKey('otp-user', userId));
     res.json({ 
       message: 'Code verified successfully',
       verified: true,
@@ -673,6 +826,7 @@ router.post('/reset-password', async (req, res) => {
 
     // Verify OTP one more time
     if (storedData.otp !== str(otp).trim()) {
+      recordOffense(accountKey('otp-user', userId));
       return res.status(400).json({ message: 'Invalid verification code. Please try again.' });
     }
 
@@ -699,8 +853,20 @@ router.post('/reset-password', async (req, res) => {
 
     // Delete OTP after successful password reset
     otpStore.delete(otpKey);
+    clearOffenses(accountKey('otp-user', userId));
 
     console.log(`[PASSWORD RESET] Password successfully reset for user: ${user.email}`);
+
+    // Security trail: password resets show up in Recent security activity
+    try {
+      const UserNotification = require('../models/UserNotification');
+      await UserNotification.create({
+        user: user._id,
+        type: 'info',
+        title: 'Password changed',
+        detail: 'Your password was just reset. If this wasn\'t you, reset it again and contact support immediately.',
+      }).catch(() => {});
+    } catch { /* best-effort */ }
 
     res.json({
       message: 'Password reset successfully. You can now sign in with your new password.',
@@ -896,6 +1062,19 @@ router.post('/verify-email-otp', async (req, res) => {
 
     const trimmedEmail = str(newEmail).trim().toLowerCase();
     const otpKey = `${user._id}_${trimmedEmail}`;
+
+    // Account lockout: repeated OTP failures escalate 15 min → 1 day
+    const emailOtpLockKey = accountKey('otp-user', user._id);
+    const emailOtpLockedMs = lockRemainingMs(emailOtpLockKey);
+    if (emailOtpLockedMs > 0) {
+      reportAccountLockout({ userId: user._id, minutes: Math.ceil(emailOtpLockedMs / 60000), lockKey: emailOtpLockKey });
+      return res.status(429).json({
+        message: `Too many incorrect attempts. Try again in ${Math.ceil(emailOtpLockedMs / 60000)} minute(s).`,
+        remainingSeconds: Math.ceil(emailOtpLockedMs / 1000),
+        escalated: true,
+        lockedBy: 'account',
+      });
+    }
     const storedData = otpStore.get(otpKey);
 
     if (!storedData) {
@@ -912,6 +1091,7 @@ router.post('/verify-email-otp', async (req, res) => {
     if (storedData.otp !== str(otp).trim()) {
       const outcome = registerOtpAttempt(otpKey, storedData);
       if (outcome === 'locked') {
+        recordOffense(accountKey('otp-user', userId));
         return res.status(429).json({ message: 'Too many incorrect attempts. Please request a new code.' });
       }
       return res.status(400).json({ message: 'Invalid verification code. Please try again.' });
@@ -919,6 +1099,7 @@ router.post('/verify-email-otp', async (req, res) => {
 
     // OTP is valid, remove from store
     otpStore.delete(otpKey);
+    clearOffenses(accountKey('otp-user', userId));
 
     res.json({ message: 'Email verified successfully' });
   } catch (error) {
@@ -1070,6 +1251,19 @@ router.put('/profile', async (req, res) => {
     }
 
     await user.save();
+
+    // Security trail: profile password changes show up in Recent security activity
+    if (newPassword) {
+      try {
+        const UserNotification = require('../models/UserNotification');
+        await UserNotification.create({
+          user: user._id,
+          type: 'info',
+          title: 'Password changed',
+          detail: 'Your password was just changed. If this wasn\'t you, reset it and contact support immediately.',
+        }).catch(() => {});
+      } catch { /* best-effort */ }
+    }
 
     res.json({
       _id: user._id,

@@ -31,9 +31,19 @@ if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DEV_OTP_RESPONSE 
 
 // ── Security headers ──────────────────────────────────────────────────────
 // Helmet sets X-Frame-Options, X-Content-Type-Options, HSTS, etc.
-// CSP is disabled — it blocks localhost API calls in development and
-// requires domain-specific config before enabling in production.
-app.use(helmet({ contentSecurityPolicy: false }));
+// Strict CSP: this origin serves JSON only (no HTML/JS ever rendered), so
+// `default-src 'none'` + `frame-ancestors 'none'` blocks any injected
+// content from executing if an upstream layer ever reflects markup.
+// Safe for the SPA: the Vite frontend is a separate origin (localhost:5173)
+// and only consumes JSON — it never renders this origin's responses as pages.
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'none'"],
+      frameAncestors: ["'none'"],
+    },
+  },
+}));
 
 // Middleware
 // Allow CORS from web dev servers and mobile app (Capacitor uses capacitor:// or http://localhost on device)
@@ -42,11 +52,16 @@ app.use(cors({
     'http://localhost:5173', 
     'http://localhost:5174',
     'http://localhost:5175',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:5174',
+    'http://127.0.0.1:5175',
     'https://localhost:5173',
     'https://localhost:5174', 
     'https://localhost:5175',
+    'https://127.0.0.1:5173',
     'capacitor://localhost',
     'http://localhost', // Mobile app
+    'http://127.0.0.1', // Mobile app (numeric loopback)
     /^http:\/\/192\.168\.\d+\.\d+:\d+$/, // Allow any local network IP
     /^https:\/\/192\.168\.\d+\.\d+:\d+$/ // HTTPS version
   ], 
@@ -62,6 +77,9 @@ app.use('/api', (req, res, next) => {
 
 // ── Rate limiters ──────────────────────────────────────────────────────────
 // Keep production limits strict while allowing repeated localhost testing.
+// Every 429 escalates that IP up the lockout ladder (15 min → 1 h → 6 h → 1 day)
+// via lockoutCheck (hard stop) + limitReachedHandler (escalation on each hit).
+const { lockoutCheck, limitReachedHandler } = require('./utils/lockout');
 const isLocalDevRequest = (req) => process.env.NODE_ENV !== 'production' ||
   ['localhost', '127.0.0.1'].includes(req.hostname) || req.ip.includes('127.0.0.1') || req.ip.includes('::1');
 const authLimiter = rateLimit({
@@ -70,6 +88,7 @@ const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: 'Too many attempts. Please wait 15 minutes and try again.' },
+  handler: limitReachedHandler('Too many attempts. Lockout escalated — please wait and try again.'),
 });
 
 // Recommend: 15 requests per 10 min per IP (protects Groq quota)
@@ -116,10 +135,12 @@ const adminLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: 'Too many admin requests. Please slow down and try again.' },
+  handler: limitReachedHandler('Too many admin requests. Lockout escalated — please wait and try again.'),
 });
 
-// Routes — admin vs user buckets are isolated
-app.use('/api/auth', authLimiter, authRoutes);
+// Routes — admin vs user buckets are isolated; lockoutCheck hard-stops IPs
+// serving an escalated lockout before any limiter or handler runs.
+app.use('/api/auth', lockoutCheck, authLimiter, authRoutes);
 app.use('/api/assessment', userLimiter, assessmentRoutes);
 app.use('/api/recommend', recommendLimiter, recommendRoutes);
 app.use('/api/chat', userLimiter, chatRoutes);
@@ -128,7 +149,7 @@ app.use('/api/supplement-detail', aiLimiter, supplementDetailRoutes);
 app.use('/api/dashboard', userLimiter, dashboardRoutes);
 app.use('/api/insights', userLimiter, insightsRoutes);
 app.use('/api/notifications', userLimiter, notificationRoutes);
-app.use('/api/admin', adminLimiter, adminRoutes);
+app.use('/api/admin', lockoutCheck, adminLimiter, adminRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -156,11 +177,31 @@ app.use((err, req, res, next) => {
   res.status(status).json({ message: userMessage });
 });
 
-// Connect to MongoDB and start server
+// ── Crash guards — a single bad request must never take the whole API
+// offline (which surfaces client-side as "Failed to fetch" everywhere) ──
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason instanceof Error ? reason.stack || reason.message : reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err instanceof Error ? err.stack || err.message : err);
+});
+
+// Connect to MongoDB and start server.
+// Hardened client: bounded pool, fast boot-fail instead of hanging forever
+// on an unreachable host, and no credentials ever touch the logs.
 const PORT = process.env.PORT || 5000;
+if (!process.env.MONGO_URI) {
+  console.error('[mongo] MONGO_URI is not set — refusing to boot without a database.');
+  process.exit(1);
+}
 
 mongoose
-  .connect(process.env.MONGO_URI)
+  .connect(process.env.MONGO_URI, {
+    maxPoolSize: 10,
+    minPoolSize: 1,
+    serverSelectionTimeoutMS: 10000,
+    socketTimeoutMS: 30000,
+  })
   .then(() => {
     console.log('Connected to MongoDB');
     const legacy = process.env.ADMIN_ALIAS && process.env.ADMIN_PASSWORD_HASH && process.env.ADMIN_TOTP_SECRET

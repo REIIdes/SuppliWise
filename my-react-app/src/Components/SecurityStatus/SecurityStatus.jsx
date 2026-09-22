@@ -23,6 +23,20 @@ const MONITOR_FRAMEWORK = {
   input_sanitization: 'OWASP',
   password_hashing:   'OWASP',
   salting:            'OWASP',
+  xss_stored:         'OWASP',
+  nosql_injection:    'OWASP',
+  path_traversal:     'OWASP',
+  prototype_pollution: 'OWASP',
+  auth_bruteforce:    'STRIDE',
+  csrf_stateless:     'OWASP',
+  prompt_injection:   'AI / OWASP',
+  pii_ai_prompts:     'AI / Privacy',
+  ai_quota:           'AI / API',
+  jwt_security:       'Auth / JWT',
+  headers_security:   'OWASP',
+  email_enumeration:  'OWASP',
+  sensitive_data:     'OWASP',
+  rate_limit_lockout: 'STRIDE',
 };
 
 // Full label for the Description column title
@@ -37,6 +51,20 @@ const MONITOR_LABEL = {
   input_sanitization: 'Input Sanitization & Validation',
   password_hashing:   'Password Hashing (bcrypt)',
   salting:            'Password Salting (bcrypt built-in)',
+  xss_stored:         'XSS — Stored Markup',
+  nosql_injection:    'NoSQL Injection',
+  path_traversal:     'Path Traversal',
+  prototype_pollution: 'Prototype Pollution',
+  auth_bruteforce:    'Auth Brute Force + Replay',
+  csrf_stateless:     'CSRF — Stateless Auth',
+  prompt_injection:   'Prompt Injection (AI)',
+  pii_ai_prompts:     'PII in AI Prompts',
+  ai_quota:           'AI Quota Abuse',
+  jwt_security:       'JWT Strength & Lifetime',
+  headers_security:   'Security Headers (Live)',
+  email_enumeration:  'Email Enumeration',
+  sensitive_data:     'Sensitive Data Exposure',
+  rate_limit_lockout: 'Rate-Limit Lockouts',
 };
 
 // Implementation path shown below the label — mirrors existing table
@@ -51,6 +79,20 @@ const MONITOR_IMPL = {
   input_sanitization: 'utils/sanitize.js · routes/auth.js',
   password_hashing:   'models/User.js · bcryptjs (cost 12)',
   salting:            'models/User.js · bcryptjs (built-in salt)',
+  xss_stored:         'utils/sanitize.js · stripTags',
+  nosql_injection:    'routes/auth.js · str() coercion',
+  path_traversal:     'server/index.js · no static serving',
+  prototype_pollution: 'utils/sanitize.js · scrubKeys',
+  auth_bruteforce:    'utils/totp.js · rate-limit',
+  csrf_stateless:     'middleware/auth.js · JWT header',
+  prompt_injection:   'routes/recommend.js · promptSafe',
+  pii_ai_prompts:     'routes/recommend.js · no identity fields',
+  ai_quota:           'server/index.js · aiLimiter',
+  jwt_security:       'routes/auth.js · 12 h JWT',
+  headers_security:   'server/index.js · helmet',
+  email_enumeration:  'routes/auth.js · generic responses',
+  sensitive_data:     'middleware/auth.js · projection',
+  rate_limit_lockout: 'utils/lockout.js · 15m→1d ladder',
 };
 
 // Display order — same visual grouping as before but shown as table sections
@@ -65,6 +107,20 @@ const MONITOR_ORDER = [
   'input_sanitization',
   'password_hashing',
   'salting',
+  'xss_stored',
+  'nosql_injection',
+  'path_traversal',
+  'prototype_pollution',
+  'auth_bruteforce',
+  'csrf_stateless',
+  'prompt_injection',
+  'pii_ai_prompts',
+  'ai_quota',
+  'jwt_security',
+  'headers_security',
+  'email_enumeration',
+  'sensitive_data',
+  'rate_limit_lockout',
 ];
 
 // ── Pill badge (same look as existing .status-label pills) ────────────────

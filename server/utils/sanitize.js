@@ -260,7 +260,10 @@ function stripTags(text) {
 }
 
 // Removes prototype-pollution keys from parsed JSON bodies before they are
-// persisted (e.g. Mixed aiResults blobs). Mutates nothing outside `value`.
+// persisted (e.g. Mixed aiResults blobs). Also strips MongoDB operator keys
+// ($-leading) and dotted keys: both are illegal as field names (dotted keys
+// crash the write with a 500) and must never reach an update document.
+// Mutates nothing outside `value`.
 function scrubKeys(value, depth = 0) {
   if (depth > 10 || value === null || typeof value !== 'object') return value;
   if (Array.isArray(value)) {
@@ -268,7 +271,8 @@ function scrubKeys(value, depth = 0) {
     return value;
   }
   for (const key of Object.keys(value)) {
-    if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype' ||
+        key.startsWith('$') || key.includes('.')) {
       delete value[key];
     } else {
       value[key] = scrubKeys(value[key], depth + 1);

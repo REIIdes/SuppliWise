@@ -1,5 +1,18 @@
-// Use an environment override when provided; otherwise fall back to the local dev server.
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+// Resolve the backend URL: explicit env override wins; otherwise derive it
+// from the page host so phones/tablets on the LAN (e.g. 192.168.x.x) reach
+// the backend instead of a dead localhost:5000 ("Failed to fetch").
+const getBaseUrl = () => {
+  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
+  if (typeof window !== 'undefined') {
+    const { hostname, protocol } = window.location;
+    if (hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
+      const scheme = protocol === 'https:' ? 'https:' : 'http:';
+      return `${scheme}//${hostname}:5000/api`;
+    }
+  }
+  return 'http://localhost:5000/api';
+};
+const BASE_URL = getBaseUrl();
 
 // Export BASE_URL so other components can use it
 export { BASE_URL };
@@ -32,21 +45,38 @@ export const parseJSON = async (res) => {
 
 // fetch with a hard timeout so a stalled network can never spin loaders forever.
 // AI calls get a longer budget via the timeoutMs argument.
+// Safe GETs get one automatic retry on connection-level failures.
 const apiFetch = async (path, options = {}, timeoutMs = 30000) => {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(`${BASE_URL}${path}`, { ...options, signal: controller.signal });
-  } catch (err) {
-    if (err.name === 'AbortError') {
-      const timeoutError = new Error('Request timed out. Please check your connection and try again.');
-      timeoutError.isTimeout = true;
-      throw timeoutError;
+  const method = (options.method || 'GET').toUpperCase();
+  const attempts = method === 'GET' ? 2 : 1;
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(`${BASE_URL}${path}`, { ...options, signal: controller.signal });
+      clearTimeout(timer);
+      return res;
+    } catch (err) {
+      clearTimeout(timer);
+      if (err.name === 'AbortError') {
+        const timeoutError = new Error('Request timed out. Please check your connection and try again.');
+        timeoutError.isTimeout = true;
+        throw timeoutError;
+      }
+      lastError = err;
+      // Retry once on connection failures (server restart, network blip)
+      if (attempt < attempts) {
+        await new Promise(resolve => setTimeout(resolve, 800));
+        continue;
+      }
+      if (err instanceof TypeError) {
+        throw new Error('Cannot reach the server. Check your connection and that the backend is running.', { cause: err });
+      }
+      throw err;
     }
-    throw err;
-  } finally {
-    clearTimeout(timer);
   }
+  throw lastError;
 };
 
 // Check if token is expired before making requests
@@ -63,25 +93,41 @@ const isTokenExpired = () => {
   }
 };
 
-// Handle authentication errors by clearing token and redirecting
-const handleAuthError = () => {
-  localStorage.removeItem('token');
-  localStorage.removeItem('user');
-  localStorage.removeItem('suppliwise_user_last_activity');
-  // Redirect to login page
-  if (window.location.pathname !== '/login' && window.location.pathname !== '/signin') {
-    window.location.href = '/login';
+// Handle authentication errors by clearing token and redirecting.
+// Only wipes the session when the stored token is actually unusable
+// (missing, malformed, or expired) — a lone 401 with a healthy token is a
+// server-side hiccup, not a logout reason.
+const handleAuthError = (serverMessage) => {
+  const tokenUsable = (() => {
+    try {
+      const token = localStorage.getItem('token');
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      return !!token && payload.exp * 1000 > Date.now() + 5000;
+    } catch {
+      return false;
+    }
+  })();
+  if (!tokenUsable) {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    localStorage.removeItem('suppliwise_user_last_activity');
+    // Redirect to login page
+    if (window.location.pathname !== '/login' && window.location.pathname !== '/signin') {
+      window.location.href = '/login';
+    }
+    return 'Your session has expired. Please sign in again.';
   }
+  return serverMessage || 'Something went wrong. Please try again.';
 };
 
 // Map HTTP status codes to user-friendly messages.
 // Server validation messages (4xx with a message field) are passed through as-is.
 // Generic 5xx and network errors get a safe fallback message.
 const friendlyError = (status, serverMessage, isLoginAttempt = false) => {
-  // Handle 401 - but NOT for login/register attempts
+  // Handle 401 - but NOT for login/register attempts.
+  // Session is only cleared when the stored token is truly unusable.
   if (status === 401 && !isLoginAttempt) {
-    handleAuthError();
-    return 'Your session has expired. Please sign in again.';
+    return handleAuthError(serverMessage);
   }
   
   // Trust explicit server validation messages for 4xx
@@ -111,14 +157,26 @@ const throwFriendly = (status, data, isLoginAttempt = false) => {
 };
 
 // Register a new user
-export const registerUser = async (firstName, lastName, gender, dateOfBirth, email, password) => {
+export const registerUser = async (firstName, lastName, gender, dateOfBirth, email, password, captcha) => {
   const res = await apiFetch('/auth/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ firstName, lastName, gender, dateOfBirth, email, password }),
+    body: JSON.stringify({ firstName, lastName, gender, dateOfBirth, email, password, captchaId: captcha?.id, captchaAnswer: captcha?.answer }),
   });
   const data = await parseJSON(res);
-  if (!res.ok) throw new Error(friendlyError(res.status, data?.message, true)); // true = is register attempt
+  if (!res.ok) {
+    const err = new Error(friendlyError(res.status, data?.message, true)); // true = is register attempt
+    if (data?.captchaFailed) err.captchaFailed = true;
+    throw err;
+  }
+  return data;
+};
+
+// Math CAPTCHA challenge for registration
+export const getCaptcha = async () => {
+  const res = await apiFetch('/auth/captcha');
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message, true));
   return data;
 };
 
@@ -144,7 +202,12 @@ export const loginUser = async (email, password) => {
     }
     
     const data = await parseJSON(res);
-    if (!res.ok) throw new Error(friendlyError(res.status, data?.message, true)); // true = is login attempt
+    if (!res.ok) {
+      const err = new Error(friendlyError(res.status, data?.message, true)); // true = is login attempt
+      if (data?.lockedBy) err.lockedBy = data.lockedBy;
+      if (data?.remainingSeconds != null) err.remainingSeconds = data.remainingSeconds;
+      throw err;
+    }
     return data;
   } catch (error) {
     console.error('Login error:', error);
@@ -316,6 +379,23 @@ export const deleteNotification = async (notificationId) => {
   if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
   return data;
 };
+
+// Titles the server uses for account-security events (lockout.js, admin.js,
+// auth.js). Matched exactly so assessment notices never leak into the
+// security feed.
+const SECURITY_NOTIFICATION_TITLES = new Set([
+  'Too many failed sign-in attempts',
+  "You're back online",
+  'Your account has been restricted',
+  'Your account is active again',
+  'Two-factor authentication enabled',
+  'Two-factor authentication disabled',
+  'Password changed',
+]);
+
+// True for account-security notices → these deep-link to Profile Security.
+export const isSecurityNotification = (item) =>
+  !!item && item.type !== 'severe-flag' && SECURITY_NOTIFICATION_TITLES.has(item.title);
 
 // Check whether new assessments are blocked by unresolved Priority items
 export const getPriorityStatus = async () => {
