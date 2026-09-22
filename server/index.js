@@ -213,6 +213,12 @@ mongoose
     }).filter(Boolean);
     const accounts = [...legacy, ...configuredAdmins];
     return Promise.all(accounts.map(account => AdminAccount.updateOne({ alias: account.alias }, { $setOnInsert: account }, { upsert: true })))
+      // Alias-only log (never secrets/hashes): proves every admin account
+      // exists after boot on any device, so a fresh clone + .env self-heals.
+      .then((results) => {
+        const inserted = results.filter(r => r.upsertedCount > 0).length;
+        console.log(`[admin-sync] ${accounts.length} admin account(s) ensured (${inserted} newly inserted): ${accounts.map(a => a.alias).join(', ')}`);
+      })
       .then(() => app.listen(PORT, () => console.log(`Server running on port ${PORT}`)))
       .then(() => {
         // Non-blocking SMTP check — bad credentials surface in the log at boot

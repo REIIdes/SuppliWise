@@ -207,10 +207,75 @@ This is an automated message from SuppliWise.
 module.exports = {
   sendOtpEmail,
   sendStatusEmail,
+  sendAdminCredentialsEmail,
   // Verifies SMTP credentials at startup so a bad app-password shows up in
   // the server log immediately instead of as mysterious login failures.
   verifyEmailConfig,
 };
+
+// New-administrator credential delivery: alias + initial password + TOTP
+// setup secret. Sent once per admin by an operator script — never from any
+// public route. Returns true on sent, false otherwise (never throws).
+async function sendAdminCredentialsEmail(toEmail, { alias, password, totpSecret } = {}) {
+  try {
+    const clean = String(toEmail || '').trim().slice(0, 254);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) return false;
+    if (!alias || !password || !totpSecret) return false;
+    const transport = getTransporter();
+    if (!transport) return false;
+
+    const fromName = process.env.EMAIL_FROM_NAME || 'SuppliWise';
+    const fromAddress = process.env.EMAIL_FROM_ADDRESS || process.env.EMAIL_USER;
+    const year = new Date().getFullYear();
+
+    await transport.sendMail({
+      from: `"${fromName}" <${fromAddress}>`,
+      to: clean,
+      subject: 'Your SuppliWise administrator access',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Administrator access</title></head>
+        <body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background-color:#f0faf0;">
+          <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0faf0;padding:40px 20px;">
+            <tr><td align="center">
+              <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+                <tr><td style="background:linear-gradient(135deg,#065f46,#059669);padding:36px 30px;text-align:center;">
+                  <h1 style="color:white;font-size:24px;font-weight:700;margin:0;">SuppliWise Administrator Access</h1>
+                  <p style="color:rgba(255,255,255,0.9);font-size:15px;margin:8px 0 0;">Sign in at <strong>/admin/login</strong></p>
+                </td></tr>
+                <tr><td style="padding:36px 30px;">
+                  <p style="color:#374151;font-size:16px;line-height:1.6;margin:0 0 16px;">Hi ${String(alias).replace(/[<>&"]/g, '')},</p>
+                  <p style="color:#374151;font-size:16px;line-height:1.6;margin:0 0 16px;">Your administrator account is ready. Use these credentials to sign in:</p>
+                  <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:20px;margin:0 0 16px;">
+                    <p style="color:#065f46;font-size:14px;margin:0 0 6px;"><strong>Alias:</strong> ${String(alias).replace(/[<>&"]/g, '')}</p>
+                    <p style="color:#065f46;font-size:14px;margin:0 0 6px;"><strong>Password:</strong> ${String(password).replace(/[<>&"]/g, '')}</p>
+                    <p style="color:#065f46;font-size:14px;margin:0;"><strong>Authenticator key:</strong> ${String(totpSecret).replace(/[<>&"]/g, '')}</p>
+                  </div>
+                  <p style="color:#374151;font-size:15px;line-height:1.6;margin:0 0 16px;">Add the authenticator key to Google Authenticator (<strong>Enter setup key</strong>, time-based), then sign in with your alias, password, and the 6-digit code.</p>
+                  <div style="background:#eff6ff;border-left:4px solid #3b82f6;padding:16px;border-radius:4px;margin:0 0 16px;">
+                    <p style="color:#1e40af;font-size:14px;line-height:1.5;margin:0;"><strong>🔒 Security:</strong> change your password after first sign-in, and never share these credentials. If you did not expect this email, contact the system owner immediately.</p>
+                  </div>
+                  <p style="color:#6b7280;font-size:14px;margin:0;">Best regards,<br><strong style="color:#22c55e;">The SuppliWise Team</strong></p>
+                </td></tr>
+                <tr><td style="background:#f9fafb;padding:20px 30px;text-align:center;border-top:1px solid #e5e7eb;">
+                  <p style="color:#6b7280;font-size:13px;margin:0 0 6px;">This is an automated message from SuppliWise.</p>
+                  <p style="color:#9ca3af;font-size:12px;margin:0;">© ${year} SuppliWise. All rights reserved.</p>
+                </td></tr>
+              </table>
+            </td></tr>
+          </table>
+        </body>
+        </html>`,
+      text: `SuppliWise Administrator Access\n\nHi ${alias},\n\nAlias: ${alias}\nPassword: ${password}\nAuthenticator key: ${totpSecret}\n\nSign in at /admin/login. Add the key to Google Authenticator (Enter setup key, time-based).\n\nPlease change your password after first sign-in and never share these credentials.`,
+    });
+    console.log(`[Email] Admin credentials sent to ${clean}`);
+    return true;
+  } catch (error) {
+    console.error('[Email] Failed to send admin credentials:', error.message);
+    return false;
+  }
+}
 
 // Account-status emails: lockout / back-online / banned / reactivated.
 // Best-effort and non-blocking — callers fire-and-forget; failures only log.

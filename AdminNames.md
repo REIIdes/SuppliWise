@@ -6,7 +6,7 @@ The entries below match the active admin configuration in `server/.env`.
 
 | Admin name | TOTP secret | Authenticator setup |
 |---|---|---|
-| `AdminDevs` | `PFMHASJDOV4USKBPHEWEGMLIME7FOMJZ` | Add as a SuppliWise admin account in Google Authenticator |
+| `AdminDevs` | `LN5T652PIVISUXSXKFFXWKCEIN6XKTBPJZIFWXTNMVOVAOD3PFKA` | Add as a SuppliWise admin account in Google Authenticator |
 | `AdminJoma` | `OVVXWNR2K5KXIXL5IRZUEPSKIFFFKPDX` | Add as a SuppliWise admin account in Google Authenticator |
 | `AdminPoli` | `MRKCGSJKOBSTGYK6FQUV2V3SOBGCQVCJ` | Add as a SuppliWise admin account in Google Authenticator |
 | `AdminJohn` | `LJXUEQ3TN5TTQWBVGZMEIXLJH4RWMYZF` | Add as a SuppliWise admin account in Google Authenticator |
