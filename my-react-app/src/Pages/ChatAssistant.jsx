@@ -1,7 +1,9 @@
 ﻿import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { sendChatMessage } from '../api';
-import { hasPlanAccess, getStoredPlan, FEATURE_TIERS, PLAN_LABELS } from '../utils/plan';
+import useAuth from '../hooks/useAuth';
+import { PLAN_LABELS } from '../utils/plan';
+import { useSubscription } from '../hooks/useSubscription';
 import UpgradeModal from '../Components/UpgradeModal/UpgradeModal';
 import './ChatAssistant.css';
 
@@ -140,7 +142,10 @@ const QUICK_PROMPTS = [
 export default function ChatAssistant({ recommendations }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const [isLoggedIn] = useState(() => !!localStorage.getItem('token'));
+  // Reactive: GlobalChat stays mounted across navigation, so a mount-time
+  // snapshot would keep showing the logged-out screen after signing in.
+  const { token } = useAuth();
+  const isLoggedIn = !!token;
   const [messages, setMessages] = useState([{
     role: 'assistant',
     text: "Hi! I'm **SuppliWise AI** — your health and wellness assistant.\n\nI can help with:\n- Your supplement recommendations and results\n- Supplements, nutrition, vitamins, and wellness questions\n- How to use any feature on SuppliWise\n- Symptoms, diet, sleep, and lifestyle advice\n\nWhat would you like to know?",
@@ -149,7 +154,18 @@ export default function ChatAssistant({ recommendations }) {
   const [loading, setLoading] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [upgradeInfo, setUpgradeInfo] = useState(null);
-  const bottomRef = useRef(null);
+  // Reactive plan object { active, plan, rank } — subscribing re-renders this
+  // component the instant the subscription changes, so the gates below always
+  // read fresh state. (Destructuring `plan` here would give the tier string,
+  // not the object, and every gate would read rank 0 and stay locked.)
+  const livePlan = useSubscription();
+
+  // A stale upgrade modal clears itself the instant the plan qualifies —
+  // upgrade lands via SSE/refresh with no manual action.
+  useEffect(() => {
+    if (upgradeInfo && livePlan.canAccess('chat')) setUpgradeInfo(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [livePlan.active, livePlan.plan, livePlan.rank, upgradeInfo]);
   const inputRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const chatWindowRef = useRef(null);
@@ -171,24 +187,21 @@ export default function ChatAssistant({ recommendations }) {
     }
   }, [recommendations]);
 
-  // Scroll behavior when chat opens
+  // Scroll behaviour: the first open shows the welcome message from the top,
+  // every later change follows the newest line. The container is scrolled
+  // directly — scrollIntoView() walks every ancestor and used to yank the page
+  // behind the panel along with the chat.
   useEffect(() => {
-    if (open && messagesContainerRef.current) {
-      // Use setTimeout to ensure DOM is fully rendered
-      setTimeout(() => {
-        if (messagesContainerRef.current) {
-          // If only welcome message exists (first time), scroll to top
-          // If there are conversations (subsequent times), scroll to bottom
-          if (messages.length === 1) {
-            messagesContainerRef.current.scrollTop = 0;
-          } else {
-            messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
-          }
-          setShowScrollButton(false);
-        }
-      }, 0);
-    }
-  }, [open, messages.length]);
+    const el = messagesContainerRef.current;
+    if (!open || !el) return;
+    // setTimeout so the freshly committed DOM has been laid out first.
+    const t = setTimeout(() => {
+      const atWelcome = messages.length === 1 && !loading;
+      el.scrollTop = atWelcome ? 0 : el.scrollHeight;
+      setShowScrollButton(false);
+    }, 0);
+    return () => clearTimeout(t);
+  }, [open, messages.length, loading]);
 
   // Detect if user has scrolled up
   useEffect(() => {
@@ -233,20 +246,21 @@ export default function ChatAssistant({ recommendations }) {
     }
   };
 
+  // Focus the composer when the panel opens and whenever a reply lands, so
+  // typing can resume without clicking back into the box after each answer.
   useEffect(() => {
-    if (open) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-      setTimeout(() => inputRef.current?.focus(), 100);
-    }
-  }, [messages, open]);
+    if (!open) return;
+    const t = setTimeout(() => inputRef.current?.focus(), 100);
+    return () => clearTimeout(t);
+  }, [open, loading]);
 
   const send = async (text) => {
     const q = (text || input).trim();
     if (!q || loading) return;
-    // Client-side Ultimate gate — prevents wasted request for under-tier users
-    if (!hasPlanAccess(FEATURE_TIERS.chat)) {
-      const stored = getStoredPlan();
-      setUpgradeInfo({ requiresPlan: FEATURE_TIERS.chat, currentPlan: stored.plan });
+    // Client-side ULTIMATE gate — prevents wasted request for under-tier users
+    // (the backend re-verifies via requireFeature('chat') regardless).
+    if (!livePlan.canAccess('chat')) {
+      setUpgradeInfo({ requiresPlan: 'custom', currentPlan: livePlan.plan });
       return;
     }
     setInput('');
@@ -270,8 +284,7 @@ export default function ChatAssistant({ recommendations }) {
       }]);
     } catch (err) {
       if (err.requiresPlan) {
-        const stored = getStoredPlan();
-        setUpgradeInfo({ requiresPlan: err.requiresPlan, currentPlan: err.currentPlan || stored.plan });
+        setUpgradeInfo({ requiresPlan: err.requiresPlan, currentPlan: err.currentPlan || livePlan.plan });
         // Remove the optimistic user message if blocked (so chat doesn't look sent)
         setMessages(prev => prev.slice(0, -1));
         return;
@@ -394,17 +407,17 @@ export default function ChatAssistant({ recommendations }) {
                 </div>
               </div>
             </div>
-          ) : !hasPlanAccess(FEATURE_TIERS.chat) ? (
-            // Subscription gate — Ultimate Package only
+          ) : !livePlan.canAccess('chat') ? (
+            // Subscription gate — ULTIMATE only
             <div className="chat-auth-required">
               <div className="auth-required-content">
                 <div className="auth-required-icon" style={{ color: '#16a34a' }}>🔒</div>
-                <h3 className="auth-required-title">AI Chat is an Ultimate Package perk</h3>
+                <h3 className="auth-required-title">AI Chat is an {PLAN_LABELS.custom} perk</h3>
                 <p className="auth-required-message">
-                  The AI Chat Assistant requires the <strong>Ultimate Package</strong>.
+                  The AI Chat Assistant requires the <strong>{PLAN_LABELS.custom} plan</strong>.
                 </p>
                 <p className="auth-required-description">
-                  Your current plan is <strong>{PLAN_LABELS[getStoredPlan().plan] || 'Basic Package'}</strong>. Contact an administrator to upgrade and unlock AI chat.
+                  Your current plan is <strong>{PLAN_LABELS[livePlan.plan] || PLAN_LABELS.free}</strong>. Contact an administrator to upgrade and unlock AI chat.
                 </p>
                 <div className="auth-required-buttons">
                   <button className="auth-btn auth-btn-primary" onClick={() => { setOpen(false); navigate('/profile'); }}>
@@ -421,37 +434,39 @@ export default function ChatAssistant({ recommendations }) {
                 ⚕️ Educational only — not medical advice. Consult a healthcare provider.
               </div>
 
-              <div className="chat-messages" ref={messagesContainerRef}>
-                {messages.map((msg, i) => (
-                  <div key={i} className={`chat-bubble ${msg.role}`}>
-                    {msg.role === 'assistant'
-                      ? renderMarkdown(msg.text)
-                      : <p className="md-p">{msg.text}</p>
-                    }
-                  </div>
-                ))}
-                {loading && (
-                  <div className="chat-bubble assistant chat-typing">
-                    <span className="typing-dot" />
-                    <span className="typing-dot" />
-                    <span className="typing-dot" />
-                  </div>
-                )}
-                <div ref={bottomRef} />
-              </div>
+              <div className="chat-messages-region">
+                <div className="chat-messages" ref={messagesContainerRef}>
+                  {messages.map((msg, i) => (
+                    <div key={i} className={`chat-bubble ${msg.role}`}>
+                      {msg.role === 'assistant'
+                        ? renderMarkdown(msg.text)
+                        : <p className="md-p">{msg.text}</p>
+                      }
+                    </div>
+                  ))}
+                  {loading && (
+                    <div className="chat-bubble assistant chat-typing">
+                      <span className="typing-dot" />
+                      <span className="typing-dot" />
+                      <span className="typing-dot" />
+                    </div>
+                  )}
+                </div>
 
-              {/* Scroll to bottom button */}
-              {showScrollButton && (
-                <button
-                  className="chat-scroll-to-bottom"
-                  onClick={scrollToBottom}
-                  aria-label="Scroll to bottom"
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="6 9 12 15 18 9" />
-                  </svg>
-                </button>
-              )}
+                {/* Scroll to bottom button — lives inside the scroll region so
+                    it stays glued above the prompt chips at any chip-row count. */}
+                {showScrollButton && (
+                  <button
+                    className="chat-scroll-to-bottom"
+                    onClick={scrollToBottom}
+                    aria-label="Scroll to bottom"
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  </button>
+                )}
+              </div>
 
               <div className="chat-quick-prompts-wrap">
                 <div className="chat-quick-prompts">
@@ -505,7 +520,7 @@ export default function ChatAssistant({ recommendations }) {
           requiredPlan={upgradeInfo.requiresPlan}
           currentPlan={upgradeInfo.currentPlan}
           onClose={() => setUpgradeInfo(null)}
-          onViewPlans={() => { setUpgradeInfo(null); window.location.href = '/profile'; }}
+          onViewPlans={() => { setUpgradeInfo(null); navigate('/profile'); }}
         />
       )}
     </>

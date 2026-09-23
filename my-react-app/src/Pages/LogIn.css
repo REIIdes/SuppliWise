@@ -93,6 +93,22 @@
   box-sizing: border-box;
 }
 
+.auth-field input:disabled {
+  opacity: 1;
+  cursor: text;
+  color: #111827;
+  -webkit-text-fill-color: #111827;
+}
+
+.auth-field input:-webkit-autofill,
+.auth-field input:-webkit-autofill:hover,
+.auth-field input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #111827;
+  caret-color: #111827;
+  box-shadow: 0 0 0 1000px #f3f4f6 inset;
+  transition: background-color 9999s ease-out;
+}
+
 /* Date input placeholder styling - make mm/dd/yyyy lighter */
 .auth-field input[type="date"]::-webkit-datetime-edit-text,
 .auth-field input[type="date"]::-webkit-datetime-edit-month-field,
@@ -256,6 +272,35 @@
   margin-bottom: 16px;
   font-family: sans-serif;
   line-height: 1.5;
+}
+
+.auth-banner-link {
+  color: #1d4ed8;
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+/* Opt-in "Save my login on this browser" toggle (switch without password) */
+.auth-remember {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 4px 0 14px;
+  font-size: 13.5px;
+  color: #4b5563;
+  font-family: sans-serif;
+  line-height: 1.45;
+  cursor: pointer;
+  user-select: none;
+}
+
+.auth-remember input[type="checkbox"] {
+  margin: 2px 0 0;
+  width: 16px;
+  height: 16px;
+  accent-color: #2563eb;
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
 /* Password input with eye icon */

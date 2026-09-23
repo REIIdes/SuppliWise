@@ -89,6 +89,17 @@ const userSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    // Subscription window. `subscriptionStartedAt` marks activation;
+    // `subscriptionExpiresAt` (null = open-ended) is evaluated at read time —
+    // once it passes, entitlements fall back to the free tier automatically.
+    subscriptionStartedAt: {
+      type: Date,
+      default: null,
+    },
+    subscriptionExpiresAt: {
+      type: Date,
+      default: null,
+    },
     lastLoginAt: {
       type: Date,
       default: null,
@@ -116,6 +127,23 @@ const userSchema = new mongoose.Schema(
     lastLoginLocation: {
       type: String,
       default: 'Unknown location',
+    },
+    // Active-session pointer: the ONE session this account is currently
+    // signed in with (its Session._id, embedded in the JWT as `sid`).
+    // Sign-in flips it in a single atomic document update — the newest
+    // sign-in always wins — and the session it displaced is revoked.
+    // No timers: sessions end only by replacement or sign-out.
+    currentSessionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+      select: false,
+    },
+    // Monotonic sign-in counter (audit/informational: bumped on every login
+    // in the same atomic update as the pointer above).
+    sessionVersion: {
+      type: Number,
+      default: 0,
+      select: false,
     },
     bannedAt: {
       type: Date,

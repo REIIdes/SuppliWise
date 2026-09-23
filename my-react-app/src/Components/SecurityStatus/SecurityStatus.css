@@ -412,3 +412,233 @@
 @media (prefers-reduced-motion: reduce) {
   .rt-row, .rt-sync-btn, .rt-download-btn { transition: none; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SECURITY AUDIT RECORD  (aud- prefix)
+   The permanent entry for the completed audit, shown under the live probes.
+══════════════════════════════════════════════════════════════════════════ */
+.aud-section { margin-top: 16px; }
+
+.aud-scope {
+  font-size: 0.85rem;
+  color: #4b5563;
+  line-height: 1.6;
+  margin: 0 0 16px;
+}
+
+/* ── Severity / outcome stat cards ───────────────────────────────────── */
+.aud-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.aud-stat {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-left-width: 4px;
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.aud-stat__value {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #111827;
+  line-height: 1.1;
+}
+.aud-stat__label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6b7280;
+}
+
+.aud-stat--critical { border-left-color: #dc2626; }
+.aud-stat--critical .aud-stat__value { color: #dc2626; }
+.aud-stat--high     { border-left-color: #ea580c; }
+.aud-stat--high .aud-stat__value { color: #ea580c; }
+.aud-stat--medium   { border-left-color: #d97706; }
+.aud-stat--medium .aud-stat__value { color: #d97706; }
+.aud-stat--low      { border-left-color: #2563eb; }
+.aud-stat--low .aud-stat__value { color: #2563eb; }
+.aud-stat--info     { border-left-color: #6b7280; }
+.aud-stat--total    { border-left-color: #111827; }
+.aud-stat--fixed    { border-left-color: #16a34a; background: #f0fdf4; }
+.aud-stat--fixed .aud-stat__value { color: #16a34a; }
+.aud-stat--open     { border-left-color: #f59e0b; background: #fffbeb; }
+.aud-stat--open .aud-stat__value { color: #d97706; }
+
+/* ── Collapsible blocks ──────────────────────────────────────────────── */
+.aud-block {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.aud-block > summary {
+  cursor: pointer;
+  padding: 10px 14px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #14532d;
+  background: #f0fdf4;
+  user-select: none;
+  list-style: none;
+}
+.aud-block > summary::-webkit-details-marker { display: none; }
+.aud-block > summary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 8px;
+  font-size: 0.7rem;
+  transition: transform 0.15s ease;
+}
+.aud-block[open] > summary::before { transform: rotate(90deg); }
+.aud-block > summary:hover { background: #dcfce7; }
+.aud-block[open] > summary { border-bottom: 1px solid #e5e7eb; }
+
+/* ── Lists ───────────────────────────────────────────────────────────── */
+.aud-list {
+  margin: 0;
+  padding: 12px 16px 14px 34px;
+  font-size: 0.83rem;
+  color: #374151;
+  line-height: 1.7;
+}
+.aud-list li { margin-bottom: 3px; word-break: break-word; }
+.aud-list--code li { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; }
+
+/* ── Findings ────────────────────────────────────────────────────────── */
+.aud-findings {
+  list-style: none;
+  margin: 0;
+  padding: 10px 14px 14px;
+}
+.aud-finding {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: #fafafa;
+}
+.aud-finding:last-child { margin-bottom: 0; }
+.aud-finding__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.aud-finding__head strong { font-size: 0.86rem; color: #111827; }
+.aud-finding__id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  color: #6b7280;
+  background: #f3f4f6;
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.aud-finding__detail {
+  font-size: 0.82rem;
+  color: #4b5563;
+  line-height: 1.6;
+  margin: 8px 0 4px;
+}
+.aud-finding__status {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #d97706;
+  margin: 4px 0 0;
+}
+.aud-finding__status--fixed { color: #16a34a; }
+
+/* ── Severity chips ──────────────────────────────────────────────────── */
+.aud-chip {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+.aud-chip--critical { background: #dc2626; }
+.aud-chip--high     { background: #ea580c; }
+.aud-chip--medium   { background: #d97706; }
+.aud-chip--low      { background: #2563eb; }
+.aud-chip--info     { background: #6b7280; }
+
+/* ── Verification checklist ─────────────────────────────────────────── */
+.aud-checks {
+  list-style: none;
+  margin: 0;
+  padding: 10px 14px 14px;
+}
+.aud-check {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 0.8rem;
+  padding: 5px 0;
+  border-bottom: 1px dashed #f3f4f6;
+}
+.aud-check:last-child { border-bottom: none; }
+.aud-check__key {
+  min-width: 150px;
+  font-weight: 700;
+  color: #374151;
+  text-transform: capitalize;
+}
+.aud-check__val { color: #6b7280; }
+.aud-check--pass .aud-check__val { color: #16a34a; font-weight: 600; }
+
+/* ── Manual action box — intentionally loud ──────────────────────────── */
+.aud-manual {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 10px;
+  padding: 4px 0 8px;
+  margin: 12px 0;
+}
+.aud-manual__title {
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: #92400e;
+  margin: 10px 0 4px;
+  padding: 0 16px;
+}
+.aud-manual .aud-list { padding-top: 4px; color: #78350f; }
+
+/* ── Disclaimer + report pointer ─────────────────────────────────────── */
+.aud-disclaimer {
+  font-size: 0.78rem;
+  color: #6b7280;
+  line-height: 1.65;
+  margin: 8px 0 4px;
+  padding-top: 10px;
+  border-top: 1px solid #e5e7eb;
+}
+.aud-report {
+  font-size: 0.8rem;
+  color: #374151;
+  margin: 6px 0 0;
+}
+.aud-report code {
+  background: #f3f4f6;
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-size: 0.78rem;
+}
+
+/* ── Responsive ──────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .aud-stats { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); }
+  .aud-check  { flex-direction: column; gap: 2px; }
+  .aud-check__key { min-width: 0; }
+}

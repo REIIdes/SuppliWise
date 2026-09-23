@@ -1,12 +1,15 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
-import { getInsights } from '../api';
-import { getStoredPlan, PLAN_LABELS } from '../utils/plan';
+import { getInsights, getToken } from '../api';
+import { PLAN_LABELS } from '../utils/plan';
+import { useSubscription, SUBSCRIPTION_EVENT } from '../hooks/useSubscription';
 import './InsightsPage.css';
 
 function InsightsPage() {
   const navigate = useNavigate();
+  // Reactive plan object { active, plan, rank } — re-renders on any change.
+  const livePlan = useSubscription();
   const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -101,10 +104,9 @@ function InsightsPage() {
 
       setLoading(false);
     } catch (err) {
-      // Plan-gated 403 is expected for Basic Package — don't spam console as error
+      // Plan-gated 403 is expected on FREE — don't spam console as error
       if (err.requiresPlan) {
-        const stored = getStoredPlan();
-        setUpgradeInfo({ requiresPlan: err.requiresPlan, currentPlan: err.currentPlan || stored.plan });
+        setUpgradeInfo({ requiresPlan: err.requiresPlan, currentPlan: err.currentPlan || livePlan.plan });
         setLoading(false);
         return;
       }
@@ -128,15 +130,19 @@ function InsightsPage() {
     }
   };
 
-  // Initial data load on mount + auth guard — server is source of truth for plan gating
+  // Initial data load on mount + auth guard — server is source of truth for plan gating.
+  // Re-fetches instantly whenever the subscription changes anywhere in the app.
   useEffect(() => {
-    const token = localStorage.getItem('token');
+    const token = getToken();
     if (!token) {
       navigate('/login');
       return;
     }
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on mount is intentional
     fetchInsightsData();
+    const onPlan = () => fetchInsightsData();
+    window.addEventListener(SUBSCRIPTION_EVENT, onPlan);
+    return () => window.removeEventListener(SUBSCRIPTION_EVENT, onPlan);
   }, [navigate]);
 
   const getIconSvg = (iconType) => {
@@ -608,7 +614,7 @@ function InsightsPage() {
               <h3 className="plan-locked__title">Insights & Analytics is locked</h3>
               <p className="plan-locked__body">
                 Insights & Analytics requires the <strong>{PLAN_LABELS[upgradeInfo.requiresPlan] || upgradeInfo.requiresPlan}</strong>.
-                Your current plan is <strong>{PLAN_LABELS[upgradeInfo.currentPlan] || upgradeInfo.currentPlan || 'Basic Package'}</strong>.
+                Your current plan is <strong>{PLAN_LABELS[upgradeInfo.currentPlan] || upgradeInfo.currentPlan || PLAN_LABELS.free}</strong>.
               </p>
               <p className="plan-locked__note">Contact an administrator to upgrade your plan and unlock this feature.</p>
               <div className="plan-locked__actions">

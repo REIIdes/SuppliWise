@@ -14,9 +14,15 @@ function prune() {
   }
 }
 
+// Keyed by (secret + code) ONLY — deliberately WITHOUT the wall-clock time
+// step. Verification uses speakeasy's `window: 1`, so a code minted for step
+// N still validates during step N+1; including the current step in the key
+// would give that replay a *different* key and let it through once more.
+// The 90 s TTL covers the code's entire ±1-step validity span, and a fresh
+// 6-digit code colliding with a consumed one inside that span is a 1-in-10^6
+// event that merely asks the user to wait one tick.
 function tokenKey(secret, token) {
-  const step = Math.floor(Date.now() / 30000);
-  return crypto.createHash('sha256').update(`${secret}:${token}:${step}`).digest('hex');
+  return crypto.createHash('sha256').update(`${secret}:${token}`).digest('hex');
 }
 
 /**

@@ -5,6 +5,7 @@ const Assessment = require('../models/Assessment');
 const AdminAccount = require('../models/AdminAccount');
 const AdminEvent = require('../models/AdminEvent');
 const { isArgon2id, isBcrypt } = require('../utils/password');
+const { SECURITY_AUDIT } = require('../utils/securityAudit');
 const speakeasy = require('speakeasy');
 const { protect, adminOnly } = require('../middleware/auth');
 const { verifyTotpOnce } = require('../utils/totp');
@@ -18,7 +19,7 @@ const safeUserProjection = {
   lastLoginIp: 0,
   lastLoginUserAgent: 0,
 };
-const adminUserFields = 'firstName lastName email createdAt subscriptionActive subscriptionPlan twoFactorEnabled lastLoginAt lastLoginIp lastLoginLocation lastLoginUserAgent accountRole accountStatus profilePicture';
+const adminUserFields = 'firstName lastName email createdAt subscriptionActive subscriptionPlan subscriptionStartedAt subscriptionExpiresAt subscriptionUpdatedAt twoFactorEnabled lastLoginAt lastLoginIp lastLoginLocation lastLoginUserAgent accountRole accountStatus profilePicture';
 
 // Human-friendly device label from a raw User-Agent string.
 // The old code showed the first 3 UA tokens verbatim, which renders as a
@@ -488,13 +489,65 @@ router.delete('/admins/:id/lockout', async (req, res) => {
 });
 
 router.patch('/users/:id/subscription', async (req, res) => {
-  const { active, plan } = req.body || {};
+  const { active, plan, expiresAt } = req.body || {};
   if (!mongoose.isValidObjectId(req.params.id) || typeof active !== 'boolean') return res.status(400).json({ message: 'A valid user and subscription state are required.' });
-  if (plan && !['free', 'monthly', 'annual', 'custom'].includes(plan)) return res.status(400).json({ message: 'Invalid subscription plan.' });
+  let expiryDate = null;
+  if (expiresAt !== undefined && expiresAt !== null) {
+    expiryDate = new Date(expiresAt);
+    if (!Number.isFinite(expiryDate.getTime())) return res.status(400).json({ message: 'Invalid expiry date.' });
+  }
   try {
-    const user = await User.findByIdAndUpdate(req.params.id, { subscriptionActive: active, subscriptionPlan: plan || (active ? 'custom' : 'free'), subscriptionUpdatedAt: new Date() }, { new: true }).select(safeUserProjection).lean();
+    const { describeSubscription, normalizePlanId, PLAN_ORDER } = require('../utils/entitlements');
+    const bus = require('../utils/subscriptionBus');
+    const before = await User.findById(req.params.id).select('subscriptionActive subscriptionPlan subscriptionStartedAt subscriptionExpiresAt').lean();
+    if (!before) return res.status(404).json({ message: 'User not found.' });
+
+    // Explicit plan wins (aliases like "deluxe"/"premium" are normalized);
+    // reactivating without a plan KEEPS the user's existing paid tier and
+    // never escalates — the previous default silently granted ULTIMATE.
+    const requestedPlan = plan !== undefined && plan !== null && plan !== '' ? normalizePlanId(plan) : null;
+    if (plan !== undefined && plan !== null && plan !== '' && !requestedPlan) {
+      return res.status(400).json({ message: 'Invalid subscription plan.' });
+    }
+    const retainedPlan = PLAN_ORDER.includes(before.subscriptionPlan) && before.subscriptionPlan !== 'free'
+      ? before.subscriptionPlan
+      : 'free';
+    const nextPlan = requestedPlan || (active ? retainedPlan : 'free');
+    const wasActive = before.subscriptionActive === true;
+    const now = new Date();
+    const update = {
+      subscriptionActive: active,
+      subscriptionPlan: nextPlan,
+      subscriptionUpdatedAt: now,
+    };
+    if (active) {
+      // Start date: keep the original for a pure tier swap, stamp a fresh one
+      // when (re)activating from inactive/free.
+      update.subscriptionStartedAt = wasActive && before.subscriptionStartedAt ? before.subscriptionStartedAt : now;
+      if (expiresAt !== undefined) {
+        update.subscriptionExpiresAt = expiryDate; // explicit (null = open-ended)
+      } else {
+        // Reactivating with no explicit expiry: drop a stale past expiry so the
+        // subscription is actually active; keep a future expiry untouched.
+        const prev = before.subscriptionExpiresAt ? new Date(before.subscriptionExpiresAt) : null;
+        update.subscriptionExpiresAt = prev && prev.getTime() > now.getTime() ? prev : null;
+      }
+    } else {
+      // Cancel/remove: the subscription ends now — resolveSubscription() treats
+      // a passed expiry as FREE regardless of the stored plan.
+      update.subscriptionExpiresAt = now;
+    }
+
+    const user = await User.findByIdAndUpdate(req.params.id, update, { new: true }).select(safeUserProjection).lean();
     if (!user) return res.status(404).json({ message: 'User not found.' });
-    res.json({ user });
+
+    // Push the new authoritative state to every open session of this user —
+    // upgrade/downgrade/cancel/expiry lands instantly, no refresh or re-login.
+    const state = describeSubscription(user);
+    const delivered = bus.publish(String(user._id), state);
+    console.log(`[admin/subscription] user ${user._id} -> ${state.currentPlan} (${state.subscriptionStatus}); pushed to ${delivered} session(s)`);
+
+    res.json({ user, subscription: state });
   } catch (error) {
     console.error('[admin/subscription]', error.message);
     res.status(500).json({ message: 'Unable to update the subscription.' });
@@ -505,6 +558,10 @@ router.patch('/users/:id/subscription', async (req, res) => {
 // Each probe runs independently; failures in one never block the others.
 // Results are cached for 60 s so the 30 s frontend auto-refresh (and the
 // OpenRouter network probe) cannot pile up expensive calls.
+// The response also carries `audit` (utils/securityAudit.js): the permanent
+// record of the completed 30-item review, distinct from the live probes —
+// probes show what the system is doing now, the audit record shows what a
+// human review found and what is still open.
 let monitorCache = { at: 0, payload: null };
 const MONITOR_CACHE_TTL_MS = 60 * 1000;
 
@@ -690,7 +747,7 @@ router.get('/security/monitor', async (req, res) => {
   const hasWarning = results.some(r => r.status === 'warning');
   const overallMonitorStatus = hasCritical ? 'critical' : hasWarning ? 'warning' : 'healthy';
 
-  const payload = { monitors: results, overallMonitorStatus, syncedAt: at };
+  const payload = { monitors: results, overallMonitorStatus, syncedAt: at, audit: SECURITY_AUDIT };
   monitorCache = { at: Date.now(), payload };
   res.json(payload);
 });

@@ -110,11 +110,16 @@ res.json({
 **Configuration Used:**
 ```env
 EMAIL_SERVICE=gmail
-EMAIL_USER=verbojanrich20@gmail.com
-EMAIL_PASSWORD=yeflslqcvfvkgynm  # App Password, not account password
+EMAIL_USER=your_email@gmail.com        # value lives in server/.env only
+EMAIL_PASSWORD=your_gmail_app_password # App Password, not account password
 EMAIL_FROM_NAME=SuppliWise
-EMAIL_FROM_ADDRESS=verbojanrich20@gmail.com
+EMAIL_FROM_ADDRESS=your_email@gmail.com
 ```
+
+> **Secrets removed (2026-09 audit):** this block previously published the
+> live mailbox address and its Gmail App Password, and a later block published
+> the live `JWT_SECRET`. All were committed to a public repository and must be
+> rotated. Documentation now carries placeholders only.
 
 ---
 
@@ -428,16 +433,16 @@ if (requiresTwoFactor) {
 ```env
 PORT=5000
 MONGO_URI=mongodb+srv://[CREDENTIALS]@cluster0.qzlkctl.mongodb.net/
-JWT_SECRET=SuppliWise-2026-Secure-Token-9f4c7d1a2b!Xz
+JWT_SECRET=<rotated — generate a fresh random value, never reuse a committed one>
 OPENROUTER_API_KEY=sk-or-v1-[REDACTED]
 ALLOW_DEV_OTP_RESPONSE=false  # OTP NOT exposed to client
 
 # Email Configuration
 EMAIL_SERVICE=gmail
-EMAIL_USER=verbojanrich20@gmail.com
-EMAIL_PASSWORD=yeflslqcvfvkgynm  # App Password
+EMAIL_USER=your_email@gmail.com
+EMAIL_PASSWORD=your_gmail_app_password
 EMAIL_FROM_NAME=SuppliWise
-EMAIL_FROM_ADDRESS=verbojanrich20@gmail.com
+EMAIL_FROM_ADDRESS=your_email@gmail.com
 ```
 
 **Security Notes:**
@@ -608,11 +613,10 @@ EMAIL_FROM_ADDRESS=your-gmail@gmail.com
 
 **Generate Secure Secret:**
 ```bash
-# Option 1: Use existing secret (configured)
-JWT_SECRET=SuppliWise-2026-Secure-Token-9f4c7d1a2b!Xz
-
-# Option 2: Generate new secret
+# Generate a fresh secret (never reuse one that has ever been committed —
+# git history keeps it forever, so a previously published value is burned).
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+JWT_SECRET=<paste the freshly generated value into server/.env only>
 ```
 
 **Important:** Never use the default placeholder value in production.

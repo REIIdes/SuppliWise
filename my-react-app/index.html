@@ -20,7 +20,32 @@
     
     <!-- PWA Manifest -->
     <link rel="manifest" href="/manifest.json" />
-    
+
+    <!-- ── Content-Security-Policy ─────────────────────────────────────────
+         Defense-in-depth against XSS: even if markup were ever injected, the
+         page refuses to run scripts from any origin but this one, refuses
+         <object>/<embed>, refuses <base> hijacking and refuses framing.
+
+         Deliberate looseness, so this can never break the app:
+         • script-src keeps 'unsafe-inline' because @vitejs/plugin-react
+           injects an inline Fast-Refresh preamble in dev and React renders
+           style/prefetch attributes inline. The real win is that NO external
+           script host and NO eval() is ever allowed — an injected
+           <script src="https://…"> simply never loads.
+           Production deployments should additionally send this as an HTTP
+           header with a nonce/hash so 'unsafe-inline' can be dropped.
+         • connect-src must allow http:/https:/ws: because the API origin is
+           derived from the page host (LAN devices call http://<ip>:5000).
+         • frame-ancestors / X-Frame-Options cannot be set from a <meta> tag —
+           configure them on the server (helmet already sends X-Frame-Options
+           for the API origin).
+
+         Verified against this codebase: no <iframe>, no Google Fonts, no
+           external scripts/styles/images, data: only for inline SVG icons and
+           profile pictures, service worker served from this origin.
+    -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; frame-src 'none'; media-src 'none'; form-action 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; manifest-src 'self'; worker-src 'self' blob:; connect-src 'self' http: https: ws: wss:" />
+
     <!-- Icons -->
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/pwa-192x192.png" />

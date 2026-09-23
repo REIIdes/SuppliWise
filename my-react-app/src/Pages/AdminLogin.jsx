@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BASE_URL, parseJSON } from '../api';
+import { emitAuthChanged } from '../auth/authState';
 import './AdminLogin.css';
 
 function AdminLoginEyeIcon({ open }) {
@@ -71,8 +72,10 @@ function AdminLogin() {
       if (!res.ok) throw new Error(data?.message || 'Verification failed.');
       try {
         const leg = localStorage.getItem('token');
-        if (leg && JSON.parse(atob(leg.split('.')[1]))?.role === 'admin')
+        if (leg && JSON.parse(atob(leg.split('.')[1]))?.role === 'admin') {
           localStorage.removeItem('token');
+          emitAuthChanged();
+        }
       } catch { /* ignore */ }
       localStorage.setItem('adminToken', data.token);
       localStorage.setItem('admin', JSON.stringify({ role: 'admin', alias: data.alias }));

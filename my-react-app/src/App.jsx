@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useLocation, Navigate } from 'react-router-dom';
 import { Component, lazy, Suspense, useEffect, useState } from 'react';
 
 import HomePage from './Pages/HomePage';
@@ -30,6 +30,10 @@ function RouteFallback() {
 
 import AdminProtectedRoute from './Components/AdminProtectedRoute';
 import SessionRevalidator from './Components/SessionRevalidator';
+import useAuth from './hooks/useAuth';
+import { useSubscription, resetSubscriptionStore } from './hooks/useSubscription';
+import { isAuthTransitionActive, hasAdminSession, hasUserSignedOut } from './auth/authState';
+import { getToken, listAccounts, resumeSession } from './api';
 
 // ── Global Error Boundary — prevents white screens ─────────────────────────
 class ErrorBoundary extends Component {
@@ -83,9 +87,6 @@ class ErrorBoundary extends Component {
 
 // Routes where the chat assistant should NOT appear
 const CHAT_HIDDEN_ROUTES = ['/login', '/signup', '/admin/login', '/admin'];
-const USER_IDLE_LIMIT_SECONDS = 5 * 60;
-const USER_IDLE_WARNING_SECONDS = 60;
-const USER_ACTIVITY_KEY = 'suppliwise_user_last_activity';
 
 function isAdminJwt(token) {
   try {
@@ -124,7 +125,10 @@ function DocumentTitle() {
 
 function GlobalChat() {
   const location = useLocation();
-  if (CHAT_HIDDEN_ROUTES.includes(location.pathname)) return null;
+  // The assistant is a USER-app feature: never on auth pages and never
+  // anywhere in the admin area — the pill must not leak onto /admin/*
+  // subpages (the exact-match list below used to let them slip past).
+  if (location.pathname.startsWith('/admin') || CHAT_HIDDEN_ROUTES.includes(location.pathname)) return null;
   return (
     <Suspense fallback={null}>
       <ChatAssistant />
@@ -132,77 +136,140 @@ function GlobalChat() {
   );
 }
 
-function UserSessionGuard() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const [remainingSeconds, setRemainingSeconds] = useState(null);
+// ── Subscription store lifecycle ─────────────────────────────────────────
+// Keeps the reactive entitlement store (SSE push, expiry watch, focus refresh,
+// cross-tab relay) alive for EVERY signed-in user session.
+//
+// This used to be an accident of GlobalChat: ChatAssistant is `lazy()` inside
+// <Suspense fallback={null}>, so until that chunk landed — and on any route
+// that hides the chat (/login, /signup, /admin) — the store had NO subscriber.
+// With no subscriber there was no EventSource, no expiry timer, no polling and
+// no window listener, so an admin upgrade/downgrade simply never reached the
+// UI until something remounted a gated page. Entitlement sync must not depend
+// on an unrelated widget being mounted, so it is anchored here instead.
+function SubscriptionSync() {
+  const { token } = useAuth();
+  const userSession = !!token && !isAdminJwt(token);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    const isAuthRoute = location.pathname === '/login' || location.pathname === '/signup' || location.pathname.startsWith('/admin');
-    if (!token || isAdminJwt(token) || isAuthRoute) {
-      return undefined;
-    }
+    // Sign-out / account switch: drop the previous session's cached plan,
+    // timers and SSE stream. Without this, the next sign-in mounted with the
+    // OLD account's plan (still inside the 30s refresh throttle) and the dead
+    // stream kept listening for an account that was no longer signed in.
+    if (!userSession) resetSubscriptionStore();
+  }, [userSession]);
 
-    const writeActivity = () => {
-      localStorage.setItem(USER_ACTIVITY_KEY, String(Date.now()));
-    };
-    const activityEvents = ['keydown', 'mousedown', 'mousemove', 'scroll', 'touchstart', 'pointerdown', 'focus'];
-    const handleActivity = () => writeActivity();
-    const storedActivity = Number(localStorage.getItem(USER_ACTIVITY_KEY));
-    if (!Number.isFinite(storedActivity) || storedActivity <= 0) writeActivity();
-    const initialStateTimer = window.setTimeout(() => setRemainingSeconds(USER_IDLE_LIMIT_SECONDS), 0);
-
-    const timer = window.setInterval(() => {
-      const lastActivity = Number(localStorage.getItem(USER_ACTIVITY_KEY));
-      const remaining = Math.max(0, Math.ceil((lastActivity + USER_IDLE_LIMIT_SECONDS * 1000 - Date.now()) / 1000));
-      setRemainingSeconds(remaining);
-      if (remaining === 0) {
-        window.clearInterval(timer);
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        localStorage.removeItem(USER_ACTIVITY_KEY);
-        navigate('/login', { replace: true, state: { sessionExpired: true } });
-      }
-    }, 1000);
-
-    activityEvents.forEach(eventName => window.addEventListener(eventName, handleActivity, { passive: true }));
-    return () => {
-      window.clearTimeout(initialStateTimer);
-      window.clearInterval(timer);
-      activityEvents.forEach(eventName => window.removeEventListener(eventName, handleActivity));
-    };
-  }, [location.pathname, navigate]);
-
-  const currentToken = localStorage.getItem('token');
-  const sessionIsVisible = currentToken && !isAdminJwt(currentToken) && !location.pathname.startsWith('/admin') && location.pathname !== '/login' && location.pathname !== '/signup';
-  if (!sessionIsVisible || remainingSeconds === null || remainingSeconds > USER_IDLE_WARNING_SECONDS) return null;
-  const minutes = Math.floor(remainingSeconds / 60);
-  const seconds = String(remainingSeconds % 60).padStart(2, '0');
-  return <div className="user-session-warning" role="status" aria-live="polite">Your session will expire in {minutes}:{seconds} due to inactivity. Move or focus on the page to stay signed in.</div>;
+  // Admin sessions are rejected by /auth/me and /subscription/stream (403), so
+  // the store never mounts for one — otherwise every poll and reconnect would
+  // be a guaranteed-failing request.
+  if (!userSession) return null;
+  // KEYED BY TOKEN, not by a boolean: an in-place account switch changes the
+  // token without changing `userSession`. Without the key the store instance
+  // survived the switch, its `[]` mount effect never re-ran, and the new
+  // account kept the previous account's plan, SSE stream and refresh throttle.
+  return <SubscriptionStoreMount key={token} />;
 }
+
+// Separate child so useSubscription() is called unconditionally inside a
+// component that only renders while a user session exists (hooks may not be
+// skipped by an early return in the parent).
+function SubscriptionStoreMount() {
+  useSubscription();
+
+  // Registered AFTER useSubscription() so React runs this cleanup last: on
+  // sign-out or an account switch the subscriber is detached first, then the
+  // store is torn down. Because the element is keyed by token, React runs this
+  // old instance's cleanup BEFORE the next session's instance mounts — so one
+  // account's state can never be handed to the next.
+  useEffect(() => () => resetSubscriptionStore(), []);
+
+  return null;
+}
+
+// User session expiry was retired on purpose: user tokens no longer carry an
+// idle timer or an `exp`, so a signed-in user is never kicked out for
+// inactivity. Sessions now end only by signing out or by a newer sign-in
+// revoking the old token (see server/middleware/auth.js sessionVersion).
+// The admin area keeps its own idle countdown — that is untouched.
 
 // Protected Route Component - requires authentication
 function ProtectedRoute({ children }) {
-  const token = localStorage.getItem('token');
+  // Reactive: re-renders when the session appears/disappears without a reload.
+  const { token } = useAuth();
   if (isAdminJwt(token)) return <Navigate to="/admin/login" replace />;
-  return token ? children : <Navigate to="/login" replace />;
+  if (token) return children;
+  // No USER token in this tab — two SEPARATE logics decide the destination:
+  //   1. This tab just ended a user session (sign-out / revoked / 401):
+  //      stay in the USER flow — always back to the Sign In form, even when
+  //      an admin session exists in the browser ("after logged out, never
+  //      redirect to the admin session"; also keeps Back from bouncing to
+  //      /admin).
+  //   2. No user history here and an active ADMIN session: the admin panel —
+  //      an admin browsing user routes must never see the user login (the
+  //      original "logged in as admin, the session goes to User login" fix,
+  //      still fully working for admin-only tabs).
+  if (!hasUserSignedOut() && hasAdminSession()) return <Navigate to="/admin" replace />;
+  return <Navigate to="/login" replace />;
+}
+
+// Public-only Route - logged-in users never see login/signup forms again.
+// This fixes the bug where /login rendered the Sign In card while the
+// navbar already showed a logged-in user.
+// Exception: /login?add=1 — "Add another account" from Profile → Accounts
+// must reach the form even while an account is already active.
+//
+// Deliberately does NOT consult the admin session: arriving at /login is an
+// explicit intent (a user just signed out, a session ended, or the URL was
+// typed), and hijacking it to /admin broke sign-out — "I pressed sign out and
+// the admin session took over, Back went to admin too". Admins are kept off
+// this screen on the way IN (ProtectedRoute routes admin-only browsers to
+// /admin) and by the navbar offering "Admin Panel" instead of "Sign In" —
+// never by a bounce FROM the form itself.
+function PublicOnlyRoute({ children }) {
+  const location = useLocation();
+  const addingAccount = new URLSearchParams(location.search).get('add') === '1';
+  const { token } = useAuth();
+  if (isAdminJwt(token)) return <Navigate to="/admin" replace />;
+  // While a sign-in is still completing (token written, destination pending)
+  // stay on the form — the login/signup flow navigates itself when ready.
+  if (isAuthTransitionActive()) return children;
+  if (token && !addingAccount) return <Navigate to="/dashboard" replace />;
+  return children;
 }
 
 // Landing Route Component - shows HomePage for non-logged users, Dashboard for logged users
 function LandingRoute() {
-  const token = localStorage.getItem('token');
+  const { token } = useAuth();
+  if (isAdminJwt(token)) return <Navigate to="/admin" replace />;
   return token ? <Navigate to="/dashboard" replace /> : <HomePage />;
 }
 
 function App() {
+  // ── Session bootstrap gate ───────────────────────────────────────────────
+  // A brand-new tab starts with no sessionStorage of its own. Before any
+  // route guard renders (and possibly bounces to /login), give open tabs a
+  // brief window to hand this tab a session via BroadcastChannel resume.
+  // First-time visitors (no known accounts) skip the wait entirely.
+  const [sessionReady, setSessionReady] = useState(() => !!getToken() || listAccounts().length === 0);
+
+  useEffect(() => {
+    if (sessionReady) return undefined;
+    let cancelled = false;
+    resumeSession().finally(() => {
+      if (!cancelled) setSessionReady(true);
+    });
+    return () => { cancelled = true; };
+  }, [sessionReady]);
+
+  if (!sessionReady) return <RouteFallback />;
+
   return (
     <ErrorBoundary>
       <BrowserRouter>
         <ScrollToTop />
         <DocumentTitle />
-        <UserSessionGuard />
         <SessionRevalidator />
+        <SubscriptionSync />
         <Suspense fallback={<RouteFallback />}>
         <Routes>
           {/* Landing route - shows HomePage for guests, redirects to Dashboard for logged-in users */}
@@ -220,9 +287,9 @@ function App() {
           {/* Insights - only accessible to logged-in users */}
           <Route path="/insights" element={<ProtectedRoute><InsightsPage /></ProtectedRoute>} />
           
-          {/* Auth routes */}
-          <Route path="/login" element={<LogIn />} />
-          <Route path="/signup" element={<SignIn />} />
+          {/* Auth routes - logged-in users are sent to the dashboard instead */}
+          <Route path="/login" element={<PublicOnlyRoute><LogIn /></PublicOnlyRoute>} />
+          <Route path="/signup" element={<PublicOnlyRoute><SignIn /></PublicOnlyRoute>} />
           <Route path="/admin/login" element={<AdminLogin />} />
           
           {/* Admin routes - protected */}

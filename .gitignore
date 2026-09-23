@@ -3,9 +3,39 @@
 server/.env
 **/.env
 
+# Example env files may only ever contain placeholders (an earlier revision
+# of server/.env.example shipped real secrets). Keep them tracked but never
+# secret-bearing.
+!.env.example
+!server/.env.example
+
+# Local-only credential material (AdminNames.md stays tracked ONLY because it
+# has been sanitized to placeholders — never put a live TOTP seed back in it).
+*credentials*
+*secrets.local*
+*.pem
+*.key
+
+# Logs (server stdout/stderr can contain PII)
+*.log
+server/*.log
+server/server-*.log
+npm-debug.log*
+
 # Dependencies
 node_modules
 server/node_modules
 
 # Build output
 dist
+my-react-app/dist
+my-react-app/dev-dist
+
+# Editor / tooling state
+.qodo/
+.vscode/
+.idea/
+
+# Local test scratch
+Temp/
+.tmp/

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import Toast from '../Components/Toast/Toast';
-import { getDashboard, updateIntake, getCalendarData, getWeeklyAdherence, getDayRecords } from '../api';
+import { getDashboard, updateIntake, getCalendarData, getWeeklyAdherence, getDayRecords, getToken } from '../api';
 import './TrackIntakePage.css';
 
 function TrackIntakePage() {
@@ -165,7 +165,7 @@ function TrackIntakePage() {
 
   // Initial load on mount + auth guard + responsive toast
   useEffect(() => {
-    const token = localStorage.getItem('token');
+    const token = getToken();
     if (!token) {
       navigate('/login');
       return;
@@ -181,7 +181,7 @@ function TrackIntakePage() {
     window.addEventListener('resize', handleResize);
     // Realtime: refresh the moment the user returns to the tab
     const handleVisible = () => {
-      if (document.visibilityState === 'visible' && localStorage.getItem('token')) {
+      if (document.visibilityState === 'visible' && getToken()) {
         fetchTrackingData();
         fetchCalendarData();
       }

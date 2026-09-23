@@ -4,71 +4,128 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
+  background-color: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(3px);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: 1500;
+  padding: 20px;
 }
 
 .session-expiry-modal {
-  background-color: #fff;
-  padding: 30px;
-  border-radius: 8px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border: 1px solid #e2e8f0;
+  border-top: 4px solid #f59e0b;
+  padding: 28px 28px 24px;
+  border-radius: 16px;
   text-align: center;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-  width: 90%;
-  max-width: 400px;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
+  width: 100%;
+  max-width: 420px;
+  animation: session-expiry-in 0.25s ease-out;
+}
+
+@keyframes session-expiry-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.session-expiry-icon {
+  font-size: 40px;
+  margin-bottom: 8px;
 }
 
 .session-expiry-modal h2 {
-  margin-top: 0;
-  font-size: 1.5rem;
-  color: #333;
+  margin: 0 0 8px;
+  font-size: 1.35rem;
+  color: #0f172a;
+  font-family: inherit;
 }
 
 .session-expiry-modal p {
-  margin-bottom: 20px;
-  font-size: 1rem;
-  color: #666;
+  margin: 0 0 14px;
+  font-size: 0.95rem;
+  color: #475569;
+  line-height: 1.55;
 }
 
 .session-expiry-timer {
-  font-size: 3rem;
-  font-weight: bold;
-  color: #d9534f;
-  margin-bottom: 25px;
+  font-size: 2.8rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #b45309;
+  background: #fffbeb;
+  border: 1px dashed #f59e0b;
+  border-radius: 12px;
+  padding: 6px 0;
+  margin-bottom: 12px;
+}
+
+.session-expiry-progress {
+  height: 8px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.session-expiry-progress span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #f59e0b, #ef4444);
+  transition: width 0.5s linear;
+}
+
+.session-expiry-notice {
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #065f46;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  font-weight: 600;
 }
 
 .session-expiry-actions {
   display: flex;
-  justify-content: space-around;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 6px;
 }
 
 .session-expiry-actions button {
-  padding: 10px 20px;
+  padding: 11px 22px;
   border: none;
-  border-radius: 5px;
+  border-radius: 10px;
   cursor: pointer;
-  font-size: 1rem;
-  font-weight: bold;
-  transition: background-color 0.3s ease;
+  font-size: 0.95rem;
+  font-weight: 700;
+  transition: transform 0.12s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.session-expiry-actions button:active {
+  transform: scale(0.97);
 }
 
 .btn-stay-logged-in {
-  background-color: #5cb85c;
+  background: linear-gradient(135deg, #16a34a, #059669);
   color: white;
+  box-shadow: 0 8px 20px rgba(22, 163, 74, 0.35);
 }
 
 .btn-stay-logged-in:hover {
-  background-color: #4cae4c;
+  background: linear-gradient(135deg, #15803d, #047857);
 }
 
 .btn-logout {
-  background-color: #f0ad4e;
-  color: white;
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
 }
 
 .btn-logout:hover {
-  background-color: #ec971f;
+  background: #e2e8f0;
+  color: #0f172a;
 }

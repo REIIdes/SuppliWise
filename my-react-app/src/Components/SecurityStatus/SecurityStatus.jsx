@@ -263,6 +263,156 @@ function OverallBanner({ status, syncedAt, syncing, onSync, onDownload }) {
   );
 }
 
+// ── Severity chip for audit findings ──────────────────────────────────────
+const SEVERITY_META = {
+  critical:      { label: 'Critical',      cls: 'aud-chip--critical' },
+  high:          { label: 'High',          cls: 'aud-chip--high' },
+  medium:        { label: 'Medium',        cls: 'aud-chip--medium' },
+  low:           { label: 'Low',           cls: 'aud-chip--low' },
+  informational: { label: 'Informational', cls: 'aud-chip--info' },
+};
+
+function SeverityChip({ severity }) {
+  const meta = SEVERITY_META[severity] || SEVERITY_META.informational;
+  return <span className={`aud-chip ${meta.cls}`}>{meta.label}</span>;
+}
+
+// ── Audit record — the permanent entry for the completed security audit ───
+// The probes above answer "is the system healthy right now". This answers
+// "what did a human review find, what changed, and what is still open" —
+// including the findings that were deliberately left unfixed.
+function AuditRecord({ audit }) {
+  if (!audit) return null;
+
+  const counts = audit.counts || {};
+  const countCards = [
+    ['Critical',      counts.critical,      'aud-stat--critical'],
+    ['High',          counts.high,          'aud-stat--high'],
+    ['Medium',        counts.medium,        'aud-stat--medium'],
+    ['Low',           counts.low,           'aud-stat--low'],
+    ['Informational', counts.informational, 'aud-stat--info'],
+    ['Total',         counts.total,         'aud-stat--total'],
+    ['Remediated',    counts.remediatedInCode, 'aud-stat--fixed'],
+    ['Open / accepted', counts.openOrAccepted,  'aud-stat--open'],
+  ];
+
+  const verification = Object.entries(audit.verification || {});
+
+  return (
+    <section className="rt-section aud-section">
+      <div className="rt-header">
+        <div className="rt-header__title-wrap">
+          <svg className="rt-header__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            <polyline points="9 12 11 14 15 10" />
+          </svg>
+          <h2 className="rt-header__title">Security Audit Record</h2>
+        </div>
+        <p className="rt-header__sub">
+          {audit.title} · <strong>{audit.id}</strong> · conducted {audit.conductedAt}
+        </p>
+      </div>
+
+      <p className="aud-scope">{audit.scope}</p>
+
+      {/* Severity breakdown */}
+      <div className="aud-stats">
+        {countCards.map(([label, value, cls]) => (
+          <div className={`aud-stat ${cls}`} key={label}>
+            <span className="aud-stat__value">{value ?? '—'}</span>
+            <span className="aud-stat__label">{label}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Phases */}
+      <details className="aud-block">
+        <summary>Method — {audit.phases?.length || 0} phases</summary>
+        <ol className="aud-list">
+          {(audit.phases || []).map(p => <li key={p}>{p}</li>)}
+        </ol>
+      </details>
+
+      {/* Headline findings */}
+      <details className="aud-block">
+        <summary>Key findings — {audit.headlineFindings?.length || 0} reported</summary>
+        <ul className="aud-findings">
+          {(audit.headlineFindings || []).map(f => (
+            <li key={f.id} className="aud-finding">
+              <div className="aud-finding__head">
+                <SeverityChip severity={f.severity} />
+                <code className="aud-finding__id">{f.id}</code>
+                <strong>{f.title}</strong>
+              </div>
+              <p className="aud-finding__detail">{f.detail}</p>
+              <p className={`aud-finding__status${/fixed/i.test(f.status || '') ? ' aud-finding__status--fixed' : ''}`}>
+                {f.status}
+              </p>
+            </li>
+          ))}
+        </ul>
+      </details>
+
+      {/* Remediations */}
+      <details className="aud-block">
+        <summary>Changes applied — {audit.remediations?.length || 0} fixes</summary>
+        <ul className="aud-list aud-list--code">
+          {(audit.remediations || []).map(r => <li key={r}>{r}</li>)}
+        </ul>
+      </details>
+
+      {/* Open / accepted */}
+      <details className="aud-block" open>
+        <summary>Open &amp; accepted items — {audit.openItems?.length || 0}</summary>
+        <ul className="aud-findings">
+          {(audit.openItems || []).map(f => (
+            <li key={f.id} className="aud-finding">
+              <div className="aud-finding__head">
+                <SeverityChip severity={f.severity} />
+                <code className="aud-finding__id">{f.id}</code>
+                <strong>{f.title}</strong>
+              </div>
+              <p className="aud-finding__detail">{f.note}</p>
+            </li>
+          ))}
+        </ul>
+      </details>
+
+      {/* Verification */}
+      <details className="aud-block" open>
+        <summary>Automated verification (Phase 5)</summary>
+        <ul className="aud-checks">
+          {verification.map(([k, v]) => (
+            <li key={k} className={/PASS/i.test(String(v)) ? 'aud-check aud-check--pass' : 'aud-check'}>
+              <span className="aud-check__key">{k}</span>
+              <span className="aud-check__val">{v}</span>
+            </li>
+          ))}
+        </ul>
+      </details>
+
+      {/* Manual actions */}
+      <div className="aud-manual">
+        <p className="aud-manual__title">
+          ⚠ Manual action required — {audit.manualActions?.length || 0} item(s)
+        </p>
+        <ul className="aud-list">
+          {(audit.manualActions || []).map(a => <li key={a}>{a}</li>)}
+        </ul>
+      </div>
+
+      {/* Disclaimer — never claim the app is fully secure */}
+      <p className="aud-disclaimer">{audit.disclaimer}</p>
+
+      {audit.report && (
+        <p className="aud-report">
+          Full written report: <code>{audit.report}</code>
+        </p>
+      )}
+    </section>
+  );
+}
+
 // ── Main Component ────────────────────────────────────────────────────────
 const SecurityStatus = ({ adminRequest, onDownloadReport }) => {
   const [monitors,             setMonitors]             = useState([]);
@@ -270,6 +420,7 @@ const SecurityStatus = ({ adminRequest, onDownloadReport }) => {
   const [syncedAt,             setSyncedAt]             = useState(null);
   const [syncing,              setSyncing]              = useState(false);
   const [monitorError,         setMonitorError]         = useState('');
+  const [audit,                setAudit]                = useState(null);
   const intervalRef = useRef(null);
 
   const fetchMonitor = useCallback(async (force = false) => {
@@ -281,6 +432,10 @@ const SecurityStatus = ({ adminRequest, onDownloadReport }) => {
       setMonitors(data.monitors || []);
       setOverallMonitorStatus(data.overallMonitorStatus || 'healthy');
       setSyncedAt(data.syncedAt || new Date().toISOString());
+      // Static record of the completed audit (rarely changes — only replace
+      // when the API actually sent one, so a stale-but-valid record never
+      // flashes away between the 30 s polls).
+      if (data.audit) setAudit(data.audit);
     } catch (err) {
       setMonitorError(err.message || 'Unable to load monitor data.');
     } finally {
@@ -356,6 +511,9 @@ const SecurityStatus = ({ adminRequest, onDownloadReport }) => {
           </table>
         </div>
       </section>
+
+      {/* ── Permanent record of the completed security audit ────────────── */}
+      <AuditRecord audit={audit} />
 
 
     </div>

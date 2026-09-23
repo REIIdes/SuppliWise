@@ -2,8 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import { exportResultsToPDF } from '../utils/exportPDF';
-import { getSupplementDetail } from '../api';
-import { hasPlanAccess, getStoredPlan, FEATURE_TIERS } from '../utils/plan';
+import { getSupplementDetail, checkFeature, getStoredUser } from '../api';
+import { safeUrl } from '../utils/safeUrl';
+import { useSubscription, SUBSCRIPTION_EVENT } from '../hooks/useSubscription';
 import UpgradeModal from '../Components/UpgradeModal/UpgradeModal';
 import './ResultsPage.css';
 
@@ -634,7 +635,7 @@ function ResultsPage() {
 
   // Get current user email from localStorage for cache scoping (unique per account)
   const currentUserId = (() => {
-    try { return JSON.parse(localStorage.getItem('user') || '{}').email || 'guest'; } catch { return 'guest'; }
+    try { return getStoredUser()?.email || 'guest'; } catch { return 'guest'; }
   })();
   const assessmentId = assessment?._id || assessment?.id || 'unknown';
   // Cache key includes userId so different accounts never share cached details
@@ -656,12 +657,27 @@ function ResultsPage() {
   const [detailSupplement, setDetailSupplement] = useState(null);
   const [showEvidenceInfo, setShowEvidenceInfo] = useState(false);
   const [upgradeInfo, setUpgradeInfo] = useState(null);
+  const [priorityNotice, setPriorityNotice] = useState(null);
   const detailCache = useRef({});  // cache: { [supplementName]: detailObject }
+  // Reactive plan object { active, plan, rank }: the PDF gate re-renders the
+  // instant the subscription changes.
+  const livePlan = useSubscription();
   const INITIAL_REC_COUNT = 6;
   
   // Use the appropriate expanded cards set based on current mode
   const expandedCards = detailMode === 'simplified' ? expandedCardsSimplified : expandedCardsDetailed;
   const setExpandedCards = detailMode === 'simplified' ? setExpandedCardsSimplified : setExpandedCardsDetailed;
+
+  // Results gate: a 403 (tier downgrade) swaps the modal in live; an upgrade
+  // clears a stale paywall without refresh.
+  useEffect(() => {
+    const onPlan = () => setUpgradeInfo((prev) => {
+      if (!prev) return prev;
+      return livePlan.canAccessTier(prev.requiresPlan) ? null : { ...prev, currentPlan: livePlan.plan };
+    });
+    window.addEventListener(SUBSCRIPTION_EVENT, onPlan);
+    return () => window.removeEventListener(SUBSCRIPTION_EVENT, onPlan);
+  }, [livePlan.rank, livePlan.plan]);
 
   // Save preference to localStorage when changed
   useEffect(() => {
@@ -698,14 +714,23 @@ function ResultsPage() {
   };
 
   const handleExportPDF = async () => {
-    if (!hasPlanAccess(FEATURE_TIERS.pdfExport)) {
-      const stored = getStoredPlan();
-      setUpgradeInfo({ requiresPlan: FEATURE_TIERS.pdfExport, currentPlan: stored.plan, feature: 'PDF Report Exports' });
+    // Instant local gate (UI only) — then the backend re-verifies the
+    // entitlement before the browser renders anything, so skipping this
+    // button can never bypass the subscription.
+    if (!livePlan.canAccess('pdfExport')) {
+      setUpgradeInfo({ requiresPlan: 'monthly', currentPlan: livePlan.plan, feature: 'PDF Report Export' });
       return;
     }
     setExporting(true);
     try {
+      await checkFeature('pdfExport');
       exportResultsToPDF(r, assessment);
+    } catch (err) {
+      if (err?.requiresPlan) {
+        setUpgradeInfo({ requiresPlan: err.requiresPlan, currentPlan: err.currentPlan || livePlan.plan, feature: 'PDF Report Export' });
+      } else {
+        console.error('PDF export blocked:', err);
+      }
     } finally {
       // Small delay so the button state is visible
       setTimeout(() => setExporting(false), 800);
@@ -743,6 +768,29 @@ function ResultsPage() {
     <div className="results-wrapper">
       <Navbar />
       <div className="results-container">
+        {priorityNotice && (
+          <div
+            className={`priority-banner priority-banner--${priorityNotice.kind}`}
+            role="status"
+            aria-live="polite"
+            style={{ marginBottom: '16px' }}
+          >
+            <div className="priority-banner__icon" aria-hidden="true">
+              {priorityNotice.kind === 'flagged' ? '⚑' : 'ℹ️'}
+            </div>
+            <div className="priority-banner__body">
+              <strong>{priorityNotice.title}</strong>
+              <span className="priority-banner__hint">{priorityNotice.body}</span>
+            </div>
+            <button
+              type="button"
+              className="priority-banner__btn"
+              onClick={() => setPriorityNotice(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
 
         {/* Evidence Info Modal */}
         {showEvidenceInfo && (
@@ -1035,7 +1083,10 @@ function ResultsPage() {
               {(r.seekingSupport.resources || []).map((res, i) => (
                 <a
                   key={i}
-                  href={res.url}
+                  // AI-generated: only http(s) or app-relative targets survive.
+                  // A `javascript:` value renders the card unlinked instead of
+                  // executing in our origin when clicked.
+                  href={safeUrl(res.url) || undefined}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="seeking-support-card"

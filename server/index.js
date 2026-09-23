@@ -15,9 +15,20 @@ const dashboardRoutes = require('./routes/dashboard');
 const insightsRoutes = require('./routes/insights');
 const adminRoutes = require('./routes/admin');
 const notificationRoutes = require('./routes/notifications');
+const subscriptionRoutes = require('./routes/subscription');
 const AdminAccount = require('./models/AdminAccount');
 
 const app = express();
+
+// ── Reverse proxy ─────────────────────────────────────────────────────────
+// Off by default: with it OFF, `req.ip` is the real socket peer, so a
+// client-supplied X-Forwarded-For header can never spoof the address that
+// rate limits, lockouts and login-location evidence key on. Set
+// TRUST_PROXY=true ONLY when the app sits behind a proxy you control
+// (nginx / Cloudflare / a load balancer) — then Express picks the real
+// client hop from the forwarded chain instead of trusting the raw header.
+// `1` trusts exactly one hop (the proxy itself), never the whole chain.
+if (process.env.TRUST_PROXY === 'true') app.set('trust proxy', 1);
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'suppliwise_jwt_secret_key_change_in_production') {
   throw new Error('JWT_SECRET is missing or still uses the default placeholder value.');
@@ -82,13 +93,31 @@ app.use('/api', (req, res, next) => {
 const { lockoutCheck, limitReachedHandler } = require('./utils/lockout');
 const isLocalDevRequest = (req) => process.env.NODE_ENV !== 'production' ||
   ['localhost', '127.0.0.1'].includes(req.hostname) || req.ip.includes('127.0.0.1') || req.ip.includes('::1');
+
+// GET /api/auth/me is read-only session/plan traffic: the reactive plan store
+// refreshes it on focus and on a slow interval. It must NEVER consume the
+// sensitive auth budget or escalate the brute-force ladder (a client refresh
+// storm once locked users out of their own accounts), so it is skipped here
+// and served by its own generous bucket below.
+const isSessionRead = (req) => req.method === 'GET' && (req.path === '/me' || req.path === '/me/');
+
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: (req) => isLocalDevRequest(req) ? 200 : 20,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: isSessionRead,
   message: { message: 'Too many attempts. Please wait 15 minutes and try again.' },
   handler: limitReachedHandler('Too many attempts. Lockout escalated — please wait and try again.'),
+});
+
+// Session/plan reads: generous, non-escalating (protected by auth + no store).
+const sessionLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: (req) => isLocalDevRequest(req) ? 1500 : 400,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many session refreshes. Please wait a moment and try again.' },
 });
 
 // Recommend: 15 requests per 10 min per IP (protects Groq quota)
@@ -140,8 +169,14 @@ const adminLimiter = rateLimit({
 
 // Routes — admin vs user buckets are isolated; lockoutCheck hard-stops IPs
 // serving an escalated lockout before any limiter or handler runs.
+// Session/plan reads get their own non-escalating bucket (registered first so
+// it applies to /api/auth/me before the strict auth limiter).
+app.use('/api/auth/me', sessionLimiter);
 app.use('/api/auth', lockoutCheck, authLimiter, authRoutes);
 app.use('/api/assessment', userLimiter, assessmentRoutes);
+// Subscription state is polled/streamed by every open session — use the
+// non-escalating session bucket so it can never trip lockouts.
+app.use('/api/subscription', sessionLimiter, subscriptionRoutes);
 app.use('/api/recommend', recommendLimiter, recommendRoutes);
 app.use('/api/chat', userLimiter, chatRoutes);
 app.use('/api/polish', aiLimiter, polishRoutes);
@@ -154,6 +189,15 @@ app.use('/api/admin', lockoutCheck, adminLimiter, adminRoutes);
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'Server is running' });
+});
+
+// ── JSON 404 for the API ───────────────────────────────────────────────────
+// Without this, any unmatched /api/* path fell through to Express's default
+// handler and answered text/html ("Cannot GET ..."), which every JSON client
+// then has to special-case. Registered after all routers + /health so real
+// routes always win, and before the error handler so it stays a 404, not a 500.
+app.use('/api', (req, res) => {
+  res.status(404).json({ message: 'Not found.' });
 });
 
 // ── Global error handler — catches any unhandled errors in routes ──────────

@@ -1,5 +1,6 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { getStoredUser } from '../api';
 
 // ── Palette ────────────────────────────────────────────────────────────────
 // Minimal 3-color palette: Black, White, Green
@@ -215,9 +216,7 @@ export async function exportResultsToPDF(recommendations, assessment) {
     let y = 0;
 
     // Resolve user name — from assessment object or localStorage fallback
-    const storedUser = (() => {
-      try { return JSON.parse(localStorage.getItem('user') || '{}'); } catch { return {}; }
-    })();
+    const storedUser = getStoredUser() || {};
     const userName = assessment?.userName || assessment?.name || storedUser?.name || null;
 
     // Use assessment creation date throughout

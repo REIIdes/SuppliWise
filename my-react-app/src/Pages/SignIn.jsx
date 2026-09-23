@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
-import { registerUser, saveAssessment, getRecommendations, saveAssessmentResults, getCaptcha } from '../api';
+import { registerUser, saveAssessment, getRecommendations, saveAssessmentResults, getCaptcha, startSession } from '../api';
+import { beginAuthTransition, endAuthTransition } from '../auth/authState';
+import { safeRedirectPath } from '../utils/safeUrl';
 import './LogIn.css';
 import './SignIn.css';
 
@@ -71,7 +73,6 @@ function SignIn() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time challenge fetch on mount
     loadCaptcha();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Months array
@@ -169,6 +170,16 @@ function SignIn() {
     setFieldErrors(prev => ({ ...prev, [field]: msg }));
   };
 
+  // While typing: revalidate a non-empty value, but an emptied field just
+  // drops its error instead of being validated as '' (which put
+  // "Please enter your email address." on a blank input mid-keystroke).
+  // Empty fields are still validated on blur and on submit.
+  const revalidateOnChange = (field, value) => {
+    if (!fieldErrors[field]) return;
+    if (value) validateField(field, value);
+    else setFieldErrors(prev => ({ ...prev, [field]: '' }));
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -200,12 +211,16 @@ function SignIn() {
     if (Object.values(newErrors).some(Boolean)) return;
 
     setLoading(true);
+    // Hold the public-route guard until this signup decides its landing
+    // page — the token write below emits, and the guard must not bounce
+    // /signup → /dashboard before the pending-assessment flow finishes.
+    beginAuthTransition();
     try {
       const dateOfBirth = `${birthYear}-${birthMonth}-${birthDay.toString().padStart(2, '0')}`;
       const data = await registerUser(firstName, lastName, gender, dateOfBirth, email, password, { id: captcha.id, answer: captchaAnswer.trim() });
-      localStorage.setItem('token', data.token);
-      localStorage.setItem('suppliwise_user_last_activity', String(Date.now()));
-      localStorage.setItem('user', JSON.stringify({ 
+      // Per-account session keys — an account already signed in on this
+      // browser keeps its own token and stays switchable.
+      const switchedFrom = startSession(data.token, {
         firstName: data.firstName, 
         lastName: data.lastName, 
         name: data.name, 
@@ -216,8 +231,13 @@ function SignIn() {
         profilePicture: data.profilePicture || '',
         bannerPicture: data.bannerPicture || '',
         subscriptionActive: data.subscriptionActive === true,
-        subscriptionPlan: data.subscriptionPlan || 'free'
-      }));
+        subscriptionPlan: data.subscriptionPlan || 'free',
+        // Resolved snapshot (expiry-aware) — the plan store renders from this.
+        subscription: data.subscription ?? null,
+      });
+
+      // Publish the new account's plan to the shared store immediately.
+      try { window.dispatchEvent(new Event('suppliwise:subscription')); } catch { /* non-browser safe */ }
 
       const pending = sessionStorage.getItem(SESSION_KEY);
       if (pending) {
@@ -234,9 +254,12 @@ function SignIn() {
         sessionStorage.removeItem(SESSION_KEY);
         navigate('/results', { state: { recommendations, assessment: formData } });
       } else {
-        // Check if there's a redirect destination from HomePage
-        const redirectTo = location.state?.redirectTo;
-        navigate(redirectTo || '/dashboard');
+        // Check if there's a redirect destination from HomePage.
+        // Same-origin app paths only (see LogIn.jsx) — an absolute URL in
+        // router state must never turn sign-up into an open redirect.
+        const redirectTo = safeRedirectPath(location.state?.redirectTo);
+        if (switchedFrom) window.location.href = redirectTo;
+        else navigate(redirectTo);
       }
     } catch (err) {
       setError(err.message);
@@ -246,6 +269,7 @@ function SignIn() {
         loadCaptcha();
       }
     } finally {
+      endAuthTransition();
       setLoading(false);
     }
   };
@@ -272,7 +296,7 @@ function SignIn() {
               <input
                 type="text"
                 value={firstName}
-                onChange={(e) => { setFirstName(e.target.value); if (fieldErrors.firstName) validateField('firstName', e.target.value); }}
+                onChange={(e) => { setFirstName(e.target.value); revalidateOnChange('firstName', e.target.value); }}
                 onBlur={(e) => validateField('firstName', e.target.value)}
                 placeholder="Enter your first name"
                 maxLength={50}
@@ -287,7 +311,7 @@ function SignIn() {
               <input
                 type="text"
                 value={lastName}
-                onChange={(e) => { setLastName(e.target.value); if (fieldErrors.lastName) validateField('lastName', e.target.value); }}
+                onChange={(e) => { setLastName(e.target.value); revalidateOnChange('lastName', e.target.value); }}
                 onBlur={(e) => validateField('lastName', e.target.value)}
                 placeholder="Enter your last name"
                 maxLength={50}
@@ -373,7 +397,7 @@ function SignIn() {
             <input
               type="email"
               value={email}
-              onChange={(e) => { setEmail(e.target.value); if (fieldErrors.email) validateField('email', e.target.value); }}
+              onChange={(e) => { setEmail(e.target.value); revalidateOnChange('email', e.target.value); }}
               onBlur={(e) => validateField('email', e.target.value)}
               placeholder="your.email@example.com"
               maxLength={254}
@@ -389,7 +413,7 @@ function SignIn() {
               <input
                 type={showPassword ? 'text' : 'password'}
                 value={password}
-                onChange={(e) => { setPassword(e.target.value); if (fieldErrors.password) validateField('password', e.target.value); }}
+                onChange={(e) => { setPassword(e.target.value); revalidateOnChange('password', e.target.value); }}
                 onBlur={(e) => validateField('password', e.target.value)}
                 placeholder="Create a strong password"
                 maxLength={128}
@@ -413,7 +437,7 @@ function SignIn() {
               <input
                 type={showConfirm ? 'text' : 'password'}
                 value={confirmPassword}
-                onChange={(e) => { setConfirmPassword(e.target.value); if (fieldErrors.confirmPassword) validateField('confirmPassword', e.target.value); }}
+                onChange={(e) => { setConfirmPassword(e.target.value); revalidateOnChange('confirmPassword', e.target.value); }}
                 onBlur={(e) => validateField('confirmPassword', e.target.value)}
                 placeholder="Confirm your password"
                 maxLength={128}

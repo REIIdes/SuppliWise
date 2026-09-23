@@ -240,7 +240,9 @@
   .chat-scroll-to-bottom {
     width: 40px !important;
     height: 40px !important;
-    bottom: 145px !important;
+    /* Anchored to the scroll region now, not the window base — same 12px as
+       desktop, so the arrow never lands on top of the prompt chips. */
+    bottom: 12px !important;
   }
 
   .chat-scroll-to-bottom svg {

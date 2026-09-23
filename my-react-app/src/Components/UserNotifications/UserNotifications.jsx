@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   getNotifications,
@@ -6,6 +6,7 @@ import {
   markAllNotificationsRead,
   deleteNotification,
   isSecurityNotification,
+  getToken,
 } from '../../api';
 import './UserNotifications.css';
 
@@ -30,9 +31,13 @@ export default function UserNotifications() {
   const [loading, setLoading] = useState(false);
   const [actionId, setActionId] = useState(null);
   const wrapRef = useRef(null);
+  const panelRef = useRef(null);
+  const closeTimerRef = useRef(0);
+  const hoverSuppressedRef = useRef(false);
+  const lastRefreshRef = useRef(0);
 
   const refresh = useCallback(async (silent = true) => {
-    if (!localStorage.getItem('token')) return;
+    if (!getToken()) return;
     if (!silent) setLoading(true);
     try {
       const data = await getNotifications(20);
@@ -46,6 +51,7 @@ export default function UserNotifications() {
   }, []);
 
   useEffect(() => {
+    lastRefreshRef.current = Date.now();
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional initial inbox load + 60s poll
     refresh(true);
     const timer = window.setInterval(() => refresh(true), 60000);
@@ -77,10 +83,102 @@ export default function UserNotifications() {
     };
   }, [open ]);
 
-  const openPanel = () => {
-    setOpen(v => !v);
-    refresh(false);
+  const cancelClose = useCallback(() => {
+    if (closeTimerRef.current) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = 0;
+    }
+  }, []);
+
+  // Grace period: bell and panel are one DOM tree separated by a 10px visual
+  // gap — leaving for the gap must not slam the panel shut before the pointer
+  // reaches it.
+  const scheduleClose = useCallback(() => {
+    cancelClose();
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = 0;
+      setOpen(false);
+    }, 200);
+  }, [cancelClose]);
+
+  // Refresh when the panel opens, at most once every 4s so rapid hover
+  // in/out or repeated clicks can't hammer the notifications endpoint.
+  const openRefresh = (showLoading) => {
+    const now = Date.now();
+    if (now - lastRefreshRef.current < 4000) return;
+    lastRefreshRef.current = now;
+    refresh(showLoading);
   };
+
+  const handleHoverEnter = (event) => {
+    // Touch has no hover — it keeps the click-to-toggle path below.
+    if (event.pointerType === 'touch') return;
+    if (hoverSuppressedRef.current) return;
+    cancelClose();
+    if (!open) {
+      setOpen(true);
+      openRefresh(false);
+    }
+  };
+
+  const handleHoverLeave = (event) => {
+    if (event.pointerType === 'touch') return;
+    hoverSuppressedRef.current = false;
+    scheduleClose();
+  };
+
+  const openPanel = () => {
+    cancelClose();
+    if (open) {
+      setOpen(false);
+      // Latch hover-reopen only while the pointer is genuinely over the bell
+      // (a keyboard toggle elsewhere must not disable hover for good).
+      hoverSuppressedRef.current = !!wrapRef.current?.matches(':hover');
+    } else {
+      hoverSuppressedRef.current = false;
+      setOpen(true);
+      openRefresh(true);
+    }
+  };
+
+  // Anchor the panel to the bell in viewport coordinates (position: fixed),
+  // re-measuring on scroll (capture phase — covers any scrollable ancestor)
+  // and resize so it stays pinned beneath the bell while the page scrolls.
+  // useLayoutEffect applies the coordinates before paint: no first-frame jump.
+  useLayoutEffect(() => {
+    if (!open) return undefined;
+    const place = () => {
+      const anchor = wrapRef.current;
+      const panel = panelRef.current;
+      if (!anchor || !panel) return;
+      const rect = anchor.getBoundingClientRect();
+      const width = Math.min(360, window.innerWidth - 32);
+      const left = Math.min(
+        Math.max(rect.right - width, 12),
+        Math.max(12, window.innerWidth - width - 12)
+      );
+      const top = rect.bottom + 10;
+      panel.style.left = `${Math.round(left)}px`;
+      panel.style.top = `${Math.round(top)}px`;
+      panel.style.right = 'auto';
+      panel.style.width = `${Math.round(width)}px`;
+      const arrowX = Math.min(
+        Math.max(rect.left + rect.width / 2 - left, 16),
+        width - 16
+      );
+      panel.style.setProperty('--arrow-x', `${Math.round(arrowX)}px`);
+    };
+    place();
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => {
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+    };
+  }, [open]);
+
+  // Clear a pending hover-close timer if the navbar unmounts mid-transition.
+  useEffect(() => () => window.clearTimeout(closeTimerRef.current), []);
 
   const handleItemClick = async (item) => {
     if (!item.read) {
@@ -130,7 +228,12 @@ export default function UserNotifications() {
   };
 
   return (
-    <div className="user-notif" ref={wrapRef}>
+    <div
+      className="user-notif"
+      ref={wrapRef}
+      onPointerEnter={handleHoverEnter}
+      onPointerLeave={handleHoverLeave}
+    >
       <button
         type="button"
         className="user-notif__bell"
@@ -148,7 +251,7 @@ export default function UserNotifications() {
       </button>
 
       {open && (
-        <div className="user-notif__panel" role="dialog" aria-label="Notifications">
+        <div className="user-notif__panel" ref={panelRef} role="dialog" aria-label="Notifications">
           <div className="user-notif__header">
             <strong>Notifications</strong>
             {unread > 0 && (

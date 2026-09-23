@@ -3,15 +3,17 @@ import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import Toast from '../Components/Toast/Toast';
 import ConfirmModal from '../Components/ConfirmModal/ConfirmModal';
-import { getDashboard, updateIntake } from '../api';
+import { getDashboard, updateIntake, getToken, getStoredUser, getMyProfile, setStoredUser } from '../api';
 import './DashboardPage.css';
 
 function DashboardPage() {
   const navigate = useNavigate();
-  const [userData] = useState(() => {
+  // Mutable so the profile-heal path below can fill it in when the tab holds
+  // a token but no cached profile (session handover/migration edge) — without
+  // this the page used to fall through to a blank render.
+  const [userData, setUserData] = useState(() => {
     try {
-      const raw = localStorage.getItem('user');
-      return raw ? JSON.parse(raw) : null;
+      return getStoredUser();
     } catch {
       return null;
     }
@@ -42,6 +44,19 @@ function DashboardPage() {
       setLoading(true);
       setError('');
       const data = await getDashboard();
+
+      // Token without a cached profile: pull the profile once from the API
+      // instead of letting the !userData check below blank the page.
+      if (!getStoredUser()) {
+        try {
+          const me = await getMyProfile();
+          const profile = me?.user || me;
+          if (profile && (profile._id || profile.email)) {
+            setStoredUser(profile);
+            setUserData(profile);
+          }
+        } catch { /* falls through to the !userData fallback */ }
+      }
       
       // Set first visit flag from server response
       if (data.isFirstVisit !== undefined) {
@@ -60,7 +75,6 @@ function DashboardPage() {
         });
         setPriorityBlock(data.priorityBlock || { blocked: false, count: 0 });
         setPriorityAssessments(data.priorityAssessments || []);
-        setLoading(false);
         return;
       }
 
@@ -107,18 +121,28 @@ function DashboardPage() {
       });
       setPriorityBlock(data.priorityBlock || { blocked: false, count: 0 });
       setPriorityAssessments(data.priorityAssessments || []);
-      setLoading(false);
     } catch (err) {
-      console.error('Error fetching dashboard:', err);
-      setError(err.message || 'Failed to load dashboard data.');
+      // A rejected session (401 + SESSION_* code) is already handled
+      // globally by api.js: this tab's copy is cleared and it redirects to
+      // /login with an explanatory notice. Logging it here used to spam the
+      // console every time the visibility handler re-fired on a doomed
+      // session — so teardowns stay silent and un-surfaced.
+      const isSessionTeardown = err?.status === 401 && err?.code;
+      if (!isSessionTeardown) {
+        console.error('Error fetching dashboard:', err);
+        setError((err && err.message) || 'Failed to load dashboard data.');
+      }
+    } finally {
+      // The spinner must ALWAYS clear — even if a handler above threw —
+      // otherwise the page sits on the loader forever.
       setLoading(false);
     }
   };
 
   // Initial dashboard load + auth guard + responsive toast
   useEffect(() => {
-    // Get user data from localStorage
-    const token = localStorage.getItem('token');
+    // Get user data from the tab session
+    const token = getToken();
 
     if (!token) {
       navigate('/login');
@@ -135,7 +159,7 @@ function DashboardPage() {
     window.addEventListener('resize', handleResize);
     // Realtime: refresh the moment the user returns to the tab
     const handleVisible = () => {
-      if (document.visibilityState === 'visible' && localStorage.getItem('token')) {
+      if (document.visibilityState === 'visible' && getToken()) {
         fetchDashboardData();
       }
     };
@@ -316,7 +340,21 @@ function DashboardPage() {
   }
 
   if (!userData) {
-    return null;
+    // Never render a blank white page: the session exists but the profile
+    // could not be loaded — show a retryable message instead.
+    return (
+      <div className="dashboard-wrapper">
+        <Navbar />
+        <div className="dashboard-container">
+          <div className="dashboard-error">
+            <p>We couldn&apos;t load your profile. Please try again.</p>
+            <button onClick={() => fetchDashboardData()} className="btn-primary">
+              Retry
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (

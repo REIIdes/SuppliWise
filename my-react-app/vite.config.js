@@ -47,8 +47,13 @@ export default defineConfig({
           }
         ]
       },
+      // NEVER enable a service worker against the dev server: a worker running
+      // in front of Vite serves cached bundles over live edits — stale pages
+      // that no code change could reach until the worker was unregistered.
+      // Dev always loads fresh from Vite; only the production build gets a
+      // worker (vite-plugin-pwa's own precached one).
       devOptions: {
-        enabled: true,
+        enabled: false,
         type: 'module',
         navigateFallback: 'index.html'
       },

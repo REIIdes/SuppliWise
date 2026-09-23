@@ -1,20 +1,38 @@
-# SuppliWise Admin Names and TOTP Keys
+# SuppliWise Admin Names
 
-> **Sensitive file:** These TOTP keys provide administrator access. Do not commit, upload, or share this file. Store it in a secure password manager and delete this local copy when no longer needed.
+> **This file must never contain live credentials.**
+>
+> A previous revision of this document listed the real base32 TOTP seeds for
+> every admin account, and it was committed to a **public** repository. Those
+> seeds must be treated as compromised: rotate all of them (Admin Profile →
+> authenticator rotation flow, or replace `ADMIN_ACCOUNTS` in `server/.env`)
+> and purge them from git history.
 
-The entries below match the active admin configuration in `server/.env`.
+## Accounts
 
 | Admin name | TOTP secret | Authenticator setup |
 |---|---|---|
-| `AdminDevs` | `JFWVMNSPLJJWS5LXFRZW6JLDFBACCKRPHBLU2MJIGYXHWTCLJ5JA` | Add as a SuppliWise admin account in Google Authenticator |
-| `AdminJoma` | `OVVXWNR2K5KXIXL5IRZUEPSKIFFFKPDX` | Add as a SuppliWise admin account in Google Authenticator |
-| `AdminPoli` | `MRKCGSJKOBSTGYK6FQUV2V3SOBGCQVCJ` | Add as a SuppliWise admin account in Google Authenticator |
-| `AdminJohn` | `LJXUEQ3TN5TTQWBVGZMEIXLJH4RWMYZF` | Add as a SuppliWise admin account in Google Authenticator |
-| `AdminShMa` | `NFWFEL26EERWCQTVJVRX2JRYENDSKQCQ` | Add as a SuppliWise admin account in Google Authenticator |
-| `AdminRaNe` | `SGQ5ZASCMJRYYXPOC53A` | Add as a SuppliWise admin account in Google Authenticator |
+| `AdminDevs` | *(stored in `server/.env` → `ADMIN_TOTP_SECRET`)* | Add as a SuppliWise admin account in Google Authenticator |
+| `AdminJoma` | *(stored in `server/.env` → `ADMIN_ACCOUNTS`)* | Add as a SuppliWise admin account in Google Authenticator |
+| `AdminPoli` | *(stored in `server/.env` → `ADMIN_ACCOUNTS`)* | Add as a SuppliWise admin account in Google Authenticator |
+| `AdminJohn` | *(stored in `server/.env` → `ADMIN_ACCOUNTS`)* | Add as a SuppliWise admin account in Google Authenticator |
+| `AdminShMa` | *(stored in `server/.env` → `ADMIN_ACCOUNTS`)* | Add as a SuppliWise admin account in Google Authenticator |
+| `AdminRaNe` | *(stored in `server/.env` → `ADMIN_ACCOUNTS`)* | Add as a SuppliWise admin account in Google Authenticator |
 
 ## Manual setup
 
-In Google Authenticator, choose **Add account**, choose **Enter setup key**, use the admin name as the account label, and enter the matching TOTP secret. Use **Time-based** authentication.
+In Google Authenticator, choose **Add account**, choose **Enter setup key**,
+use the admin name as the account label, and read the TOTP secret from your
+secret manager (or from `server/.env` on the server itself). Use
+**Time-based** authentication.
 
-Do not regenerate or replace a key in this document alone. The key must also be changed in the server configuration or through the Admin Profile authenticator rotation flow, otherwise login verification will fail.
+Never copy a live secret into a tracked file, a document, a ticket, or a
+screenshot. Generate new secrets with:
+
+```powershell
+node -e "console.log(require('speakeasy').generateSecret({length: 20}).base32)"
+```
+
+If a key is regenerated, it must also be written to the server configuration
+(or rotated through the Admin Profile authenticator rotation flow),
+otherwise login verification will fail.

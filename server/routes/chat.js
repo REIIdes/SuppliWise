@@ -1,7 +1,7 @@
 ﻿const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
-const { requirePlan } = require('../utils/plan');
+const { requireFeature } = require('../utils/entitlements');
 
 // ── System prompt ──────────────────────────────────────────────────────────
 function buildSystemPrompt(recContext) {
@@ -120,9 +120,10 @@ ${recContext ? `\n## USER'S CURRENT RECOMMENDATIONS\n${recContext}` : ''}`;
 
 // ── POST /api/chat ──────────────────────────────────────────────────────────
 // @access  Private (Ultimate/custom package only — AI Chat is the top-tier perk).
-// Requires login AND an active Ultimate subscription; otherwise 401/403 with
-// a requiresPlan payload so the client can show an upgrade prompt.
-router.post('/', protect, requirePlan('custom'), async (req, res) => {
+// Requires login AND an active Ultimate subscription (AI Chat Assistant is an
+// Ultimate entitlement); otherwise 401/403 with a requiresPlan payload so the
+// client can show an upgrade prompt.
+router.post('/', protect, requireFeature('chat'), async (req, res) => {
   try {
     const { message, context, history } = req.body;
 

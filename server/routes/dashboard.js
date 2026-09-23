@@ -5,7 +5,7 @@ const { protect } = require('../middleware/auth');
 const Assessment = require('../models/Assessment');
 const IntakeRecord = require('../models/IntakeRecord');
 const DashboardMetrics = require('../models/DashboardMetrics');
-const { notExpiredFilter } = require('../utils/assessments');
+const { notExpiredFilter, expiryFromCreatedAt } = require('../utils/assessments');
 
 // Coerce any JSON value to a plain string for DB equality filters.
 // Objects (e.g. {"$ne": "x"}) would otherwise become NoSQL operators and
@@ -396,8 +396,16 @@ router.post('/intake', protect, async (req, res) => {
       if (completedNow && assessmentDoc && assessmentDoc.priority === 'Priority') {
         try {
           await Assessment.findByIdAndUpdate(record.assessment, {
-            // Resolved by completion: Standard + expires immediately (record kept).
-            $set: { priority: 'Standard', resolvedAt: new Date(), resolvedReason: 'intake-complete', expiresAt: new Date() },
+            // Resolved by completion: Standard again, with the normal 5-year
+            // window counted from CREATION. It used to set expiresAt to "now",
+            // which retired the record the instant the user finished their
+            // priority review and showed "Expired <today>" in history.
+            $set: {
+              priority: 'Standard',
+              resolvedAt: new Date(),
+              resolvedReason: 'intake-complete',
+              expiresAt: expiryFromCreatedAt(assessmentDoc.createdAt),
+            },
           });
           priorityLifted = true;
           const UserNotification = require('../models/UserNotification');
@@ -569,6 +577,16 @@ router.post('/reset', protect, async (req, res) => {
       return res.status(400).json({ message: 'Invalid assessment.' });
     }
 
+    // Ownership check: the referenced assessment must belong to the caller.
+    // Without it, any authenticated user could bind their dashboard metrics
+    // to another account's assessment id (broken object-level authorization).
+    const owned = await Assessment.findOne({ _id: assessmentId, user: req.user._id })
+      .select('_id')
+      .lean();
+    if (!owned) {
+      return res.status(404).json({ message: 'Assessment not found.' });
+    }
+
     // Deactivate all previous metrics
     await DashboardMetrics.updateMany(
       { user: req.user._id, isActive: true },
@@ -654,11 +672,19 @@ router.get('/calendar/:year/:month', protect, async (req, res) => {
   try {
     const { year, month } = req.params;
     
-    // Validate year and month
-    const yearNum = parseInt(year);
-    const monthNum = parseInt(month);
-    
-    if (isNaN(yearNum) || isNaN(monthNum) || monthNum < 1 || monthNum > 12) {
+    // Validate year and month.
+    // The year is also clamped to a sane window: an unbounded value builds an
+    // Invalid Date whose toISOString() throws, turning a crafted URL into a
+    // 500 instead of an empty result.
+    const yearNum = parseInt(year, 10);
+    const monthNum = parseInt(month, 10);
+    const currentYear = new Date().getFullYear();
+
+    if (
+      isNaN(yearNum) || isNaN(monthNum) ||
+      monthNum < 1 || monthNum > 12 ||
+      yearNum < 2000 || yearNum > currentYear + 1
+    ) {
       return res.status(400).json({ message: 'Invalid year or month.' });
     }
 

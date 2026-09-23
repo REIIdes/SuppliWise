@@ -1,10 +1,15 @@
 const express = require('express');
 const router = express.Router();
+const { protect } = require('../middleware/auth');
 
 // @route   POST /api/polish
 // @desc    Polish a free-text health description using OpenRouter AI (DeepSeek V4 Flash)
-// @access  Public
-router.post('/', async (req, res) => {
+// @access  Private — authenticated callers only. This endpoint spends real
+//          OpenRouter quota on every request; leaving it anonymous made it a
+//          free AI proxy for anyone who found the route (the ip-based
+//          aiLimiter alone only slows an attacker down). Verified there is no
+//          unauthenticated caller anywhere in the frontend before adding it.
+router.post('/', protect, async (req, res) => {
   try {
     const { text } = req.body;
 

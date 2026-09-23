@@ -362,21 +362,31 @@ const AssessmentManagement = ({ users: propUsers = [] }) => {
                       <p className="am-empty">No assessments found for this user.</p>
                     ) : (
                       assessments.map((assessment) => {
-                        // Real expiry — createdAt + 5 years, or assessment.expiresAt
-                        const expiryDate = assessment.expiresAt
-                          ? new Date(assessment.expiresAt)
-                          : (() => { const d = new Date(assessment.createdAt); d.setFullYear(d.getFullYear() + 5); return d; })();
+                        const isPriority = assessment.priority === 'Priority';
+                        // Real expiry — assessment.expiresAt, else the fallback
+                        // createdAt + 5 calendar years (same advance the server
+                        // writes). Priority assessments never expire while
+                        // flagged, so they carry no expiry at all.
+                        const expiryDate = isPriority
+                          ? null
+                          : assessment.expiresAt
+                            ? new Date(assessment.expiresAt)
+                            : (() => { const d = new Date(assessment.createdAt); d.setFullYear(d.getFullYear() + 5); return d; })();
+                        const isExpiredRecord = !isPriority
+                          && !!expiryDate
+                          && Number.isFinite(expiryDate.getTime())
+                          && expiryDate.getTime() <= Date.now();
 
                         return (
                           <div key={assessment._id} className="am-card">
                             {/* Card header */}
                             <div className="am-card__header">
-                              {assessment.priority !== 'Priority' && assessment.expiresAt && new Date(assessment.expiresAt).getTime() <= Date.now() ? (
+                              {isExpiredRecord ? (
                                 <span className="am-pill am-pill--expired" title="Expired — record kept for reference">EXPIRED</span>
                               ) : (
                                 <span className="am-pill am-pill--active">ACTIVE</span>
                               )}
-                              {assessment.priority === 'Priority' && (
+                              {isPriority && (
                                 <span
                                   className="am-pill am-pill--priority"
                                   title={(assessment.flagReasons || []).join('; ') || 'Flagged as priority'}
@@ -388,9 +398,7 @@ const AssessmentManagement = ({ users: propUsers = [] }) => {
                                 {new Date(assessment.createdAt).toLocaleString()}
                               </span>
                             </div>
-                            {assessment.priority === 'Priority' &&
-                              Array.isArray(assessment.flagReasons) &&
-                              assessment.flagReasons.length > 0 && (
+                            {isPriority && Array.isArray(assessment.flagReasons) && assessment.flagReasons.length > 0 && (
                               <p className="am-card__flag-reasons">
                                 Flagged: {assessment.flagReasons.join('; ')}
                               </p>
@@ -427,7 +435,13 @@ const AssessmentManagement = ({ users: propUsers = [] }) => {
                             {/* Footer */}
                             <div className="am-card__footer">
                               <span className="am-card__expiry">
-                                Expires {expiryDate.toLocaleString()}
+                                {isPriority
+                                  ? 'No expiry — resolves on completion'
+                                  : isExpiredRecord
+                                    ? `Expired ${expiryDate.toLocaleString()}`
+                                    : expiryDate
+                                      ? `Expires ${expiryDate.toLocaleString()}`
+                                      : ''}
                               </span>
                               <div className="am-actions">
                                 <button className="am-btn am-btn--grey"   onClick={() => handleViewAssessment(assessment)}>View</button>

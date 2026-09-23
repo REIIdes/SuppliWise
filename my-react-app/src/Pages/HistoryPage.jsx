@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import ReadOnlyAssessment from '../Components/ReadOnlyAssessment/ReadOnlyAssessment';
-import { getHistory, deleteAssessment } from '../api';
+import { getHistory, deleteAssessment, checkFeature, getToken } from '../api';
 import { exportResultsToPDF } from '../utils/exportPDF';
-import { hasPlanAccess, getStoredPlan, FEATURE_TIERS } from '../utils/plan';
+import { PLAN_LABELS, historyLimitForStoredPlan } from '../utils/plan';
+import { safeUrl } from '../utils/safeUrl';
+import { useSubscription, SUBSCRIPTION_EVENT } from '../hooks/useSubscription';
 import UpgradeModal from '../Components/UpgradeModal/UpgradeModal';
 import './HistoryPage.css';
 
@@ -251,13 +253,28 @@ function HistoryPage() {
   const [showAllSupplements, setShowAllSupplements] = useState({});
   const [upgradeInfo, setUpgradeInfo] = useState(null);
   const [historyMeta, setHistoryMeta] = useState({ planLimit: null, pagination: null, currentPlan: null });
+  // Pagination: the server serves tier-capped pages (FREE 5 / DELUXE 10 /
+  // PREMIUM+ 20) and gates page 2+ behind the `historyFull` entitlement —
+  // so the "5-Year Record History" feature IS paging deeper, and without
+  // these controls it could never be exercised at all.
+  const [page, setPage] = useState(1);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // The limit the SERVER actually used for the page we last loaded. Every
+  // following page must request the same value: the server computes
+  // skip = (page - 1) * limit, so changing the requested size between pages
+  // would silently skip or repeat records.
+  const [pageLimit, setPageLimit] = useState(null);
+  // Reactive plan: gates re-render the instant the subscription changes.
+  // History list re-loads so tier-capped page sizes update without a refresh.
+  const livePlan = useSubscription();
 
   const getExpirationDate = (item) => {
     if (item.priority === 'Priority') return null; // flagged items never expire
     if (item.expiresAt) return new Date(item.expiresAt);
     const createdAt = new Date(item.createdAt);
     if (Number.isNaN(createdAt.getTime())) return null;
-    // Add exactly 5 years to the created date (maintaining same time)
+    // Fallback: exactly 5 calendar years from creation — the same advance the
+    // server's expiryFrom() writes, so both render the identical timestamp.
     const expirationDate = new Date(createdAt);
     expirationDate.setFullYear(expirationDate.getFullYear() + 5);
     return expirationDate;
@@ -277,28 +294,73 @@ function HistoryPage() {
     setShowAllSupplements(prev => ({ ...prev, [assessmentId]: !prev[assessmentId] }));
   };
 
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) { navigate('/login'); return; }
+  const showToast = (msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(''), 3000);
+  };
 
-    getHistory()
+  const loadHistory = (targetPage = 1, { append = false, limit = null } = {}) => {
+    // Appending must not blank the list behind a full-page spinner.
+    if (!append) setLoading(true);
+    setError('');
+    return getHistory(targetPage, limit || undefined)
       .then(data => {
         const normalized = data.assessments.map(item => ({
           ...item,
           aiResults: enrichAiResults(item.aiResults),
         }));
-        setHistory(normalized);
+        setHistory(prev => {
+          if (!append) return normalized;
+          // De-dupe: overlapping pages (plan change, an item deleted elsewhere)
+          // must never render the same assessment twice.
+          const seen = new Set(prev.map(row => row._id));
+          return [...prev, ...normalized.filter(row => !seen.has(row._id))];
+        });
         setServerTime(new Date(data.serverTime));
         setHistoryMeta({ planLimit: data.planLimit || null, pagination: data.pagination || null, currentPlan: data.currentPlan || null });
+        setPage(data.pagination?.page || targetPage);
+        if (data.pagination?.limit) setPageLimit(data.pagination.limit);
+        // NOTE: the response's `currentPlan` is a server-RESOLVED tier, not the
+        // stored subscriptionActive/Plan flags. Writing it into the account
+        // cache used to clobber the cached snapshot (entitlement map +
+        // subscriptionEnd) and left the profile's lock grid rendering stale
+        // state — the shared subscription store is the only writer now.
       })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (append) showToast(err.message || 'Could not load more history.');
+        else setError(err.message);
+      })
+      .finally(() => {
+        if (!append) setLoading(false);
+        setLoadingMore(false);
+      });
+  };
+
+  // PREMIUM+ (`historyFull`) can page deeper; lower tiers get the paywall.
+  const handleLoadMore = () => {
+    if (loadingMore) return;
+    setLoadingMore(true);
+    loadHistory(page + 1, { append: true, limit: pageLimit || undefined });
+  };
+
+  useEffect(() => {
+    const token = getToken();
+    if (!token) { navigate('/login'); return; }
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial load from the server is an external-system sync
+    loadHistory(1, { limit: historyLimitForStoredPlan() });
+    const onPlan = () => loadHistory(1, { limit: historyLimitForStoredPlan() });
+    window.addEventListener(SUBSCRIPTION_EVENT, onPlan);
+    return () => window.removeEventListener(SUBSCRIPTION_EVENT, onPlan);
   }, [navigate]);
 
-  const showToast = (msg) => {
-    setToast(msg);
-    setTimeout(() => setToast(''), 3000);
-  };
+  // A stale paywall modal clears itself the instant the plan is upgraded
+  // (SSE push, admin change, expiry) — no refresh or reopen needed.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing a stale paywall on plan change is an external-system sync
+    if (upgradeInfo && livePlan.canAccess('pdfExport')) setUpgradeInfo(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [livePlan.active, livePlan.plan, livePlan.rank, upgradeInfo]);
 
   const fmt = (dateStr) =>
     new Date(dateStr).toLocaleDateString('en-US', {
@@ -312,6 +374,10 @@ function HistoryPage() {
     try {
       await deleteAssessment(deleteTarget._id);
       setHistory(prev => prev.filter(h => h._id !== deleteTarget._id));
+      // Keep "Showing X of Y" honest after a removal.
+      setHistoryMeta(prev => (prev.pagination && Number.isFinite(prev.pagination.total)
+        ? { ...prev, pagination: { ...prev.pagination, total: Math.max(0, prev.pagination.total - 1) } }
+        : prev));
       setExpanded(null);
       showToast('Assessment deleted successfully.');
       setDeleteTarget(null);
@@ -429,7 +495,7 @@ function HistoryPage() {
           {history.map((item, i) => (
             <div key={item._id} className="history-card">
               {/* Card Header */}
-              <div className="history-card-header" onClick={() => setExpanded(expanded === i ? null : i)}>
+              <div className="history-card-header" onClick={() => setExpanded(expanded === item._id ? null : item._id)}>
                 <div className="history-card-header-left">
                   <div className="date-with-badge">
                     {i === 0 && !isExpired(item) && (
@@ -517,14 +583,24 @@ function HistoryPage() {
                   {item.aiResults && (
                     <button
                       className="btn-download-pdf"
-                      onClick={(e) => {
+                      onClick={async (e) => {
                         e.stopPropagation();
-                        if (!hasPlanAccess(FEATURE_TIERS.pdfExport)) {
-                          const stored = getStoredPlan();
-                          setUpgradeInfo({ requiresPlan: FEATURE_TIERS.pdfExport, currentPlan: stored.plan, feature: 'PDF Report Exports' });
+                        // Local gate first (instant UI), then the backend
+                        // re-verifies before the browser renders the report.
+                        if (!livePlan.canAccess('pdfExport')) {
+                          setUpgradeInfo({ requiresPlan: 'monthly', currentPlan: livePlan.plan, feature: 'PDF Report Export' });
                           return;
                         }
-                        exportResultsToPDF(item.aiResults, item);
+                        try {
+                          await checkFeature('pdfExport');
+                          exportResultsToPDF(item.aiResults, item);
+                        } catch (err) {
+                          if (err?.requiresPlan) {
+                            setUpgradeInfo({ requiresPlan: err.requiresPlan, currentPlan: err.currentPlan || livePlan.plan, feature: 'PDF Report Export' });
+                          } else {
+                            console.error('PDF export blocked:', err);
+                          }
+                        }
                       }}
                       title="Download PDF report"
                     >
@@ -548,12 +624,12 @@ function HistoryPage() {
                     </button>
                   )}
                   
-                  <span className="history-toggle">{expanded === i ? '▲' : '▼'}</span>
+                  <span className="history-toggle">{expanded === item._id ? '▲' : '▼'}</span>
                 </div>
               </div>
 
               {/* Expanded Content */}
-              {expanded === i && (
+              {expanded === item._id && (
                 <div className="history-card-body">
                   <div className="history-tabs">
                     <button className={`history-tab ${getTab(item._id) === 'assessment' ? 'active' : ''}`}
@@ -863,7 +939,7 @@ function HistoryPage() {
                           <p className="history-seeking-support-intro">{fixChars(item.aiResults.seekingSupport.intro)}</p>
                           <div className="history-seeking-support-resources">
                             {(item.aiResults.seekingSupport.resources || []).map((res, ri) => (
-                              <a key={ri} href={res.url} target="_blank" rel="noopener noreferrer" className="history-seeking-support-card">
+                              <a key={ri} href={safeUrl(res.url) || undefined} target="_blank" rel="noopener noreferrer" className="history-seeking-support-card">
                                 <span className="history-seeking-label">{fixChars(res.label)}</span>
                                 <span className="history-seeking-name">{fixChars(res.name)}</span>
                                 <p className="history-seeking-desc">{fixChars(res.description)}</p>
@@ -879,11 +955,31 @@ function HistoryPage() {
             </div>
           ))}
         </div>
-        {historyMeta.pagination?.hasMore && !hasPlanAccess(FEATURE_TIERS.historyFull) && (
+        {/* PREMIUM+ ("5-Year Record History"): keep paging through every record.
+            This control is the feature itself — without it page 2+ of the
+            server's gate was unreachable for every plan. */}
+        {historyMeta.pagination?.hasMore && livePlan.canAccess('historyFull') && (
+          <div className="history-load-more">
+            <button
+              type="button"
+              className="upgrade-btn upgrade-btn-primary"
+              onClick={handleLoadMore}
+              disabled={loadingMore}
+            >
+              {loadingMore ? 'Loading…' : 'Load older assessments'}
+            </button>
+            <p className="history-load-more__note">
+              Showing {history.length}
+              {Number.isFinite(historyMeta.pagination?.total) ? ` of ${historyMeta.pagination.total}` : ''} records
+              {pageLimit ? ` · ${pageLimit} per page` : ''}
+            </p>
+          </div>
+        )}
+        {historyMeta.pagination?.hasMore && !livePlan.canAccess('historyFull') && (
           <div className="plan-locked" style={{ marginTop: '24px' }}>
             <div className="plan-locked__icon">🔒</div>
             <h3 className="plan-locked__title">More history is locked</h3>
-            <p className="plan-locked__body">Full 5-year history requires <strong>Premium Package</strong>. Your plan allows {historyMeta.planLimit || 5} per page.</p>
+            <p className="plan-locked__body">Full 5-year history requires <strong>{PLAN_LABELS.annual}</strong>. Your plan allows {historyMeta.planLimit || 5} per page.</p>
             <p className="plan-locked__note">Contact an administrator to upgrade.</p>
             <div className="plan-locked__actions">
               <button type="button" className="upgrade-btn upgrade-btn-primary" onClick={() => navigate('/profile')}>View my plan</button>

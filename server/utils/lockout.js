@@ -185,9 +185,18 @@ function clearAccountState(rawKey) {
 }
 
 function clientIp(req) {
-  const forwarded = req.headers['x-forwarded-for'];
-  const first = Array.isArray(forwarded) ? forwarded[0] : String(forwarded || '').split(',')[0];
-  return (first || req.ip || '').trim();
+  // `req.ip` honours Express's `trust proxy` setting, which is the ONLY
+  // trustworthy source for a client address:
+  //   • trust proxy OFF (the default, and the value used unless
+  //     TRUST_PROXY=true) → req.ip is the real socket peer, so a
+  //     client-supplied X-Forwarded-For header is ignored entirely. That
+  //     header is attacker-controlled: honouring it let anyone rotate their
+  //     claimed "IP" and walk straight out of an IP lockout.
+  //   • trust proxy ON (explicitly configured for a proxy we control)
+  //     → Express itself picks the correct hop from the forwarded chain.
+  // Either way the value is derived from server state, never from raw
+  // attacker input.
+  return String(req.ip || '').trim();
 }
 
 const ipKey = (req) => `ip:${clientIp(req)}`;

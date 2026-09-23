@@ -12,9 +12,15 @@ ADMIN_PASSWORD_HASH=$2b$10$replace_with_a_bcrypt_hash
 ADMIN_TOTP_SECRET=replace_with_a_base32_authenticator_secret
 ```
 
-This workspace is already configured locally with the example alias `AdminDevs` and password `Devs101`. Change that password before using the app outside local development. The generated TOTP secret is in `server/.env`; add it to an authenticator app before signing in.
+Admin passwords are **never** written down in documents. The workspace is
+already configured locally — read the alias, the bcrypt/argon2id hash and the
+TOTP secret from `server/.env` (gitignored) or from your password manager.
+Add each TOTP secret to the appropriate authenticator app before signing in.
 
-Additional local aliases are configured: `AdminJoma` / `Joma123`, `AdminPoli` / `Poli123`, `AdminJohn` / `John123`, `AdminShMa` / `ShMa123`, and `AdminRaNe` / `RaNe123`. Each account has its own TOTP secret in `ADMIN_ACCOUNTS` (see `AdminNames.md`); add each secret to the appropriate authenticator app.
+> **Incident note:** this file previously listed six admin passwords in
+> plaintext and was committed to a public repository. Those passwords must be
+> considered compromised — change every one of them, and rotate the matching
+> TOTP secrets. Store new values only in `server/.env` and a password manager.
 
 Generate a password hash from the `server` directory:
 

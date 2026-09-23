@@ -34,7 +34,8 @@ function HomePage() {
           </button>
           <button
             className="btn-secondary"
-            onClick={() => document.getElementById('how-it-works').scrollIntoView({ behavior: 'smooth' })}
+            type="button"
+            onClick={() => document.getElementById('how-it-works')?.scrollIntoView({ behavior: 'smooth' })}
           >
             Learn More
           </button>

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import Toast from '../Components/Toast/Toast';
-import { getHistory, addSupplementToPlan, removeSupplementFromPlan, getMyPlan } from '../api';
+import { getHistory, addSupplementToPlan, removeSupplementFromPlan, getMyPlan, getToken } from '../api';
 import './RecommendationsPage.css';
 
 function RecommendationsPage() {
@@ -54,7 +54,7 @@ function RecommendationsPage() {
 
   // Initial parallel load on mount + auth guard
   useEffect(() => {
-    const token = localStorage.getItem('token');
+    const token = getToken();
     if (!token) {
       navigate('/login');
       return;

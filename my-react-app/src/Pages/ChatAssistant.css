@@ -31,7 +31,14 @@
   bottom: 90px;
   right: 28px;
   width: 380px;
-  max-height: 580px;
+  /* Never taller than the room above the FAB. With a flat 580px the panel
+     needed 670px of viewport (580 + 90 gap); any window shorter than that
+     pushed the top of the panel — header first — off the top of the screen,
+     so the chat appeared to start mid-way down at the disclaimer banner. */
+  max-height: min(580px, calc(100vh - 110px));
+  /* Belt-and-braces: the panel can never be wider than the viewport, so it
+     can never be the thing that opens a horizontal scrollbar. */
+  max-width: calc(100vw - 20px);
   background: #fff;
   border-radius: 18px;
   box-shadow: 0 12px 48px rgba(0, 0, 0, 0.16), 0 2px 8px rgba(0, 0, 0, 0.08);
@@ -224,9 +231,27 @@
 }
 
 /* ── Messages ── */
+/* The scroll area gets its own positioned box so the "jump to newest" button
+   can be anchored to it instead of to a magic offset from the window base. */
+.chat-messages-region {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
 .chat-messages {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
   overflow-y: auto;
+  /* Setting overflow-y:auto leaves overflow-x computed as auto too — one long
+     URL or unbroken word in a message opened a horizontal scrollbar right
+     across the chat. Text wraps (see overflow-wrap on .chat-bubble) and
+     tables scroll in their own wrapper, so nothing needs to scroll here. */
+  overflow-x: hidden;
+  /* Keep wheel-scrolling inside the chat from dragging the page behind it. */
+  overscroll-behavior: contain;
   padding: 16px 14px;
   display: flex;
   flex-direction: column;
@@ -234,7 +259,7 @@
   scrollbar-width: thin;
   scrollbar-color: #e5e7eb transparent;
 }
-.chat-messages::-webkit-scrollbar { width: 4px; }
+.chat-messages::-webkit-scrollbar { width: 4px; height: 0; }
 .chat-messages::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 4px; }
 
 /* ── Bubbles ── */
@@ -244,6 +269,9 @@
   border-radius: 14px;
   font-size: 13.5px;
   line-height: 1.6;
+  /* Inherited by every markdown child: long links/words break instead of
+     forcing the transcript wider than the panel. */
+  overflow-wrap: anywhere;
 }
 .chat-bubble.user {
   background: linear-gradient(135deg, #22c55e, #16a34a);
@@ -375,6 +403,9 @@
 }
 .chat-input {
   flex: 1;
+  /* A flex item's automatic minimum is its intrinsic width, which kept the
+     composer (plus send button) from ever shrinking below ~250px. */
+  min-width: 0;
   padding: 10px 14px;
   border: 1.5px solid #e5e7eb;
   border-radius: 10px;
@@ -451,7 +482,10 @@
 /* ── Scroll to Bottom Button ── */
 .chat-scroll-to-bottom {
   position: absolute;
-  bottom: 195px;
+  /* Anchored to .chat-messages-region, which ends directly above the prompt
+     chips. Previously this was a hardcoded 195px from the window base, so it
+     drifted over the composer/messages whenever the chip rows wrapped. */
+  bottom: 12px;
   left: 50%;
   transform: translateX(-50%);
   background: linear-gradient(135deg, #22c55e, #16a34a);
@@ -498,7 +532,7 @@
     left: 10px;
     width: auto;
     bottom: 80px;
-    max-height: 72vh;
+    max-height: min(72vh, calc(100vh - 100px));
     border-radius: 14px;
   }
   .chat-fab {

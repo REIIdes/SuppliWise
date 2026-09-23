@@ -7,8 +7,9 @@ const UserNotification = require('../models/UserNotification');
 const AdminEvent = require('../models/AdminEvent');
 const { protect } = require('../middleware/auth');
 const { sanitizeTextField, sanitizeShortField, scrubKeys } = require('../utils/sanitize');
-const { historyLimitFor, tierOf } = require('../utils/plan');
+const { historyLimitFor, tierOf, can, PLAN_LABELS, resolveSubscription } = require('../utils/plan');
 const { analyzeSeverity } = require('../utils/severity');
+const { expiryDateFromNow, expiryFromCreatedAt } = require('../utils/assessments');
 
 // Flag an assessment as Priority + notify the user and admins (best-effort,
 // never fails the surrounding request). Idempotent per assessment.
@@ -121,19 +122,20 @@ router.post('/', protect, async (req, res) => {
       fitnessFocus: req.body.fitnessFocus,
       proteinIntake: req.body.proteinIntake,
       recreationalDrugTypes: recreationalDrugTypes || '',
-      expiresAt: new Date(Date.now() + 5 * 365.25 * 24 * 60 * 60 * 1000),
+      // 5 calendar years from creation — same helper the rest of the retention
+      // logic uses, so the stored date and the "Expires …" badge always match.
+      expiresAt: expiryDateFromNow(),
     });
 
     console.log('Assessment saved to DB, id:', assessment._id);
 
     // Auto-flag severe cases (Priority + user/admin notifications, best-effort).
-    // Priority Health Reviews is a Premium Package+ perk: lower tiers save
+    // Priority Assessment is a PREMIUM+ entitlement: lower tiers save
     // as Standard with no flag, no notifications, and no new-assessment block.
     // (A manual admin Priority flag still applies to any tier.)
-    const { tierRank, PLAN_RANK } = require('../utils/plan');
     const severity = analyzeSeverity(req.body);
     let severityFlag = { flagged: false, reasons: [] };
-    if (severity.flagged && tierRank(req.user) >= PLAN_RANK.annual) {
+    if (severity.flagged && can(req.user, 'priorityAssessment')) {
       severityFlag = severity;
       await flagSevereAssessment(assessment, severity.reasons, req.user.email);
       // Reflect the flag in this response (the created doc predates the update)
@@ -196,13 +198,29 @@ router.get('/priority-status', protect, async (req, res) => {
 // @route   GET /api/assessment/history
 // @desc    Get all assessments for the current user (newest first, paginated)
 // @access  Private (page size capped by subscription tier:
-//          free = 5, monthly = 10, annual/ultimate = 20 — full 5-year
-//          record history is an annual+ perk)
+//          FREE = 5, DELUXE = 10, PREMIUM/ULTIMATE = 20 — paging beyond the
+//          first page is a PREMIUM+ entitlement: "5-Year Record History")
 router.get('/history', protect, async (req, res) => {
   try {
     const planLimit = historyLimitFor(req.user);
-    const page  = Math.max(1, parseInt(req.query.page)  || 1);
-    const requested = Math.max(1, parseInt(req.query.limit) || 10);
+    // Page is clamped to a finite window: an unbounded value produced a
+    // skip far beyond Number.MAX_SAFE_INTEGER (imprecise, and a cheap way to
+    // make the database grind). Anything past this window is simply the last
+    // reachable page — pagination metadata still tells the client the truth.
+    const page = Math.min(1000000, Math.max(1, parseInt(req.query.page, 10) || 1));
+    // 5-Year Record History (PREMIUM+): lower tiers get one tier-capped page
+    // and a structured 403 for anything deeper — enforced here, not in the UI.
+    if (page > 1 && !can(req.user, 'historyFull')) {
+      return res.status(403).json({
+        message: `Full record history requires the ${PLAN_LABELS.annual} plan. Please upgrade to continue.`,
+        feature: 'historyFull',
+        requiresPlan: 'annual',
+        currentPlan: tierOf(req.user),
+        subscriptionStatus: resolveSubscription(req.user).status,
+        allowed: false,
+      });
+    }
+    const requested = Math.max(1, parseInt(req.query.limit, 10) || 10);
     const limit = Math.min(requested, planLimit, 20);
     const skip  = (page - 1) * limit;
     // Lightweight mode for the recommendations page — only the fields it reads,
@@ -300,6 +318,10 @@ router.get('/results/:assessmentId', protect, async (req, res) => {
 // @access  Private
 const MAX_AI_RESULTS_BYTES = 500 * 1024; // 500 KB — prevents DB bloat from oversized payloads
 router.patch('/:id/results', protect, async (req, res) => {
+  // Malformed ids reach Mongoose as a CastError and surfaced as a 500.
+  if (!mongoose.isValidObjectId(req.params.id)) {
+    return res.status(400).json({ message: 'Invalid assessment.' });
+  }
   try {
     if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
       return res.status(400).json({ message: 'Invalid results payload.' });
@@ -323,10 +345,9 @@ router.patch('/:id/results', protect, async (req, res) => {
     if (!assessment) return res.status(404).json({ message: 'Assessment not found.' });
     // Re-run severe-case detection now that AI results exist (warnings scan).
     // Only flags when the assessment isn't already Priority (idempotent) and
-    // the owner holds Premium Package+ (Priority reviews are tier-gated).
+    // the owner holds PREMIUM+ (Priority Assessment is tier-gated).
     let severityFlag = { flagged: false, reasons: [] };
-    const { tierRank: resultsTierRank, PLAN_RANK: RESULTS_PLAN_RANK } = require('../utils/plan');
-    if (assessment.priority !== 'Priority' && resultsTierRank(req.user) >= RESULTS_PLAN_RANK.annual) {
+    if (assessment.priority !== 'Priority' && can(req.user, 'priorityAssessment')) {
       const severity = analyzeSeverity(
         assessment.toObject ? assessment.toObject() : assessment,
         req.body
@@ -354,12 +375,19 @@ router.patch('/:id/priority', protect, async (req, res) => {
   if (!['Priority', 'Standard'].includes(priority)) {
     return res.status(400).json({ message: 'Priority must be "Priority" or "Standard".' });
   }
+  // Malformed ids reach Mongoose as a CastError and surfaced as a 500.
+  if (!mongoose.isValidObjectId(req.params.id)) {
+    return res.status(400).json({ message: 'Invalid assessment.' });
+  }
   try {
-    const { expiryDateFromNow } = require('../utils/assessments');
-    // Priority suspends expiration; resolving restores a fresh 5-year window.
+    const existing = await Assessment.findById(req.params.id).select('createdAt').lean();
+    if (!existing) return res.status(404).json({ message: 'Assessment not found.' });
+    // Priority suspends expiration; resolving restores the standard 5-year
+    // window counted from CREATION — never "5 years from now", which used to
+    // push an old record's expiry far into the future.
     const update = priority === 'Priority'
       ? { priority, flaggedAt: new Date(), expiresAt: null, resolvedAt: null, resolvedReason: '' }
-      : { priority, expiresAt: expiryDateFromNow(), resolvedAt: new Date(), resolvedReason: 'admin-resolved' };
+      : { priority, expiresAt: expiryFromCreatedAt(existing.createdAt), resolvedAt: new Date(), resolvedReason: 'admin-resolved' };
     const assessment = await Assessment.findByIdAndUpdate(
       req.params.id,
       update,
@@ -377,6 +405,10 @@ router.patch('/:id/priority', protect, async (req, res) => {
 // @desc    Delete an assessment — owner or admin
 // @access  Private
 router.delete('/:id', protect, async (req, res) => {
+  // Malformed ids reach Mongoose as a CastError and surfaced as a 500.
+  if (!mongoose.isValidObjectId(req.params.id)) {
+    return res.status(400).json({ message: 'Invalid assessment.' });
+  }
   try {
     // Admins can delete any assessment; regular users can only delete their own
     const filter = req.user.role === 'admin'

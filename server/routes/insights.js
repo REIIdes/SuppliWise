@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
-const { requirePlan } = require('../utils/plan');
+const { requireFeature } = require('../utils/entitlements');
 const Assessment = require('../models/Assessment');
 const IntakeRecord = require('../models/IntakeRecord');
 const DashboardMetrics = require('../models/DashboardMetrics');
@@ -22,10 +22,10 @@ const formatDate = (date) => {
 
 // @route   GET /api/insights
 // @desc    Get AI insights and tracking data for the active assessment
-// @access  Private (Deluxe Package and above)
-// Insights & Analytics is a paid perk — free-tier users are stopped here
-// with a 403 + requiresPlan payload so the client can show an upgrade prompt.
-router.get('/', protect, requirePlan('monthly'), async (req, res) => {
+// @access  Private (DELUXE plan and above)
+// Insights & Analytics is a Deluxe+ entitlement — free-tier users are stopped
+// here with a 403 + requiresPlan payload so the client can show an upgrade prompt.
+router.get('/', protect, requireFeature('insights'), async (req, res) => {
   try {
     // Latest assessment still in force (expired ones are retired from insights)
     const latestAssessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })

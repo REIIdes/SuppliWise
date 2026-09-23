@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
-import { saveAssessment, getRecommendations, saveAssessmentResults, getPriorityStatus } from '../api';
+import { saveAssessment, getRecommendations, saveAssessmentResults, getPriorityStatus, getToken, getStoredUser } from '../api';
+import { useSubscription, SUBSCRIPTION_EVENT } from '../hooks/useSubscription';
 import './AssessmentPage.css';
 
 const TOTAL_STEPS = 4;
@@ -185,14 +186,14 @@ function Step1({ data, onChange, errors }) {
   const showActivityLevel = age === 0 || age >= 13;
   const [openActivity, setOpenActivity] = useState(null);
   const [openTooltip, setOpenTooltip] = useState(null);
-  const [isLoggedIn] = useState(() => !!localStorage.getItem('user'));
+  const [isLoggedIn] = useState(() => !!getStoredUser());
 
   // Calculate age and load gender from user's data stored in localStorage (only for logged-in users)
   useEffect(() => {
-    const userStr = localStorage.getItem('user');
-    if (!userStr) return;
+    const cachedUser = getStoredUser();
+    if (!cachedUser) return;
     try {
-      const user = JSON.parse(userStr);
+      const user = cachedUser;
         
         // Auto-calculate age from dateOfBirth
         if (user.dateOfBirth) {
@@ -2101,20 +2102,38 @@ function AssessmentPage() {
   const [isReadOnly] = useState(routeReadOnly);
 
   // Priority gate — a new assessment is blocked while a Priority review is open
-  // (read-only history views are never blocked)
+  // (read-only history views are never blocked). Re-checks instantly when the
+  // subscription changes: Premium upgrade lifts the "no flag" state for the
+  // next save; downgrade/expiry re-applies Standard-only immediately.
   const [priorityGate, setPriorityGate] = useState({ checking: !routeReadOnly, blocked: false, items: [] });
-  useEffect(() => {
-    if (routeReadOnly) return;
-    let cancelled = false;
-    getPriorityStatus()
+  const { refresh: refreshPlan } = useSubscription();
+  const checkPriorityGate = () => {
+    if (routeReadOnly) return Promise.resolve();
+    setPriorityGate((prev) => ({ ...prev, checking: true }));
+    return getPriorityStatus()
       .then(data => {
-        if (!cancelled) setPriorityGate({ checking: false, blocked: !!data.blocked, items: data.assessments || [] });
+        if (!cancelledRef.current) setPriorityGate({ checking: false, blocked: !!data.blocked, items: data.assessments || [] });
       })
       .catch(() => {
         // Fail open on network error — the server re-checks on submit (403)
-        if (!cancelled) setPriorityGate({ checking: false, blocked: false, items: [] });
+        if (!cancelledRef.current) setPriorityGate({ checking: false, blocked: false, items: [] });
       });
-    return () => { cancelled = true; };
+  };
+  const cancelledRef = useRef(false);
+  useEffect(() => {
+    if (routeReadOnly) return undefined;
+    cancelledRef.current = false;
+    // Initial gate probe: the synchronous "checking" flip is intentional
+    // (it raises the spinner until the promise settles); all later updates
+    // are event-driven through onPlan.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional initial checking state
+    checkPriorityGate();
+    const onPlan = () => { refreshPlan(); checkPriorityGate(); };
+    window.addEventListener(SUBSCRIPTION_EVENT, onPlan);
+    return () => {
+      cancelledRef.current = true;
+      window.removeEventListener(SUBSCRIPTION_EVENT, onPlan);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -2125,10 +2144,10 @@ function AssessmentPage() {
       sessionStorage.removeItem(SESSION_KEY);
       
       // Start fresh but preserve user profile data (age, gender) if available
-      const userRaw = localStorage.getItem('user');
-      if (userRaw) {
+      const cachedProfile = getStoredUser();
+      if (cachedProfile) {
         try {
-          const user = JSON.parse(userRaw);
+          const user = cachedProfile;
           // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time draft reset with profile preserve
           setFormData({
             ...EMPTY_FORM,
@@ -2300,7 +2319,7 @@ function AssessmentPage() {
       return;
     }
 
-    const token = localStorage.getItem('token');
+    const token = getToken();
     if (!token) {
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(formData));
       navigate('/login', { state: { fromAssessment: true } });
@@ -2336,11 +2355,13 @@ function AssessmentPage() {
     try {
       let assessmentId = null;
       let garbageFields = [];
+      let lastSeverityFlag = { flagged: false, reasons: [] };
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
           const saveResult = await saveAssessment(payload);
           assessmentId = saveResult?.assessment?._id;
           garbageFields = saveResult?.garbageFields || [];
+          if (saveResult?.severityFlag) lastSeverityFlag = saveResult.severityFlag;
           if (assessmentId) break;
         } catch (saveErr) {
           console.error(`Assessment save attempt ${attempt} failed:`, saveErr.message);
@@ -2362,6 +2383,11 @@ function AssessmentPage() {
       }
 
       sessionStorage.removeItem(SESSION_KEY);
+      // Premium+ severe saves flag instantly; Free-tier severe saves stay
+      // Standard — the toast below reflects the live plan, no refresh needed.
+      if (lastSeverityFlag?.flagged) {
+        sessionStorage.setItem('suppliwise_last_priority_flag', JSON.stringify({ at: Date.now(), reasons: lastSeverityFlag.reasons || [] }));
+      }
       navigate('/results', { state: { recommendations, assessment: payload, garbageFields } });
     } catch (err) {
       const msg = err.message || '';

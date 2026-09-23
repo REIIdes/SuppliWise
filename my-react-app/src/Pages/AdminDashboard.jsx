@@ -1,6 +1,7 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BASE_URL, parseJSON } from '../api';
+import { PLAN_LABELS } from '../utils/plan';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import './AdminDashboard.css';
@@ -13,54 +14,109 @@ const ADMIN_IDLE_LIMIT_SECONDS = 3 * 60 + 30;
 const ADMIN_WARNING_SECONDS = 30;
 const ADMIN_REFRESH_INTERVAL_MS = 10 * 1000;
 
+// ── Subscription status (mirrors server resolveSubscription) ──────────────
+// The admin grid used to read the RAW subscriptionActive flag, so a user whose
+// subscriptionExpiresAt had already passed still showed "Subscribed ✓" while
+// the API was quietly serving them the FREE tier. Every lock that followed
+// then looked like a bug. Resolve it at render time exactly like the backend.
+function isSubscriptionLive(user) {
+  if (!user || user.subscriptionActive !== true) return false;
+  if (!user.subscriptionExpiresAt) return true; // null = open-ended
+  const end = new Date(user.subscriptionExpiresAt).getTime();
+  return !Number.isFinite(end) || end > Date.now();
+}
+
+function subscriptionExpiryLabel(user) {
+  if (!user?.subscriptionExpiresAt) return null;
+  const end = new Date(user.subscriptionExpiresAt);
+  if (!Number.isFinite(end.getTime())) return null;
+  const stamp = end.toLocaleString('en-US', {
+    year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+  return end.getTime() <= Date.now() ? `Expired ${stamp}` : `Expires ${stamp}`;
+}
+
 // ── Idle countdown badge ───────────────────────────────────────────────
 // Owns its 1 s ticker so the rest of the dashboard does NOT re-render every
 // second (previously the whole page re-rendered 210× per idle session).
 // Memoized: only this badge updates as the countdown ticks.
-import SessionExpiryModal from '../components/SessionExpiryModal/SessionExpiryModal';
+import SessionExpiryModal from '../Components/SessionExpiryModal/SessionExpiryModal';
 
-const AdminIdleStatus = memo(function AdminIdleStatus({ deadlineRef, onExpire, onActivity }) {
+const AdminIdleStatus = memo(function AdminIdleStatus({ deadlineRef, onExpire, onStay }) {
   const [remaining, setRemaining] = useState(ADMIN_IDLE_LIMIT_SECONDS);
   const [showModal, setShowModal] = useState(false);
+  const [expired, setExpired] = useState(false);
+  const [notice, setNotice] = useState('');
   const onExpireRef = useRef(null);
+  const onStayRef = useRef(null);
   useEffect(() => {
     onExpireRef.current = onExpire;
   }, [onExpire]);
+  useEffect(() => {
+    onStayRef.current = onStay;
+  }, [onStay]);
+
+  // Keep the modal alive after a successful refresh (new deadline pushed out)
+  // instead of flashing it away — the admin sees the countdown reset.
+  const prevRemainingRef = useRef(remaining);
+  useEffect(() => {
+    if (showModal && !expired && remaining > prevRemainingRef.current + 5) {
+      setShowModal(true);
+    }
+    prevRemainingRef.current = remaining;
+  }, [remaining, showModal, expired]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
       const left = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
       setRemaining(left);
 
-      if (left <= ADMIN_WARNING_SECONDS && !showModal) {
+      if (left <= ADMIN_WARNING_SECONDS && left > 0 && !expired) {
         setShowModal(true);
       }
 
-      if (left === 0) {
+      if (left === 0 && !expired) {
+        setExpired(true);
+        setShowModal(true);
+        setNotice('Your admin session has expired due to inactivity.');
         window.clearInterval(timer);
-        onExpireRef.current();
+        // Give the admin a beat to read the notice before redirecting.
+        window.setTimeout(() => { onExpireRef.current?.(); }, 2500);
       }
     }, 500);
     return () => window.clearInterval(timer);
-  }, [deadlineRef, showModal]);
+  }, [deadlineRef, expired]);
 
-  const handleStayLoggedIn = () => {
-    setShowModal(false);
-    onActivity();
+  const handleStayLoggedIn = async () => {
+    setNotice('');
+    try {
+      await onStayRef.current?.();
+      setExpired(false);
+      setRemaining(Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000)));
+      // Countdown visibly resets; keep the modal briefly so the
+      // "session extended" state is noticeable, not magic.
+      setNotice('Session extended — you are still signed in.');
+      window.setTimeout(() => { setShowModal(false); setNotice(''); }, 1800);
+    } catch {
+      setExpired(true);
+      setNotice('Could not refresh the session. Signing out…');
+      window.setTimeout(() => { onExpireRef.current?.(); }, 1500);
+    }
   };
 
   const handleLogout = () => {
-    onExpireRef.current();
+    onExpireRef.current?.();
   };
 
+  if (!showModal) return null;
   return (
-    showModal && (
-      <SessionExpiryModal
-        remainingTime={remaining}
-        onStayLoggedIn={handleStayLoggedIn}
-        onLogout={handleLogout}
-      />
-    )
+    <SessionExpiryModal
+      remainingTime={remaining}
+      expired={expired}
+      notice={notice}
+      onStayLoggedIn={handleStayLoggedIn}
+      onLogout={handleLogout}
+    />
   );
 });
 
@@ -149,6 +205,114 @@ function AdminDashboard() {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
+  const notifBellRef = useRef(null);
+  const notifPanelRef = useRef(null);
+  const notifCloseTimerRef = useRef(0);
+  const notifHoverSuppressedRef = useRef(false);
+
+  // Grace period between the 10px bell→panel gap: leaving for the gap must
+  // not slam the panel shut before the pointer reaches it.
+  const cancelNotifClose = () => {
+    if (notifCloseTimerRef.current) {
+      window.clearTimeout(notifCloseTimerRef.current);
+      notifCloseTimerRef.current = 0;
+    }
+  };
+
+  const scheduleNotifClose = () => {
+    cancelNotifClose();
+    notifCloseTimerRef.current = window.setTimeout(() => {
+      notifCloseTimerRef.current = 0;
+      setShowNotifications(false);
+    }, 200);
+  };
+
+  const handleNotifHoverEnter = (event) => {
+    // Touch has no hover — it keeps the click-to-toggle path.
+    if (event.pointerType === 'touch') return;
+    if (notifHoverSuppressedRef.current) return;
+    cancelNotifClose();
+    setShowNotifications(true);
+  };
+
+  const handleNotifHoverLeave = (event) => {
+    if (event.pointerType === 'touch') return;
+    notifHoverSuppressedRef.current = false;
+    scheduleNotifClose();
+  };
+
+  const toggleNotifications = () => {
+    cancelNotifClose();
+    if (showNotifications) {
+      // Latch hover-reopen off only while the pointer is genuinely over
+      // the bell (a keyboard toggle elsewhere must not disable hover).
+      notifHoverSuppressedRef.current = !!notifBellRef.current?.matches(':hover');
+      setShowNotifications(false);
+    } else {
+      notifHoverSuppressedRef.current = false;
+      setShowNotifications(true);
+    }
+  };
+
+  // Anchor the panel to the bell in viewport coordinates (position: fixed),
+  // re-measuring on scroll (capture phase) and resize so it stays pinned
+  // beneath the bell while the page scrolls. useLayoutEffect runs before
+  // paint: the panel never flashes at a fallback position first.
+  useLayoutEffect(() => {
+    if (!showNotifications) return undefined;
+    const place = () => {
+      const anchor = notifBellRef.current;
+      const panel = notifPanelRef.current;
+      if (!anchor || !panel) return;
+      const rect = anchor.getBoundingClientRect();
+      const width = Math.min(360, window.innerWidth - 36);
+      const left = Math.min(
+        Math.max(rect.right - width, 18),
+        Math.max(18, window.innerWidth - width - 18)
+      );
+      const top = rect.bottom + 10;
+      panel.style.left = `${Math.round(left)}px`;
+      panel.style.top = `${Math.round(top)}px`;
+      panel.style.right = 'auto';
+      panel.style.width = `${Math.round(width)}px`;
+      const arrowX = Math.min(
+        Math.max(rect.left + rect.width / 2 - left, 16),
+        width - 16
+      );
+      panel.style.setProperty('--arrow-x', `${Math.round(arrowX)}px`);
+    };
+    place();
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => {
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+    };
+  }, [showNotifications]);
+
+  // Close on outside click / Escape (bell + panel are separate DOM subtrees,
+  // so containment must check both).
+  useEffect(() => {
+    if (!showNotifications) return undefined;
+    const onDown = (event) => {
+      const inBell = notifBellRef.current?.contains(event.target);
+      const inPanel = notifPanelRef.current?.contains(event.target);
+      if (!inBell && !inPanel) setShowNotifications(false);
+    };
+    const onKey = (event) => {
+      if (event.key === 'Escape') setShowNotifications(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [showNotifications]);
+
+  // Clear a pending hover-close timer if the dashboard unmounts mid-transition.
+  useEffect(() => () => window.clearTimeout(notifCloseTimerRef.current), []);
+
   const [search, setSearch] = useState('');
   const [adminSearch, setAdminSearch] = useState('');
   const [error, setError] = useState('');
@@ -279,26 +443,31 @@ function AdminDashboard() {
     };
   }, [loadUsers, loadAdmins]);
 
-  const PLAN_LABELS = {
-    free: 'Basic Package',
-    monthly: 'Deluxe Package',
-    annual: 'Premium Package',
-    custom: 'Ultimate Package',
-  };
-
   const setSubscriptionPlan = async (user, plan) => {
     if (!['free', 'monthly', 'annual', 'custom'].includes(plan)) return;
-    const wasActive = !!user.subscriptionActive;
+    const wasLive = isSubscriptionLive(user);
     try {
       const data = await request(`/users/${user._id}/subscription`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active: plan !== 'free', plan }) });
+      // Broadcast the authoritative plan so this tab's plan store picks up a
+      // change to ITS OWN account (it is ignored otherwise — see the store's
+      // admin listener). Delivery to the target user's open tabs/phones is the
+      // server's SSE push, not this event.
+      try {
+        window.dispatchEvent(new CustomEvent('suppliwise:subscription-admin', { detail: data.user }));
+      } catch { /* non-browser safe */ }
       setUsers(current => current.map(item => item._id === data.user._id ? data.user : item));
-      const flipped = wasActive !== data.user.subscriptionActive;
+      // Metric counters track LIVE subscriptions, so compare resolved state on
+      // both sides (a past subscriptionExpiresAt already counts as inactive).
+      const isNowLive = data.subscription
+        ? data.subscription.subscriptionActive === true
+        : isSubscriptionLive(data.user);
+      const flipped = wasLive !== isNowLive;
       setOverview(current => current ? {
         ...current,
         metrics: {
           ...current.metrics,
-          activeSubscriptions: current.metrics.activeSubscriptions + (flipped ? (data.user.subscriptionActive ? 1 : -1) : 0),
-          inactiveSubscriptions: current.metrics.inactiveSubscriptions + (flipped ? (data.user.subscriptionActive ? -1 : 1) : 0),
+          activeSubscriptions: current.metrics.activeSubscriptions + (flipped ? (isNowLive ? 1 : -1) : 0),
+          inactiveSubscriptions: current.metrics.inactiveSubscriptions + (flipped ? (isNowLive ? -1 : 1) : 0),
         },
         recentUsers: current.recentUsers.map(item => item._id === data.user._id ? { ...item, ...data.user } : item),
       } : current);
@@ -594,6 +763,19 @@ function AdminDashboard() {
     signOutRef.current();
   }, []);
 
+  // "Stay signed in" hits the server first so the expiry is a visible refresh,
+  // not silent magic: the countdown resets only after the backend confirms.
+  const handleStayActive = useCallback(async () => {
+    const response = await fetch(`${BASE_URL}/auth/admin-refresh`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${localStorage.getItem('adminToken')}` },
+    });
+    const data = await parseJSON(response);
+    if (!response.ok) throw new Error(data?.message || 'Session refresh failed.');
+    if (data?.token) localStorage.setItem('adminToken', data.token);
+    idleDeadlineRef.current = Date.now() + ADMIN_IDLE_LIMIT_SECONDS * 1000;
+  }, []);
+
   useEffect(() => {
     if (!localStorage.getItem('admin') || !localStorage.getItem('adminToken')) {
       navigate('/admin/login');
@@ -752,8 +934,11 @@ function AdminDashboard() {
         admin={profile}
         unreadCount={unreadCount}
         showNotifications={showNotifications}
-        onToggleNotifications={() => setShowNotifications(v => !v)}
+        onToggleNotifications={toggleNotifications}
         onGoProfile={() => setTab('profile')}
+        bellRef={notifBellRef}
+        onBellPointerEnter={handleNotifHoverEnter}
+        onBellPointerLeave={handleNotifHoverLeave}
       />
 
       <div className="admin-body">
@@ -816,9 +1001,17 @@ function AdminDashboard() {
         {/* ── Main content ─────────────────────────────────── */}
         <main className="admin-main">
 
-          {/* Notification panel (rendered here so it overlays main, not topbar) */}
+          {/* Notification panel: position:fixed + JS-anchored to the bell
+              (survives scrolling), opens on hover, arrow points up at the
+              bell. Rendered inside main only to keep JSX locality — fixed
+              positioning takes it out of this flow. */}
           {showNotifications && (
-            <div className="notification-panel admin-notif-panel">
+            <div
+              className="notification-panel admin-notif-panel"
+              ref={notifPanelRef}
+              onPointerEnter={handleNotifHoverEnter}
+              onPointerLeave={handleNotifHoverLeave}
+            >
               <div className="admin-notif-panel__header">
                 <h3>System notifications</h3>
                 {notifications.length > 0 && (
@@ -831,6 +1024,7 @@ function AdminDashboard() {
                   </button>
                 )}
               </div>
+              <div className="admin-notif-panel__list">
               {notifications.length
                 ? notifications.map((notification, index) => (
                     <div
@@ -858,6 +1052,7 @@ function AdminDashboard() {
                   ))
                 : <p className="admin-muted">No new notifications.</p>
               }
+              </div>
             </div>
           )}
 
@@ -876,7 +1071,7 @@ function AdminDashboard() {
             </div>
           </header>
 
-          <AdminIdleStatus deadlineRef={idleDeadlineRef} onExpire={handleIdleExpire} onActivity={handleIdleExpire} />
+          <AdminIdleStatus deadlineRef={idleDeadlineRef} onExpire={handleIdleExpire} onStay={handleStayActive} />
 
           {error && <div className="admin-alert danger">{error}</div>}
 
@@ -1079,8 +1274,8 @@ function Overview({ overview }) {
                     </td>
                     <td className="ov-nowrap">{new Date(user.createdAt).toLocaleDateString()}</td>
                     <td>
-                      <span className={`ov-sub-badge${user.subscriptionActive ? ' ov-sub-badge--active' : ''}`}>
-                        {user.subscriptionActive ? 'Active' : 'Basic Package'}
+                      <span className={`ov-sub-badge${isSubscriptionLive(user) ? ' ov-sub-badge--active' : ''}`}>
+                        {isSubscriptionLive(user) ? 'Active' : PLAN_LABELS.free}
                       </span>
                     </td>
                     <td>
@@ -1304,9 +1499,14 @@ function Users({ users, usersFetchedAt, search, setSearch, loadUsers, setSubscri
                     </div>
                     <div className="user-detail-item">
                       <strong>Subscription</strong>
-                      <span className={`subscription-status-badge${user.subscriptionActive ? ' subscription-status-badge--active' : ''}`}>
-                        {user.subscriptionActive ? 'Subscribed ✓' : 'Basic Package'}
+                      <span className={`subscription-status-badge${isSubscriptionLive(user) ? ' subscription-status-badge--active' : ''}`}>
+                        {isSubscriptionLive(user) ? 'Subscribed ✓' : PLAN_LABELS.free}
                       </span>
+                      {subscriptionExpiryLabel(user) && (
+                        <small className={`subscription-expiry-note${isSubscriptionLive(user) ? '' : ' subscription-expiry-note--expired'}`}>
+                          {subscriptionExpiryLabel(user)}
+                        </small>
+                      )}
                       <label className="subscription-plan-label" htmlFor={`plan-${user._id}`}>
                         Plan — select to change
                       </label>
@@ -1629,22 +1829,30 @@ function ProfilePanel({ profile, form, setForm, message, onSubmit, rotateOtp, se
 
       {/* ── Account card ─────────────────────────────────────────────── */}
       <div className="profile-card">
+        <span className="profile-card__glow profile-card__glow--a" aria-hidden="true" />
+        <span className="profile-card__glow profile-card__glow--b" aria-hidden="true" />
+
         <div className="profile-card__avatar">
           {(profile?.alias || 'A')[0].toUpperCase()}
         </div>
+
         <div className="profile-card__info">
-          <p className="profile-card__name">{profile?.alias || 'administrator'}</p>
-          <p className="profile-card__meta">Administrator account</p>
-          {profile?.lastLoginAt && (
-            <p className="profile-card__meta">
-              Last login: {new Date(profile.lastLoginAt).toLocaleString()}
-            </p>
-          )}
-          {profile?.createdAt && (
-            <p className="profile-card__meta">
-              Account created: {new Date(profile.createdAt).toLocaleDateString()}
-            </p>
-          )}
+          <div className="profile-card__title">
+            <p className="profile-card__name">{profile?.alias || 'administrator'}</p>
+            <span className="profile-card__badge">Administrator</span>
+          </div>
+          <p className="profile-card__meta">Full administrative access to SuppliWise</p>
+
+          <div className="profile-card__stats">
+            <span className="profile-card__stat">
+              <em>Last login</em>
+              {profile?.lastLoginAt ? new Date(profile.lastLoginAt).toLocaleString() : '—'}
+            </span>
+            <span className="profile-card__stat">
+              <em>Member since</em>
+              {profile?.createdAt ? new Date(profile.createdAt).toLocaleDateString() : '—'}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -1659,15 +1867,17 @@ function ProfilePanel({ profile, form, setForm, message, onSubmit, rotateOtp, se
       <div className="profile-grid">
 
         {/* ── Change password ────────────────────────────────────────── */}
-        <section className="admin-panel profile-panel">
+        <section className="admin-panel profile-panel profile-panel--violet">
           <div className="profile-section-header">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-            </svg>
+            <span className="profile-section-icon profile-section-icon--violet" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </svg>
+            </span>
             <h3>Change password</h3>
           </div>
-          <p className="admin-muted">Enter your current password and a new one. Your Google Authenticator code is required to confirm.</p>
+          <p className="admin-muted profile-section-desc">Enter your current password and a new one. Your Google Authenticator code is required to confirm.</p>
 
           <form className="profile-form" onSubmit={handlePasswordSubmit} autoComplete="off">
             <div className="profile-field">
@@ -1731,14 +1941,16 @@ function ProfilePanel({ profile, form, setForm, message, onSubmit, rotateOtp, se
         </section>
 
         {/* ── Rotate authenticator key ──────────────────────────────── */}
-        <section className="admin-panel profile-panel">
+        <section className="admin-panel profile-panel profile-panel--amber">
           <div className="profile-section-header">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-            </svg>
+            <span className="profile-section-icon profile-section-icon--amber" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              </svg>
+            </span>
             <h3>Rotate authenticator key</h3>
           </div>
-          <p className="admin-muted">Generate a new Google Authenticator secret. The old key stops working immediately — scan the new QR code before signing out.</p>
+          <p className="admin-muted profile-section-desc">Generate a new Google Authenticator secret. The old key stops working immediately — scan the new QR code before signing out.</p>
 
           <form className="profile-form" onSubmit={handleRotateSubmit}>
             <div className="profile-field">

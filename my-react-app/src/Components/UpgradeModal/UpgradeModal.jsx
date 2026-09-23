@@ -5,8 +5,8 @@ import './UpgradeModal.css';
 // Props: feature (display name), requiredPlan (tier key), currentPlan,
 //        onClose, onViewPlans.
 export default function UpgradeModal({ feature, requiredPlan, currentPlan, onClose, onViewPlans }) {
-  const requiredLabel = PLAN_LABELS[requiredPlan] || requiredPlan || 'a paid plan';
-  const currentLabel = currentPlan ? (PLAN_LABELS[currentPlan] || currentPlan) : 'Basic Package';
+  const requiredLabel = PLAN_LABELS[requiredPlan] || requiredPlan;
+  const currentLabel = currentPlan ? (PLAN_LABELS[currentPlan] || currentPlan) : PLAN_LABELS.free;
 
   return (
     <div className="upgrade-overlay" onClick={onClose} role="dialog" aria-modal="true" aria-label="Upgrade required">
@@ -14,7 +14,7 @@ export default function UpgradeModal({ feature, requiredPlan, currentPlan, onClo
         <div className="upgrade-icon" aria-hidden="true">🔒</div>
         <h3 className="upgrade-title">{feature || 'This feature'} is locked</h3>
         <p className="upgrade-body">
-          {feature || 'This feature'} requires the <strong>{requiredLabel}</strong>.
+          {feature || 'This feature'} requires {requiredLabel ? <strong>{requiredLabel}</strong> : 'a paid plan'}.
           {currentPlan && (
             <> Your current plan is <strong>{currentLabel}</strong>.</>
           )}

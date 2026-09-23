@@ -1,11 +1,28 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import UserNotifications from '../UserNotifications/UserNotifications';
+import useAuth from '../../hooks/useAuth';
+import { hasAdminSession } from '../../auth/authState';
 import './Navbar.css';
 
 function Navbar() {
-  const token = localStorage.getItem('token');
-  const userRaw = localStorage.getItem('user');
-  const user = userRaw ? JSON.parse(userRaw) : null;
+  // Reactive session: the navbar flips between signed-in/out the instant
+  // the token changes (login, logout, account switch) — no reload needed.
+  const { token, user } = useAuth();
+  const location = useLocation();
+  // The auth pages must never wear the signed-in chip: /login is reachable
+  // while signed in only for "add another account" (?add=1), and showing the
+  // active account over the Sign In form reads as a glitch. Account
+  // management (switch / add / sign out) lives in Profile → Accounts.
+  const onAuthPage = location.pathname === '/login' || location.pathname === '/signup';
+  const showSession = Boolean(token && user) && !onAuthPage;
+  const displayName = user?.firstName && user?.lastName
+    ? `${user.firstName} ${user.lastName}`
+    : (user?.name || 'Account');
+  const avatarInitial = (
+    user?.firstName?.charAt(0) ||
+    user?.name?.charAt(0) ||
+    'A'
+  ).toUpperCase();
 
   return (
     <nav className="navbar">
@@ -22,7 +39,7 @@ function Navbar() {
         <NavLink to={token ? "/dashboard" : "/"} className="navbar-brand">SuppliWise</NavLink>
       </div>
       <div className="navbar-right">
-        {token && user ? (
+        {showSession ? (
           <>
             <UserNotifications />
             <NavLink to="/history" className="navbar-nav-link" title="History">
@@ -40,15 +57,20 @@ function Navbar() {
                   backgroundPosition: 'center',
                 }}
               >
-                {!user.profilePicture && (user.firstName ? user.firstName.charAt(0).toUpperCase() : user.name.charAt(0).toUpperCase())}
+                {!user.profilePicture && avatarInitial}
               </div>
               <span className="navbar-username">
-                {user.firstName && user.lastName 
-                  ? `${user.firstName} ${user.lastName}` 
-                  : user.name}
+                {displayName}
               </span>
             </NavLink>
           </>
+        ) : hasAdminSession() ? (
+          // Active admin session: point at the admin panel — a user
+          // "Sign In" button would just bounce them back there anyway
+          // (route guards keep signed-in admins inside /admin).
+          <NavLink to="/admin" className="navbar-signin-btn">
+            Admin Panel
+          </NavLink>
         ) : (
           <NavLink to="/login" className="navbar-signin-btn">
             Sign In

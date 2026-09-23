@@ -40,9 +40,14 @@ const assessmentSchema = new mongoose.Schema(
     proteinIntake: { type: String },
     bloodTestResults: { type: String },
     recreationalDrugTypes: { type: String },
+    // 5 CALENDAR years after creation (shared helper — same math as the UI).
+    // The create route sets this explicitly; the default keeps any other insert
+    // on the standard retention window instead of "never expires".
+    // Priority assessments null this while flagged (never expire while under
+    // review) and restore it from createdAt when resolved.
     expiresAt: {
       type: Date,
-      default: () => new Date(Date.now() + 5 * 365.25 * 24 * 60 * 60 * 1000),
+      default: () => require('../utils/assessments').expiryDateFromNow(),
     },
     // Admin-set priority flag
     priority: { type: String, enum: ['Priority', 'Standard'], default: 'Standard' },

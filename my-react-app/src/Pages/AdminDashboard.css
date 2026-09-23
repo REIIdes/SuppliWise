@@ -290,22 +290,78 @@
 }
 .admin-header { display: flex; justify-content: space-between; align-items: end; gap: 24px; margin-bottom: 34px; }
 
-/* Notification panel — floats over admin-main content */
+/* Notification panel — fixed + JS-anchored to the bell: left/top/width are
+   written before paint by a layout effect in AdminDashboard, so the panel
+   stays pinned under the bell while the page scrolls (the values below are
+   the pre-JS fallback). overflow must be visible so the bell arrow outside
+   the box isn't clipped — .admin-notif-panel__list does the scrolling.
+   z-index 200 beats the fixed topbar (150) so the arrow tip can reach it. */
 .admin-notif-panel {
-  position: absolute;
-  z-index: 50;
-  top: 16px;
-  right: clamp(20px, 5vw, 72px);
+  position: fixed;
+  z-index: 200;
+  top: 66px;
+  right: 24px;
+  left: auto;
   width: min(360px, calc(100vw - 36px));
   max-height: 420px;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   padding: 18px;
   border: 1px solid var(--admin-line);
   background: #fff;
   box-shadow: 0 12px 30px rgba(23,35,31,.16);
   border-radius: 8px;
+  overflow: visible;
 }
 .admin-notif-panel h3 { margin-bottom: 0; }
+
+/* Scroll area for the items — header stays pinned above it. min-height:0
+   lets this flex child shrink so the panel's max-height actually caps it. */
+.admin-notif-panel__list {
+  overflow-y: auto;
+  min-height: 0;
+  overscroll-behavior: contain;
+}
+
+/* Arrow pointing up at the bell; --arrow-x (bell centre, set in JS) keeps
+   it aimed at the button. Two stacked triangles: outer = border colour,
+   inner = white fill 1px lower. */
+.admin-notif-panel::before,
+.admin-notif-panel::after {
+  content: '';
+  position: absolute;
+  left: var(--arrow-x, 50%);
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 10px solid transparent;
+  border-right: 10px solid transparent;
+  pointer-events: none;
+}
+.admin-notif-panel::before {
+  top: -10px;
+  border-bottom: 10px solid var(--admin-line);
+}
+.admin-notif-panel::after {
+  top: -9px;
+  border-bottom: 10px solid #fff;
+}
+
+/* Item entrance: light stagger so the list reads as it arrives. */
+@keyframes admin-notif-item-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.admin-notif-panel__list .notification {
+  animation: admin-notif-item-in 0.28s ease both;
+}
+.admin-notif-panel__list .notification:nth-child(1) { animation-delay: 0.04s; }
+.admin-notif-panel__list .notification:nth-child(2) { animation-delay: 0.08s; }
+.admin-notif-panel__list .notification:nth-child(3) { animation-delay: 0.12s; }
+.admin-notif-panel__list .notification:nth-child(4) { animation-delay: 0.16s; }
+.admin-notif-panel__list .notification:nth-child(5) { animation-delay: 0.2s; }
+.admin-notif-panel__list .notification:nth-child(6) { animation-delay: 0.24s; }
+.admin-notif-panel__list .notification:nth-child(n + 7) { animation-delay: 0.28s; }
 .admin-notif-panel__header {
   display: flex;
   align-items: center;
@@ -653,6 +709,16 @@
   background: #e3f5e9;
   color: #24734e;
 }
+.subscription-expiry-note {
+  display: block;
+  font: 11px Arial, sans-serif;
+  color: var(--admin-muted, #6b7280);
+  margin-top: 4px;
+}
+.subscription-expiry-note--expired {
+  color: #b91c1c;
+  font-weight: 700;
+}
 .subscription-plan-label {
   font: 12px Arial, sans-serif;
   color: var(--admin-muted);
@@ -696,51 +762,57 @@
 .security-active { color: #24734e; } .security-email { color: #96602b; }
 .danger-action { color: #a23a29; border-color: #e7b8ae; } select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px; font: 12px Arial, sans-serif; }
 
-/* ── Profile page ────────────────────────────────────────────────────── */
-.profile-page { display: flex; flex-direction: column; gap: 20px; }
+/* ── Profile page ──────────────────────────────────────────────────────
+   Scoped under .admin-shell: ProfilePage.css (the member-facing profile)
+   uses the same .profile-page / .profile-form / .profile-alert names and
+   both stylesheets are bundled into the same document. Without this prefix
+   the admin rules hijack the user page whenever the admin chunk loads last. */
+.admin-shell .profile-page { display: flex; flex-direction: column; gap: 20px; }
 
-.profile-card { display: flex; align-items: center; gap: 20px; padding: 22px 24px; background: #fff; border: 1px solid var(--admin-line); border-radius: 10px; }
-.profile-card__avatar { width: 56px; height: 56px; border-radius: 50%; background: var(--admin-green); color: #fff; display: flex; align-items: center; justify-content: center; font: 700 22px Arial, sans-serif; flex-shrink: 0; }
-.profile-card__name { font: 700 17px Arial, sans-serif; color: var(--admin-ink); margin: 0 0 4px; }
-.profile-card__meta { font: 12px Arial, sans-serif; color: var(--admin-muted); margin: 0; }
+.admin-shell .profile-card { display: flex; align-items: center; gap: 20px; padding: 22px 24px; background: #fff; border: 1px solid var(--admin-line); border-radius: 10px; }
+.admin-shell .profile-card__avatar { width: 56px; height: 56px; border-radius: 50%; background: var(--admin-green); color: #fff; display: flex; align-items: center; justify-content: center; font: 700 22px Arial, sans-serif; flex-shrink: 0; }
+.admin-shell .profile-card__name { font: 700 17px Arial, sans-serif; color: var(--admin-ink); margin: 0 0 4px; }
+.admin-shell .profile-card__meta { font: 12px Arial, sans-serif; color: var(--admin-muted); margin: 0; }
 
-.profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
-.profile-panel { margin-bottom: 0 !important; }
+.admin-shell .profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.admin-shell .profile-panel { margin-bottom: 0 !important; }
 
-.profile-section-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
-.profile-section-header svg { width: 18px; height: 18px; color: var(--admin-green); flex-shrink: 0; }
-.profile-section-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
+.admin-shell .profile-section-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.admin-shell .profile-section-header svg { width: 18px; height: 18px; color: var(--admin-green); flex-shrink: 0; }
+.admin-shell .profile-section-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
 
-.profile-form { display: flex; flex-direction: column; gap: 16px; margin-top: 18px; }
+.admin-shell .profile-form { display: flex; flex-direction: column; gap: 16px; margin-top: 18px; }
 
-.profile-field { display: flex; flex-direction: column; gap: 6px; }
-.profile-field label { font: 700 11px Arial, sans-serif; text-transform: uppercase; letter-spacing: .05em; color: var(--admin-muted); }
-.profile-field input { border: 1px solid var(--admin-line); padding: 10px 12px; font: 14px Arial, sans-serif; background: #fbfcfa; border-radius: 4px; width: 100%; box-sizing: border-box; transition: border-color 0.15s; }
-.profile-field input:focus { outline: none; border-color: var(--admin-green); }
+.admin-shell .profile-field { display: flex; flex-direction: column; gap: 6px; }
+.admin-shell .profile-field label { font: 700 11px Arial, sans-serif; text-transform: uppercase; letter-spacing: .05em; color: var(--admin-muted); }
+.admin-shell .profile-field input { border: 1px solid var(--admin-line); padding: 10px 12px; font: 14px Arial, sans-serif; background: #fbfcfa; border-radius: 4px; width: 100%; box-sizing: border-box; transition: border-color 0.15s; }
+.admin-shell .profile-field input:focus { outline: none; border-color: var(--admin-green); }
 
-.profile-input-wrap { position: relative; }
-.profile-input-wrap input { padding-right: 42px; }
-.profile-eye { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--admin-muted); padding: 2px; display: flex; }
-.profile-eye svg { width: 16px; height: 16px; }
-.profile-eye:hover { color: var(--admin-ink); }
+.admin-shell .profile-input-wrap { position: relative; }
+/* Higher specificity than the .profile-field input padding above, so the
+   eye toggle never ends up sitting on top of the typed characters. */
+.admin-shell .profile-field .profile-input-wrap input { padding-right: 46px; }
+.admin-shell .profile-eye { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--admin-muted); padding: 2px; display: flex; }
+.admin-shell .profile-eye svg { width: 16px; height: 16px; }
+.admin-shell .profile-eye:hover { color: var(--admin-ink); }
 
-.profile-hint { font: 11px Arial, sans-serif; color: var(--admin-muted); }
+.admin-shell .profile-hint { font: 11px Arial, sans-serif; color: var(--admin-muted); }
 
-.profile-submit { margin-top: 4px; width: 100%; }
+.admin-shell .profile-submit { margin-top: 4px; width: 100%; }
 
-.profile-alert { display: flex; align-items: flex-start; gap: 10px; padding: 12px 16px; border-radius: 6px; font: 13px/1.5 Arial, sans-serif; }
-.profile-alert span:first-child { font-weight: 700; flex-shrink: 0; }
-.profile-alert--success { background: #f0fdf4; color: #166534; border: 1px solid #86efac; }
-.profile-alert--error   { background: #fef2f2; color: #b91c1c; border: 1px solid #fca5a5; }
+.admin-shell .profile-alert { display: flex; align-items: flex-start; gap: 10px; padding: 12px 16px; border-radius: 6px; font: 13px/1.5 Arial, sans-serif; }
+.admin-shell .profile-alert span:first-child { font-weight: 700; flex-shrink: 0; }
+.admin-shell .profile-alert--success { background: #f0fdf4; color: #166534; border: 1px solid #86efac; }
+.admin-shell .profile-alert--error   { background: #fef2f2; color: #b91c1c; border: 1px solid #fca5a5; }
 
-.profile-qr { margin-top: 20px; padding: 18px; border: 1px solid var(--admin-line); border-radius: 8px; background: #fbfcfa; }
-.profile-qr__label { font: 13px Arial, sans-serif; color: var(--admin-muted); margin: 0 0 12px; }
-.profile-qr__img { display: block; width: 150px; height: 150px; margin-bottom: 14px; }
-.profile-qr__secret { display: flex; flex-direction: column; gap: 4px; }
-.profile-qr__secret-label { font: 700 10px Arial, sans-serif; text-transform: uppercase; letter-spacing: .06em; color: var(--admin-muted); }
-.profile-qr__secret-value { font: 12px/1.5 'Courier New', monospace; color: var(--admin-ink); word-break: break-all; background: #f1f5f3; padding: 6px 8px; border-radius: 4px; }
+.admin-shell .profile-qr { margin-top: 20px; padding: 18px; border: 1px solid var(--admin-line); border-radius: 8px; background: #fbfcfa; }
+.admin-shell .profile-qr__label { font: 13px Arial, sans-serif; color: var(--admin-muted); margin: 0 0 12px; }
+.admin-shell .profile-qr__img { display: block; width: 150px; height: 150px; margin-bottom: 14px; }
+.admin-shell .profile-qr__secret { display: flex; flex-direction: column; gap: 4px; }
+.admin-shell .profile-qr__secret-label { font: 700 10px Arial, sans-serif; text-transform: uppercase; letter-spacing: .06em; color: var(--admin-muted); }
+.admin-shell .profile-qr__secret-value { font: 12px/1.5 'Courier New', monospace; color: var(--admin-ink); word-break: break-all; background: #f1f5f3; padding: 6px 8px; border-radius: 4px; }
 
-@media (max-width: 820px) { .profile-grid { grid-template-columns: 1fr; } }.notification { border-left: 3px solid #d46b35; padding: 10px 0 10px 12px; margin: 12px 0; font: 13px Arial, sans-serif; }
+@media (max-width: 820px) { .admin-shell .profile-grid { grid-template-columns: 1fr; } }.notification { border-left: 3px solid #d46b35; padding: 10px 0 10px 12px; margin: 12px 0; font: 13px Arial, sans-serif; }
 .notification-panel .notification {
   display: block;
   padding: 10px;
@@ -1301,4 +1373,384 @@
   .ov-threat {
     transition: none;
   }
+}
+
+/* Notification panel: appear instantly (must come after the notifDrop and
+   item-stagger rules above so source order wins). */
+@media (prefers-reduced-motion: reduce) {
+  .admin-notif-panel,
+  .admin-notif-panel .notification {
+    animation: none;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   VIBRANT PROFILE REFRESH — gradient hero, accent chips, lively forms
+
+   Everything here is scoped to .admin-shell. The member-facing ProfilePage
+   reuses .profile-page / .profile-form / .profile-alert, so an unscoped
+   rule would restyle the wrong screen depending on which chunk loads last.
+
+   Entrances use fill-mode `backwards` (NOT `both`): once an animation with
+   `both` finishes it keeps winning the cascade, so the :hover transform
+   below would silently never apply.
+   ═══════════════════════════════════════════════════════════════════ */
+.admin-shell .profile-page {
+  --pf-violet-a: #8b5cf6;
+  --pf-violet-b: #4f46e5;
+  --pf-violet-ink: #6d28d9;
+  --pf-amber-a: #fbbf24;
+  --pf-amber-b: #ea580c;
+  --pf-amber-ink: #c2410c;
+}
+
+@keyframes pf-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes pf-pop {
+  from { opacity: 0; transform: scale(0.6) rotate(-10deg); }
+  to   { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+
+/* ── Hero account card ─────────────────────────────────────────────── */
+.admin-shell .profile-card {
+  position: relative;
+  overflow: hidden;
+  gap: 22px;
+  padding: 26px 28px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 20px;
+  color: #fff;
+  background: linear-gradient(115deg, #0b3d2c 0%, #14532d 36%, #0f766e 76%, #0d9488 100%);
+  box-shadow: 0 24px 46px -26px rgba(13, 148, 136, 0.9), 0 8px 18px -12px rgba(11, 61, 44, 0.65);
+  animation: pf-rise 0.45s ease backwards;
+}
+.admin-shell .profile-card__glow {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+}
+.admin-shell .profile-card__glow--a {
+  width: 280px;
+  height: 280px;
+  top: -120px;
+  right: -70px;
+  background: radial-gradient(circle, rgba(52, 211, 153, 0.55), transparent 70%);
+}
+.admin-shell .profile-card__glow--b {
+  width: 240px;
+  height: 240px;
+  bottom: -130px;
+  left: 8%;
+  background: radial-gradient(circle, rgba(251, 191, 36, 0.38), transparent 70%);
+}
+.admin-shell .profile-card__avatar,
+.admin-shell .profile-card__info { position: relative; z-index: 1; }
+.admin-shell .profile-card__info { min-width: 0; }
+
+.admin-shell .profile-card__avatar {
+  width: 76px;
+  height: 76px;
+  flex-shrink: 0;
+  border-radius: 22px;
+  font: 800 30px/1 Arial, sans-serif;
+  background: linear-gradient(140deg, #fbbf24, #f97316 55%, #ef4444);
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.22),
+              inset 0 -6px 14px rgba(0, 0, 0, 0.18),
+              0 16px 28px -14px rgba(0, 0, 0, 0.65);
+  animation: pf-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) backwards;
+}
+.admin-shell .profile-card__title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.admin-shell .profile-card__name { font: 800 20px/1.2 Arial, sans-serif; color: #fff; margin: 0; letter-spacing: 0.01em; }
+.admin-shell .profile-card__badge {
+  font: 800 10px/1 Arial, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 6px 10px;
+  border-radius: 999px;
+  color: #064e3b;
+  background: linear-gradient(135deg, #a7f3d0, #6ee7b7);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.28);
+}
+.admin-shell .profile-card__meta { font: 12.5px/1.5 Arial, sans-serif; color: rgba(255, 255, 255, 0.85); margin: 4px 0 0; }
+.admin-shell .profile-card__stats { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.admin-shell .profile-card__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.12);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  font: 600 12.5px/1.3 Arial, sans-serif;
+  color: #fff;
+}
+.admin-shell .profile-card__stat em {
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+/* ── Feedback alert ────────────────────────────────────────────────── */
+.admin-shell .profile-alert {
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-radius: 14px;
+  font: 600 13.5px/1.5 Arial, sans-serif;
+  animation: pf-rise 0.35s ease backwards;
+}
+.admin-shell .profile-alert span:first-child {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  font-size: 13px;
+  color: #fff;
+}
+.admin-shell .profile-alert--success {
+  background: linear-gradient(120deg, #ecfdf5, #d1fae5);
+  border: 1px solid #6ee7b7;
+  color: #065f46;
+  box-shadow: 0 12px 26px -20px rgba(16, 185, 129, 0.95);
+}
+.admin-shell .profile-alert--success span:first-child { background: linear-gradient(135deg, #22c55e, #059669); }
+.admin-shell .profile-alert--error {
+  background: linear-gradient(120deg, #fef2f2, #fee2e2);
+  border: 1px solid #fca5a5;
+  color: #b91c1c;
+  box-shadow: 0 12px 26px -20px rgba(239, 68, 68, 0.95);
+}
+.admin-shell .profile-alert--error span:first-child { background: linear-gradient(135deg, #ef4444, #b91c1c); }
+
+/* ── Panels: colour-coded top rail, lift on hover ──────────────────── */
+.admin-shell .profile-grid { gap: 20px; }
+.admin-shell .profile-panel {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--admin-line);
+  border-radius: 18px;
+  box-shadow: 0 8px 22px -18px rgba(23, 35, 31, 0.8);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  animation: pf-rise 0.45s ease backwards;
+}
+.admin-shell .profile-grid .profile-panel:nth-child(2) { animation-delay: 0.08s; }
+.admin-shell .profile-panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+}
+.admin-shell .profile-panel--violet::before { background: linear-gradient(90deg, var(--pf-violet-a), var(--pf-violet-b), #22d3ee); }
+.admin-shell .profile-panel--amber::before  { background: linear-gradient(90deg, var(--pf-amber-a), var(--pf-amber-b), #f43f5e); }
+.admin-shell .profile-panel:hover {
+  transform: translateY(-3px);
+  border-color: #c6d5cd;
+  box-shadow: 0 26px 42px -30px rgba(23, 35, 31, 0.95);
+}
+
+/* ── Section header: gradient icon chip ────────────────────────────── */
+.admin-shell .profile-section-header { gap: 12px; margin-bottom: 8px; }
+.admin-shell .profile-section-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 13px;
+  flex-shrink: 0;
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 10px 20px -12px rgba(0, 0, 0, 0.75);
+  transition: transform 0.2s ease;
+}
+.admin-shell .profile-section-header .profile-section-icon svg { width: 19px; height: 19px; color: #fff; flex-shrink: 0; }
+.admin-shell .profile-section-icon--violet { background: linear-gradient(135deg, var(--pf-violet-a), var(--pf-violet-b)); }
+.admin-shell .profile-section-icon--amber  { background: linear-gradient(135deg, var(--pf-amber-a), var(--pf-amber-b)); }
+.admin-shell .profile-panel:hover .profile-section-icon { transform: rotate(-6deg) scale(1.07); }
+.admin-shell .profile-section-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--admin-ink);
+}
+
+/* ── Description: accent bar matching its panel ────────────────────── */
+.admin-shell .profile-section-desc {
+  position: relative;
+  padding-left: 14px;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.admin-shell .profile-section-desc::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 3px;
+  bottom: 3px;
+  width: 3px;
+  border-radius: 3px;
+}
+.admin-shell .profile-panel--violet .profile-section-desc::before { background: linear-gradient(180deg, var(--pf-violet-a), var(--pf-violet-b)); }
+.admin-shell .profile-panel--amber  .profile-section-desc::before { background: linear-gradient(180deg, var(--pf-amber-a), var(--pf-amber-b)); }
+
+/* ── Forms: tinted labels, rounded inputs, real focus rings ────────── */
+.admin-shell .profile-form { gap: 16px; margin-top: 20px; }
+.admin-shell .profile-field { gap: 7px; }
+.admin-shell .profile-field label { font-size: 11px; letter-spacing: 0.07em; }
+.admin-shell .profile-panel--violet .profile-field label { color: var(--pf-violet-ink); }
+.admin-shell .profile-panel--amber  .profile-field label { color: var(--pf-amber-ink); }
+
+.admin-shell .profile-field input {
+  border: 1.5px solid #e3eae6;
+  border-radius: 12px;
+  background: #fbfdfc;
+  padding: 12px 14px;
+  font-size: 14.5px;
+  color: var(--admin-ink);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+.admin-shell .profile-field input::placeholder { color: #9aa8a1; }
+.admin-shell .profile-field input:hover:not(:focus) { border-color: #c6d5cd; background: #fff; }
+
+.admin-shell .profile-field input:focus {
+  outline: none;
+  background: #fff;
+  border-color: var(--pf-violet-b);
+  box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.18);
+}
+.admin-shell .profile-panel--amber .profile-field input:focus {
+  border-color: var(--pf-amber-b);
+  box-shadow: 0 0 0 4px rgba(234, 88, 12, 0.18);
+}
+/* Stronger ring for keyboard users (must follow the rules above: equal
+   specificity on the amber panel means source order decides). */
+.admin-shell .profile-field input:focus-visible {
+  border-color: var(--pf-violet-b);
+  box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.34);
+}
+.admin-shell .profile-panel--amber .profile-field input:focus-visible {
+  border-color: var(--pf-amber-b);
+  box-shadow: 0 0 0 4px rgba(234, 88, 12, 0.34);
+}
+
+/* ── Password reveal toggle ────────────────────────────────────────── */
+.admin-shell .profile-eye {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 9px;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+.admin-shell .profile-eye:hover {
+  background: #eef4f1;
+  color: var(--admin-ink);
+  /* Restate the centring translate — a bare scale() would drop it and the
+     button would jump off the middle of the input. */
+  transform: translateY(-50%) scale(1.08);
+}
+.admin-shell .profile-eye:active { transform: translateY(-50%) scale(0.92); }
+.admin-shell .profile-eye:focus-visible {
+  outline: 2px solid var(--pf-violet-b);
+  outline-offset: 2px;
+  transform: translateY(-50%);
+}
+
+.admin-shell .profile-hint { font-size: 11.5px; line-height: 1.45; }
+
+/* ── Submit buttons ────────────────────────────────────────────────── */
+.admin-shell .profile-submit {
+  margin-top: 6px;
+  width: 100%;
+  border: 0;
+  border-radius: 13px;
+  padding: 14px 18px;
+  font: 800 13.5px/1 Arial, sans-serif;
+  letter-spacing: 0.03em;
+  color: #fff;
+  cursor: pointer;
+  transition: transform 0.16s ease, box-shadow 0.2s ease, filter 0.2s ease, opacity 0.2s ease;
+}
+.admin-shell .profile-panel--violet .profile-submit {
+  background: linear-gradient(135deg, #8b5cf6, #4f46e5 55%, #4338ca);
+  box-shadow: 0 16px 28px -16px rgba(79, 70, 229, 0.95);
+}
+.admin-shell .profile-panel--amber .profile-submit {
+  background: linear-gradient(135deg, #fbbf24, #f97316 55%, #ea580c);
+  box-shadow: 0 16px 28px -16px rgba(234, 88, 12, 0.95);
+}
+.admin-shell .profile-submit:hover:not(:disabled) { transform: translateY(-2px); filter: brightness(1.07); }
+.admin-shell .profile-submit:active:not(:disabled) { transform: translateY(0) scale(0.985); }
+.admin-shell .profile-submit:disabled { opacity: 0.6; cursor: not-allowed; filter: saturate(0.6); }
+.admin-shell .profile-submit:focus-visible { outline: 3px solid rgba(23, 35, 31, 0.55); outline-offset: 3px; }
+
+/* ── Rotated authenticator key / QR ────────────────────────────────── */
+.admin-shell .profile-qr {
+  margin-top: 20px;
+  padding: 20px;
+  border: 1px dashed #c4b5fd;
+  border-radius: 16px;
+  background: linear-gradient(160deg, #faf7ff, #f1ecff);
+  animation: pf-rise 0.4s ease backwards;
+}
+.admin-shell .profile-qr__label { font-size: 13px; font-weight: 700; color: #5b21b6; margin: 0 0 12px; }
+.admin-shell .profile-qr__img {
+  display: block;
+  width: 160px;
+  height: 160px;
+  margin-bottom: 14px;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid #e7e0ff;
+  border-radius: 14px;
+  box-shadow: 0 16px 32px -20px rgba(79, 70, 229, 0.95);
+}
+.admin-shell .profile-qr__secret { gap: 6px; }
+.admin-shell .profile-qr__secret-label { color: #7c3aed; }
+.admin-shell .profile-qr__secret-value {
+  background: #fff;
+  border: 1px solid #e7e0ff;
+  border-radius: 10px;
+  padding: 9px 11px;
+  color: #4338ca;
+  font-weight: 700;
+}
+
+/* ── Narrow screens ────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .admin-shell .profile-card { flex-wrap: wrap; gap: 16px; padding: 22px; }
+  .admin-shell .profile-card__avatar { width: 64px; height: 64px; font-size: 26px; border-radius: 18px; }
+  .admin-shell .profile-card__stats { width: 100%; }
+  .admin-shell .profile-card__stat { flex: 1 1 150px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-shell .profile-card,
+  .admin-shell .profile-card__avatar,
+  .admin-shell .profile-panel,
+  .admin-shell .profile-alert,
+  .admin-shell .profile-qr { animation: none !important; }
+  .admin-shell .profile-panel,
+  .admin-shell .profile-section-icon,
+  .admin-shell .profile-eye,
+  .admin-shell .profile-submit,
+  .admin-shell .profile-field input { transition: none !important; }
+  .admin-shell .profile-panel:hover,
+  .admin-shell .profile-panel:hover .profile-section-icon,
+  .admin-shell .profile-submit:hover:not(:disabled),
+  .admin-shell .profile-submit:active:not(:disabled) { transform: none; }
+  .admin-shell .profile-eye:hover,
+  .admin-shell .profile-eye:active,
+  .admin-shell .profile-eye:focus-visible { transform: translateY(-50%); }
 }

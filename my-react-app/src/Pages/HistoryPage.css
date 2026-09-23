@@ -171,6 +171,24 @@
 /* ── Card List ── */
 .history-list { display: flex; flex-direction: column; gap: 16px; }
 
+/* ── Pagination (PREMIUM+ "5-Year Record History") ── */
+.history-load-more {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-top: 24px;
+}
+.history-load-more .upgrade-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.history-load-more__note {
+  margin: 0;
+  color: #6b7280;
+  font-size: 13px;
+}
+
 /* ── Card ── */
 .history-card {
   background: #fff;

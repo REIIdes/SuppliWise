@@ -36,29 +36,54 @@ fetch functions); backend `node --check` clean; `npm test` green.
 `server/models/*`, `my-react-app/src/App.jsx` (React.lazy),
 `my-react-app/vite.config.js`.
 
-## 3. Subscription plans (Basic / Deluxe / Premium / Ultimate)
+## 3. Subscription plans (FREE / DELUXE / PREMIUM / ULTIMATE)
 
 **Use:** admins sell four tiers; the app shows and enforces them.
-Tiers: `free`→Basic Package, `monthly`→Deluxe, `annual`→Premium,
-`custom`→Ultimate. Inactive subscriptions always fall back to free.
+Tiers: `free`→FREE, `monthly`→DELUXE, `annual`→PREMIUM,
+`custom`→ULTIMATE. Inactive/expired/cancelled subscriptions always fall
+back to FREE (resolved at read time — no cron needed).
+**Structure:**
+- FREE — Health Assessment, Supplement Recommendations, Daily Intake
+- DELUXE — all FREE + Insights & Analytics, PDF Report Export
+- PREMIUM — all FREE/DELUXE + Priority Assessment, 5-Year Record History
+- ULTIMATE — unlocks all available features (incl. AI Chat Assistant)
+
 **How it works:**
-- Shared rank map `PLAN_RANK {free:0, monthly:1, annual:2, custom:3}` on both
-  sides (`server/utils/plan.js`, `my-react-app/src/utils/plan.js`).
-- Backend `requirePlan(minTier)` middleware → 403 with
+- Single source of truth: `server/utils/entitlements.js` (FEATURES table,
+  `can()`, `requireFeature()`, `describeSubscription()`); the frontend
+  mirrors it exactly in `my-react-app/src/subscription/features.js` and
+  re-exports it from `src/utils/plan.js` (no inline tier math anywhere).
+- `requireFeature(key)` middleware → 403 with
   `requiresPlan`/`currentPlan` (client shows upgrade prompt, never logs out).
-- History page size capped per tier: 5 / 10 / 20 / 20.
-- Gates: Insights → Deluxe+, AI Chat → Ultimate only, PDF export → Deluxe+,
-  5-year history → Premium+, Priority reviews → Premium+ (auto-flag).
-- `GET /api/auth/me` (lightweight, no image blobs) feeds the profile page;
-  login/register responses carry plan fields cached to localStorage.
+  Applied to Insights, AI Chat; `can()` gates Priority auto-flag and the
+  history depth check.
+- History: page size capped per tier (5 / 10 / 20 / 20) AND page > 1 is a
+  403 below PREMIUM — "5-Year Record History" is server-enforced.
+- PDF export is rendered client-side (jsPDF), so the export path first calls
+  `GET /api/subscription/feature/pdfExport` — the backend verdict decides,
+  frontend visibility is UI only.
+- All auth responses (`/me`, login, register, 2FA, profile update) carry a
+  resolved `subscription` snapshot (`describeSubscription`) that honours
+  expiry/cancellation; the client re-resolves it at read time as well.
+- Live sync: `GET /api/subscription/stream` (SSE) pushes every admin
+  upgrade/downgrade/cancel/remove instantly to the user's open tabs; a local
+  expiry timer flips to FREE at `subscriptionExpiresAt`; a shared throttled
+  poll + focus refresh back it up. All paths funnel into one store commit
+  (`src/hooks/useSubscription.js`) that notifies pages exactly once per real
+  change — no refresh, re-login, or profile reopen required.
+- Admin PATCH (`/api/admin/users/:id/subscription`) normalizes plan aliases
+  and never escalates a tier when `plan` is omitted.
 - Admin User Management has a per-user plan dropdown; overview counters
   update optimistically.
 - Profile page shows a status card + per-tier feature showcase (locked items
-  greyed with lock icons for lower tiers).
-**Implemented:** `server/utils/plan.js`, `server/routes/insights.js`,
-`server/routes/chat.js`, `server/routes/assessment.js` (cap),
-`server/routes/auth.js` (`/me` + response fields), `server/routes/admin.js`
-(subscription PATCH), `my-react-app/src/utils/plan.js`,
+  greyed with lock icons for lower tiers) rendered from the registry.
+**Implemented:** `server/utils/entitlements.js` (+ `utils/plan.js` shim),
+`server/routes/insights.js`, `server/routes/chat.js`,
+`server/routes/assessment.js` (cap + depth gate), `server/routes/auth.js`
+(snapshot fields), `server/routes/admin.js` (subscription PATCH),
+`server/routes/subscription.js` (state/feature/SSE),
+`my-react-app/src/subscription/features.js`, `src/utils/plan.js`,
+`src/hooks/useSubscription.js`,
 `src/Components/UpgradeModal/*`, `ProfilePage`, `ChatAssistant`,
 `InsightsPage`, `HistoryPage`, `ResultsPage`, `AdminDashboard`, `LogIn`,
 `SignIn`.
@@ -247,7 +272,7 @@ PUT subscription fields).
 
 ## 19. Admin extras
 
-Plan dropdown per user (Basic/Deluxe/Premium/Ultimate) with optimistic
+Plan dropdown per user (FREE/DELUXE/PREMIUM/ULTIMATE) with optimistic
 counters; high-contrast hamburger/back-arrow toggle with press pop-in;
 staggered tab entrance, active-pill sweep, icon micro-interactions
 (reduced-motion safe); monitor PDF word-boundary truncation + wider latency
@@ -323,11 +348,15 @@ audit event; toggle-merge preserves the badge (PATCH carries no lockout).
 
 ## 26. Provisioning: AdminRaNe
 
-**Use:** fifth admin account from `ADMIN_ACCOUNTS`.
+**Use:** additional admin account from `ADMIN_ACCOUNTS`.
 **How it works:** bcrypt cost-12 hash + random base32 TOTP appended to
 `server/.env`; boot upsert created the enabled DB record; password + TOTP
-verified live. Alias `AdminRaNe` / password `RaNe123` / authenticator
-`SGQ5ZASCMJRYYXPOC53A`.
+verified live.
+
+> **Secrets removed:** this entry previously published the plaintext password
+> and TOTP seed for `AdminRaNe`. It was committed to a public repository, so
+> both must be rotated. Credentials now live only in `server/.env`
+> (gitignored) and a password manager — never in documentation.
 
 ## 27. Chat gate button fix (CSS collision)
 

@@ -2,7 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import ConfirmModal from '../Components/ConfirmModal/ConfirmModal';
-import { BASE_URL, getMyProfile, getNotifications, markNotificationRead, isSecurityNotification } from '../api';
+import AccountSwitcher from '../Components/AccountSwitcher/AccountSwitcher';
+import { BASE_URL, getMyProfile, getNotifications, markNotificationRead, isSecurityNotification, signOutCurrentAccount, getToken, getStoredUser, setStoredUser } from '../api';
+import { useSubscription, SUBSCRIPTION_EVENT } from '../hooks/useSubscription';
+import { PLAN_LABELS, PLAN_RANK, FEATURES, planFromUser } from '../utils/plan';
 import './ProfilePage.css';
 
 // Relative time for the security activity feed
@@ -19,25 +22,18 @@ function secTimeAgo(iso) {
   return new Date(iso).toLocaleDateString();
 }
 
-// Plan labels (must match the admin console)
-const PLAN_LABELS = {  free: 'Basic Package',
-  monthly: 'Deluxe Package',
-  annual: 'Premium Package',
-  custom: 'Ultimate Package',
-};
-
-// Plan tiers: free < monthly < annual < custom(Ultimate).
-// Each feature declares the lowest tier that unlocks it.
-const PLAN_RANK = { free: 0, monthly: 1, annual: 2, custom: 3 };
-const PLAN_FEATURES = [
-  { icon: 'clipboard', title: 'AI Health Assessments', text: 'Guided 4-step assessments with instant results', tier: 'free' },
-  { icon: 'pill', title: 'Supplement Recommendations', text: 'Personalized AI picks with dosage & timing', tier: 'free' },
-  { icon: 'check', title: 'Daily Intake Tracking', text: 'Mark taken, streaks, calendar & adherence stats', tier: 'free' },
-  { icon: 'chart', title: 'Insights & Analytics', text: 'Wellness score, trends and phase guidance', tier: 'monthly' },
-  { icon: 'pdf', title: 'PDF Report Exports', text: 'Download & share full assessment reports', tier: 'monthly' },
-  { icon: 'history', title: '5-Year Record History', text: 'Every assessment kept, searchable anytime', tier: 'annual' },
-  { icon: 'flag', title: 'Priority Health Reviews', text: 'Severe cases flagged for fast admin review', tier: 'annual' },
-  { icon: 'spark', title: 'AI Chat Assistant', text: 'Ask anything about supplements & wellness', tier: 'custom' },
+// Display metadata for the feature showcase — the tier for each entry comes
+// from the canonical registry (subscription/features.js), never from a local
+// copy, so the profile can't disagree with the API.
+const FEATURE_CARDS = [
+  { key: 'healthAssessment',   icon: 'clipboard', text: 'Guided 4-step assessments with instant results' },
+  { key: 'recommendations',    icon: 'pill',      text: 'Personalized AI picks with dosage & timing' },
+  { key: 'dailyIntake',        icon: 'check',     text: 'Mark taken, streaks, calendar & adherence stats' },
+  { key: 'insights',           icon: 'chart',     text: 'Wellness score, trends and phase guidance' },
+  { key: 'pdfExport',          icon: 'pdf',       text: 'Download & share full assessment reports' },
+  { key: 'historyFull',        icon: 'history',   text: 'Every assessment kept, searchable anytime' },
+  { key: 'priorityAssessment', icon: 'flag',      text: 'Severe cases flagged for fast admin review' },
+  { key: 'chat',               icon: 'spark',     text: 'Ask anything about supplements & wellness' },
 ];
 
 function FeatureIcon({ icon }) {
@@ -66,8 +62,7 @@ function ProfilePage() {
   // One-time read of the cached user (localStorage is the source of truth here)
   const [storedUser] = useState(() => {
     try {
-      const raw = localStorage.getItem('user');
-      return raw ? JSON.parse(raw) : {};
+      return getStoredUser() || {};
     } catch {
       return {};
     }
@@ -105,15 +100,43 @@ function ProfilePage() {
   const securityRef = useRef(null);
   const [searchParams] = useSearchParams();
 
-  // Subscription status (fetched fresh; falls back to cached localStorage values)
-  const [subscription, setSubscription] = useState(() => ({
-    active: storedUser.subscriptionActive === true,
-    plan: storedUser.subscriptionPlan || 'free',
-    updatedAt: storedUser.subscriptionUpdatedAt || null,
-  }));
+  // Subscription status (starts from cache — resolved incl. expiry — then
+  // syncs live + from server). Subscribing here means upgrades/downgrades by
+  // admin, expiry, or another tab update the card + feature list instantly —
+  // no reopen needed.
+  const { active: liveActive, plan: livePlan, entitlements: liveEntitlements, refresh: refreshLivePlan, applyFresh, canAccess } = useSubscription();
+  const [subscription, setSubscription] = useState(() => {
+    const resolved = planFromUser(storedUser);
+    return {
+      active: resolved.active,
+      plan: resolved.plan,
+      updatedAt: storedUser.subscriptionUpdatedAt || null,
+      entitlements: resolved.entitlements,
+    };
+  });
+
+  // Mirror the live store into local card state (avoids stale plan display).
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mirroring the external subscription store is an external-system sync
+    setSubscription((prev) => {
+      if (prev.active === liveActive && prev.plan === livePlan && prev.entitlements === liveEntitlements) return prev;
+      return { ...prev, active: liveActive, plan: livePlan, entitlements: liveEntitlements };
+    });
+  }, [liveActive, livePlan, liveEntitlements]);
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState('');
   const profileLoadedRef = useRef(false);
+
+  // A throttled/rate-limited refresh is never surfaced: the shared plan store
+  // retries on its own, so syncing stays completely invisible. Only a real
+  // failure (server down, unreachable) becomes a retriable error.
+  const handleProfileRefreshError = (err) => {
+    if (err?.status === 429 || err?.remainingSeconds || err?.retryAfterSeconds) {
+      setProfileError('');
+      return;
+    }
+    setProfileError(err?.message || 'Could not refresh your profile.');
+  };
 
   const [formData, setFormData] = useState({
     firstName: storedUser.firstName || '',
@@ -127,13 +150,15 @@ function ProfilePage() {
   });
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
+    const token = getToken();
     if (!token) {
       navigate('/login');
       return;
     }
 
-    // Refresh profile + subscription from the server once (cached values render instantly)
+    // Refresh profile + subscription from the server once (cached values render instantly).
+    // Keep listening: if the plan changes elsewhere (admin console, another
+    // tab, expiry), the card re-syncs without reopening the profile.
     if (!profileLoadedRef.current) {
       profileLoadedRef.current = true;
       (async () => {
@@ -152,17 +177,18 @@ function ProfilePage() {
             gender: fresh.gender || prev.gender,
           }));
           setTwoFactorEnabled(fresh.twoFactorEnabled === true);
+          const live = applyFresh(fresh);
           setSubscription({
-            active: fresh.subscriptionActive === true,
-            plan: fresh.subscriptionPlan || 'free',
+            active: live.active,
+            plan: live.plan,
             updatedAt: fresh.subscriptionUpdatedAt || null,
+            entitlements: live.entitlements,
           });
           // Keep the cache fresh (pictures stay untouched — /me excludes the blobs)
           try {
-            const raw = localStorage.getItem('user');
-            const cached = raw ? JSON.parse(raw) : {};
-            localStorage.setItem('user', JSON.stringify({
-              ...cached,
+            const current = getStoredUser() || {};
+            setStoredUser({
+              ...current,
               firstName: fresh.firstName,
               lastName: fresh.lastName,
               name: fresh.name,
@@ -173,11 +199,15 @@ function ProfilePage() {
               subscriptionActive: fresh.subscriptionActive,
               subscriptionPlan: fresh.subscriptionPlan,
               subscriptionUpdatedAt: fresh.subscriptionUpdatedAt,
-            }));
+              // Always refreshed alongside the snapshot: dropping the window
+              // made the raw fallback unable to see that a plan had expired.
+              subscriptionExpiresAt: fresh.subscription?.subscriptionEnd ?? current.subscriptionExpiresAt ?? null,
+              subscription: fresh.subscription ?? current.subscription ?? null,
+            });
           } catch { /* cache write best-effort */ }
         } catch (err) {
           // Cached values stay on screen; show a retry instead of hanging
-          setProfileError(err.message || 'Could not refresh your profile.');
+          handleProfileRefreshError(err);
         } finally {
           setProfileLoading(false);
         }
@@ -195,9 +225,17 @@ function ProfilePage() {
     };
   }, [navigate, resendTimer, otpExpiryTimer]);
 
+  // Live plan sync: admin changes, expiry, or another tab update this card
+  // without reopening the profile.
+  useEffect(() => {
+    const onPlan = () => { refreshLivePlan(); };
+    window.addEventListener(SUBSCRIPTION_EVENT, onPlan);
+    return () => window.removeEventListener(SUBSCRIPTION_EVENT, onPlan);
+  }, [refreshLivePlan]);
+
   // Recent security activity: newest security notices first (max 5 shown)
   useEffect(() => {
-    if (!localStorage.getItem('token')) return;
+    if (!getToken()) return;
     let cancelled = false;
     (async () => {
       try {
@@ -260,7 +298,7 @@ function ProfilePage() {
     try {
       const response = await fetch(`${BASE_URL}/auth/setup-2fa`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+        headers: { Authorization: `Bearer ${getToken()}` },
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Unable to start authenticator setup.');
@@ -284,7 +322,7 @@ function ProfilePage() {
     try {
       const response = await fetch(`${BASE_URL}/auth/verify-2fa`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify({ otp: twoFactorCode }),
       });
       const data = await response.json();
@@ -293,8 +331,7 @@ function ProfilePage() {
       setShow2FASetup(false);
       setTwoFactorCode('');
       setSuccess('Google Authenticator is now enabled.');
-      const user = JSON.parse(localStorage.getItem('user') || '{}');
-      localStorage.setItem('user', JSON.stringify({ ...user, twoFactorEnabled: true }));
+      setStoredUser({ ...(getStoredUser() || {}), twoFactorEnabled: true });
     } catch (err) {
       setError(err.message || 'Unable to verify the authenticator code.');
     } finally {
@@ -312,7 +349,7 @@ function ProfilePage() {
     try {
       const response = await fetch(`${BASE_URL}/auth/disable-2fa`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify({ otp: twoFactorCode }),
       });
       const data = await response.json();
@@ -320,8 +357,7 @@ function ProfilePage() {
       setTwoFactorEnabled(false);
       setShowDisable2FAConfirm(false);
       setTwoFactorCode('');
-      const user = JSON.parse(localStorage.getItem('user') || '{}');
-      localStorage.setItem('user', JSON.stringify({ ...user, twoFactorEnabled: false }));
+      setStoredUser({ ...(getStoredUser() || {}), twoFactorEnabled: false });
       setSuccess('Google Authenticator has been disabled. Email OTP will be used at login.');
     } catch (err) {
       setError(err.message || 'Unable to disable Google Authenticator.');
@@ -415,7 +451,7 @@ function ProfilePage() {
   };
 
   const requestEmailOtp = async (newEmail) => {
-    const token = localStorage.getItem('token');
+    const token = getToken();
     const response = await fetch(`${BASE_URL}/auth/request-email-otp`, {
       method: 'POST',
       headers: {
@@ -484,7 +520,7 @@ function ProfilePage() {
   const verifyEmailOtp = async () => {
     setOtpLoading(true);
     try {
-      const token = localStorage.getItem('token');
+      const token = getToken();
       const response = await fetch(`${BASE_URL}/auth/verify-email-otp`, {
         method: 'POST',
         headers: {
@@ -537,8 +573,7 @@ function ProfilePage() {
     setSuccess('');
 
     // Check if email has changed
-    const userRaw = localStorage.getItem('user');
-    const currentUser = userRaw ? JSON.parse(userRaw) : null;
+    const currentUser = getStoredUser();
     const newEmail = formData.email.trim().toLowerCase();
     
     if (currentUser && newEmail !== currentUser.email.toLowerCase()) {
@@ -566,7 +601,7 @@ function ProfilePage() {
     setSuccess('');
 
     try {
-      const token = localStorage.getItem('token');
+      const token = getToken();
       if (!token) {
         navigate('/login');
         return;
@@ -651,8 +686,14 @@ function ProfilePage() {
         throw new Error(data.message || 'Failed to update profile');
       }
 
-      // Update localStorage with new user data
-      localStorage.setItem('user', JSON.stringify({
+      // Persist fresh profile in the tab session (plan broadcast + directory refresh happen inside)
+      const live = applyFresh(data);
+      // Spread the CURRENT cache: rebuilding field-by-field silently dropped
+      // subscriptionExpiresAt/subscriptionStartedAt, so the expiry-aware
+      // fallback could no longer tell an expired plan from an active one.
+      const currentCache = getStoredUser() || {};
+      setStoredUser({
+        ...currentCache,
         _id: data._id,
         firstName: data.firstName,
         lastName: data.lastName,
@@ -667,12 +708,17 @@ function ProfilePage() {
         subscriptionActive: data.subscriptionActive,
         subscriptionPlan: data.subscriptionPlan,
         subscriptionUpdatedAt: data.subscriptionUpdatedAt,
-      }));
+        subscriptionExpiresAt: data.subscription?.subscriptionEnd ?? data.subscriptionExpiresAt ?? currentCache.subscriptionExpiresAt ?? null,
+        subscription: data.subscription ?? currentCache.subscription ?? null,
+      });
 
       setSubscription({
-        active: data.subscriptionActive === true,
-        plan: data.subscriptionPlan || 'free',
+        active: live.active,
+        plan: live.plan,
         updatedAt: data.subscriptionUpdatedAt || null,
+        // Without this the lock grid fell back to rank-only resolution and
+        // could disagree with the rest of the app after a profile save.
+        entitlements: live.entitlements,
       });
 
       setProfilePicture(data.profilePicture || '');
@@ -702,10 +748,9 @@ function ProfilePage() {
   };
 
   const handleCancel = () => {
-    // Reload user data from localStorage
-    const userRaw = localStorage.getItem('user');
-    if (userRaw) {
-      const user = JSON.parse(userRaw);
+    // Reload user data from the tab session
+    const user = getStoredUser();
+    if (user) {
       setFormData({
         firstName: user.firstName || '',
         lastName: user.lastName || '',
@@ -741,12 +786,15 @@ function ProfilePage() {
     return age;
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    localStorage.removeItem('suppliwise_user_last_activity');
+  const handleLogout = async () => {
+    // Revokes this account's token server-side (so no copy of it survives)
+    // and forgets only THIS account — other accounts signed in on this
+    // browser remain in the switcher, ready to be picked up.
+    await signOutCurrentAccount();
     sessionStorage.removeItem('pending_assessment');
-    navigate('/login');
+    // replace: the now-dead profile page must not linger in history, or
+    // Back after sign-out bounces through the guards into /admin.
+    navigate('/login', { replace: true });
   };
 
   const handleLogoutClick = () => {
@@ -959,22 +1007,30 @@ function ProfilePage() {
                 Subscription Status
               </h2>
               <p className="profile-section-subtitle">Your Plan is based on what you purchase.</p>
-              {!profileLoading && (
+              {!profileLoading && (() => {
+                // Server entitlements first; tier table as the UI fallback.
+                const planState = {
+                  active: subscription.active,
+                  plan: subscription.plan,
+                  rank: subscription.active ? (PLAN_RANK[subscription.plan] ?? 0) : 0,
+                  entitlements: subscription.entitlements || null,
+                };
+                return (
                 <div className="plan-features">
                   <p className="plan-features__heading">
                     {subscription.active
                       ? `Unlocked with ${PLAN_LABELS[subscription.plan] || 'your plan'}`
-                      : 'Included in Basic Package — upgrade to unlock more'}
+                      : `Included in ${PLAN_LABELS.free} — upgrade to unlock more`}
                   </p>
                   <div className="plan-features__grid">
-                    {PLAN_FEATURES.map(f => {
-                      const rank = subscription.active ? (PLAN_RANK[subscription.plan] ?? 0) : 0;
-                      const unlocked = rank >= PLAN_RANK[f.tier];
+                    {FEATURE_CARDS.map(f => {
+                      const def = FEATURES[f.key];
+                      const unlocked = canAccess(f.key);
                       return (
-                        <div key={f.title} className={`plan-feature${unlocked ? ' plan-feature--on' : ' plan-feature--locked'}`}>
+                        <div key={f.key} className={`plan-feature${unlocked ? ' plan-feature--on' : ' plan-feature--locked'}`}>
                           <span className="plan-feature__icon"><FeatureIcon icon={unlocked ? f.icon : 'lock'} /></span>
                           <div>
-                            <span className="plan-feature__title">{f.title}</span>
+                            <span className="plan-feature__title">{def.label}</span>
                             <span className="plan-feature__text">{f.text}</span>
                           </div>
                           <span className="plan-feature__check" aria-label={unlocked ? 'Included' : 'Locked'}>
@@ -984,14 +1040,12 @@ function ProfilePage() {
                       );
                     })}
                   </div>
-                  {(() => {
-                    const rank = subscription.active ? (PLAN_RANK[subscription.plan] ?? 0) : 0;
-                    return rank < PLAN_RANK.custom && (
-                      <p className="plan-features__note">Want more? Contact an administrator to upgrade your plan.</p>
-                    );
-                  })()}
+                  {planState.rank < PLAN_RANK.custom && (
+                    <p className="plan-features__note">Want more? Contact an administrator to upgrade your plan.</p>
+                  )}
                 </div>
-              )}
+                );
+              })()}
               {profileLoading ? (
                 <div className="subscription-card subscription-card--loading" aria-live="polite">
                   <span className="subscription-skeleton subscription-skeleton--badge" />
@@ -1000,13 +1054,13 @@ function ProfilePage() {
               ) : (
                 <div className={`subscription-card${subscription.active ? ' subscription-card--active' : ''}`}>
                   <span className={`subscription-badge${subscription.active ? ' subscription-badge--active' : ' subscription-badge--free'}`}>
-                    {subscription.active ? 'Active ✓' : 'Basic Package'}
+                    {subscription.active ? 'Active ✓' : PLAN_LABELS.free}
                   </span>
                   <div className="subscription-details">
                     <span className="subscription-plan">
                       {subscription.active
-                        ? (PLAN_LABELS[subscription.plan] || 'Premium Package')
-                        : 'Basic Package — core assessments, recommendations & tracking included'}
+                        ? (PLAN_LABELS[subscription.plan] || PLAN_LABELS.free)
+                        : `${PLAN_LABELS.free} — core assessments, recommendations & tracking included`}
                     </span>
                     {subscription.updatedAt && (
                       <span className="subscription-updated">
@@ -1029,10 +1083,14 @@ function ProfilePage() {
                       setProfileLoading(true);
                       getMyProfile()
                         .then((fresh) => {
+                          // Resolve through the shared store so this retry
+                          // also refreshes every gated surface (expiry-aware).
+                          const live = applyFresh(fresh);
                           setSubscription({
-                            active: fresh.subscriptionActive === true,
-                            plan: fresh.subscriptionPlan || 'free',
+                            active: live.active,
+                            plan: live.plan,
                             updatedAt: fresh.subscriptionUpdatedAt || null,
+                            entitlements: live.entitlements,
                           });
                           setFormData(prev => ({
                             ...prev,
@@ -1042,7 +1100,7 @@ function ProfilePage() {
                             gender: fresh.gender || prev.gender,
                           }));
                         })
-                        .catch((err) => setProfileError(err.message || 'Could not refresh your profile.'))
+                        .catch((err) => handleProfileRefreshError(err))
                         .finally(() => {
                           profileLoadedRef.current = true;
                           setProfileLoading(false);
@@ -1238,6 +1296,22 @@ function ProfilePage() {
                   </ul>
                 )}
               </div>
+            </div>
+
+            <div className="profile-section">
+              <h2 className="profile-section-title">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                </svg>
+                Accounts
+              </h2>
+              <p className="profile-section-subtitle">
+                Accounts signed in on this browser. Switch instantly — every account keeps its own session, so the others stay signed in.
+              </p>
+              <AccountSwitcher />
             </div>
 
             {error && (

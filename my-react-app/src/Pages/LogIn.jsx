@@ -1,11 +1,19 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
-import { BASE_URL, saveAssessment, getRecommendations, saveAssessmentResults, parseJSON } from '../api';
+import { BASE_URL, saveAssessment, getRecommendations, saveAssessmentResults, parseJSON, startSession, takeAuthNotice, getToken } from '../api';
+import { beginAuthTransition, endAuthTransition } from '../auth/authState';
+import { safeRedirectPath } from '../utils/safeUrl';
 import './LogIn.css';
 import './ProfilePage.css'; // Import for OTP modal styles
 
 const SESSION_KEY = 'pending_assessment';
+
+// One-shot notice left behind by a forced sign-out (session replaced by a
+// newer sign-in, signed out elsewhere, or a token the session store no
+// longer vouches for). Consumed ONCE at module load so React StrictMode's
+// double-run of the lazy useState initializer below still sees the same text.
+const LOGIN_NOTICE = takeAuthNotice();
 
 // Strict email regex — requires a proper TLD (2+ letters; long TLDs allowed)
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/;
@@ -22,12 +30,25 @@ function validateEmail(email) {
 }
 
 function LogIn() {
-  const [email, setEmail] = useState('');
+  // Prefill from ?add=1&email= — the Accounts panel sends it when a switch
+  // can't be handed over and falls back to a fresh sign-in, so the form opens
+  // on the target account's own email instead of a blank field.
+  const [email, setEmail] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('add') !== '1') return '';
+      return (params.get('email') || '').trim().slice(0, 254);
+    } catch { return ''; }
+  });
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
-  const [error, setError] = useState('');
+  const [error, setError] = useState(LOGIN_NOTICE);
   const [loading, setLoading] = useState(false);
+  // OPT-IN saved login: checked by default so switching accounts later never
+  // asks for this password again (server stores only a session-bound
+  // remember credential — never this password or an access token).
+  const [remember, setRemember] = useState(true);
   const [showOtpModal, setShowOtpModal] = useState(false);
   const [otp, setOtp] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
@@ -55,12 +76,45 @@ function LogIn() {
   const location = useLocation();
 
   const fromAssessment = location.state?.fromAssessment;
+  // "Add another account" (?add=1 from Profile → Accounts): the navbar no
+  // longer shows the signed-in chip on auth pages, so this banner supplies
+  // the context and a way back to the current session. The account switcher
+  // also lands here when a switch can't be handed over — with &email= naming
+  // the target account (prefilled above) so the banner says who it's for.
+  const searchParams = new URLSearchParams(location.search);
+  const addingAccount = searchParams.get('add') === '1' && !!getToken();
+  const targetEmail = searchParams.get('add') === '1' ? (searchParams.get('email') || '').trim() : '';
+
+  // Browsers often paint autofill without firing onChange, so React state
+  // stays empty and the form reports "please enter your email" over a
+  // visibly filled field. Pull the real DOM values in after paint.
+  useEffect(() => {
+    const syncAutofill = () => {
+      const emailInput = document.getElementById('login-email');
+      const passwordInput = document.getElementById('login-password');
+      if (emailInput?.value) setEmail(emailInput.value);
+      if (passwordInput?.value) setPassword(passwordInput.value);
+    };
+    syncAutofill();
+    const timers = [50, 300, 1000].map((ms) => setTimeout(syncAutofill, ms));
+    return () => timers.forEach(clearTimeout);
+  }, []);
 
   const validateField = (field, value) => {
     let msg = '';
     if (field === 'email') msg = validateEmail(value);
     if (field === 'password' && !value) msg = 'Please enter your password.';
     setFieldErrors(prev => ({ ...prev, [field]: msg }));
+  };
+
+  // While typing: revalidate a non-empty value, but an emptied field just
+  // drops its error instead of being validated as '' (which put
+  // "Please enter your email address." on a blank input mid-keystroke).
+  // Empty fields are still validated on blur and on submit.
+  const revalidateOnChange = (field, value) => {
+    if (!fieldErrors[field]) return;
+    if (value) validateField(field, value);
+    else setFieldErrors(prev => ({ ...prev, [field]: '' }));
   };
 
   const startResendCooldown = (seconds) => {
@@ -153,23 +207,28 @@ function LogIn() {
     e.preventDefault();
     setError('');
 
-    const emailErr = validateEmail(email);
-    const passwordErr = !password ? 'Please enter your password.' : '';
+    const emailInput = document.getElementById('login-email');
+    const passwordInput = document.getElementById('login-password');
+    const emailValue = (emailInput?.value || email || '').trim();
+    const passwordValue = passwordInput?.value || password || '';
+    if (emailValue !== email) setEmail(emailValue);
+    if (passwordValue !== password) setPassword(passwordValue);
+
+    const emailErr = validateEmail(emailValue);
+    const passwordErr = !passwordValue ? 'Please enter your password.' : '';
     const newErrors = { email: emailErr, password: passwordErr };
     setFieldErrors(newErrors);
     if (Object.values(newErrors).some(Boolean)) return;
 
     setLoading(true);
     try {
-      console.log('[DEBUG] Sending login request...');
       const response = await fetch(`${BASE_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: emailValue, password: passwordValue }),
       });
 
       const data = await parseJSON(response);
-      console.log('[DEBUG] Login response:', data);
 
       if (!response.ok) {
         throw new Error(data.message || 'Login failed');
@@ -186,7 +245,6 @@ function LogIn() {
 
       // Check if OTP is required
       if (data.requiresOtp) {
-        console.log('[DEBUG] OTP required, showing modal');
         setOtp('');
         setError('');
         setSuccess('');
@@ -199,10 +257,8 @@ function LogIn() {
       }
 
       // Old flow (shouldn't happen with OTP enabled)
-      console.log('[DEBUG] No OTP required - using old flow (this should not happen!)');
       await completeLogin(data);
     } catch (err) {
-      console.error('[DEBUG] Login error:', err);
       const message = err.lockedBy === 'network'
         ? 'Too many attempts from this network. Please wait a few minutes or switch networks and try again.'
         : err.message;
@@ -224,7 +280,7 @@ function LogIn() {
       const response = await fetch(`${BASE_URL}/auth/${requiresTwoFactor ? 'login-2fa' : 'verify-login-otp'}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: pendingUserId, otp: otp.trim() }),
+        body: JSON.stringify({ userId: pendingUserId, otp: otp.trim(), remember }),
       });
 
       const data = await parseJSON(response);
@@ -248,9 +304,14 @@ function LogIn() {
   };
 
   const completeLogin = async (data) => {
-    localStorage.setItem('token', data.token);
-    localStorage.setItem('suppliwise_user_last_activity', String(Date.now()));
-    localStorage.setItem('user', JSON.stringify({ 
+    // Hold the public-route guard while we decide where this sign-in lands —
+    // the token write below emits immediately, and the guard must not bounce
+    // /login → /dashboard before the pending-assessment flow reaches /results.
+    beginAuthTransition();
+    try {
+    // Store this account under its OWN session keys and make it active —
+    // any account already signed in on this browser stays signed in.
+    const switchedFrom = startSession(data.token, {
       firstName: data.firstName, 
       lastName: data.lastName, 
       name: data.name, 
@@ -262,8 +323,15 @@ function LogIn() {
       profilePicture: data.profilePicture || '',
       bannerPicture: data.bannerPicture || '',
       subscriptionActive: data.subscriptionActive === true,
-      subscriptionPlan: data.subscriptionPlan || 'free'
-    }));
+      subscriptionPlan: data.subscriptionPlan || 'free',
+      // Resolved snapshot (expiry-aware) — the plan store renders from this.
+      subscription: data.subscription ?? null,
+      subscriptionUpdatedAt: data.subscriptionUpdatedAt ?? null,
+    }, data.rememberToken || '');
+
+    // Publish the freshly signed-in account's plan to the shared store so no
+    // page can keep showing the previous session's subscription state.
+    try { window.dispatchEvent(new Event('suppliwise:subscription')); } catch { /* non-browser safe */ }
 
     // Check for pending assessment saved before login
     const pending = sessionStorage.getItem(SESSION_KEY);
@@ -291,9 +359,25 @@ function LogIn() {
       // Clear any stale pending assessment data
       sessionStorage.removeItem(SESSION_KEY);
       
-      // Check if there's a redirect destination from HomePage
-      const redirectTo = location.state?.redirectTo;
-      navigate(redirectTo || '/dashboard');
+      // Check if there's a redirect destination from HomePage.
+      // Only a same-origin app path is resumed: this value is fed straight
+      // into `window.location.href` on the account-switch path, so an
+      // absolute URL in router state would have been an open redirect. Anything
+      // else falls back to the dashboard.
+      const redirectTo = safeRedirectPath(location.state?.redirectTo);
+      if (switchedFrom) {
+        // We just took over from a different signed-in account: navigate with
+        // a full page load so none of the previous account's state survives.
+        window.location.href = redirectTo;
+      } else {
+        navigate(redirectTo);
+      }
+    }
+    } finally {
+      // Re-open the guard: if we navigated it re-evaluates harmlessly; if we
+      // failed after writing the token it redirects instead of stranding
+      // the user on the login form with a signed-in navbar.
+      endAuthTransition();
     }
   };
 
@@ -527,16 +611,32 @@ function LogIn() {
             </div>
           )}
 
+          {/* Add-another-account flow: current sessions stay signed in */}
+          {addingAccount && (
+            <div className="auth-info-banner">
+              {targetEmail ? (
+                <>➕ Sign in as <strong>{targetEmail}</strong> to continue. Your other accounts stay signed in on this browser.</>
+              ) : (
+                <>➕ Sign in to add another account. Your other accounts stay signed in on this browser.</>
+              )}{' '}
+              <NavLink to="/profile" className="auth-banner-link">Back to my session</NavLink>
+            </div>
+          )}
+
           {error && !showOtpModal && <p className="auth-error">{error}</p>}
 
           <div className={`auth-field ${fieldErrors.email ? 'field-has-error' : ''}`}>
             <label>Email</label>
             <input
+              id="login-email"
+              name="email"
               type="email"
               value={email}
-              onChange={(e) => { setEmail(e.target.value); if (fieldErrors.email) validateField('email', e.target.value); }}
-              onBlur={(e) => validateField('email', e.target.value)}
+              onChange={(e) => { setEmail(e.target.value); revalidateOnChange('email', e.target.value); }}
+              onBlur={(e) => { if (e.target.value) validateField('email', e.target.value); }}
+              onInput={(e) => { if (e.target.value && e.target.value !== email) setEmail(e.target.value); }}
               placeholder="your.email@example.com"
+              autoComplete="email"
               required
             />
             {fieldErrors.email && <span className="auth-field-error">{fieldErrors.email}</span>}
@@ -546,11 +646,15 @@ function LogIn() {
             <label>Password</label>
             <div className="auth-input-wrap">
               <input
+                id="login-password"
+                name="password"
                 type={showPassword ? 'text' : 'password'}
                 value={password}
-                onChange={(e) => { setPassword(e.target.value); if (fieldErrors.password) validateField('password', e.target.value); }}
-                onBlur={(e) => validateField('password', e.target.value)}
+                onChange={(e) => { setPassword(e.target.value); revalidateOnChange('password', e.target.value); }}
+                onBlur={(e) => { if (e.target.value) validateField('password', e.target.value); }}
+                onInput={(e) => { if (e.target.value && e.target.value !== password) setPassword(e.target.value); }}
                 placeholder="Enter your password"
+                autoComplete="current-password"
                 required
               />
               <button type="button" className="eye-btn" onClick={() => setShowPassword(s => !s)} aria-label="Toggle password visibility">
@@ -563,6 +667,15 @@ function LogIn() {
             </div>
             {fieldErrors.password && <span className="auth-field-error">{fieldErrors.password}</span>}
           </div>
+
+          <label className="auth-remember">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+            />
+            <span>Save my login on this browser — switch accounts later without typing your password</span>
+          </label>
 
           <button type="submit" className="auth-btn" disabled={loading}>
             {loading ? 'Signing in...' : 'Sign In'}

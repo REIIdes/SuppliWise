@@ -1,5 +1,15 @@
 const nodemailer = require('nodemailer');
 
+// Logs land in shared stdout/log files, so recipients are never written out
+// in full: keeps the local part's first character plus the domain so an
+// incident stays diagnosable without persisting PII.
+function maskEmail(value) {
+  const email = String(value || '').trim();
+  const at = email.indexOf('@');
+  if (at <= 0) return '[redacted]';
+  return `${email[0]}***@${email.slice(at + 1)}`;
+}
+
 // Create reusable transporter
 let transporter = null;
 
@@ -195,7 +205,7 @@ This is an automated message from SuppliWise.
     };
 
     await transport.sendMail(mailOptions);
-    console.log(`[Email] Verification email sent successfully to ${toEmail}`);
+    console.log(`[Email] Verification email sent successfully to ${maskEmail(toEmail)}`);
     return true;
   } catch (error) {
     transporter = null;
@@ -269,7 +279,7 @@ async function sendAdminCredentialsEmail(toEmail, { alias, password, totpSecret 
         </html>`,
       text: `SuppliWise Administrator Access\n\nHi ${alias},\n\nAlias: ${alias}\nPassword: ${password}\nAuthenticator key: ${totpSecret}\n\nSign in at /admin/login. Add the key to Google Authenticator (Enter setup key, time-based).\n\nPlease change your password after first sign-in and never share these credentials.`,
     });
-    console.log(`[Email] Admin credentials sent to ${clean}`);
+    console.log(`[Email] Admin credentials sent to ${maskEmail(clean)}`);
     return true;
   } catch (error) {
     console.error('[Email] Failed to send admin credentials:', error.message);
@@ -364,7 +374,7 @@ async function sendStatusEmail(toEmail, kind, context = {}) {
         </html>`,
       text: `SuppliWise - ${p.title}\n\nHi there,\n\n${p.body}\n\n${p.advice}\n\nBest regards,\nThe SuppliWise Team`,
     });
-    console.log(`[Email] Status email (${kind}) sent to ${clean}`);
+    console.log(`[Email] Status email (${kind}) sent to ${maskEmail(clean)}`);
     return true;
   } catch (error) {
     console.error(`[Email] Failed to send ${kind} email:`, error.message);

@@ -10,7 +10,8 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "test": "node --test \"Test File/*.test.js\"",
-    "check": "node --check index.js && node --check middleware/auth.js && node --check routes/auth.js && node --check routes/admin.js && node --check models/User.js"
+    "test:flows": "node test-subscription-flows.js",
+    "check": "node --check index.js && node --check middleware/auth.js && node --check routes/auth.js && node --check routes/admin.js && node --check models/User.js && node --check models/Session.js && node --check utils/sessions.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

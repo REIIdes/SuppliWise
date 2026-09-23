@@ -6,6 +6,9 @@ function AdminTopbar({
   showNotifications,
   onToggleNotifications,
   onGoProfile,
+  bellRef,
+  onBellPointerEnter,
+  onBellPointerLeave,
 }) {
   const initials = admin?.alias
     ? admin.alias.charAt(0).toUpperCase()
@@ -32,8 +35,13 @@ function AdminTopbar({
       {/* ── Right: bell + profile ──────────────────── */}
       <div className="admin-topbar__actions">
 
-        {/* Bell / notifications */}
-        <div className="admin-topbar__notif-wrap">
+        {/* Bell / notifications — opens on hover (mouse/pen) as well as click */}
+        <div
+          className="admin-topbar__notif-wrap"
+          ref={bellRef}
+          onPointerEnter={onBellPointerEnter}
+          onPointerLeave={onBellPointerLeave}
+        >
           <button
             className="admin-topbar__icon-btn"
             aria-label="Open notifications"
