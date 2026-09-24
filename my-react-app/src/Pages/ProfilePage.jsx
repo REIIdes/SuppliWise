@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
-import ConfirmModal from '../Components/ConfirmModal/ConfirmModal';
+import ConfirmLogoutModal from '../Components/ConfirmLogoutModal/ConfirmLogoutModal';
 import AccountSwitcher from '../Components/AccountSwitcher/AccountSwitcher';
 import { BASE_URL, getMyProfile, getNotifications, markNotificationRead, isSecurityNotification, signOutCurrentAccount, getToken, getStoredUser, setStoredUser } from '../api';
 import { useSubscription, SUBSCRIPTION_EVENT } from '../hooks/useSubscription';
@@ -1381,14 +1381,13 @@ function ProfilePage() {
         </div>
       </div>
 
-      {/* Logout Confirmation Modal */}
+      {/* Logout Confirmation Modal — vibrant shared dialog */}
       {showLogoutConfirm && (
-        <ConfirmModal
+        <ConfirmLogoutModal
           title="Confirm Logout"
           message="Are you sure you want to log out?"
           confirmText="Log Out"
           cancelText="Cancel"
-          type="warning"
           onConfirm={confirmLogout}
           onCancel={() => setShowLogoutConfirm(false)}
         />

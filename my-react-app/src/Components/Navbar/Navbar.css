@@ -1,16 +1,55 @@
-/* ── Navbar ── */
+/* ═══════════════════════════════════════════════════════════════════
+   NAVBAR — vibrant refresh (shared by every user-facing page)
+   White glass bar with an animated rainbow gradient underline, a
+   gradient logo tile + brand wordmark, pill hover states for nav
+   links, a ringed gradient avatar and a gradient Sign In CTA that
+   matches the auth pages.
+
+   ⚠ No `transform` / `backdrop-filter` / `opacity<1` (persistent) on
+   .navbar itself: the notifications panel rendered inside it is
+   position: fixed and JS-anchored to the viewport — those properties
+   would turn the navbar into its containing block and break it.
+   The entrance animation below is opacity-only and ends at 1.
+   ═══════════════════════════════════════════════════════════════════ */
+
 .navbar {
   width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #ffffff;
-  padding: 10px 24px;
-  border-bottom: 1px solid #e5e7eb;
   box-sizing: border-box;
+  padding: 10px 24px;
   position: sticky;
   top: 0;
   z-index: 100;
+  background: linear-gradient(180deg, #ffffff 0%, #f7fffb 100%);
+  box-shadow:
+    0 1px 0 rgba(16, 185, 129, 0.10),
+    0 8px 26px -20px rgba(6, 95, 70, 0.5);
+  animation: nav-fade 0.4s ease both;
+}
+
+/* Animated rainbow underline — echoes the auth card ribbon */
+.navbar::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #34d399, #22d3ee, #818cf8, #fbbf24, #34d399);
+  background-size: 300% 100%;
+  animation: nav-ribbon 12s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes nav-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes nav-ribbon {
+  from { background-position: 0% 50%; }
+  to   { background-position: 300% 50%; }
 }
 
 .navbar-left {
@@ -18,29 +57,48 @@
   align-items: center;
   gap: 10px;
   text-decoration: none;
+  min-width: 0;
 }
 
+/* ── Logo tile: gradient shadow + playful hover wiggle on the svg ─── */
 .navbar-logo-box {
   width: 44px;
   height: 44px;
-  border-radius: 10px;
+  border-radius: 13px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: transparent;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
+.navbar-logo-box svg {
+  filter: drop-shadow(0 5px 12px rgba(16, 185, 129, 0.5));
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.navbar-logo-box:hover svg {
+  transform: rotate(-6deg) scale(1.08);
+}
+
+/* ── Brand wordmark: emerald → teal → cyan gradient text ──────────── */
 .navbar-brand {
-  font-size: 20px;
-  font-weight: 600;
-  color: #4ade80;
+  font-size: 21px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   text-decoration: none;
   font-family: sans-serif;
+  white-space: nowrap;
+  background: linear-gradient(92deg, #059669 0%, #0d9488 55%, #0891b2 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  transition: filter 0.2s ease;
 }
 
 .navbar-brand:hover {
-  color: #22c55e;
+  filter: brightness(0.92) saturate(1.15);
 }
 
 .navbar-right {
@@ -49,6 +107,7 @@
   gap: 12px;
 }
 
+/* ── History link (legacy class, kept for safety) ─────────────────── */
 .navbar-history-link {
   font-size: 14px;
   font-weight: 500;
@@ -58,49 +117,63 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  transition: color 0.2s;
+  border-radius: 10px;
+  transition: color 0.2s, background 0.2s;
 }
 
 .navbar-history-link:hover,
 .navbar-history-link.active {
-  color: #22c55e;
+  color: #047857;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(34, 211, 238, 0.10));
 }
 
+/* ── Nav links: tinted pill on hover / active ─────────────────────── */
 .navbar-nav-link {
   font-size: 14px;
-  font-weight: 500;
-  color: #374151;
+  font-weight: 600;
+  color: #334155;
   text-decoration: none;
-  padding: 8px;
+  padding: 8px 10px;
   display: flex;
   align-items: center;
   gap: 5px;
-  border-radius: 6px;
-  transition: all 0.2s;
+  border-radius: 10px;
+  transition: color 0.2s ease, background 0.2s ease, transform 0.2s ease;
 }
 
 .navbar-nav-link:hover {
-  color: #22c55e;
-  background: #f0fdf4;
+  color: #047857;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(34, 211, 238, 0.10));
+  transform: translateY(-1px);
+}
+
+.navbar-nav-link:active {
+  transform: translateY(0);
 }
 
 .navbar-nav-link.active {
-  color: #22c55e;
-  background: #f0fdf4;
+  color: #047857;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.14), rgba(34, 211, 238, 0.12));
 }
 
+.navbar-nav-link:focus-visible {
+  outline: 2px solid #10b981;
+  outline-offset: 1px;
+}
+
+/* ── Profile chip: pill hover + gradient ring avatar ──────────────── */
 .navbar-profile-link {
   display: flex;
   align-items: center;
   gap: 8px;
   text-decoration: none;
-  padding: 4px 8px;
-  border-radius: 8px;
-  transition: background 0.2s;
+  padding: 4px 10px 4px 4px;
+  border-radius: 999px;
+  transition: background 0.2s ease;
 }
 
 .navbar-profile-link:hover {
-  background: #f3f4f6;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.10), rgba(129, 140, 248, 0.10));
 }
 
 .navbar-profile-link .navbar-avatar {
@@ -121,7 +194,10 @@
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: #22c55e;
+  background: linear-gradient(135deg, #34d399 0%, #0d9488 100%);
+  box-shadow:
+    0 0 0 3px rgba(52, 211, 153, 0.22),
+    0 4px 10px -4px rgba(16, 185, 129, 0.5);
   color: #fff;
   font-size: 14px;
   font-weight: 700;
@@ -132,24 +208,80 @@
 
 .navbar-username {
   font-size: 14px;
-  font-weight: 500;
-  color: #374151;
+  font-weight: 600;
+  color: #0f172a;
 }
 
-.navbar-signin-btn {
-  padding: 8px 20px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  background: #fff;
-  color: #111827;
+.navbar-nav-label {
   font-size: 14px;
-  font-weight: 500;
+}
+
+/* Web3 / Market / DAO text labels collapse to icons on small screens so the
+   navbar never overflows on mobile. */
+@media (max-width: 768px) {
+  .navbar-nav-label {
+    display: none;
+  }
+}
+
+/* ── Sign In CTA: vibrant gradient pill matching the auth pages ───── */
+.navbar-signin-btn {
+  padding: 9px 22px;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #10b981 0%, #059669 55%, #0d9488 100%);
+  background-size: 160% 160%;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
   cursor: pointer;
   text-decoration: none;
   font-family: sans-serif;
-  transition: background 0.2s;
+  white-space: nowrap;
+  box-shadow: 0 10px 22px -10px rgba(16, 185, 129, 0.65);
+  transition: transform 0.18s ease, box-shadow 0.22s ease, background-position 0.3s ease;
 }
 
 .navbar-signin-btn:hover {
-  background: #f3f4f6;
+  background-position: 100% 50%;
+  transform: translateY(-2px);
+  box-shadow: 0 14px 26px -10px rgba(13, 148, 136, 0.6);
+  color: #fff;
+}
+
+.navbar-signin-btn:active {
+  transform: translateY(0);
+}
+
+.navbar-signin-btn:focus-visible {
+  outline: 3px solid rgba(16, 185, 129, 0.45);
+  outline-offset: 2px;
+}
+
+/* ── Reduced motion: keep the design, drop the animation ──────────── */
+@media (prefers-reduced-motion: reduce) {
+  .navbar,
+  .navbar::after {
+    animation: none !important;
+  }
+  .navbar-nav-link,
+  .navbar-signin-btn,
+  .navbar-logo-box svg,
+  .navbar-brand,
+  .navbar-profile-link,
+  .navbar-history-link {
+    transition: none;
+  }
+  .navbar-nav-link:hover,
+  .navbar-nav-link:active {
+    transform: none;
+  }
+  .navbar-signin-btn:hover,
+  .navbar-signin-btn:active {
+    transform: none;
+  }
+  .navbar-logo-box:hover svg {
+    transform: none;
+  }
 }

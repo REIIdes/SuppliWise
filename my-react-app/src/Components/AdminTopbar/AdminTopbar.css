@@ -1,12 +1,17 @@
 /* ── Admin Topbar ─────────────────────────────────────────────────────── */
+/* The shell (sidebar top / main margin) reads this same variable, so the
+   bar height only ever changes in one place. */
+:root { --admin-topbar-h: 60px; }
+
 .admin-topbar {
   width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #18342a;
-  padding: 0 24px;
-  height: 56px;
+  gap: 16px;
+  background: linear-gradient(100deg, #10261f 0%, #18342a 42%, #1c3d31 78%, #143026 100%);
+  padding: 0 22px;
+  height: var(--admin-topbar-h, 60px);
   border-bottom: 1px solid rgba(255,255,255,.08);
   box-sizing: border-box;
   position: fixed;
@@ -15,13 +20,29 @@
   right: 0;
   z-index: 150;
   flex-shrink: 0;
+  overflow: hidden;
+  box-shadow: 0 6px 22px -14px rgba(0,0,0,.9);
+}
+
+/* Soft colour wash across the bar so it isn't a flat slab */
+.admin-topbar__glow {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(520px 90px at 8% 120%, rgba(217,107,53,.30), transparent 65%),
+    radial-gradient(460px 80px at 78% -30%, rgba(99,102,241,.28), transparent 65%),
+    radial-gradient(360px 70px at 46% 140%, rgba(16,185,129,.18), transparent 65%);
+  pointer-events: none;
 }
 
 /* ── Left: logo + name ──────────────────────────── */
 .admin-topbar__brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 11px;
+  position: relative;
+  z-index: 1;
+  min-width: 0;
 }
 
 .admin-topbar__logo {
@@ -29,36 +50,89 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  background: linear-gradient(140deg, #f97316, #d46b35 55%, #b8511f);
+  box-shadow: 0 6px 16px -6px rgba(217,107,53,.9), inset 0 1px 0 rgba(255,255,255,.42);
 }
 
 .admin-topbar__name {
   font-size: 17px;
-  font-weight: 700;
-  color: #ed9a62;
-  font-family: sans-serif;
-  letter-spacing: -0.01em;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.02em;
 }
 
 .admin-topbar__divider {
   width: 1px;
   height: 18px;
-  background: rgba(255,255,255,.2);
+  background: linear-gradient(180deg, transparent, rgba(255,255,255,.35), transparent);
   flex-shrink: 0;
 }
 
 .admin-topbar__panel {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 12.5px;
+  font-weight: 600;
   color: #a8c4b4;
-  font-family: sans-serif;
+  letter-spacing: .01em;
+}
+
+/* Live status chip */
+.admin-topbar__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: 6px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  font: 700 10.5px/1 Arial, sans-serif;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: #a7f3d0;
+  background: rgba(16,185,129,.14);
+  border: 1px solid rgba(52,211,153,.34);
+  white-space: nowrap;
+}
+.admin-topbar__status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #34d399;
+  box-shadow: 0 0 0 0 rgba(52,211,153,.7);
+  animation: admin-status-pulse 2s ease-out infinite;
+}
+@keyframes admin-status-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(52,211,153,.65); }
+  70%  { box-shadow: 0 0 0 7px rgba(52,211,153,0); }
+  100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); }
 }
 
 /* ── Right: actions ─────────────────────────────── */
 .admin-topbar__actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
+  position: relative;
+  z-index: 1;
 }
+
+/* Secure-connection badge */
+.admin-topbar__secure {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border-radius: 999px;
+  font: 700 10.5px/1 Arial, sans-serif;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: #c7d2fe;
+  background: rgba(99,102,241,.16);
+  border: 1px solid rgba(129,140,248,.36);
+  white-space: nowrap;
+}
+.admin-topbar__secure svg { color: #a5b4fc; }
 
 /* Notification bell wrapper */
 .admin-topbar__notif-wrap {
@@ -71,82 +145,257 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
-  border: 1px solid rgba(255,255,255,.15);
-  border-radius: 8px;
+  width: 39px;
+  height: 39px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 11px;
   background: rgba(255,255,255,.07);
   color: #c6d8cc;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition: background .15s, color .15s, border-color .15s, transform .15s, box-shadow .15s;
 }
-.admin-topbar__icon-btn:hover {
-  background: rgba(255,255,255,.14);
+.admin-topbar__icon-btn:hover,
+.admin-topbar__icon-btn.is-open {
+  background: linear-gradient(135deg, rgba(217,107,53,.9), rgba(225,29,72,.85));
   color: #fff;
-  border-color: rgba(255,255,255,.28);
+  border-color: transparent;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px -8px rgba(225,29,72,.9);
 }
 
 /* Unread badge */
 .admin-topbar__badge {
   position: absolute;
-  top: -5px;
-  right: -5px;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 4px;
+  top: -6px;
+  right: -6px;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 5px;
   border-radius: 10px;
-  background: #d46b35;
+  background: linear-gradient(135deg, #f43f5e, #e11d48);
   color: #fff;
-  font: 700 10px Arial, sans-serif;
+  font: 800 10px/1 Arial, sans-serif;
   display: flex;
   align-items: center;
   justify-content: center;
   pointer-events: none;
+  border: 2px solid #18342a;
+  box-shadow: 0 3px 8px rgba(225,29,72,.7);
 }
 
 /* Profile button */
 .admin-topbar__profile {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   padding: 4px 10px 4px 4px;
-  border: 1px solid rgba(255,255,255,.15);
-  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 999px;
   background: rgba(255,255,255,.07);
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background .15s, border-color .15s, transform .15s, box-shadow .15s;
 }
 .admin-topbar__profile:hover {
   background: rgba(255,255,255,.14);
-  border-color: rgba(255,255,255,.28);
+  border-color: rgba(255,255,255,.3);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px -10px rgba(0,0,0,.9);
 }
 
-/* Avatar circle */
+/* Avatar circle — gradient ring so it reads as a focal point */
 .admin-topbar__avatar {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
-  background: #d46b35;
+  background: linear-gradient(140deg, #fbbf24, #f97316 55%, #e11d48);
   color: #fff;
-  font: 700 13px Arial, sans-serif;
+  font: 800 13px/1 Arial, sans-serif;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   user-select: none;
+  object-fit: cover;
+  box-shadow: 0 0 0 2px rgba(255,255,255,.22), 0 4px 10px -3px rgba(249,115,22,.9);
 }
 
 /* Admin alias text */
 .admin-topbar__alias {
-  font: 500 13px/1 Arial, sans-serif;
+  font: 700 13px/1 Arial, sans-serif;
   color: #eff6ee;
   white-space: nowrap;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Small caret on the profile chip */
+.admin-topbar__chev {
+  display: flex;
+  color: rgba(255,255,255,.55);
+  transition: transform .18s ease, color .18s ease;
+}
+.admin-topbar__profile:hover .admin-topbar__chev {
+  transform: translateY(1px);
+  color: #fff;
+}
+/* Open state rotates the caret up — must out-rank the hover rule above. */
+.admin-topbar__chev.is-open,
+.admin-topbar__profile:hover .admin-topbar__chev.is-open {
+  transform: rotate(180deg);
+  color: #fff;
+}
+.admin-topbar__profile.is-open {
+  background: rgba(255,255,255,.16);
+  border-color: rgba(255,255,255,.34);
+}
+
+/* Photo avatar: real image instead of the gradient + initial */
+img.admin-topbar__avatar,
+img.admin-topbar__dropdown-avatar { display: block; object-fit: cover; }
+
+/* ── Collapsible account menu ──────────────────────── */
+.admin-topbar__menu { position: relative; }
+
+/* position: fixed (like the notification panel) so the menu is never clipped
+   by the topbar and stays pinned under the pill while the page scrolls. */
+.admin-topbar__dropdown {
+  position: fixed;
+  top: calc(var(--admin-topbar-h, 60px) + 8px);
+  right: 22px;
+  width: min(272px, calc(100vw - 28px));
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 16px;
+  background: linear-gradient(160deg, #1a3b2f 0%, #143026 60%, #11271e 100%);
+  box-shadow: 0 28px 54px -24px rgba(0,0,0,.95), inset 0 1px 0 rgba(255,255,255,.08);
+  z-index: 160;
+  animation: admin-menu-in .16s ease both;
+}
+@keyframes admin-menu-in {
+  from { opacity: 0; transform: translateY(-8px) scale(.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.admin-topbar__dropdown-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 6px 10px;
+  margin-bottom: 5px;
+  border-bottom: 1px solid rgba(255,255,255,.1);
+}
+.admin-topbar__dropdown-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(140deg, #fbbf24, #f97316 55%, #e11d48);
+  color: #fff;
+  font: 800 15px/1 Arial, sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px rgba(255,255,255,.22);
+}
+.admin-topbar__dropdown-id { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.admin-topbar__dropdown-id strong {
+  font: 800 14px/1.2 Arial, sans-serif;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.admin-topbar__dropdown-id em {
+  font: 700 10px/1 Arial, sans-serif;
+  font-style: normal;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: #6ee7b7;
+}
+
+.admin-topbar__menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: #dcebe2;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease, transform .15s ease;
+}
+.admin-topbar__menu-item:hover {
+  background: rgba(255,255,255,.1);
+  color: #fff;
+  transform: translateX(2px);
+}
+.admin-topbar__menu-item:focus-visible {
+  outline: 2px solid #f97316;
+  outline-offset: 2px;
+}
+.admin-topbar__menu-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  flex-shrink: 0;
+  background: rgba(255,255,255,.09);
+  color: #a7f3d0;
+}
+.admin-topbar__menu-icon--accent {
+  background: linear-gradient(135deg, #f97316, #e11d48);
+  color: #fff;
+  box-shadow: 0 6px 14px -8px rgba(225,29,72,.95);
+}
+.admin-topbar__menu-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.admin-topbar__menu-text strong { font: 700 13px/1.25 Arial, sans-serif; }
+.admin-topbar__menu-text em {
+  font: 500 11px/1.35 Arial, sans-serif;
+  font-style: normal;
+  color: #9db8ab;
+}
+.admin-topbar__menu-item--danger .admin-topbar__menu-icon { color: #fda4af; }
+.admin-topbar__menu-item--danger:hover { background: rgba(225,29,72,.24); }
+
+.admin-topbar__dropdown-sep {
+  height: 1px;
+  margin: 5px 6px;
+  background: rgba(255,255,255,.1);
 }
 
 /* ── Responsive ─────────────────────────────────── */
+@media (max-width: 720px) {
+  .admin-topbar__status,
+  .admin-topbar__secure span { display: none; }
+  .admin-topbar__secure {
+    padding: 7px;
+    border-radius: 50%;
+  }
+}
 @media (max-width: 480px) {
   .admin-topbar__panel,
   .admin-topbar__divider { display: none; }
   .admin-topbar__alias   { display: none; }
   .admin-topbar { padding: 0 14px; }
+  .admin-topbar__dropdown { right: 14px; }
+}
+
+/* ── Reduced motion ─────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .admin-topbar__status-dot { animation: none; }
+  .admin-topbar__dropdown { animation: none; }
+  .admin-topbar__icon-btn,
+  .admin-topbar__profile,
+  .admin-topbar__menu-item,
+  .admin-topbar__chev { transition: none; }
+  .admin-topbar__menu-item:hover { transform: none; }
 }

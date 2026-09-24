@@ -4,14 +4,53 @@ const User = require('../models/User');
 const Assessment = require('../models/Assessment');
 const AdminAccount = require('../models/AdminAccount');
 const AdminEvent = require('../models/AdminEvent');
+const Session = require('../models/Session');
+const UserNotification = require('../models/UserNotification');
+const IntakeRecord = require('../models/IntakeRecord');
+const DashboardMetrics = require('../models/DashboardMetrics');
 const { isArgon2id, isBcrypt } = require('../utils/password');
 const { SECURITY_AUDIT } = require('../utils/securityAudit');
 const speakeasy = require('speakeasy');
 const { protect, adminOnly } = require('../middleware/auth');
 const { verifyTotpOnce } = require('../utils/totp');
+// Blockchain layer (all 20 Web3 features) — models + the PoW ledger the
+// security monitor probes below. Loaded here so every blockchain probe hits
+// the source-of-truth collections directly (no self-HTTP calls).
+const {
+  Block, Wallet, SupplyBatch, Listing, Order, Dispute, Proposal,
+  KnowledgePost, RewardEvent, Nft, LoyaltyCode, DataShare, StorageObject,
+  HealthAnchor, ShareLink, RecAnchor, Trial, TrialConsent, OracleFeed,
+  Expert, Booking, Web3Config, DEFAULT_PARAMS,
+} = require('../models/Web3');
+const ledger = require('../blockchain/ledger');
 
 const router = express.Router();
 router.use(protect, adminOnly);
+
+// ── Account removal plan ─────────────────────────────────────────────────
+// "Delete account" is a hard delete: the account leaves the database together
+// with everything it owns. The plan is derived from the schemas instead of a
+// hand-written list, so a model that has no user reference is simply skipped
+// and a newly added user-owned collection is covered without edits here.
+const USER_REF_FIELDS = ['user', 'owner', 'sellerUser', 'buyerUser'];
+const USER_OWNED_MODELS = [
+  Assessment,
+  UserNotification,
+  IntakeRecord,
+  DashboardMetrics,
+  Block, Wallet, SupplyBatch, Listing, Order, Dispute, Proposal, KnowledgePost,
+  RewardEvent, Nft, LoyaltyCode, DataShare, StorageObject, HealthAnchor,
+  ShareLink, RecAnchor, Trial, TrialConsent, OracleFeed, Expert, Booking,
+];
+const USER_DELETE_PLAN = USER_OWNED_MODELS
+  .map(model => {
+    const fields = USER_REF_FIELDS.filter(field => {
+      const path = model.schema.paths[field];
+      return path && path.instance === 'ObjectId';
+    });
+    return fields.length ? { model, fields } : null;
+  })
+  .filter(Boolean);
 
 const safeUserProjection = {
   password: 0,
@@ -373,13 +412,38 @@ router.delete('/users/:id/lockout', async (req, res) => {
   }
 });
 
+// ── Hard delete: the account AND all of its data leave the database ─────
 router.delete('/users/:id', async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid user account.' });
+  const userId = req.params.id;
   try {
-    const user = await User.findByIdAndUpdate(req.params.id, { accountStatus: 'deleted', bannedAt: new Date() }, { new: true }).select('email').lean();
+    const user = await User.findById(userId).select('email firstName lastName').lean();
     if (!user) return res.status(404).json({ message: 'User not found.' });
-    await AdminEvent.create({ type: 'account', title: 'Account deleted', detail: `${user.email} was disabled and marked deleted.`, user: user._id });
-    res.json({ message: 'Account deleted and access disabled.' });
+
+    // 1. Sessions first — a refresh must not slip through mid-delete and
+    //    resurrect a session for an account that is being removed.
+    await Session.deleteMany({ user: userId });
+
+    // 2. Everything else the account owns (assessments, notifications,
+    //    intake/dashboard rows, Web3 records, …).
+    await Promise.all(USER_DELETE_PLAN.map(({ model, fields }) =>
+      model.deleteMany({ $or: fields.map(field => ({ [field]: userId })) }).exec()
+    ));
+
+    // 3. The account itself.
+    await User.deleteOne({ _id: userId });
+
+    // 4. Keep an audit trail of the removal (Mongo has no FK, so the id may
+    //    dangle on purpose — that is what makes it an audit record).
+    const who = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+    await AdminEvent.create({
+      type: 'account',
+      title: 'Account deleted',
+      detail: `${user.email}${who ? ` (${who})` : ''} was permanently deleted with all related data.`,
+      user: userId,
+    });
+
+    res.json({ message: `${user.email} was permanently deleted.`, email: user.email });
   } catch (error) {
     console.error('[admin/delete-user]', error.message);
     res.status(500).json({ message: 'Unable to delete the account.' });
@@ -740,6 +804,292 @@ router.get('/security/monitor', async (req, res) => {
         return probe(key, meta[0], meta[1], () => check(req.app));
       }
     ),
+
+    // ── Blockchain layer — live probes for ALL 20 Web3 features ────────────
+    // The application DB is the source of truth for balances/records; the
+    // append-only PoW chain anchors their digests (blockchain/engine.js).
+    // Each probe audits its collections directly: counts, structural
+    // invariants (hash linkage, key envelopes, content addressing, unique
+    // idempotency keys) and freshness. Empty counts are healthy — a fresh
+    // install simply has no activity yet; only real integrity failures
+    // escalate to warning/critical.
+
+    // ── Ledger infrastructure — the chain every feature anchors onto ───────
+    probe('bc_ledger', 'PoW Ledger & Integrity', 'blockchain', async () => {
+      const v = await ledger.verify(); // recompute every hash + linkage
+      if (!v.valid) {
+        return { status: 'critical', detail: `Chain integrity FAILED at block ${v.brokenAt} (${v.reason}) — anchored digests cannot be trusted until the chain is re-synced.` };
+      }
+      const [txAgg] = await Block.aggregate([
+        { $unwind: '$txs' },
+        { $group: { _id: null, n: { $sum: 1 } } },
+      ]);
+      return { status: 'healthy', detail: `Append-only chain verified end-to-end: ${v.checked} block(s), height ${v.height}, difficulty ${v.difficulty}, ${txAgg ? txAgg.n : 0} anchored tx(s). Hash-linkage + nonce re-audit passed. Personal data never touches the chain — only sha256 digests.` };
+    }),
+
+    // Feature 1 — Immutable supply chain tracking (public QR verification)
+    probe('bc_supply', 'Supply Chain Tracking (QR)', 'blockchain', async () => {
+      const total = await SupplyBatch.countDocuments();
+      const [agg] = await SupplyBatch.aggregate([
+        { $group: { _id: null, events: { $sum: { $size: '$events' } } } },
+      ]);
+      const events = agg ? agg.events : 0;
+      return { status: 'healthy', detail: `${total} batch(es) tracked, ${events} journey step(s) anchored on-chain (raw-sourcing → retail → delivered). Public scan-to-verify endpoint live at /api/web3/verify/:code — no account needed to scan a bottle.` };
+    }),
+
+    // Feature 2 — Certifications anchored on-chain
+    probe('bc_certifications', 'On-chain Certifications', 'blockchain', async () => {
+      const [agg] = await SupplyBatch.aggregate([
+        { $unwind: '$certifications' },
+        { $group: {
+          _id: null,
+          total: { $sum: 1 },
+          anchored: { $sum: { $cond: [{ $and: [
+            { $ne: ['$certifications.txHash', ''] },
+            { $gte: ['$certifications.blockIndex', 0] },
+          ] }, 1, 0] } },
+        } },
+      ]);
+      const total = agg ? agg.total : 0;
+      const anchored = agg ? agg.anchored : 0;
+      if (anchored < total) {
+        return { status: 'warning', detail: `${total} certification(s) recorded but only ${anchored} carry an on-chain digest — re-anchor the outstanding records.` };
+      }
+      return { status: 'healthy', detail: `${total} certification(s) (lab-report, organic, GMP…) recorded, ${anchored} with an on-chain result digest — certificates cannot be swapped after the fact.` };
+    }),
+
+    // Feature 3 — Smart-contract escrow orders
+    probe('bc_escrow', 'Smart-contract Escrow', 'blockchain', async () => {
+      const [held, released, refunded] = await Promise.all([
+        Order.countDocuments({ status: 'escrow' }),
+        Order.countDocuments({ status: 'released' }),
+        Order.countDocuments({ status: 'refunded' }),
+      ]);
+      return { status: 'healthy', detail: `Escrow contract active: ${held} order(s) currently held, ${released} released on delivery, ${refunded} refunded by dispute verdict. Funds move only via delivery confirmation or juror majority — never unilaterally.` };
+    }),
+
+    // Feature 4 — Verified P2P marketplace
+    probe('bc_market', 'Verified P2P Marketplace', 'blockchain', async () => {
+      const [total, active, orders] = await Promise.all([
+        Listing.countDocuments(),
+        Listing.countDocuments({ active: true }),
+        Order.countDocuments(),
+      ]);
+      return { status: 'healthy', detail: `${total} listing(s) (${active} live) and ${orders} order(s) in the verified marketplace. Sellers settle from their DID wallet; protocol fee is set by the DAO param marketplaceFeePct.` };
+    }),
+
+    // Feature 5 — Wallets / decentralized identity
+    probe('bc_wallet', 'Wallets / Decentralized ID', 'blockchain', async () => {
+      const [userWallets, systemWallets, missingKey] = await Promise.all([
+        Wallet.countDocuments({ user: { $ne: null } }),
+        Wallet.countDocuments({ isSystem: true }),
+        // Match missing/empty envelopes with `null`, never `''` — an
+        // empty-string filter cannot cast to the embedded {iv,ct,tag} schema.
+        Wallet.countDocuments({
+          user: { $ne: null },
+          $or: [{ privateKeyEnc: { $exists: false } }, { privateKeyEnc: null }],
+        }),
+      ]);
+      if (missingKey > 0) {
+        return { status: 'critical', detail: `${missingKey} wallet(s) are missing their AES-256-GCM key envelope — signing keys cannot be exported for those accounts.` };
+      }
+      return { status: 'healthy', detail: `${userWallets} user wallet(s) + ${systemWallets} system wallet(s) (treasury/escrow/inventory). ed25519 signing keys stored only inside AES-256-GCM envelopes — plaintext keys are never persisted. One-time welcome airdrop on first access.` };
+    }),
+
+    // Feature 6 — User-owned health records (anchored ledger + credential)
+    probe('bc_health_ledger', 'Health Records Anchor', 'blockchain', async () => {
+      const [total, anchored, latest] = await Promise.all([
+        HealthAnchor.countDocuments(),
+        HealthAnchor.countDocuments({ txHash: { $ne: '' }, blockIndex: { $gte: 0 } }),
+        HealthAnchor.findOne().sort({ at: -1 }).select('at').lean(),
+      ]);
+      const lastNote = latest
+        ? ` Latest snapshot: ${new Date(latest.at).toLocaleString()}.`
+        : ' No snapshots anchored yet.';
+      return { status: 'healthy', detail: `${total} health snapshot(s), ${anchored} committed with block refs — digest covers every assessment and intake, so record tampering is detectable.${lastNote} Verifiable export (signed credential) available.` };
+    }),
+
+    // Feature 7 — Data sovereignty & rewards (consent smart-contracts)
+    probe('bc_data_consent', 'Data Sovereignty Consent', 'blockchain', async () => {
+      const [active, revoked, consentTx] = await Promise.all([
+        DataShare.countDocuments({ status: 'active' }),
+        DataShare.countDocuments({ status: 'revoked' }),
+        DataShare.countDocuments({ consentTx: { $ne: '' } }),
+      ]);
+      const dataShareReward = DEFAULT_PARAMS.dataShareReward;
+      return { status: 'healthy', detail: `Consent smart-contracts: ${active} active research share(s), ${revoked} revoked (payload destroyed on revoke), ${consentTx} consent record(s) anchored on-chain. Exact terms + scope hashed before any grant — withdrawable at any time, +${dataShareReward} WELL per grant.` };
+    }),
+
+    // Feature 8 — Decentralized & encrypted storage (content-addressed)
+    probe('bc_storage', 'Encrypted Decentralized Storage', 'blockchain', async () => {
+      const [total, malformed] = await Promise.all([
+        StorageObject.countDocuments(),
+        StorageObject.countDocuments({ $or: [{ ciphertext: '' }, { iv: '' }, { tag: '' }] }),
+      ]);
+      if (malformed > 0) {
+        return { status: 'critical', detail: `${malformed} stored object(s) are missing ciphertext/IV/auth-tag — those payloads cannot be decrypted safely.` };
+      }
+      const [agg] = await StorageObject.aggregate([
+        { $group: { _id: null, bytes: { $sum: '$size' } } },
+      ]);
+      const bytes = agg ? agg.bytes : 0;
+      return { status: 'healthy', detail: `${total} object(s) (${bytes} bytes) content-addressed by CID and encrypted with AES-256-GCM — no plaintext at rest, and the CID itself binds the content (tamper = different CID).` };
+    }),
+
+    // Feature 9 — WELL rewards engine (healthy-habit incentives)
+    probe('bc_rewards', 'WELL Rewards Engine', 'blockchain', async () => {
+      const [total, agg, latest] = await Promise.all([
+        RewardEvent.countDocuments(),
+        RewardEvent.aggregate([{ $group: { _id: null, sum: { $sum: '$amount' } } }]),
+        RewardEvent.findOne().sort({ at: -1 }).select('kind amount at').lean(),
+      ]);
+      const minted = agg[0] ? agg[0].sum : 0;
+      const lastNote = latest
+        ? ` Latest: ${latest.kind} (+${latest.amount} WELL) at ${new Date(latest.at).toLocaleString()}.`
+        : ' No rewards claimed yet.';
+      return { status: 'healthy', detail: `${total} reward event(s), ${minted} WELL minted for verified activity (check-ins, intakes, assessments). Unique (user, kind, refId) index makes every claim idempotent — double-claiming is impossible.${lastNote}` };
+    }),
+
+    // Feature 10 — Achievement NFT gallery
+    probe('bc_nfts', 'Achievement NFTs', 'blockchain', async () => {
+      const [total, uniqueTokens] = await Promise.all([
+        Nft.countDocuments(),
+        Nft.distinct('tokenId').then(ids => ids.length),
+      ]);
+      if (uniqueTokens !== total) {
+        return { status: 'critical', detail: `Duplicate NFT tokenIds detected (${total} docs vs ${uniqueTokens} unique) — the collection's uniqueness invariant is broken.` };
+      }
+      return { status: 'healthy', detail: `${total} achievement NFT(s) minted with globally unique tokenIds, each carrying its on-chain mint txHash. Gallery eligibility derives from the same reward events above.` };
+    }),
+
+    // Feature 11 — Token staking
+    probe('bc_staking', 'Token Staking', 'blockchain', async () => {
+      const [agg, negative] = await Promise.all([
+        Wallet.aggregate([
+          { $match: { staked: { $gt: 0 } } },
+          { $group: { _id: null, holders: { $sum: 1 }, staked: { $sum: '$staked' } } },
+        ]),
+        Wallet.countDocuments({ staked: { $lt: 0 } }),
+      ]);
+      if (negative > 0) {
+        return { status: 'critical', detail: `${negative} wallet(s) hold a NEGATIVE staked balance — the staking invariant (staked >= 0) is violated.` };
+      }
+      const holders = agg[0] ? agg[0].holders : 0;
+      const staked = agg[0] ? agg[0].staked : 0;
+      return { status: 'healthy', detail: `${holders} holder(s) staking ${staked} WELL total. APY (stakeApyPct) accrues daily and is governed by the DAO; staked >= 500 unlocks premium perks. Invariant staked >= 0 holds on every wallet.` };
+    }),
+
+    // Feature 12 — Loyalty program
+    probe('bc_loyalty', 'Loyalty Program', 'blockchain', async () => {
+      const [unused, redeemed, bad] = await Promise.all([
+        LoyaltyCode.countDocuments({ status: 'unused' }),
+        LoyaltyCode.countDocuments({ status: 'redeemed' }),
+        LoyaltyCode.countDocuments({ valueWell: { $lt: 0 } }),
+      ]);
+      if (bad > 0) {
+        return { status: 'critical', detail: `${bad} loyalty code(s) carry a negative value — the redeem invariant is violated.` };
+      }
+      return { status: 'healthy', detail: `Loyalty conversion live: ${unused} unused code(s), ${redeemed} redeemed. WELL converts at the DAO param loyaltyRedeemRate (min 10 WELL); every burn/redemption is recorded on-chain.` };
+    }),
+
+    // Feature 13 — DAO governance
+    probe('bc_dao', 'DAO Governance', 'blockchain', async () => {
+      const [active, passed, rejected] = await Promise.all([
+        Proposal.countDocuments({ status: 'active' }),
+        Proposal.countDocuments({ status: 'passed' }),
+        Proposal.countDocuments({ status: 'rejected' }),
+      ]);
+      const cfg = await Web3Config.findOne({ key: 'main' }).lean();
+      const params = (cfg && cfg.params) || {};
+      const missing = Object.keys(DEFAULT_PARAMS).filter(k => !(k in params));
+      if (missing.length) {
+        return { status: 'warning', detail: `DAO parameter set incomplete — missing: ${missing.join(', ')}. Falling back to genesis defaults until the config doc is repaired.` };
+      }
+      return { status: 'healthy', detail: `${active} active proposal(s), ${passed} passed, ${rejected} rejected. All ${Object.keys(DEFAULT_PARAMS).length} protocol params published as the public contract terms (rewards, fees, quorum, APY) — voting weight = stake, quorum ${DEFAULT_PARAMS.daoQuorumWeight}, ${DEFAULT_PARAMS.daoVotingDays}-day lifetime, lazy on-chain execution.` };
+    }),
+
+    // Feature 14 — Community knowledge base
+    probe('bc_knowledge', 'Community Knowledge Base', 'blockchain', async () => {
+      const [posts, agg] = await Promise.all([
+        KnowledgePost.countDocuments(),
+        KnowledgePost.aggregate([{ $group: { _id: null, up: { $sum: '$upvotes' } } }]),
+      ]);
+      const upvotes = agg[0] ? agg[0].up : 0;
+      const p = DEFAULT_PARAMS;
+      return { status: 'healthy', detail: `${posts} post(s), ${upvotes} total upvote(s). Publishing pays ${p.knowledgeReward} WELL to the author and ${p.knowledgeUpvoteReward} per upvote (capped ${p.knowledgeUpvoteCap}) plus ${p.curatorReward} to the curator — payout tx recorded per post.` };
+    }),
+
+    // Feature 15 — Decentralized dispute resolution
+    probe('bc_disputes', 'Dispute Resolution (jurors)', 'blockchain', async () => {
+      const [open, resolved, withVotes] = await Promise.all([
+        Dispute.countDocuments({ status: 'open' }),
+        Dispute.countDocuments({ status: 'resolved' }),
+        Dispute.countDocuments({ 'votes.0': { $exists: true } }),
+      ]);
+      return { status: 'healthy', detail: `${open} open dispute(s), ${resolved} resolved, ${withVotes} with juror votes recorded. Jurors are randomly drawn from staked holders (never a party), majority verdict settles escrow, +${DEFAULT_PARAMS.jurorReward} WELL per juror.` };
+    }),
+
+    // Feature 16 — Interoperable health profile share links
+    probe('bc_share_links', 'Health Profile Share Links', 'blockchain', async () => {
+      const now = Date.now();
+      const [active, revoked, expired] = await Promise.all([
+        ShareLink.countDocuments({ revoked: false, expiresAt: { $gt: now } }),
+        ShareLink.countDocuments({ revoked: true }),
+        ShareLink.countDocuments({ revoked: false, expiresAt: { $lte: now } }),
+      ]);
+      return { status: 'healthy', detail: `${active} live share link(s) for doctor/nutritionist views, ${revoked} revoked, ${expired} naturally expired. Links are time-boxed and revocable; views are counted per token.` };
+    }),
+
+    // Feature 17 — Verifiable AI recommendations (transparency proofs)
+    probe('bc_ai_proof', 'Verifiable AI Recommendations', 'blockchain', async () => {
+      const [total, complete] = await Promise.all([
+        RecAnchor.countDocuments(),
+        RecAnchor.countDocuments({
+          inputHash: { $ne: '' }, outputHash: { $ne: '' }, combinedHash: { $ne: '' },
+          txHash: { $ne: '' }, blockIndex: { $gte: 0 },
+        }),
+      ]);
+      if (complete < total) {
+        return { status: 'warning', detail: `${total} AI proof(s) recorded but only ${complete} fully anchored on-chain — the outstanding recommendations lack a block reference.` };
+      }
+      return { status: 'healthy', detail: `${total} AI recommendation proof(s) anchored: input hash, output hash and logic version recorded per assessment — anyone can re-verify that the advice shown is the advice that was hashed.` };
+    }),
+
+    // Feature 18 — Secure clinical trial participation (on-chain consent)
+    probe('bc_trials', 'Clinical Trial Consent', 'blockchain', async () => {
+      const [trials, optedIn, withdrawn, anchored] = await Promise.all([
+        Trial.countDocuments(),
+        TrialConsent.countDocuments({ status: 'opted-in' }),
+        TrialConsent.countDocuments({ status: 'withdrawn' }),
+        TrialConsent.countDocuments({ consentTx: { $ne: '' } }),
+      ]);
+      return { status: 'healthy', detail: `${trials} trial(s) listed, ${optedIn} active consent record(s), ${withdrawn} withdrawn, ${anchored} with terms digests anchored on-chain. Consent stores the exact hashed terms + data scope; withdrawal is recorded just as permanently.` };
+    }),
+
+    // Feature 19 — Decentralized oracles
+    probe('bc_oracle', 'Decentralized Oracles', 'blockchain', async () => {
+      const feeds = await OracleFeed.find({}).select('key updatedAt').lean();
+      if (!feeds.length) {
+        return { status: 'warning', detail: 'No oracle feeds registered — pricing/research/market data has no external input. Seeded automatically on boot; check the [web3] chain-ready log.' };
+      }
+      const newest = Math.max(...feeds.map(f => Number(f.updatedAt) || 0));
+      const ageH = (Date.now() - newest) / 36e5;
+      const stale = ageH > 48;
+      return {
+        status: stale ? 'warning' : 'healthy',
+        detail: `${feeds.length} feed(s) live across pricing/research/market. Latest value: ${ageH < 1 ? `${Math.max(1, Math.round(ageH * 60))} min` : `${Math.round(ageH)} h`} ago — values re-derived deterministically each day (auditable) and anchored.${stale ? ' Feeds are stale (>48 h): trigger a refresh from the Web3 hub.' : ''}`,
+      };
+    }),
+
+    // Feature 20 — Tokenized access to health professionals
+    probe('bc_experts', 'Professional Bookings', 'blockchain', async () => {
+      const [experts, confirmed, cancelled] = await Promise.all([
+        Expert.countDocuments({ active: true }),
+        Booking.countDocuments({ status: 'confirmed' }),
+        Booking.countDocuments({ status: 'cancelled' }),
+      ]);
+      return { status: 'healthy', detail: `${experts} active expert(s) listed at WELL hourly rates, ${confirmed} confirmed booking(s), ${cancelled} cancelled. Payment settles on-chain from the user's wallet at booking time; each booking carries its own txHash.` };
+    }),
   ]);
 
   // Derive overall monitor status
@@ -798,12 +1148,74 @@ router.get('/ai', (req, res) => {
 
 router.get('/profile', async (req, res) => {
   try {
-    if (!mongoose.isValidObjectId(req.user._id)) return res.json({ alias: req.user.alias, createdAt: null, lastLoginAt: null });
-    const account = await AdminAccount.findById(req.user._id).select('alias createdAt lastLoginAt').lean();
-    res.json({ alias: account?.alias || req.user.alias, createdAt: account?.createdAt || null, lastLoginAt: account?.lastLoginAt || null });
+    if (!mongoose.isValidObjectId(req.user._id)) return res.json({ alias: req.user.alias, createdAt: null, lastLoginAt: null, profilePicture: '', bannerPicture: '' });
+    const account = await AdminAccount.findById(req.user._id).select('alias createdAt lastLoginAt profilePicture bannerPicture').lean();
+    res.json({
+      alias: account?.alias || req.user.alias,
+      createdAt: account?.createdAt || null,
+      lastLoginAt: account?.lastLoginAt || null,
+      profilePicture: account?.profilePicture || '',
+      bannerPicture: account?.bannerPicture || '',
+    });
   } catch (error) {
     console.error('[admin/profile]', error.message);
     res.status(500).json({ message: 'Unable to load the admin profile.' });
+  }
+});
+
+// ── Edit profile: picture + background picture ──────────────────────────
+// Same contract as the member-facing /profile update (base64 data URLs) so
+// the client mirrors ProfilePage: either key may be sent alone, an empty
+// string clears it, and anything else is rejected before it reaches Mongo.
+const MAX_ADMIN_AVATAR_BYTES = 2 * 1024 * 1024; // 2 MB
+const MAX_ADMIN_BANNER_BYTES = 3 * 1024 * 1024; // 3 MB
+const isImageDataUrl = (value) => typeof value === 'string'
+  && value.startsWith('data:image/')
+  && value.includes(';base64,');
+
+router.patch('/profile', async (req, res) => {
+  try {
+    const { profilePicture, bannerPicture } = req.body || {};
+    if (profilePicture === undefined && bannerPicture === undefined) {
+      return res.status(400).json({ message: 'Nothing to update.' });
+    }
+    if (!mongoose.isValidObjectId(req.user._id)) return res.status(409).json({ message: 'Please sign in again before editing the admin profile.' });
+
+    const validatePicture = (value, maxBytes, label, tooBigMessage) => {
+      if (value === '') return { ok: true, stored: '' };
+      if (!isImageDataUrl(value)) return { ok: false, message: `${label} must be an image file.` };
+      if (Buffer.byteLength(value, 'utf8') > maxBytes) return { ok: false, message: tooBigMessage };
+      return { ok: true, stored: value };
+    };
+
+    let nextAvatar;
+    let nextBanner;
+    if (profilePicture !== undefined) {
+      const avatarCheck = validatePicture(profilePicture, MAX_ADMIN_AVATAR_BYTES, 'Profile picture', 'Profile picture must be smaller than 2 MB.');
+      if (!avatarCheck.ok) return res.status(400).json({ message: avatarCheck.message });
+      nextAvatar = avatarCheck.stored;
+    }
+    if (bannerPicture !== undefined) {
+      const bannerCheck = validatePicture(bannerPicture, MAX_ADMIN_BANNER_BYTES, 'Background picture', 'Background picture must be smaller than 3 MB.');
+      if (!bannerCheck.ok) return res.status(400).json({ message: bannerCheck.message });
+      nextBanner = bannerCheck.stored;
+    }
+
+    const account = await AdminAccount.findById(req.user._id);
+    if (!account) return res.status(404).json({ message: 'Admin account not found.' });
+    if (profilePicture !== undefined) account.profilePicture = nextAvatar;
+    if (bannerPicture !== undefined) account.bannerPicture = nextBanner;
+    await account.save();
+
+    res.json({
+      alias: account.alias,
+      profilePicture: account.profilePicture || '',
+      bannerPicture: account.bannerPicture || '',
+      message: 'Profile picture and background saved.',
+    });
+  } catch (error) {
+    console.error('[admin/profile/patch]', error.message);
+    res.status(500).json({ message: 'Unable to save the admin profile.' });
   }
 });
 

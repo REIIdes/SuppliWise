@@ -11,9 +11,11 @@ const { protect } = require('../middleware/auth');
 //          unauthenticated caller anywhere in the frontend before adding it.
 router.post('/', protect, async (req, res) => {
   try {
-    const { text } = req.body;
-
-    if (!text || !text.trim()) {
+    // Type-guard first: a non-string body field (number, object, array) must
+    // never reach .trim() — the catch below re-reads req.body too, so a throw
+    // there would escape this async handler as an unhandled rejection.
+    const { text } = req.body || {};
+    if (typeof text !== 'string' || !text.trim()) {
       return res.status(400).json({ message: 'No text provided.' });
     }
 
@@ -91,7 +93,7 @@ router.post('/', protect, async (req, res) => {
 
     const data = await response.json();
     const choice = data.choices?.[0]?.message;
-    const result = (choice?.content || choice?.reasoning || '').trim();
+    const result = String(choice?.content || choice?.reasoning || '').trim();
 
     if (result === 'REJECTED' || result.toUpperCase().startsWith('REJECTED')) {
       return res.json({ polished: null, rejected: true, reason: 'not_health_related' });
@@ -105,8 +107,9 @@ router.post('/', protect, async (req, res) => {
 
   } catch (err) {
     console.error('[polish]', err.message);
-    // Fallback — return basic cleaned version rather than failing
-    const raw = req.body?.text?.trim() || '';
+    // Fallback — return basic cleaned version rather than failing. Re-read the
+    // body defensively: it may be exactly what caused the error above.
+    const raw = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
     return res.json({ polished: raw ? basicClean(raw) : null, rejected: false });
   }
 });

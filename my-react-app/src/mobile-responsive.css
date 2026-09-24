@@ -18,6 +18,15 @@
     background: #d1f4e0 !important;
   }
 
+  /* Auth pages (Sign In / Sign Up): keep a vibrant gradient instead of
+     the flat green — must come after the grouped rule above to win. */
+  .page-wrapper {
+    background:
+      radial-gradient(700px 420px at 0% 0%, rgba(16, 185, 129, 0.28), transparent 60%),
+      radial-gradient(700px 500px at 100% 30%, rgba(56, 189, 248, 0.25), transparent 55%),
+      linear-gradient(165deg, #d1fae5 0%, #ecfeff 55%, #e0e7ff 100%) !important;
+  }
+
   /* Assessment page specific - darker green background */
   .assessment-container {
     background: transparent !important;
@@ -41,8 +50,9 @@
   /* Make auth card more visible on mobile darker background */
   .auth-card {
     background: white !important;
-    border: 2px solid #86efac !important;
-    box-shadow: 0 6px 20px rgba(16, 185, 129, 0.2) !important;
+    border: 2px solid #6ee7b7 !important;
+    border-radius: 26px !important;
+    box-shadow: 0 24px 55px -22px rgba(6, 95, 70, 0.4) !important;
   }
 }
 

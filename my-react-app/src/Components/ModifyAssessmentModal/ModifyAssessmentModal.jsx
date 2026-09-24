@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BASE_URL, parseJSON } from '../../api';
+import ConfirmModal from '../ConfirmModal/ConfirmModal';
 import './ModifyAssessmentModal.css';
 
 // Request timeout so slow networks can't hang the modal actions forever
@@ -43,6 +44,7 @@ const ModifyAssessmentModal = ({ assessment, onClose, onSave, onDelete }) => {
   const [loading, setLoading] = useState(null); // 'priority' | 'delete' | null
   const [error, setError]     = useState('');
   const [success, setSuccess] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   // Stay in sync if the assessment prop changes underneath (auto-lift/reflag,
   // list refresh) so the buttons always reflect the live flagged review state
@@ -84,9 +86,17 @@ const ModifyAssessmentModal = ({ assessment, onClose, onSave, onDelete }) => {
   };
 
   // ── Delete ────────────────────────────────────────────────────────────
+  // No window.confirm(): the Android webview swallows it (the Delete button
+  // looked dead) and a native dialog cannot be styled. The in-app warning
+  // modal is the same one the admin "Delete account" flow uses.
+  const requestDelete = () => {
+    if (loading) return;
+    setConfirmDelete(true);
+  };
+
   const handleDelete = async () => {
     if (loading) return;
-    if (!window.confirm('Delete this assessment? This cannot be undone.')) return;
+    setConfirmDelete(false);
     setLoading('delete');
     setError('');
     setSuccess('');
@@ -158,8 +168,9 @@ const ModifyAssessmentModal = ({ assessment, onClose, onSave, onDelete }) => {
 
             {/* Delete */}
             <button
+              type="button"
               className="mam-btn mam-btn--delete"
-              onClick={handleDelete}
+              onClick={requestDelete}
               disabled={loading !== null}
             >
               {loading === 'delete' ? 'Deleting…' : 'Delete Assessment'}
@@ -168,6 +179,20 @@ const ModifyAssessmentModal = ({ assessment, onClose, onSave, onDelete }) => {
           </div>
         </div>
       </div>
+
+      {/* Delete warning — rendered after the overlay so its z-index (2000)
+          always wins over the assessment sheet (1100). */}
+      {confirmDelete && (
+        <ConfirmModal
+          type="danger"
+          title="Delete this assessment?"
+          message="This permanently removes the assessment and everything attached to it. This cannot be undone."
+          confirmText="Yes, delete it"
+          cancelText="Keep assessment"
+          onConfirm={handleDelete}
+          onCancel={() => setConfirmDelete(false)}
+        />
+      )}
     </div>
   );
 };

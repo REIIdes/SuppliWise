@@ -1,7 +1,6 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import UserNotifications from '../UserNotifications/UserNotifications';
 import useAuth from '../../hooks/useAuth';
-import { hasAdminSession } from '../../auth/authState';
 import './Navbar.css';
 
 function Navbar() {
@@ -28,8 +27,14 @@ function Navbar() {
     <nav className="navbar">
       <div className="navbar-left">
         <div className="navbar-logo-box">
-          <svg width="30" height="30" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <rect width="100" height="100" rx="22" fill="#3dbf8a"/>
+          <svg width="30" height="30" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <defs>
+              <linearGradient id="nav-logo-grad" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse">
+                <stop stopColor="#34d399"/>
+                <stop offset="1" stopColor="#06b6d4"/>
+              </linearGradient>
+            </defs>
+            <rect width="100" height="100" rx="22" fill="url(#nav-logo-grad)"/>
             <g transform="rotate(-40, 50, 50)">
               <rect x="22" y="36" width="56" height="28" rx="14" fill="none" stroke="white" strokeWidth="6"/>
               <line x1="50" y1="36" x2="50" y2="64" stroke="white" strokeWidth="6"/>
@@ -42,6 +47,15 @@ function Navbar() {
         {showSession ? (
           <>
             <UserNotifications />
+            <NavLink to="/web3" className="navbar-nav-link" title="Web3 Hub">
+              ⛓<span className="navbar-nav-label">Web3</span>
+            </NavLink>
+            <NavLink to="/marketplace" className="navbar-nav-link" title="Marketplace">
+              🛒<span className="navbar-nav-label">Market</span>
+            </NavLink>
+            <NavLink to="/governance" className="navbar-nav-link" title="Governance">
+              🏛️<span className="navbar-nav-label">DAO</span>
+            </NavLink>
             <NavLink to="/history" className="navbar-nav-link" title="History">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10" />
@@ -64,14 +78,11 @@ function Navbar() {
               </span>
             </NavLink>
           </>
-        ) : hasAdminSession() ? (
-          // Active admin session: point at the admin panel — a user
-          // "Sign In" button would just bounce them back there anyway
-          // (route guards keep signed-in admins inside /admin).
-          <NavLink to="/admin" className="navbar-signin-btn">
-            Admin Panel
-          </NavLink>
         ) : (
+          // Strictly user-facing: this navbar never offers admin entry —
+          // admin and user sessions stay separate, and the admin panel is
+          // reached only via its own /admin routes. Route guards still send
+          // an admin-holder who opens a protected user route back to /admin.
           <NavLink to="/login" className="navbar-signin-btn">
             Sign In
           </NavLink>

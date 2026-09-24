@@ -1,0 +1,197 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   Confirm Logout — vibrant shared dialog (admin panel + user Profile page)
+   Amber/orange identity: gradient badge, pulse ring, corner glows,
+   gradient primary button. Sits above every in-app overlay (max 2000),
+   below the PWA install prompt (9999).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.clo-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background:
+    radial-gradient(1100px 520px at 50% -12%, rgba(245, 158, 11, 0.22), transparent 62%),
+    rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: clo-fade 0.25s ease;
+}
+
+.clo-card {
+  position: relative;
+  width: min(430px, 92vw);
+  padding: 40px 34px 30px;
+  background: #fff;
+  border-radius: 28px;
+  text-align: center;
+  overflow: hidden;
+  box-shadow:
+    0 30px 80px -20px rgba(15, 23, 42, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.6) inset;
+  animation: clo-pop 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ── Decorative corner glows ─────────────────────────────────────────── */
+.clo-glow {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(55px);
+  pointer-events: none;
+}
+.clo-glow--amber {
+  width: 230px;
+  height: 230px;
+  top: -120px;
+  right: -80px;
+  background: #fde68a;
+  opacity: 0.6;
+}
+.clo-glow--violet {
+  width: 190px;
+  height: 190px;
+  bottom: -100px;
+  left: -80px;
+  background: #ddd6fe;
+  opacity: 0.5;
+}
+
+/* ── Gradient warning badge + pulse ring ─────────────────────────────── */
+.clo-icon {
+  position: relative;
+  z-index: 1;
+  width: 92px;
+  height: 92px;
+  margin: 0 auto 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 55%, #f97316 100%);
+  border-radius: 50%;
+  box-shadow:
+    0 14px 30px -10px rgba(245, 158, 11, 0.65),
+    0 0 0 9px rgba(245, 158, 11, 0.12);
+  animation: clo-icon-in 0.5s 0.05s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.clo-icon-ring {
+  position: absolute;
+  inset: -9px;
+  border-radius: 50%;
+  border: 2px solid rgba(245, 158, 11, 0.5);
+  animation: clo-ring 2.4s ease-out infinite;
+}
+
+/* ── Copy ────────────────────────────────────────────────────────────── */
+.clo-title {
+  position: relative;
+  z-index: 1;
+  margin: 0 0 10px;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #0f172a;
+}
+.clo-message {
+  position: relative;
+  z-index: 1;
+  margin: 0 0 28px;
+  font-size: 15.5px;
+  line-height: 1.55;
+  color: #64748b;
+}
+
+/* ── Actions ─────────────────────────────────────────────────────────── */
+.clo-actions {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  gap: 14px;
+}
+.clo-btn {
+  flex: 1;
+  padding: 14px 18px;
+  border: none;
+  border-radius: 16px;
+  font-size: 15.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease,
+    background 0.18s ease, border-color 0.18s ease;
+}
+.clo-btn:focus-visible {
+  outline: 3px solid #fbbf24;
+  outline-offset: 2px;
+}
+
+.clo-btn--cancel {
+  background: #f8fafc;
+  color: #475569;
+  border: 2px solid #e2e8f0;
+}
+.clo-btn--cancel:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  transform: translateY(-2px);
+}
+.clo-btn--cancel:active {
+  transform: translateY(0);
+}
+
+.clo-btn--confirm {
+  color: #fff;
+  background: linear-gradient(135deg, #fb923c 0%, #f59e0b 100%);
+  background-size: 150% 150%;
+  box-shadow: 0 14px 28px -12px rgba(249, 115, 22, 0.75);
+}
+.clo-btn--confirm:hover {
+  background-position: 100% 50%;
+  transform: translateY(-2px);
+  box-shadow: 0 18px 32px -12px rgba(249, 115, 22, 0.9);
+}
+.clo-btn--confirm:active {
+  transform: translateY(0);
+}
+
+/* ── Motion ──────────────────────────────────────────────────────────── */
+@keyframes clo-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes clo-pop {
+  from { transform: scale(0.92) translateY(14px); opacity: 0; }
+  to   { transform: scale(1) translateY(0); opacity: 1; }
+}
+@keyframes clo-icon-in {
+  from { transform: scale(0.5) rotate(-8deg); opacity: 0; }
+  to   { transform: scale(1) rotate(0); opacity: 1; }
+}
+@keyframes clo-ring {
+  0%   { transform: scale(0.92); opacity: 0.9; }
+  70%  { transform: scale(1.22); opacity: 0; }
+  100% { transform: scale(1.22); opacity: 0; }
+}
+
+/* ── Small screens: stack the actions ────────────────────────────────── */
+@media (max-width: 420px) {
+  .clo-actions { flex-direction: column; }
+  .clo-card { padding: 34px 24px 26px; }
+  .clo-title { font-size: 23px; }
+}
+
+/* ── Reduced motion: keep the design, drop the animation ─────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .clo-overlay,
+  .clo-card,
+  .clo-icon,
+  .clo-icon-ring {
+    animation: none;
+  }
+  .clo-btn--cancel,
+  .clo-btn--confirm {
+    transition: none;
+  }
+}

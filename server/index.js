@@ -16,6 +16,7 @@ const insightsRoutes = require('./routes/insights');
 const adminRoutes = require('./routes/admin');
 const notificationRoutes = require('./routes/notifications');
 const subscriptionRoutes = require('./routes/subscription');
+const web3Routes = require('./routes/web3');
 const AdminAccount = require('./models/AdminAccount');
 
 const app = express();
@@ -184,6 +185,10 @@ app.use('/api/supplement-detail', aiLimiter, supplementDetailRoutes);
 app.use('/api/dashboard', userLimiter, dashboardRoutes);
 app.use('/api/insights', userLimiter, insightsRoutes);
 app.use('/api/notifications', userLimiter, notificationRoutes);
+// Blockchain layer (wallets, supply chain, marketplace, DAO, rewards, data
+// sovereignty). Same non-escalating user bucket: normal feature traffic must
+// never climb the brute-force lockout ladder.
+app.use('/api/web3', userLimiter, web3Routes);
 app.use('/api/admin', lockoutCheck, adminLimiter, adminRoutes);
 
 // Health check
@@ -223,11 +228,18 @@ app.use((err, req, res, next) => {
 
 // ── Crash guards — a single bad request must never take the whole API
 // offline (which surfaces client-side as "Failed to fetch" everywhere) ──
+// try/catch inside the guards: if the log itself throws (e.g. a broken stdout
+// pipe after the host shell dies), Node terminates the process with the
+// handler's error — logging must never be able to take the API down.
 process.on('unhandledRejection', (reason) => {
-  console.error('[unhandledRejection]', reason instanceof Error ? reason.stack || reason.message : reason);
+  try {
+    console.error('[unhandledRejection]', reason instanceof Error ? reason.stack || reason.message : reason);
+  } catch { /* keep serving */ }
 });
 process.on('uncaughtException', (err) => {
-  console.error('[uncaughtException]', err instanceof Error ? err.stack || err.message : err);
+  try {
+    console.error('[uncaughtException]', err instanceof Error ? err.stack || err.message : err);
+  } catch { /* keep serving */ }
 });
 
 // Connect to MongoDB and start server.
@@ -264,6 +276,12 @@ mongoose
         console.log(`[admin-sync] ${accounts.length} admin account(s) ensured (${inserted} newly inserted): ${accounts.map(a => a.alias).join(', ')}`);
       })
       .then(() => app.listen(PORT, () => console.log(`Server running on port ${PORT}`)))
+      .then(() => {
+        // Genesis for the Web3 layer: chain + reference data. Non-blocking —
+        // a seed hiccup must never keep the API from serving requests (the
+        // endpoints self-heal by lazy-initializing on first use).
+        require('./blockchain/seed').bootstrap().catch(() => {});
+      })
       .then(() => {
         // Non-blocking SMTP check — bad credentials surface in the log at boot
         const { verifyEmailConfig } = require('./utils/email');

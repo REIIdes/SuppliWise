@@ -127,7 +127,9 @@ router.post('/', protect, requireFeature('chat'), async (req, res) => {
   try {
     const { message, context, history } = req.body;
 
-    if (!message || !message.trim()) {
+    // Type guard: non-string messages (numbers/arrays) previously threw on
+    // .trim() and fell through to the generic 200 error reply instead of 400.
+    if (typeof message !== 'string' || !message.trim()) {
       return res.status(400).json({ reply: 'Please enter a message.' });
     }
 

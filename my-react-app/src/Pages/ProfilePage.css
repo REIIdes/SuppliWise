@@ -855,13 +855,27 @@
 }
 
 .profile-modal {
+  position: relative;
+  overflow: hidden;
   background: #fff;
+  border: 1px solid rgba(24, 52, 42, 0.1);
   border-radius: 20px;
   padding: 32px;
   max-width: 450px;
   width: 100%;
   box-shadow: 0 28px 70px rgba(0, 0, 0, 0.35);
   animation: modal-pop 0.2s ease-out;
+}
+
+/* Vibrant spectrum rail, matching the Web3/admin surfaces. */
+.profile-modal::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #22c55e 0%, #0d9488 42%, #4f6bed 74%, #d46b35 100%);
 }
 
 @keyframes modal-pop {
@@ -950,6 +964,14 @@
   box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.12);
 }
 
+/* Real digits keep the wide tracking; the hint is tracked lightly so
+   "Enter 6-digit code" does not read as one stretched-out word. */
+.profile-otp-input::placeholder {
+  color: #a9b8b0;
+  font-weight: 500;
+  letter-spacing: 3px;
+}
+
 .profile-otp-input:disabled {
   background: #f3f4f6;
   cursor: not-allowed;
@@ -1018,9 +1040,22 @@
   transition: transform 0.15s, box-shadow 0.2s, background 0.2s;
 }
 
+/* A saturated green at opacity .6 left the white label sitting on pale
+   green — effectively unreadable while the 6-digit code was incomplete.
+   The disabled state now picks its own neutral surface + dimmed text so the
+   contrast ratio stays legible instead of washing out. */
 .profile-modal-btn:disabled {
-  opacity: 0.6;
+  opacity: 1;
   cursor: not-allowed;
+  background: #e7ece9;
+  color: #85958d;
+  box-shadow: none;
+  transform: none;
+}
+
+.profile-modal-btn-primary:disabled {
+  background: #e7ece9;
+  color: #85958d;
 }
 
 .profile-modal-btn-primary {
@@ -1041,6 +1076,16 @@
 
 .profile-modal-btn-secondary:hover:not(:disabled) {
   background: #e2e8e5;
+}
+
+/* Keyboard focus was invisible: the input's :focus rule removes the outline
+   and the buttons never defined one. Placed after :focus so it wins on
+   equal specificity. */
+.profile-otp-input:focus-visible,
+.profile-modal-btn:focus-visible,
+.profile-modal-resend-btn:focus-visible {
+  outline: 3px solid rgba(212, 107, 53, 0.6);
+  outline-offset: 2px;
 }
 
 /* ── Responsive ───────────────────────────────────────────────────────── */

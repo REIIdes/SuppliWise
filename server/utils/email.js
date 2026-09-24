@@ -22,8 +22,7 @@ const getTransporter = () => {
     }
 
     try {
-      transporter = nodemailer.createTransport({
-        service: process.env.EMAIL_SERVICE || 'gmail',
+      const common = {
         // Pooled connections: reuse the SMTP session instead of a full
         // TLS handshake per OTP (major send-latency win on repeated logins)
         pool: true,
@@ -33,7 +32,23 @@ const getTransporter = () => {
           user: process.env.EMAIL_USER,
           pass: String(process.env.EMAIL_PASSWORD).replace(/\s+/g, ''),
         },
-      });
+      };
+
+      // Explicit SMTP endpoint (self-hosted relay, Mailpit/Mailhog for local
+      // dev, or a capture server in the auth stress suite). When set, it wins
+      // over the EMAIL_SERVICE preset — a `service` preset would otherwise
+      // overwrite host/port with the provider's well-known values.
+      const host = String(process.env.EMAIL_HOST || '').trim();
+      const options = host
+        ? {
+            ...common,
+            host,
+            port: Number.parseInt(process.env.EMAIL_PORT, 10) || 587,
+            secure: String(process.env.EMAIL_SECURE || '').trim().toLowerCase() === 'true',
+          }
+        : { ...common, service: process.env.EMAIL_SERVICE || 'gmail' };
+
+      transporter = nodemailer.createTransport(options);
 
       console.log('[Email] Email service configured successfully');
     } catch (error) {

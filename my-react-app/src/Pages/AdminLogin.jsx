@@ -94,44 +94,94 @@ function AdminLogin() {
 
       {/* ── Left dark branding panel ──────────────────────── */}
       <div className="al-left" aria-hidden="true">
+        <span className="al-orb al-orb--1" />
+        <span className="al-orb al-orb--2" />
+        <span className="al-orb al-orb--3" />
+
         <div className="al-left__inner">
 
           <div className="al-logo">
-            <svg width="38" height="38" viewBox="0 0 100 100" fill="none">
-              <rect width="100" height="100" rx="22" fill="#d46b35"/>
-              <g transform="rotate(-40,50,50)">
-                <rect x="22" y="36" width="56" height="28" rx="14"
-                      fill="none" stroke="white" strokeWidth="6"/>
-                <line x1="50" y1="36" x2="50" y2="64" stroke="white" strokeWidth="6"/>
-              </g>
-            </svg>
+            <span className="al-logo__mark">
+              <svg width="24" height="24" viewBox="0 0 100 100" fill="none">
+                <g transform="rotate(-40,50,50)">
+                  <rect x="22" y="36" width="56" height="28" rx="14"
+                        fill="none" stroke="white" strokeWidth="9"/>
+                  <line x1="50" y1="36" x2="50" y2="64" stroke="white" strokeWidth="9"/>
+                </g>
+              </svg>
+            </span>
             <span className="al-logo__name">SuppliWise</span>
           </div>
 
           <div className="al-left__copy">
+            <span className="al-eyebrow">Restricted area</span>
             <h1 className="al-left__heading">Control Panel</h1>
             <p className="al-left__sub">
               Secure administrative access for authorised personnel only.
             </p>
           </div>
 
+          <ul className="al-features">
+            <li>
+              <span className="al-features__dot al-features__dot--emerald" />
+              Live system &amp; threat monitoring
+            </li>
+            <li>
+              <span className="al-features__dot al-features__dot--indigo" />
+              Two-factor authenticator sign-in
+            </li>
+            <li>
+              <span className="al-features__dot al-features__dot--amber" />
+              Complete, tamper-evident audit trail
+            </li>
+          </ul>
+
           <div className="al-shield">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                 strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
+                 strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              <polyline points="9 12 11 14 15 10"/>
             </svg>
           </div>
+
+          <p className="al-left__foot">
+            <span className="al-left__lock">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                   strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2"/>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </svg>
+            </span>
+            TLS encrypted &middot; session monitored
+          </p>
 
         </div>
       </div>
 
       {/* ── Right form panel ─────────────────────────────── */}
       <div className="al-right">
+
+        {/* Branding repeats here so small screens (where .al-left is hidden)
+            still show who this panel belongs to. */}
+        <div className="al-mobile-brand">
+          <svg width="30" height="30" viewBox="0 0 100 100" fill="none" aria-hidden="true">
+            <rect width="100" height="100" rx="24" fill="#d46b35"/>
+            <g transform="rotate(-40,50,50)">
+              <rect x="22" y="36" width="56" height="28" rx="14"
+                    fill="none" stroke="white" strokeWidth="8"/>
+              <line x1="50" y1="36" x2="50" y2="64" stroke="white" strokeWidth="8"/>
+            </g>
+          </svg>
+          <span>SuppliWise <em>Control Panel</em></span>
+        </div>
+
         <form
           className="al-card"
           onSubmit={challengeId ? submitOtp : submitCredentials}
           noValidate
         >
+          <span className="al-card__rail" aria-hidden="true" />
+
           <div className="al-card__header">
             <span className="al-kicker">SUPPLIWISE CONTROL PANEL</span>
             <h2 className="al-card__title">
@@ -142,6 +192,17 @@ function AdminLogin() {
                 ? 'Open Google Authenticator and enter the current 6-digit code.'
                 : 'This area is restricted to authorised administrators.'}
             </p>
+
+            <ol className="al-steps" aria-label="Sign-in progress">
+              <li className={`al-step${challengeId ? ' al-step--done' : ' al-step--active'}`}>
+                <span className="al-step__num">{challengeId ? '✓' : '1'}</span>
+                <span className="al-step__label">Credentials</span>
+              </li>
+              <li className={`al-step${challengeId ? ' al-step--active' : ''}`}>
+                <span className="al-step__num">2</span>
+                <span className="al-step__label">2FA code</span>
+              </li>
+            </ol>
           </div>
 
           {error && (
@@ -160,20 +221,37 @@ function AdminLogin() {
             <>
               <div className="al-field">
                 <label htmlFor="al-alias">Admin alias</label>
-                <input
-                  id="al-alias"
-                  type="text"
-                  value={alias}
-                  onChange={e => setAlias(e.target.value)}
-                  placeholder="Enter your alias"
-                  autoComplete="username"
-                  required
-                />
+                <div className="al-input-wrap">
+                  <span className="al-field__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                         strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                      <circle cx="12" cy="7" r="4"/>
+                    </svg>
+                  </span>
+                  <input
+                    id="al-alias"
+                    type="text"
+                    value={alias}
+                    onChange={e => setAlias(e.target.value)}
+                    placeholder="Enter your alias"
+                    autoComplete="username"
+                    className="al-field__icon-input"
+                    required
+                  />
+                </div>
               </div>
 
               <div className="al-field">
                 <label htmlFor="al-password">Secret password</label>
                 <div className="al-input-wrap">
+                  <span className="al-field__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                         strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="11" width="18" height="11" rx="2"/>
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                    </svg>
+                  </span>
                   <input
                     id="al-password"
                     type={showPassword ? 'text' : 'password'}
@@ -181,6 +259,7 @@ function AdminLogin() {
                     onChange={e => setPassword(e.target.value)}
                     placeholder="Enter your password"
                     autoComplete="current-password"
+                    className="al-field__icon-input"
                     required
                   />
                   <button
@@ -260,6 +339,11 @@ function AdminLogin() {
 
           <div className="al-footer">
             <button type="button" className="al-return" onClick={() => navigate('/login')}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                   strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <line x1="19" y1="12" x2="5" y2="12"/>
+                <polyline points="12 19 5 12 12 5"/>
+              </svg>
               Return to user login
             </button>
           </div>

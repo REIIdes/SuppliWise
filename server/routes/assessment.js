@@ -56,7 +56,13 @@ router.post('/', protect, async (req, res) => {
       recreationalDrugTypes,
     } = req.body;
 
-    // Validate numeric ranges
+    // Validate numeric fields — numbers or numeric strings only. Anything
+    // else (arrays, objects, "not-a-number") slipped past the old range
+    // comparisons and died in Mongoose as a CastError → 500.
+    const finite = (v) => v === undefined || v === null || v === '' || Number.isFinite(Number(v));
+    if (!finite(age) || !finite(weight) || !finite(height)) {
+      return res.status(400).json({ message: 'Age, weight, and height must be valid numbers.' });
+    }
     if (age && (age < 1 || age > 120)) return res.status(400).json({ message: 'Age must be between 1 and 120.' });
     if (weight && (weight < 1 || weight > 500)) return res.status(400).json({ message: 'Weight must be between 1 and 500 kg.' });
     if (height && (height < 30 || height > 300)) return res.status(400).json({ message: 'Height must be between 30 and 300 cm.' });

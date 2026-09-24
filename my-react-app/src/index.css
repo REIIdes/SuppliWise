@@ -2,6 +2,19 @@
   box-sizing: border-box;
 }
 
+/* ── Password-field hardening ─────────────────────────────────────
+   Password values must never be selectable, copyable, cuttable,
+   pasteable or draggable (and the selection is collapsed as soon as
+   the field receives focus). Otherwise a clipboard snapshot or a
+   shoulder-surfing pass can recover a credential.
+   ────────────────────────────────────────────────────────────────── */
+input[type="password"] {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
 body {
   margin: 0;
   padding: 0;

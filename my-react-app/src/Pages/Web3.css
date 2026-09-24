@@ -1,0 +1,1078 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   SuppliWise Web3 layer — shared design system for the hub, marketplace,
+   governance and public QR verification pages.
+
+   Palette is the app's own: deep forest (#18342a) + brand green (#24734e),
+   lit with the brand orange (#d46b35) and a spectrum of accents. Vibrant,
+   but every foreground/background pair below clears WCAG AA on its own
+   surface, and motion is fully disabled under prefers-reduced-motion.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.w3-page {
+  /* ── Tokens ──────────────────────────────────────────────────────── */
+  --w3-ink: #10241c;
+  --w3-ink-2: #33513f;
+  --w3-muted: #6b7f74;
+  --w3-line: #dce9e0;
+  --w3-paper: #f5f7f3;
+
+  --w3-deep: #18342a;
+  --w3-brand: #24734e;
+  --w3-brand-2: #2d6a4f;
+  --w3-lime: #22c55e;
+  --w3-teal: #0d9488;
+  --w3-sky: #4f6bed;
+  --w3-violet: #8b5cf6;
+  --w3-amber: #fbbf24;
+  --w3-orange: #d46b35;
+  --w3-rose: #f43f5e;
+
+  --w3-focus: rgba(212, 107, 53, 0.6);
+  --w3-shadow-sm: 0 8px 20px -14px rgba(16, 36, 28, 0.55);
+  --w3-shadow-md: 0 18px 40px -30px rgba(16, 36, 28, 0.6);
+  --w3-shadow-lg: 0 30px 60px -34px rgba(16, 36, 28, 0.62);
+
+  --w3-font: 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --w3-mono-font: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+
+  position: relative;
+  min-height: 100vh;
+  color: var(--w3-ink);
+  font-family: var(--w3-font);
+  /* Vibrant aurora: three coloured pools over a paper base. `fixed` keeps
+     the colour from sliding while a long panel scrolls underneath. */
+  background:
+    radial-gradient(1080px 520px at 10% -10%, rgba(34, 197, 94, 0.32), transparent 62%),
+    radial-gradient(880px 460px at 92% -6%, rgba(212, 107, 53, 0.26), transparent 64%),
+    radial-gradient(820px 440px at 72% 2%, rgba(79, 107, 237, 0.18), transparent 62%),
+    radial-gradient(760px 420px at 30% 12%, rgba(13, 148, 136, 0.16), transparent 64%),
+    linear-gradient(180deg, #eafaf0 0%, #f7faf6 44%, var(--w3-paper) 100%);
+  background-attachment: fixed;
+}
+
+/* Text inputs inherit the page font unless they opt into mono. */
+.w3-page input,
+.w3-page select,
+.w3-page textarea,
+.w3-page button {
+  font-family: inherit;
+}
+
+.w3-container {
+  position: relative;
+  max-width: 1200px;
+  margin: 0 auto;
+  /* Bottom padding reserves the strip the fixed "Ask AI" FAB floats over so
+     it can never sit on top of the last row of content. */
+  padding: 28px 24px 132px;
+}
+
+/* ── Hero header ───────────────────────────────────────────────────── */
+.w3-header {
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 22px;
+  padding: 30px 32px;
+  border-radius: 24px;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background:
+    radial-gradient(620px 260px at 88% -30%, rgba(251, 191, 36, 0.55), transparent 70%),
+    linear-gradient(120deg, #18342a 0%, #24734e 46%, #0d9488 100%);
+  box-shadow: 0 30px 60px -34px rgba(16, 36, 28, 0.8);
+}
+
+/* Faint diagonal weave so the hero reads as a surface, not a flat fill. */
+.w3-header::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    115deg,
+    rgba(255, 255, 255, 0.07) 0 2px,
+    transparent 2px 14px
+  );
+}
+
+.w3-header .w3-title,
+.w3-header .w3-subtitle {
+  position: relative;
+  z-index: 1;
+  color: #fff;
+}
+
+.w3-title {
+  margin: 0 0 8px;
+  font-size: clamp(26px, 3.4vw, 34px);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  color: var(--w3-ink);
+}
+
+.w3-subtitle {
+  margin: 0;
+  max-width: 78ch;
+  font-size: 15.5px;
+  line-height: 1.6;
+  color: var(--w3-muted);
+}
+
+.w3-header .w3-subtitle {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* ── Cross-section links ───────────────────────────────────────────── */
+.w3-subnav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+/* ── Tabs ───────────────────────────────────────────────────────────────
+   Docked pill strip. The old version leaked a native scrollbar and clipped
+   the last tab, so the strip now hides its scrollbar, snap-aligns each tab
+   and keeps its rounded "dock" shape while it scrolls. */
+.w3-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 7px;
+  margin-bottom: 22px;
+  border: 1px solid rgba(24, 52, 42, 0.09);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.82);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--w3-shadow-sm);
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.w3-tabs::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+.w3-tab {
+  flex: 0 0 auto;
+  scroll-snap-align: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border: 1px solid transparent;
+  border-radius: 13px;
+  background: transparent;
+  color: var(--w3-ink-2);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease,
+    transform 0.18s ease, box-shadow 0.2s ease;
+}
+
+.w3-tab:hover:not(.active) {
+  background: rgba(36, 115, 78, 0.1);
+  border-color: rgba(36, 115, 78, 0.18);
+  color: var(--w3-brand);
+  transform: translateY(-1px);
+}
+
+.w3-tab.active {
+  color: #fff;
+  border-color: transparent;
+  background: linear-gradient(135deg, #22c55e 0%, #24734e 58%, #18342a 100%);
+  box-shadow: 0 10px 20px -10px rgba(24, 52, 42, 0.85);
+}
+
+/* ── Cards ─────────────────────────────────────────────────────────── */
+.w3-card {
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 20px;
+  padding: 24px;
+  border: 1px solid var(--w3-line);
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: var(--w3-shadow-md);
+}
+
+/* Full-bleed spectrum rail across the card top. */
+.w3-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(
+    90deg,
+    #22c55e 0%,
+    #0d9488 28%,
+    #4f6bed 58%,
+    #8b5cf6 78%,
+    #d46b35 100%
+  );
+}
+
+.w3-card.accent {
+  border-color: rgba(34, 197, 94, 0.4);
+  background:
+    radial-gradient(760px 240px at 0% 0%, rgba(34, 197, 94, 0.13), transparent 72%),
+    linear-gradient(180deg, #ffffff 0%, #fbfffc 100%);
+  box-shadow: var(--w3-shadow-lg);
+}
+
+.w3-card-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--w3-ink);
+}
+
+.w3-card-sub {
+  margin: 0 0 16px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--w3-muted);
+}
+
+/* ── Layout helpers ────────────────────────────────────────────────── */
+.w3-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 16px;
+}
+
+.w3-grid.two {
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.w3-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.w3-row.between {
+  justify-content: space-between;
+}
+
+.w3-col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── Stats ─────────────────────────────────────────────────────────────
+   Tabular numerals in the UI font: the old Courier stack rendered
+   "3  days" and "Sep 27 , 2026" with distracting gaps. */
+.w3-stat {
+  position: relative;
+  overflow: hidden;
+  padding: 16px 18px 16px 20px;
+  border: 1px solid var(--w3-line);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff 0%, #f7faf8 100%);
+  box-shadow: var(--w3-shadow-sm);
+}
+
+.w3-stat::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 4px;
+  background: linear-gradient(180deg, #22c55e, #0d9488);
+}
+
+.w3-stat-value {
+  font-size: 25px;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--w3-ink);
+}
+
+.w3-stat-value.green { color: #15803d; }
+.w3-stat-value.amber { color: #b45309; }
+
+.w3-stat-label {
+  margin-top: 3px;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--w3-muted);
+}
+
+/* ── Forms ─────────────────────────────────────────────────────────── */
+.w3-label {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--w3-ink-2);
+}
+
+.w3-input,
+.w3-select,
+.w3-textarea {
+  width: 100%;
+  padding: 10px 13px;
+  border: 1px solid #cfe0d5;
+  border-radius: 12px;
+  font-size: 14px;
+  color: var(--w3-ink);
+  background: #fff;
+  outline: none;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+}
+
+.w3-input::placeholder,
+.w3-textarea::placeholder {
+  color: #9aada2;
+}
+
+.w3-input:hover,
+.w3-select:hover,
+.w3-textarea:hover {
+  border-color: #b4d4c2;
+}
+
+.w3-input:focus,
+.w3-select:focus,
+.w3-textarea:focus {
+  border-color: var(--w3-brand);
+  background: #fcfffd;
+  box-shadow: 0 0 0 4px rgba(36, 115, 78, 0.16);
+}
+
+.w3-textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.w3-field {
+  margin-bottom: 14px;
+}
+
+.w3-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 34px;
+  /* Chevron drawn inline so no extra asset or background-position maths. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' fill='none' stroke='%2333513f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 13px center;
+}
+
+/* ── Buttons ───────────────────────────────────────────────────────── */
+.w3-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #22c55e 0%, #24734e 60%, #18342a 100%);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 12px 24px -14px rgba(24, 52, 42, 0.95);
+  transition: transform 0.16s ease, box-shadow 0.2s ease, background 0.2s ease,
+    color 0.2s ease, border-color 0.2s ease, filter 0.2s ease;
+}
+
+.w3-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  filter: saturate(1.1);
+  box-shadow: 0 18px 30px -16px rgba(24, 52, 42, 1);
+}
+
+.w3-btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
+.w3-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.w3-btn.ghost {
+  border-color: #cfe0d5;
+  background: #fff;
+  color: var(--w3-ink-2);
+  box-shadow: var(--w3-shadow-sm);
+}
+
+.w3-btn.ghost:hover:not(:disabled) {
+  border-color: rgba(36, 115, 78, 0.5);
+  background: linear-gradient(135deg, #f2fbf5, #ffffff);
+  color: var(--w3-brand);
+  filter: none;
+  box-shadow: 0 14px 24px -16px rgba(24, 52, 42, 0.9);
+}
+
+.w3-btn.danger {
+  background: linear-gradient(135deg, #fb7185 0%, #e11d48 60%, #9f1239 100%);
+  box-shadow: 0 12px 24px -14px rgba(225, 29, 72, 0.95);
+}
+
+.w3-btn.small {
+  padding: 7px 14px;
+  font-size: 13px;
+  border-radius: 10px;
+}
+
+.w3-btn.full {
+  width: 100%;
+}
+
+/* ── Badges ────────────────────────────────────────────────────────── */
+.w3-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: #edf3ef;
+  color: var(--w3-ink-2);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.w3-badge.green  { background: #dcfce7; border-color: #bbf7d0; color: #15803d; }
+.w3-badge.amber  { background: #fef3c7; border-color: #fde68a; color: #b45309; }
+.w3-badge.red    { background: #ffe4e6; border-color: #fecdd3; color: #be123c; }
+.w3-badge.blue   { background: #e0e7ff; border-color: #c7d2fe; color: #3730a3; }
+.w3-badge.purple { background: #ede9fe; border-color: #ddd6fe; color: #6d28d9; }
+
+/* ── Alerts ────────────────────────────────────────────────────────── */
+.w3-alert {
+  padding: 12px 15px;
+  margin-bottom: 16px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.w3-alert.ok {
+  border-color: #86efac;
+  background: linear-gradient(135deg, #f0fdf4, #f7fee7);
+  color: #15803d;
+}
+
+.w3-alert.err {
+  border-color: #fca5a5;
+  background: linear-gradient(135deg, #fef2f2, #fff1f2);
+  color: #b91c1c;
+}
+
+.w3-alert.info {
+  border-color: #93c5fd;
+  background: linear-gradient(135deg, #eff6ff, #eef2ff);
+  color: #1d4ed8;
+}
+
+/* ── Monospace / copyable values ───────────────────────────────────── */
+.w3-mono {
+  font-family: var(--w3-mono-font);
+  font-size: 13px;
+  color: var(--w3-ink-2);
+  word-break: break-word;
+}
+
+.w3-hash {
+  display: inline-block;
+  max-width: 100%;
+  padding: 3px 9px;
+  border: 1px solid #c7d2fe;
+  border-radius: 8px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-family: var(--w3-mono-font);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  word-break: break-all;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.w3-hash:hover {
+  border-color: #a5b4fc;
+  background: #e0e7ff;
+  color: #312e81;
+}
+
+/* ── Tables ────────────────────────────────────────────────────────── */
+.w3-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--w3-line);
+  border-radius: 14px;
+  background: #fff;
+}
+
+.w3-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.w3-table th {
+  padding: 10px 12px;
+  border-bottom: 2px solid var(--w3-line);
+  background: linear-gradient(180deg, #f7faf8, #eef5f0);
+  color: var(--w3-ink-2);
+  font-size: 11.5px;
+  font-weight: 800;
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.w3-table td {
+  padding: 11px 12px;
+  border-bottom: 1px solid #eef3f0;
+  color: var(--w3-ink-2);
+  vertical-align: top;
+}
+
+.w3-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.w3-table tbody tr {
+  transition: background 0.15s ease;
+}
+
+.w3-table tbody tr:hover {
+  background: #f6fbf8;
+}
+
+/* ── Empty state & spinner ─────────────────────────────────────────── */
+.w3-empty {
+  padding: 40px 18px;
+  border: 1px dashed #c9ded2;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #fbfdfb, #f5faf7);
+  color: var(--w3-muted);
+  font-size: 14px;
+  text-align: center;
+}
+
+.w3-empty-icon {
+  margin-bottom: 8px;
+  font-size: 34px;
+}
+
+.w3-spinner {
+  width: 26px;
+  height: 26px;
+  margin: 28px auto;
+  border: 3px solid #d9e8df;
+  border-top-color: var(--w3-brand);
+  border-radius: 50%;
+  animation: w3-spin 0.8s linear infinite;
+}
+
+@keyframes w3-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Timeline ─────────────────────────────────────────────────────── */
+.w3-timeline {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.w3-timeline-item {
+  position: relative;
+  margin-left: 8px;
+  padding: 0 0 20px 28px;
+  border-left: 2px solid #bbf7d0;
+}
+
+.w3-timeline-item:last-child {
+  padding-bottom: 4px;
+  border-left-color: transparent;
+}
+
+.w3-timeline-item::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: -8px;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #22c55e, #0d9488);
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.2);
+}
+
+.w3-timeline-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--w3-ink);
+}
+
+.w3-timeline-meta {
+  margin: 2px 0;
+  font-size: 12px;
+  color: var(--w3-muted);
+}
+
+.w3-timeline-note {
+  font-size: 13px;
+  color: var(--w3-ink-2);
+}
+
+/* ── Progress ─────────────────────────────────────────────────────── */
+.w3-progress {
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e6efe9;
+}
+
+.w3-progress-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #22c55e, #0d9488 60%, #4f6bed);
+  transition: width 0.45s ease;
+}
+
+/* ── NFT cards ─────────────────────────────────────────────────────── */
+.w3-nft {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 152px;
+  overflow: hidden;
+  padding: 16px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 16px;
+  color: #fff;
+  box-shadow: var(--w3-shadow-md);
+  transition: transform 0.2s ease, box-shadow 0.24s ease;
+}
+
+.w3-nft:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--w3-shadow-lg);
+}
+
+.w3-nft-emoji {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  font-size: 34px;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+}
+
+.w3-nft-name {
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.w3-nft-desc {
+  margin-top: 4px;
+  font-size: 12px;
+  opacity: 0.92;
+}
+
+.w3-nft-serial {
+  margin-top: 6px;
+  font-family: var(--w3-mono-font);
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+/* ── Achievements ─────────────────────────────────────────────────── */
+.w3-ach {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid #eef3f0;
+}
+
+.w3-ach:last-child {
+  border-bottom: none;
+}
+
+.w3-ach-icon {
+  width: 30px;
+  font-size: 22px;
+  text-align: center;
+}
+
+.w3-ach-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.w3-ach-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--w3-ink);
+}
+
+.w3-ach-desc {
+  font-size: 12px;
+  color: var(--w3-muted);
+}
+
+/* ── Marketplace listings ──────────────────────────────────────────── */
+.w3-listing {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 18px;
+  border: 1px solid var(--w3-line);
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdfb 100%);
+  box-shadow: var(--w3-shadow-sm);
+  transition: transform 0.2s ease, box-shadow 0.24s ease, border-color 0.24s ease;
+}
+
+.w3-listing:hover {
+  transform: translateY(-3px);
+  border-color: rgba(34, 197, 94, 0.5);
+  box-shadow: 0 28px 52px -32px rgba(16, 36, 28, 0.75);
+}
+
+.w3-listing-brand {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--w3-muted);
+}
+
+.w3-listing-title {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--w3-ink);
+}
+
+.w3-listing-desc {
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--w3-muted);
+}
+
+.w3-price {
+  font-size: 21px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #15803d;
+}
+
+.w3-price small {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--w3-muted);
+}
+
+/* ── Governance tally ──────────────────────────────────────────────── */
+.w3-tally {
+  display: flex;
+  height: 11px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ffe4e6, #fecdd3);
+}
+
+.w3-tally-for {
+  height: 100%;
+  background: linear-gradient(90deg, #22c55e, #10b981);
+}
+
+.w3-tally-labels {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--w3-muted);
+}
+
+/* ── Public verification page ─────────────────────────────────────────
+   The hero used to float on an empty page; it now lives in a real card so
+   the form has a surface, and the code field + button read as one control. */
+.w3-verify-shell {
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 20px;
+  padding: 8px 20px 32px;
+  border: 1px solid var(--w3-line);
+  border-radius: 26px;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfffd 100%);
+  box-shadow: var(--w3-shadow-lg);
+}
+
+.w3-verify-shell::before {
+  content: '';
+  position: absolute;
+  top: -150px;
+  left: 50%;
+  width: 520px;
+  height: 300px;
+  border-radius: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: radial-gradient(circle, rgba(34, 197, 94, 0.18), transparent 70%);
+}
+
+.w3-verify-hero {
+  position: relative;
+  z-index: 1;
+  padding: 40px 20px 24px;
+  text-align: center;
+}
+
+.w3-verify-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 22px;
+  font-size: 34px;
+  background: linear-gradient(135deg, #22c55e, #0d9488);
+  box-shadow: 0 18px 34px -18px rgba(13, 148, 136, 0.9);
+}
+
+.w3-verify-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 24px;
+  margin-bottom: 14px;
+  border-radius: 999px;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.w3-verify-badge.good {
+  border: 2px solid #86efac;
+  background: linear-gradient(135deg, #dcfce7, #bbf7d0);
+  color: #166534;
+  box-shadow: 0 14px 30px -18px rgba(22, 101, 52, 0.9);
+}
+
+.w3-verify-badge.bad {
+  border: 2px solid #fca5a5;
+  background: linear-gradient(135deg, #fee2e2, #fecdd3);
+  color: #b91c1c;
+  box-shadow: 0 14px 30px -18px rgba(185, 28, 28, 0.85);
+}
+
+.w3-verify-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  max-width: 440px;
+  margin: 22px auto 0;
+}
+
+.w3-code-input {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 2px solid #cfe0d5;
+  border-radius: 14px;
+  background: #fff;
+  color: var(--w3-ink);
+  font-family: var(--w3-mono-font);
+  font-size: 19px;
+  letter-spacing: 0.1em;
+  text-align: center;
+  text-transform: uppercase;
+  outline: none;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.w3-code-input::placeholder {
+  color: #b3c7bc;
+  letter-spacing: 0.1em;
+}
+
+.w3-code-input:focus {
+  border-color: var(--w3-brand);
+  box-shadow: 0 0 0 4px rgba(36, 115, 78, 0.16);
+}
+
+/* ── Overflow guards ───────────────────────────────────────────────────
+   Long unspaced tokens — batch codes, tx hashes, a user-entered product
+   title like "NNNNNNNN…" — used to widen their whole grid column and spill
+   the page sideways, because grid/flex items default to min-width:auto and
+   therefore refuse to shrink below their longest word.
+   Two-part fix:
+     1. min-width:0 lets each card shrink to its column;
+     2. overflow-wrap:anywhere lets the text break *inside* the long token
+        instead of pushing the layout out. (`anywhere` rather than
+        `break-word`, which still contributes the full word to min-content.) */
+.w3-grid > *,
+.w3-listing,
+.w3-stat,
+.w3-card,
+.w3-nft,
+.w3-ach-body {
+  min-width: 0;
+}
+
+.w3-card-title,
+.w3-listing-title,
+.w3-listing-brand,
+.w3-listing-desc,
+.w3-card-sub,
+.w3-ach-name,
+.w3-ach-desc,
+.w3-nft-name,
+.w3-nft-desc,
+.w3-timeline-title,
+.w3-timeline-note,
+.w3-stat-value,
+.w3-price,
+.w3-verify-hero,
+.w3-empty {
+  overflow-wrap: anywhere;
+}
+
+.w3-badge {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* ── Tab panel ────────────────────────────────────────────────────── */
+/* Programmatically focusable for screen readers, but never a visible
+   focus ring — the tab itself already shows the selection. */
+.w3-tabpanel:focus {
+  outline: none;
+}
+
+/* ── Focus visibility (keyboard only) ─────────────────────────────── */
+.w3-page :is(.w3-tab, .w3-btn, .w3-hash, .w3-input, .w3-select, .w3-textarea, .w3-code-input):focus-visible {
+  outline: 3px solid var(--w3-focus);
+  outline-offset: 2px;
+}
+
+/* Screen-reader-only helper for labels that the design carries visually. */
+.w3-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── Responsive ───────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .w3-header {
+    padding: 24px 22px;
+  }
+}
+
+@media (max-width: 768px) {
+  .w3-container {
+    padding: 18px 14px 128px;
+  }
+
+  .w3-header {
+    padding: 20px 18px;
+    border-radius: 20px;
+  }
+
+  .w3-card {
+    padding: 18px;
+    border-radius: 18px;
+  }
+
+  .w3-grid,
+  .w3-grid.two {
+    grid-template-columns: 1fr;
+  }
+
+  .w3-stat-value {
+    font-size: 22px;
+  }
+
+  .w3-tab {
+    padding: 9px 13px;
+    font-size: 13px;
+  }
+
+  .w3-verify-hero {
+    padding: 28px 12px 20px;
+  }
+
+  .w3-verify-badge {
+    padding: 10px 18px;
+    font-size: 15px;
+  }
+
+  .w3-code-input {
+    font-size: 17px;
+  }
+
+  .w3-verify-form .w3-btn {
+    width: 100%;
+  }
+}
+
+/* ── Reduced motion ───────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .w3-page *,
+  .w3-page *::before,
+  .w3-page *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .w3-page {
+    background-attachment: scroll;
+  }
+}

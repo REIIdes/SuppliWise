@@ -9,7 +9,10 @@ import AssessmentManagement from './AssessmentManagement';
 import SecurityStatus from '../Components/SecurityStatus/SecurityStatus';
 import AdminTopbar from '../Components/AdminTopbar/AdminTopbar';
 
-const tabs = ['overview', 'users', 'admins', 'assessment-management', 'ai', 'profile', 'security'];
+// 'profile' (Settings) is intentionally NOT in this list: it was removed from
+// the sidebar and now lives behind the avatar pill menu in the topbar
+// (Manage Account / Edit Profile both deep-link into it).
+const tabs = ['overview', 'users', 'admins', 'assessment-management', 'ai', 'security'];
 const ADMIN_IDLE_LIMIT_SECONDS = 3 * 60 + 30;
 const ADMIN_WARNING_SECONDS = 30;
 const ADMIN_REFRESH_INTERVAL_MS = 10 * 1000;
@@ -41,6 +44,8 @@ function subscriptionExpiryLabel(user) {
 // second (previously the whole page re-rendered 210× per idle session).
 // Memoized: only this badge updates as the countdown ticks.
 import SessionExpiryModal from '../Components/SessionExpiryModal/SessionExpiryModal';
+import ConfirmLogoutModal from '../Components/ConfirmLogoutModal/ConfirmLogoutModal';
+import ConfirmModal from '../Components/ConfirmModal/ConfirmModal';
 
 const AdminIdleStatus = memo(function AdminIdleStatus({ deadlineRef, onExpire, onStay }) {
   const [remaining, setRemaining] = useState(ADMIN_IDLE_LIMIT_SECONDS);
@@ -170,13 +175,29 @@ const TAB_ICONS = {
   ),
 };
 
-const SIGNOUT_ICON = (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-    <polyline points="16 17 21 12 16 7"/>
-    <line x1="21" y1="12" x2="9" y2="12"/>
-  </svg>
-);
+/* ── Settings → Edit profile: picture picking ─────────────────────────── */
+// Same limits the server enforces (2 MB picture / 3 MB background), checked
+// before the file is ever read so a bad pick fails with a readable message.
+const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+const BANNER_MAX_BYTES = 3 * 1024 * 1024;
+
+function readImageFile(file, maxBytes, tooBigMessage) {
+  return new Promise((resolve, reject) => {
+    if (!file) { resolve(''); return; }
+    if (!file.type || !file.type.startsWith('image/')) {
+      reject(new Error('Please select an image file.'));
+      return;
+    }
+    if (file.size > maxBytes) {
+      reject(new Error(tooBigMessage));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read that file. Please try another image.'));
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.readAsDataURL(file);
+  });
+}
 
 function AdminDashboard() {
   const navigate = useNavigate();
@@ -200,11 +221,21 @@ function AdminDashboard() {
   const [profile, setProfile] = useState(null);
   const [profileForm, setProfileForm] = useState({ currentPassword: '', newPassword: '', otp: '' });
   const [profileMessage, setProfileMessage] = useState('');
+  // Saved picture/background (from /admin/profile) + whether the Edit profile
+  // panel inside Settings starts expanded.
+  const [appearance, setAppearance] = useState({ profilePicture: '', bannerPicture: '' });
+  const [editProfileOpen, setEditProfileOpen] = useState(true);
   const [rotateOtp, setRotateOtp] = useState('');
   const [rotatedKey, setRotatedKey] = useState(null);
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  // Destructive-action guard: which user is awaiting confirmation, which row
+  // is mid-request, and the one-shot success banner shown afterwards.
+  const [pendingDeleteUser, setPendingDeleteUser] = useState(null);
+  const [deletingUserId, setDeletingUserId] = useState('');
+  const [notice, setNotice] = useState('');
   const notifBellRef = useRef(null);
   const notifPanelRef = useRef(null);
   const notifCloseTimerRef = useRef(0);
@@ -313,6 +344,14 @@ function AdminDashboard() {
   // Clear a pending hover-close timer if the dashboard unmounts mid-transition.
   useEffect(() => () => window.clearTimeout(notifCloseTimerRef.current), []);
 
+  // Success banners (e.g. "account disabled") fade on their own so they can
+  // never pile up while the admin keeps working.
+  useEffect(() => {
+    if (!notice) return undefined;
+    const timer = window.setTimeout(() => setNotice(''), 6000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
   const [search, setSearch] = useState('');
   const [adminSearch, setAdminSearch] = useState('');
   const [error, setError] = useState('');
@@ -386,6 +425,18 @@ function AdminDashboard() {
       const [overviewData, aiData, securityData, profileData, notificationData] = await Promise.all([request('/overview', { background }), request('/ai', { background }), request('/security', { background }), request('/profile', { background }), request('/notifications', { background })]);
       setOverview(overviewData); setAi(aiData); setSecurity(securityData); setProfile(profileData);
       setNotifications(notificationData.notifications || []); setUnreadCount(notificationData.unreadCount || 0);
+      // Pictures ride along with /profile. Identity is preserved when nothing
+      // changed, so the 10 s background refresh never resets the Edit profile
+      // draft (ProfilePanel only adopts values it sees as new).
+      setAppearance(current => {
+        const next = {
+          profilePicture: profileData?.profilePicture || '',
+          bannerPicture: profileData?.bannerPicture || '',
+        };
+        return current.profilePicture === next.profilePicture && current.bannerPicture === next.bannerPicture
+          ? current
+          : next;
+      });
       // Users tab needs the authoritative /users list (100 rows + live
       // lockout). recentUsers (8 rows) is only a dashboard preview — using
       // it here used to shrink the table and show stale "Clear" badges.
@@ -673,7 +724,7 @@ function AdminDashboard() {
             ai_quota: 'AI / API', jwt_security: 'Auth / JWT',
             headers_security: 'OWASP', email_enumeration: 'OWASP',
             sensitive_data: 'OWASP', rate_limit_lockout: 'STRIDE',
-          }[m.key] || '—',
+          }[m.key] || (String(m.key).startsWith('bc_') ? 'Blockchain' : '—'),
           // Truncate at a word boundary so cells never end mid-word
           truncateWords(m.detail || '', 140),
           m.latencyMs != null ? `${m.latencyMs} ms` : '—',
@@ -828,6 +879,44 @@ function AdminDashboard() {
     } catch (requestError) { setProfileMessage(requestError.message); }
   };
 
+  // Settings → Edit profile save. Only the keys that actually changed are
+  // sent; the server treats a missing key as "leave it alone".
+  const saveAppearance = useCallback(async (draft) => {
+    const payload = {};
+    if (draft.profilePicture !== appearance.profilePicture) payload.profilePicture = draft.profilePicture;
+    if (draft.bannerPicture !== appearance.bannerPicture) payload.bannerPicture = draft.bannerPicture;
+    if (Object.keys(payload).length === 0) {
+      return { ok: false, message: 'No changes to save yet.', appearance };
+    }
+    try {
+      const data = await request('/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const saved = { profilePicture: data.profilePicture || '', bannerPicture: data.bannerPicture || '' };
+      setAppearance(saved);
+      setProfile(current => (current ? { ...current, ...saved } : current));
+      return { ok: true, message: data?.message || 'Profile saved.', appearance: saved };
+    } catch (requestError) {
+      return { ok: false, message: requestError.message };
+    }
+  }, [request, appearance]);
+
+  // Avatar-pill menu → jump into the Settings (profile) tab. That tab was
+  // removed from the sidebar, so this menu is its only entry point.
+  const openSettings = useCallback((section) => {
+    setTab('profile');
+    if (section === 'edit') setEditProfileOpen(true);
+    const targetId = section === 'edit' ? 'admin-edit-profile' : 'admin-account-card';
+    window.setTimeout(() => {
+      const target = document.getElementById(targetId);
+      if (!target) return;
+      const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      target.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+    }, 90);
+  }, []);
+
   const updateAccount = async (user, changes) => {
     try {
       const data = await request(`/users/${user._id}/account`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(changes) });
@@ -836,9 +925,29 @@ function AdminDashboard() {
     } catch (requestError) { setError(requestError.message); }
   };
 
-  const deleteAccount = async user => {
-    if (!window.confirm(`Disable ${user.email}?`)) return;
-    try { await request(`/users/${user._id}`, { method: 'DELETE' }); await loadUsers(); } catch (requestError) { setError(requestError.message); }
+  // Destructive account removal. window.confirm() is gone on purpose: the
+  // Android/Capacitor webview silently swallows it (the button looked dead),
+  // and a native dialog cannot be styled. The row now raises a warning
+  // banner + in-app confirmation modal instead.
+  const deleteAccount = user => {
+    setPendingDeleteUser(user || null);
+  };
+
+  const confirmDeleteAccount = async () => {
+    const user = pendingDeleteUser;
+    setPendingDeleteUser(null);
+    if (!user) return;
+    setDeletingUserId(user._id);
+    try {
+      const data = await request(`/users/${user._id}`, { method: 'DELETE' });
+      await loadUsers();
+      setError('');
+      setNotice(data?.message || `${user.email} was deleted.`);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setDeletingUserId('');
+    }
   };
 
   const unlockUser = async (user) => {
@@ -932,10 +1041,18 @@ function AdminDashboard() {
       {/* ── Topbar: spans full width above sidebar + main ── */}
       <AdminTopbar
         admin={profile}
+        profilePicture={appearance.profilePicture}
         unreadCount={unreadCount}
         showNotifications={showNotifications}
         onToggleNotifications={toggleNotifications}
-        onGoProfile={() => setTab('profile')}
+        onManageAccount={() => openSettings('account')}
+        onEditProfile={() => openSettings('edit')}
+        onSignOut={() => setShowLogoutConfirm(true)}
+        onMenuOpenChange={(open) => {
+          // One anchored panel at a time — opening the profile menu closes
+          // the notification panel (the bell does the reverse on its click).
+          if (open) { cancelNotifClose(); setShowNotifications(false); }
+        }}
         bellRef={notifBellRef}
         onBellPointerEnter={handleNotifHoverEnter}
         onBellPointerLeave={handleNotifHoverLeave}
@@ -979,24 +1096,42 @@ function AdminDashboard() {
                 key={item}
                 className={tab === item ? 'active' : ''}
                 onClick={() => handleTabClick(item)}
-                title={sidebarCollapsed ? TAB_LABEL[item] : undefined}
+                /* Labels are also hidden by the ≤820px media query (not only by
+                   the collapsed class), so the tooltip must always be present. */
+                title={TAB_LABEL[item]}
+                aria-label={TAB_LABEL[item]}
+                aria-current={tab === item ? 'page' : undefined}
               >
                 <span className="sidebar-nav-icon">{TAB_ICONS[item]}</span>
                 <span className="sidebar-nav-label">{TAB_LABEL[item]}</span>
               </button>
             ))}
           </nav>
-
-          {/* Sign out */}
-          <button
-            className="admin-link sidebar-signout"
-            onClick={signOut}
-            title={sidebarCollapsed ? 'Sign out' : undefined}
-          >
-            <span className="sidebar-nav-icon">{SIGNOUT_ICON}</span>
-            <span className="sidebar-nav-label">Sign out</span>
-          </button>
         </aside>
+
+        {/* Sign-out confirmation — same design as the user Profile page */}
+        {showLogoutConfirm && (
+          <ConfirmLogoutModal
+            message="Your admin session will end and you'll be taken back to the admin sign-in page."
+            onConfirm={() => { setShowLogoutConfirm(false); signOut(); }}
+            onCancel={() => setShowLogoutConfirm(false)}
+          />
+        )}
+
+        {/* Delete-account warning + confirmation. Replaces the old
+            window.confirm(), which the Android webview blocked (the button
+            looked dead) and which cannot be styled. */}
+        {pendingDeleteUser && (
+          <ConfirmModal
+            type="danger"
+            title="Delete this account?"
+            message={pendingDeleteUser.email + ' will be permanently removed from the database together with all of its data (assessments, sessions and notifications). This cannot be undone.'}
+            confirmText="Yes, delete permanently"
+            cancelText="Keep account"
+            onConfirm={confirmDeleteAccount}
+            onCancel={() => setPendingDeleteUser(null)}
+          />
+        )}
 
         {/* ── Main content ─────────────────────────────────── */}
         <main className="admin-main">
@@ -1073,15 +1208,16 @@ function AdminDashboard() {
 
           <AdminIdleStatus deadlineRef={idleDeadlineRef} onExpire={handleIdleExpire} onStay={handleStayActive} />
 
-          {error && <div className="admin-alert danger">{error}</div>}
+          {error && <div className="admin-alert danger" role="alert">{error}</div>}
+          {notice && <div className="admin-alert success" role="status">{notice}</div>}
 
           {tab === 'overview'               && overview && <div className="admin-tab-panel"><Overview overview={overview} /></div>}
-          {tab === 'users'                  && <div className="admin-tab-panel"><Users users={users} usersFetchedAt={usersFetchedAt} search={search} setSearch={value => { searchRef.current = value; setSearch(value); }} loadUsers={loadUsers} setSubscriptionPlan={setSubscriptionPlan} planLabels={PLAN_LABELS} updateAccount={updateAccount} deleteAccount={deleteAccount} unlockUser={unlockUser} expandedUser={expandedUser} setExpandedUser={setExpandedUser} /></div>}
+          {tab === 'users'                  && <div className="admin-tab-panel"><Users users={users} usersFetchedAt={usersFetchedAt} search={search} setSearch={value => { searchRef.current = value; setSearch(value); }} loadUsers={loadUsers} setSubscriptionPlan={setSubscriptionPlan} planLabels={PLAN_LABELS} updateAccount={updateAccount} deleteAccount={deleteAccount} deletingUserId={deletingUserId} unlockUser={unlockUser} expandedUser={expandedUser} setExpandedUser={setExpandedUser} /></div>}
           {tab === 'admins'                 && <div className="admin-tab-panel"><Admins admins={admins} adminsFetchedAt={adminsFetchedAt} search={adminSearch} setSearch={value => { adminSearchRef.current = value; setAdminSearch(value); }} loadAdmins={loadAdmins} toggleAdmin={toggleAdmin} unlockAdmin={unlockAdmin} currentAdminId={profile && profile._id} expandedAdmin={expandedAdmin} setExpandedAdmin={setExpandedAdmin} /></div>}
           {tab === 'assessment-management'  && <div className="admin-tab-panel"><AssessmentManagement users={allUsers} /></div>}
           {tab === 'ai'                     && <div className="admin-tab-panel"><AiPanel ai={ai} /></div>}
           {tab === 'security'               && <div className="admin-tab-panel"><SecurityStatus adminRequest={request} onDownloadReport={() => downloadReportRef.current()} /></div>}
-          {tab === 'profile'                && <div className="admin-tab-panel"><ProfilePanel profile={profile} form={profileForm} setForm={setProfileForm} message={profileMessage} onSubmit={changePassword} rotateOtp={rotateOtp} setRotateOtp={setRotateOtp} rotatedKey={rotatedKey} onRotate={rotateAuthenticator} /></div>}
+          {tab === 'profile'                && <div className="admin-tab-panel"><ProfilePanel profile={profile} appearance={appearance} onSaveAppearance={saveAppearance} editOpen={editProfileOpen} onToggleEdit={() => setEditProfileOpen(v => !v)} form={profileForm} setForm={setProfileForm} message={profileMessage} onSubmit={changePassword} rotateOtp={rotateOtp} setRotateOtp={setRotateOtp} rotatedKey={rotatedKey} onRotate={rotateAuthenticator} /></div>}
         </main>
       </div>
     </div>
@@ -1383,7 +1519,7 @@ function LockoutCountdown({ remainingSeconds, fetchedAt, lockedBy, ips, onExpire
   );
 }
 
-function Users({ users, usersFetchedAt, search, setSearch, loadUsers, setSubscriptionPlan, planLabels, updateAccount, deleteAccount, unlockUser, expandedUser, setExpandedUser }) {
+function Users({ users, usersFetchedAt, search, setSearch, loadUsers, setSubscriptionPlan, planLabels, updateAccount, deleteAccount, deletingUserId, unlockUser, expandedUser, setExpandedUser }) {
   const handleUserToggle = (userId) => {
     setExpandedUser(expandedUser === userId ? null : userId);
   };
@@ -1576,9 +1712,18 @@ function Users({ users, usersFetchedAt, search, setSearch, loadUsers, setSubscri
                       )}
                     </div>
                   </div>
-                  <div className="user-actions">
-                    <button className="status danger-action" onClick={() => deleteAccount(user)}>
-                      Delete account
+                  <div className="user-actions user-actions--stacked">
+                    <p className="user-warning" role="note">
+                      <span className="user-warning__icon" aria-hidden="true">!</span>
+                      Deleting an account permanently removes it and all of its data from the database. This cannot be undone.
+                    </p>
+                    <button
+                      type="button"
+                      className="status danger-action"
+                      onClick={() => deleteAccount(user)}
+                      disabled={deletingUserId === user._id}
+                    >
+                      {deletingUserId === user._id ? 'Deleting...' : 'Delete account'}
                     </button>
                   </div>
                 </div>
@@ -1797,11 +1942,66 @@ function EyeIcon({ open }) {
   );
 }
 
-function ProfilePanel({ profile, form, setForm, message, onSubmit, rotateOtp, setRotateOtp, rotatedKey, onRotate }) {
+function ProfilePanel({ profile, appearance, onSaveAppearance, editOpen, onToggleEdit, form, setForm, message, onSubmit, rotateOtp, setRotateOtp, rotatedKey, onRotate }) {
   const [showCurrent,  setShowCurrent]  = useState(false);
   const [showNew,      setShowNew]      = useState(false);
   const [pwLoading,    setPwLoading]    = useState(false);
   const [rotLoading,   setRotLoading]   = useState(false);
+
+  /* ── Edit profile: picture + background picture ─────────────────────── */
+  const savedAppearance = {
+    profilePicture: appearance?.profilePicture || '',
+    bannerPicture: appearance?.bannerPicture || '',
+  };
+  // Unsaved picture picks are held in `draft`; while there are none, the
+  // server values (re-read from /profile every 10 s) render directly. Deriving
+  // beats syncing in an effect: fresh values flow through immediately, there is
+  // no cascading render, and a pick that has not been saved yet can never be
+  // overwritten by a background refresh.
+  const [draft, setDraft] = useState(null);
+  const draftState = draft || savedAppearance;
+  const [appearanceNote, setAppearanceNote] = useState(null); // { ok, text }
+  const [appearanceSaving, setAppearanceSaving] = useState(false);
+  const avatarInputRef = useRef(null);
+  const bannerInputRef = useRef(null);
+
+  const hasAppearanceChanges = draftState.profilePicture !== savedAppearance.profilePicture
+    || draftState.bannerPicture !== savedAppearance.bannerPicture;
+
+  const handlePicturePick = async (event, key, maxBytes, tooBigMessage) => {
+    const file = event.target.files && event.target.files[0];
+    // Reset first so picking the same file twice still fires a change event.
+    event.target.value = '';
+    if (!file) return;
+    try {
+      const dataUrl = await readImageFile(file, maxBytes, tooBigMessage);
+      if (!dataUrl) return;
+      setDraft(current => ({ ...(current || savedAppearance), [key]: dataUrl }));
+      setAppearanceNote(null);
+    } catch (pickError) {
+      setAppearanceNote({ ok: false, text: pickError.message });
+    }
+  };
+
+  const clearPicture = (key) => {
+    setDraft(current => ({ ...(current || savedAppearance), [key]: '' }));
+    setAppearanceNote(null);
+  };
+
+  const handleAppearanceSave = async () => {
+    if (!onSaveAppearance || appearanceSaving) return;
+    setAppearanceSaving(true);
+    try {
+      const result = await onSaveAppearance(draftState);
+      setAppearanceNote({ ok: Boolean(result && result.ok), text: (result && result.message) || '' });
+      // Saved — drop the local draft so the now-current server values render.
+      if (result && result.ok) setDraft(null);
+    } catch (saveError) {
+      setAppearanceNote({ ok: false, text: saveError.message || 'Unable to save the profile.' });
+    } finally {
+      setAppearanceSaving(false);
+    }
+  };
 
   const update = event => setForm(current => ({ ...current, [event.target.name]: event.target.value }));
 
@@ -1828,12 +2028,25 @@ function ProfilePanel({ profile, form, setForm, message, onSubmit, rotateOtp, se
     <div className="profile-page">
 
       {/* ── Account card ─────────────────────────────────────────────── */}
-      <div className="profile-card">
+      <div
+        className="profile-card"
+        id="admin-account-card"
+        style={draftState.bannerPicture ? {
+          backgroundImage: `url(${draftState.bannerPicture})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+        } : undefined}
+      >
         <span className="profile-card__glow profile-card__glow--a" aria-hidden="true" />
         <span className="profile-card__glow profile-card__glow--b" aria-hidden="true" />
+        {draftState.bannerPicture && (
+          <span className="profile-card__banner-shade" aria-hidden="true" />
+        )}
 
         <div className="profile-card__avatar">
-          {(profile?.alias || 'A')[0].toUpperCase()}
+          {draftState.profilePicture
+            ? <img className="profile-card__avatar-img" src={draftState.profilePicture} alt="" aria-hidden="true" />
+            : (profile?.alias || 'A')[0].toUpperCase()}
         </div>
 
         <div className="profile-card__info">
@@ -1863,6 +2076,121 @@ function ProfilePanel({ profile, form, setForm, message, onSubmit, rotateOtp, se
           {message}
         </div>
       )}
+
+      {/* ── Edit profile: picture + background picture (collapsible) ──── */}
+      <section className="admin-panel profile-panel profile-panel--rose" id="admin-edit-profile">
+        <div className="profile-section-header">
+          <span className="profile-section-icon profile-section-icon--rose" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+              <circle cx="12" cy="7" r="4"/>
+            </svg>
+          </span>
+          <h3 className="profile-section-title">
+            <button
+              type="button"
+              className="profile-collapse"
+              aria-expanded={Boolean(editOpen)}
+              aria-controls={editOpen ? 'admin-edit-profile-body' : undefined}
+              onClick={onToggleEdit}
+            >
+              <span>Edit profile</span>
+              <span className={`profile-collapse__chev${editOpen ? ' is-open' : ''}`} aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="6 9 12 15 18 9"/>
+                </svg>
+              </span>
+            </button>
+          </h3>
+        </div>
+
+        {editOpen && (
+          <div className="profile-edit-body" id="admin-edit-profile-body">
+            <p className="admin-muted profile-section-desc">Change your picture, your background picture, and the other details shown across the admin panel.</p>
+
+            {/* Profile picture */}
+            <div className="pf-look__row">
+              <div className="pf-look__preview pf-look__preview--avatar">
+                {draftState.profilePicture
+                  ? <img src={draftState.profilePicture} alt="Profile picture preview" />
+                  : <span aria-hidden="true">{(profile?.alias || 'A')[0].toUpperCase()}</span>}
+              </div>
+              <div className="pf-look__info">
+                <strong>Profile picture</strong>
+                <span className="admin-muted">Shown in the topbar and on this card · JPG or PNG · max 2 MB</span>
+                <div className="pf-look__actions">
+                  <button type="button" className="admin-secondary" onClick={() => avatarInputRef.current?.click()}>
+                    Change picture
+                  </button>
+                  {draftState.profilePicture && (
+                    <button type="button" className="admin-secondary pf-look__remove" onClick={() => clearPicture('profilePicture')}>
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <input
+                  ref={avatarInputRef}
+                  className="pf-look__file"
+                  type="file"
+                  accept="image/*"
+                  tabIndex={-1}
+                  aria-hidden="true"
+                  onChange={(event) => handlePicturePick(event, 'profilePicture', AVATAR_MAX_BYTES, 'Profile picture must be less than 2MB.')}
+                />
+              </div>
+            </div>
+
+            {/* Background picture */}
+            <div className="pf-look__row">
+              <div
+                className="pf-look__preview pf-look__preview--banner"
+                style={draftState.bannerPicture ? { backgroundImage: `url(${draftState.bannerPicture})` } : undefined}
+              >
+                {!draftState.bannerPicture && <span aria-hidden="true">No background</span>}
+              </div>
+              <div className="pf-look__info">
+                <strong>Background picture</strong>
+                <span className="admin-muted">Banner behind the account card · JPG or PNG · max 3 MB</span>
+                <div className="pf-look__actions">
+                  <button type="button" className="admin-secondary" onClick={() => bannerInputRef.current?.click()}>
+                    Change background
+                  </button>
+                  {draftState.bannerPicture && (
+                    <button type="button" className="admin-secondary pf-look__remove" onClick={() => clearPicture('bannerPicture')}>
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <input
+                  ref={bannerInputRef}
+                  className="pf-look__file"
+                  type="file"
+                  accept="image/*"
+                  tabIndex={-1}
+                  aria-hidden="true"
+                  onChange={(event) => handlePicturePick(event, 'bannerPicture', BANNER_MAX_BYTES, 'Background picture must be less than 3MB.')}
+                />
+              </div>
+            </div>
+
+            {appearanceNote && (
+              <div className={`profile-alert ${appearanceNote.ok ? 'profile-alert--success' : 'profile-alert--error'}`} role="alert">
+                <span>{appearanceNote.ok ? '✓' : '✕'}</span>
+                {appearanceNote.text}
+              </div>
+            )}
+
+            <button
+              type="button"
+              className="admin-primary profile-submit"
+              onClick={handleAppearanceSave}
+              disabled={appearanceSaving || !hasAppearanceChanges}
+            >
+              {appearanceSaving ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
+        )}
+      </section>
 
       <div className="profile-grid">
 

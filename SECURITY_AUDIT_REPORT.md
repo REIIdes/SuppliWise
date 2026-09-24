@@ -543,6 +543,57 @@ Because the remote is **public**, everything below is in git history and must be
 
 ---
 
+## 9A. Addendum — Glitch Hunt (2026-09-24)
+
+A second, adversarial pass ran the day after the audit: instead of reading code, it *attacked the live
+API* with `server/glitch-hunt.js` — a 120-probe suite that deliberately tries to break, confuse, or
+cheat every subsystem (auth, sessions, entitlements, IDOR, injection, prototype chain, parameter bounds,
+XSS, open redirect, mass assignment, admin boundaries, output hygiene). Every probe asserts the *safe*
+outcome; a wrong status, a leak, a 500, or a hung response is a FAIL. The first run crashed the server
+mid-hunt — which is itself proof the method finds real defects.
+
+### New glitches found and fixed (G-series)
+
+| ID | Glitch | File | Fix |
+|---|---|---|---|
+| **G1** | `POST /api/polish` with a non-string `text` (`[]`, `12345`, `null`) **hung the request forever** (no response) and raised an unhandled rejection from a re-thrown catch — a client could wedge connections at will. | `server/routes/polish.js` | Top-of-route type guard (`typeof text === 'string'`) → clean **400**; defensive catch so a handler error answers 500 instead of never responding. |
+| **G2** | `POST /api/assessment` with `age: "not-a-number"` (or non-numeric `weight`/`height`) returned **500** — a Mongoose `CastError` escaping validation. | `server/routes/assessment.js` | `finite()` numeric validation on age/weight/height → **400** with a clear message. |
+| **G3** | `POST /api/chat` with a non-string `message` (e.g. `12345`) fell through to a generic **200** instead of a validation error. | `server/routes/chat.js` | `typeof message !== 'string'` guard → **400**. |
+| **G4** | `add-supplement` accepted hostile field types: uncoerced `dosage`/`timing` objects and a non-whitelisted `priority` (Mongoose enum `ValidationError` → **500**); `cleanSupplementName` did not strip markup, allowing `<img onerror=…>` to persist in stored supplement names (stored-XSS primitive). | `server/routes/dashboard.js` | `str()` coercion on `dosage`/`timing`, `priority` whitelisted to `High/Medium/Low`, `cleanSupplementName` strips all markup (`/<[^>]*>/g`). |
+| **G5** | The process-level crash guards themselves could throw from their logging path and take the API down. | `server/index.js` | Guard bodies wrapped in `try/catch` — a throwing log can no longer kill the process. |
+| **G6** | Prior probe-run accounts (`hunt-*`) survived the crashed hunt — test artifacts accumulating in the live database. | n/a (operational) | Cleanup verified: accounts deleted (`deleteMany` on `^hunt-`), and the suite now always tears down its throwaway accounts. |
+
+### Probe-suite fixes (the tool, not the product)
+
+Also fixed in `glitch-hunt.js` so the harness reports truth rather than its own bugs: hard 10 s timeout
+on every call (a hung response surfaces as status-0 FAIL, never a frozen suite), no bodies on GET/HEAD
+(undici rejects those client-side), and the deep-history probe accepts **403** as the correct
+`historyFull` entitlement gate.
+
+### Verification — all green after fixes
+
+| Check | Result |
+|---|---|
+| `node glitch-hunt.js` (live API) | ✅ **120 passed, 0 failed**, exit 0 |
+| `node test-session-flows.js` (live) | ✅ all pass — sessions, revocation, races, saved logins |
+| `node test-subscription-flows.js` (live) | ✅ **29/29** — SSE pushes, tier gates, expiry |
+| `npm run check` (server syntax) | ✅ exit 0 |
+| `npm test` (server) | ✅ **68/68** |
+| `npx eslint .` (client) | ✅ 0 errors (4 pre-existing warnings) |
+| `npx vite build` | ✅ built, PWA worker generated |
+| `npm test` (client entitlements) | ✅ **9/9** |
+| `npm audit --omit=dev` | ✅ **0 vulnerabilities** — both scopes |
+| `GET /api/health` | ✅ 200 (API left running on the fixed code) |
+
+Notable behaviors confirmed by the hunt: forged/`alg:none`/wrong-secret tokens all **401**; query-string
+tokens dead everywhere except the SSE stream; mass assignment of `role`/`subscriptionPlan` ignored at
+register *and* profile; IDOR probes (foreign assessment reset/delete/read/patch) all refused; NoSQL
+operators rejected with 400; prototype keys (`constructor`, `__proto__`, …) fail closed with 403; FREE
+tier correctly 403s on insights/chat/page-2 history; email-change rebind refused without OTP proof;
+logout and session displacement revoke server-side immediately.
+
+---
+
 ## 10. Appendix
 
 ### A. How to re-verify this audit
@@ -551,6 +602,7 @@ Because the remote is **public**, everything below is in git history and must be
 cd server
 npm run check          # syntax on core modules
 npm test               # node --test "Test File/*.test.js"
+node glitch-hunt.js    # adversarial probe suite (API must be running) — needs 0 failures
 
 # Frontend
 cd ..\my-react-app
@@ -602,6 +654,102 @@ git grep -nE '\$2[aby]\$[0-9]{2}\$[./A-Za-z0-9]{53}|\$argon2id\$|[A-Z2-7]{32}' -
 | Drop the 10 MB JSON limit | **No** — banner uploads need it; uploads are already size-capped with `413` (L7). |
 | Remove `axios` / replace `speakeasy` | **No** — dependency churn during a security pass carries its own risk; documented instead (I4). |
 | Remove debug `console.log` calls | **Investigated, not needed** — a repo-wide sweep found no logging of tokens, OTPs, or full credentials in the client. The four remaining client logs are benign (`saveAssessmentResults failed: <message>`, PWA install outcome, "App ready to work offline"), and `api.js:653` logs only a server HTML error body. Server-side recipient logging *was* fixed (M7). |
+
+---
+
+*Report generated 2026-09-23 as part of audit `SEC-AUDIT-2026-09-23`. The machine-readable record is
+`server/utils/securityAudit.js`; this document is referenced from the admin Live Status Monitoring widget.*
+
+---
+
+## 9B. Addendum — Blockchain (Web3) Glitch Hunt (2026-09-24/25)
+
+A focused, adversarial stress test of the entire `/api/web3` surface ran over two days (2026-09-24 to
+2026-09-25). The probe (`server/glitch-hunt-web3.js`) deliberately tries to break, confuse, or cheat
+every blockchain subsystem: wallets/DID, marketplace with smart-contract escrow, decentralized dispute
+resolution, DAO governance, community knowledge base, achievement NFTs, staking/loyalty, supply-chain
+journey anchoring, privacy storage, expert bookings, oracle feeds, and clinical-trial consent.
+
+### Threat model
+
+The probe assumes a live server and throws the entire glitch catalog at it:
+
+| Class | Probes |
+|---|---|
+| **Auth boundary** | 401 on every protected endpoint; 3 public endpoints reachable without account |
+| **IDOR** | 9 cross-account access attempts (storage, data shares, profile shares, supply events, escrow confirm, assessment rewards, recommendations) — all 4xx |
+| **Malformed ids** | 15 endpoints with garbage ObjectIds — all 4xx, never 500 |
+| **Public regressions** | Unknown/well-formed codes/tokens → 4xx, never 500 |
+| **Maxlength overflows** | 6 fields pushed past schema limits (listing title 300, proposal title 300, knowledge title/body 300/5000, data-share recipient 500, supply productName 300) — all truncated or 4xx, no 500 |
+| **Non-finite numerics** | 20 hostile values (raw `1e999`, `Infinity`, `NaN`, negatives, fractional qty `1.5`) — all rejected 400 |
+| **Prototype-chain params** | `toString`, `constructor`, `__proto__` as DAO parameters — all rejected 400 |
+| **DAO parameter bounds** | 7 out-of-range values (negative, null, 1e12, 0 voting days, 1e6 voting days) — all 400; vote on expired proposal → 400 |
+| **Wallet-creation race** | 5 concurrent first-reads on a fresh account — single identity, balance 100 exactly once |
+| **Check-in race** | 6 concurrent daily claims — exactly one minted, balance delta matches the single reward |
+| **Escrow double-confirm** | 2 concurrent delivery confirmations — exactly one succeeds, seller paid +9.7 once (never +19.4) |
+| **Loyalty double-spend** | 2 concurrent orders with the same code — exactly one discount applied, stock −1, buyer −10 once |
+| **Zero-total order** | Full discount (code ≥ subtotal) → 201 with total 0, then confirm → released, no `BAD_AMOUNT` |
+| **Stock race** | 6 concurrent orders vs stock 2 — exactly 2 succeed, stock 0, never negative |
+| **Dispute lifecycle under concurrency** | Overlong reason (1500 chars) sliced; non-party blocked 403; confirm blocked while open 400; 2 juror votes + 2 lazy GETs concurrent — resolved exactly once, buyer refunded +12 once, juror paid |
+| **Supply journey races** | 2 forward steps concurrent → both persist, no lost update, strictly forward; 2 duplicate steps concurrent → exactly one applied |
+| **DAO vote race** | 3 concurrent votes on one proposal — all persist, voterCount = 4 (proposer + 3) |
+| **Knowledge upvote race** | 4 concurrent upvotes — all persist, `upvotes = 4` |
+| **NFT mint race** | 5 concurrent `achievements/check` — all 200, no E11000 crashes, kinds unique |
+| **Booking double-cancel** | 2 concurrent cancels on one booking — idempotent, refund paid once (balance restored to 100, never 190) |
+| **Oracle refresh** | 4 concurrent — all 200 |
+| **Oversize privacy storage** | 901 KB pin → 4xx (never 500) |
+| **Stress burst + integrity** | 30 parallel reads — all healthy; sweep confirms every listing `priceWell` finite; chain `/verify` valid |
+
+### Root-cause defects fixed (B-series)
+
+| ID | Defect | File | Fix |
+|---|---|---|---|
+| **B1** | `releaseEscrow` / `refundEscrow` / `tryResolve` had in-memory status guards only → double-settlement under concurrency | `server/routes/web3/market.js` | Atomic `updateOne({_id, status:'escrow'}, {$set:{status}})` claim before any transfer; rollback on payment failure; `refundEscrow` same pattern; `tryResolve` claim open→resolved before payout; targeted `$set` for `resolvedTx` so concurrent juror pushes aren't overwritten |
+| **B2** | `confirm` route allowed release while a dispute was open → buyer could "confirm away" a contested order | `server/routes/web3/market.js` | `Dispute.exists({order})` check before release |
+| **B3** | Dispute reason unbounded → ValidationError 500 on overlong string | `server/routes/web3/market.js` | `.slice(0, 1000)` after trim; 11000 duplicate-open catch → 400 |
+| **B4** | Juror selection padded with arbitrary unstaked wallets (`others`) when staked pool < 3 → sybil juror manipulation, escrow deadlock | `server/routes/web3/market.js` | `selectJurors` = staked non-party wallets only (up to 5); empty → open jury (per rules.js docs) |
+| **B5** | Loyalty code claimed by read-then-save → double-spend under concurrency | `server/routes/web3/market.js` | Atomic conditional `updateOne({_id, status:'unused'}, {$set:{status:'redeemed'}})` before stock reserve; revert on any failure |
+| **B6** | Order qty parsed with `parseInt` → `1.5` truncated to 1, stock corrupted | `server/routes/web3/market.js` | Strict `Number.isInteger(qty)` on raw value; zero-total escrows zero, skips transfer |
+| **B7** | Listing priceWell `Infinity` accepted (JSON `1e999` literal) → stored as `null`, sweep saw `null` | `server/routes/web3/market.js` | `Number.isFinite(priceWell)` guard |
+| **B8** | Supply journey event append: read-validate-push-save → lost updates, out-of-sequence under race | `server/routes/web3/supply.js` | Optimistic size-guarded `$push` loop: re-load → re-validate forward-only against fresh last step → conditional push by `events: {$size}`; 409 after 5 retries |
+| **B9** | Certifications: read-validate-push-save → lost updates | `server/routes/web3/supply.js` | Atomic `$push` + reload |
+| **B10** | DAO `finalizeExpired`: setParam then status flip → two GETs could both execute the same param change | `server/routes/web3/govern.js` | Claim-first `updateOne({_id, status:'active'}, {$set:{status}})`; then setParam+anchor; per-proposal `try/catch` so one bad proposal can't abort the sweep |
+| **B11** | DAO proposal creation: `param in DEFAULT_PARAMS` reads prototype; no null/empty/NaN/bounds on numeric params | `server/routes/web3/govern.js` | `hasOwnProperty` + `engine.assertParamValue()` (finite, ≥0, ≤1e9, votingDays 1–365); null/'' → 400 |
+| **B12** | DAO vote: no endsAt check; push+save → lost updates | `server/routes/web3/govern.js` | EndsAt gate; atomic conditional `$push` on `{_id, status:'active', 'votes.user':{$ne}}`; reload for tally |
+| **B13** | Knowledge post/upvote: title/body unbounded; upvote push+save → lost updates | `server/routes/web3/govern.js` | Title/body sliced (140/4000); upvote atomic `$push` + `$inc` + reload for `upvotes` |
+| **B14** | Achievement NFT mint: concurrent `countDocuments` → serial collision → E11000 500 | `server/routes/web3/rewards.js` + `models/Web3.js` | Try/catch 11000 skip; unique index `{owner, kind}` on NFT schema |
+| **B15** | Booking cancel: read-status-save → double refund under concurrency | `server/routes/web3/ecosystem.js` | Atomic `updateOne({_id, status:'confirmed'}, {$set:{status:'cancelled'}})` claim; rollback on refund failure; idempotent 200 for loser |
+| **B16** | Oracle refresh `create` → 11000 on concurrent first refresh | `server/routes/web3/ecosystem.js` | 11000 catch → update existing |
+| **B17** | Data share recipient unbounded → ValidationError 500 | `server/routes/web3/data.js` | `.slice(0, 120)` |
+| **B18** | Supply batch productName/brand unbounded | `server/routes/web3/supply.js` | `.slice(0, 120)` / `.slice(0, 80)` |
+| **B19** | Engine `credit/debit/transfer/stake/unstake/grantReward` accepted `Infinity` | `server/blockchain/engine.js` | `Number.isFinite(value)` on every amount |
+| **B20** | Engine `setParam`: `param in DEFAULT_PARAMS` reads prototype; no bounds | `server/blockchain/engine.js` | `hasOwnProperty` + exported `assertParamValue` (finite, ≥0, ≤1e9, votingDays 1–365) |
+| **B21** | Smoke suite juror determinism broken by leftover wallets | `server/test-web3-flows.js` | Precondition = staked non-system wallets === 0; C stakes before dispute; orphan purge in cleanup |
+
+### Verification — all green after fixes
+
+| Check | Result |
+|---|---|
+| `node glitch-hunt-web3.js` (live API) | ✅ **132 passed, 0 failed**, exit 0 |
+| `node glitch-hunt.js` (original suite) | ✅ **120 passed, 0 failed** |
+| `node test-session-flows.js` | ✅ **51/51** — sessions, revocation, races, saved logins |
+| `node test-subscription-flows.js` | ✅ **29/29** — SSE pushes, tier gates, expiry |
+| `node test-web3-flows.js` | ✅ **81/81** — all Web3 features including staked juror C |
+| `npm run check` (server syntax) | ✅ exit 0 |
+| `npm test` (server) | ✅ **68/68** |
+| `npx eslint .` (client) | ✅ 0 errors (4 pre-existing warnings) |
+| `npx vite build` | ✅ built, PWA worker generated |
+| `npm test` (client entitlements) | ✅ **9/9** |
+| `npm audit --omit=dev` | ✅ **0 vulnerabilities** — both scopes |
+| `GET /api/health` | ✅ 200 (API left running on the fixed code) |
+
+### Residual risk — Web3 layer
+
+- **Knowledge-author payout cap micro-race** (B13 note): concurrent upvotes can each see `alreadyPaid < cap` and both grant; bounded by `upvotes` (max ~100 posts × ~100 upvotes) and documented — no automated fix without a heavier lock.
+- **Stored markup in Web3 content** (knowledge posts, supply notes, dispute reasons) — React escapes on render; no server-side sanitization applied.
+- **Juror pool composition** — staked-only is sound against deadlock, but an empty staked pool means *any* non-party may vote. If no non-party exists, escrow stalls. In practice the platform always has ≥1 wallet (the real user) and the smoke/probe suites stake C/HJ1/HJ2.
+- **Chain anchor availability** — a failed anchor is logged and the DB mutation still commits. This is the intended availability-over-audit design.
+- **Unique NFT index** — `{owner, kind}` unique index added; existing DB had no duplicates, so `db.SwNft.createIndex({owner:1,kind:1},{unique:true})` succeeded on restart.
 
 ---
 

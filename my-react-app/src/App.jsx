@@ -19,6 +19,14 @@ const AdminLogin = lazy(() => import('./Pages/AdminLogin'));
 const AdminDashboard = lazy(() => import('./Pages/AdminDashboard'));
 const AssessmentManagement = lazy(() => import('./Pages/AssessmentManagement'));
 
+// Web3 / blockchain layer (wallet, rewards, marketplace, DAO, verification)
+const Web3HubPage = lazy(() => import('./Pages/Web3HubPage'));
+const MarketplacePage = lazy(() => import('./Pages/MarketplacePage'));
+const GovernancePage = lazy(() => import('./Pages/GovernancePage'));
+// Public routes — no session required (QR scan / share links)
+const VerifyPage = lazy(() => import('./Pages/VerifyPage'));
+const SharePage = lazy(() => import('./Pages/SharePage'));
+
 // Minimal loading fallback for lazy routes
 function RouteFallback() {
   return (
@@ -223,8 +231,8 @@ function ProtectedRoute({ children }) {
 // typed), and hijacking it to /admin broke sign-out — "I pressed sign out and
 // the admin session took over, Back went to admin too". Admins are kept off
 // this screen on the way IN (ProtectedRoute routes admin-only browsers to
-// /admin) and by the navbar offering "Admin Panel" instead of "Sign In" —
-// never by a bounce FROM the form itself.
+// /admin) and the user navbar staying strictly user-facing — it always shows
+// "Sign In", never an admin shortcut — never by a bounce FROM the form itself.
 function PublicOnlyRoute({ children }) {
   const location = useLocation();
   const addingAccount = new URLSearchParams(location.search).get('add') === '1';
@@ -260,6 +268,27 @@ function App() {
     });
     return () => { cancelled = true; };
   }, [sessionReady]);
+
+  // ── Password-field hardening ─────────────────────────────
+  // Password values must never be selectable, copyable, cuttable,
+  // pasteable or draggable, and any selection is collapsed the
+  // moment the field receives focus. Otherwise a clipboard
+  // snapshot or a shoulder-surfing pass can recover a credential.
+  useEffect(() => {
+    const isPasswordInput = (el) =>
+      el instanceof HTMLInputElement && el.type === 'password';
+    const block = (e) => {
+      if (isPasswordInput(e.target)) e.preventDefault();
+    };
+    ['copy', 'cut', 'paste', 'contextmenu', 'dragstart', 'select'].forEach(
+      (event) => document.addEventListener(event, block, true)
+    );
+    return () => {
+      ['copy', 'cut', 'paste', 'contextmenu', 'dragstart', 'select'].forEach(
+        (event) => document.removeEventListener(event, block, true)
+      );
+    };
+  }, []);
 
   if (!sessionReady) return <RouteFallback />;
 
@@ -303,6 +332,18 @@ function App() {
           <Route path="/results" element={<ProtectedRoute><ResultsPage /></ProtectedRoute>} />
           <Route path="/history" element={<ProtectedRoute><HistoryPage /></ProtectedRoute>} />
           <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+
+          {/* Web3 layer - user session required */}
+          <Route path="/web3" element={<ProtectedRoute><Web3HubPage /></ProtectedRoute>} />
+          <Route path="/marketplace" element={<ProtectedRoute><MarketplacePage /></ProtectedRoute>} />
+          <Route path="/governance" element={<ProtectedRoute><GovernancePage /></ProtectedRoute>} />
+
+          {/* Public verification & sharing - deliberately OUTSIDE ProtectedRoute:
+              a consumer scanning a bottle QR or a clinician opening a share
+              link must never be bounced to /login. */}
+          <Route path="/verify" element={<VerifyPage />} />
+          <Route path="/verify/:code" element={<VerifyPage />} />
+          <Route path="/share/:token" element={<SharePage />} />
         </Routes>
         </Suspense>
         <GlobalChat />

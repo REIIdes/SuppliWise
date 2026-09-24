@@ -25,9 +25,11 @@ export const DIRECTORY_KEY = 'sw_accounts';
 
 // The ADMIN session lives in its own localStorage key (written by AdminLogin,
 // read by the admin guards) and is completely separate from the tab's user
-// session above. Route guards and the navbar must consult it too: useAuth()
-// only sees the user token, so without this a signed-in admin bounces through
-// the USER Sign In screen on every user route.
+// session above. Route guards must consult it too: useAuth() only sees the
+// user token, so without this a signed-in admin bounces through the USER
+// Sign In screen on every protected user route. The user navbar deliberately
+// does NOT consult it — it only ever shows "Sign In", so admin entry never
+// leaks into the user-facing UI.
 export const ADMIN_TOKEN_KEY = 'adminToken';
 
 export const hasAdminSession = () => {

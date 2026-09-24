@@ -385,36 +385,388 @@
   text-decoration: underline;
 }
 
-/* ══ VIBRANT THEME REFRESH ══ */
+/* ═══════════════════════════════════════════════════════════════════
+   VIBRANT AUTH THEME — shared by Sign In (LogIn) & Sign Up (SignIn)
+   Emerald → teal → sky palette with violet + amber accents: layered
+   gradient backdrop with two slow-drifting color orbs, a glassy card
+   with an animated gradient ribbon and corner glow, badge + gradient
+   heading, icon-led fields, tinted states and a pill CTA.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Page backdrop: layered gradients + drifting color orbs ───────── */
+.page-wrapper {
+  position: relative;
+  /* isolate → the z-index:-1 orbs paint above our own background but
+     below every piece of content (navbar, card, modals stay on top). */
+  isolation: isolate;
+  overflow-x: hidden;
+  background:
+    radial-gradient(1000px 620px at 8% -12%, rgba(16, 185, 129, 0.22), transparent 60%),
+    radial-gradient(900px 700px at 112% 18%, rgba(56, 189, 248, 0.20), transparent 55%),
+    radial-gradient(820px 620px at 55% 118%, rgba(251, 191, 36, 0.16), transparent 62%),
+    linear-gradient(165deg, #ecfdf5 0%, #f0fdf4 34%, #eff6ff 68%, #f5f3ff 100%);
+}
+
+.page-wrapper::before,
+.page-wrapper::after {
+  content: "";
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: 0.55;
+  pointer-events: none;
+  z-index: -1;
+}
+.page-wrapper::before {
+  width: 420px;
+  height: 420px;
+  top: -130px;
+  left: -120px;
+  background: linear-gradient(135deg, #34d399, #22d3ee);
+  animation: auth-orb-a 17s ease-in-out infinite alternate;
+}
+.page-wrapper::after {
+  width: 380px;
+  height: 380px;
+  bottom: -140px;
+  right: -120px;
+  background: linear-gradient(135deg, #818cf8, #fbbf24);
+  animation: auth-orb-b 21s ease-in-out infinite alternate;
+}
+
+/* ── Card: glassy white, gradient ribbon, soft corner glow ────────── */
 .auth-card {
-  border-radius: 22px !important;
-  box-shadow: 0 20px 50px rgba(6, 95, 70, 0.14) !important;
-  border: 1px solid #d9efe1 !important;
-  animation: auth-rise 0.45s ease both;
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 26px;
+  padding: 42px 36px 34px;
+  box-shadow:
+    0 32px 70px -28px rgba(6, 95, 70, 0.38),
+    0 14px 34px -20px rgba(37, 99, 235, 0.24),
+    0 0 0 1px rgba(6, 95, 70, 0.06);
+  animation: auth-rise 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
-@keyframes auth-rise {
-  from { opacity: 0; transform: translateY(18px) scale(0.99); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+.auth-card::before {
+  /* animated gradient ribbon across the top edge */
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  background: linear-gradient(90deg, #34d399, #22d3ee, #818cf8, #fbbf24, #34d399);
+  background-size: 300% 100%;
+  animation: auth-ribbon 9s linear infinite;
 }
-.auth-btn {
-  background: linear-gradient(135deg, #34d399, #059669) !important;
-  border-radius: 999px !important;
-  box-shadow: 0 8px 20px rgba(16, 185, 129, 0.30) !important;
-  transition: transform 0.15s ease, box-shadow 0.2s ease !important;
+.auth-card::after {
+  /* soft emerald glow in the top-right corner (clipped by overflow) */
+  content: "";
+  position: absolute;
+  top: -110px;
+  right: -90px;
+  width: 260px;
+  height: 260px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(52, 211, 153, 0.35), rgba(52, 211, 153, 0) 70%);
+  pointer-events: none;
 }
-.auth-btn:hover:not(:disabled) {
-  transform: translateY(-2px) !important;
-  box-shadow: 0 12px 26px rgba(16, 185, 129, 0.38) !important;
+.auth-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Header: gradient badge, gradient title, subtitle ─────────────── */
+.auth-badge {
+  width: 74px;
+  height: 74px;
+  margin: 4px auto 16px;
+  border-radius: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #34d399 0%, #06b6d4 52%, #3b82f6 100%);
+  box-shadow:
+    0 16px 32px -12px rgba(16, 185, 129, 0.55),
+    0 0 0 9px rgba(52, 211, 153, 0.14);
+  animation: auth-badge-in 0.55s 0.08s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 .auth-title {
-  font-weight: 800 !important;
-  letter-spacing: -0.02em !important;
-  background: linear-gradient(92deg, #065f46, #059669 60%, #2563eb);
+  font-size: 25px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 0 0 8px;
+  background: linear-gradient(92deg, #047857 0%, #0d9488 45%, #2563eb 100%);
   -webkit-background-clip: text;
   background-clip: text;
-  color: transparent !important;
+  color: transparent;
 }
+.auth-subtitle {
+  text-align: center;
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: #64748b;
+  margin: 0 0 22px;
+}
+.auth-divider {
+  border-top: 2px dashed #e2e8f0;
+  margin: 2px 0 20px;
+}
+
+/* ── Banners & error pill ─────────────────────────────────────────── */
+.auth-info-banner {
+  background: linear-gradient(135deg, #eff6ff, #eef2ff);
+  border: 1px solid #c7d2fe;
+  border-left: 4px solid #6366f1;
+  border-radius: 14px;
+  color: #3730a3;
+  padding: 12px 14px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  margin-bottom: 16px;
+}
+.auth-banner-link {
+  color: #4338ca;
+  font-weight: 700;
+}
+.auth-error {
+  background: linear-gradient(135deg, #fef2f2, #fff1f2);
+  border: 1px solid #fecaca;
+  border-left: 4px solid #ef4444;
+  border-radius: 14px;
+  color: #b91c1c;
+  padding: 11px 14px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  margin-bottom: 16px;
+}
+
+/* ── Fields: crisp borders, vibrant focus ring, autofill match ────── */
+.auth-field label {
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: #334155;
+}
+.auth-field input,
+.birthday-row-inline .birthday-select-inline,
+.birthday-row-inline .birthday-input-inline {
+  background: #f8fafc;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 14px;
+  padding-top: 13px;
+  padding-bottom: 13px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+.auth-field input:-webkit-autofill,
+.auth-field input:-webkit-autofill:hover,
+.auth-field input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #111827;
+  caret-color: #111827;
+  box-shadow: 0 0 0 1000px #f8fafc inset;
+  transition: background-color 9999s ease-out;
+}
+.auth-field input:focus,
+.birthday-row-inline .birthday-select-inline:focus,
+.birthday-row-inline .birthday-input-inline:focus {
+  background: #fff;
+  border-color: #10b981;
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.16);
+}
+
+/* ── Leading field icons (Sign In email / password) ───────────────── */
+.auth-input-ic {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.auth-input-ic input,
+.auth-input-pw input {
+  padding-left: 42px;
+}
+.auth-ic {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  color: #94a3b8;
+  pointer-events: none;
+  transition: color 0.2s ease;
+}
+.auth-input-ic:focus-within .auth-ic,
+.auth-input-pw:focus-within .auth-ic {
+  color: #059669;
+}
+.field-has-error .auth-ic {
+  color: #ef4444;
+}
+
+/* ── Password eye: rounded hover target ───────────────────────────── */
+.eye-btn {
+  width: 34px;
+  height: 34px;
+  right: 7px;
+  border-radius: 11px;
+  transition: color 0.15s ease, background-color 0.15s ease, transform 0.15s ease;
+}
+.eye-btn:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+.eye-btn:active {
+  transform: scale(0.92);
+}
+.eye-btn:focus-visible {
+  outline: 2px solid #10b981;
+  outline-offset: 1px;
+}
+
+/* ── Error states: red border + soft ring, readable message ───────── */
+.field-has-error input,
+.field-has-error .auth-input-wrap input,
+.field-has-error .auth-input-ic input,
+.field-has-error .birthday-row-inline .birthday-select-inline,
+.field-has-error .birthday-row-inline .birthday-input-inline {
+  background: #fff5f5;
+  border-color: #fca5a5;
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.12);
+}
+.field-has-error input:focus,
+.field-has-error .auth-input-wrap input:focus,
+.field-has-error .auth-input-ic input:focus,
+.field-has-error .birthday-row-inline .birthday-select-inline:focus,
+.field-has-error .birthday-row-inline .birthday-input-inline:focus {
+  background: #fff;
+  border-color: #ef4444;
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.16);
+}
+.auth-field-error {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #dc2626;
+}
+
+/* ── "Save my login" pill ─────────────────────────────────────────── */
+.auth-remember {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 11px 13px;
+  margin: 2px 0 16px;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+.auth-remember:hover {
+  border-color: #a7f3d0;
+  background: #f0fdf4;
+}
+.auth-remember input[type="checkbox"] {
+  width: 17px;
+  height: 17px;
+  accent-color: #059669;
+}
+
+/* ── Primary CTA: vibrant pill with gradient shift on hover ───────── */
+.auth-btn {
+  background: linear-gradient(135deg, #10b981 0%, #059669 55%, #0d9488 100%) !important;
+  background-size: 160% 160% !important;
+  border-radius: 999px !important;
+  padding: 15px !important;
+  font-size: 16px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.01em;
+  box-shadow: 0 14px 30px -12px rgba(16, 185, 129, 0.55) !important;
+  transition: transform 0.18s ease, box-shadow 0.22s ease, background-position 0.3s ease !important;
+}
+.auth-btn:hover:not(:disabled) {
+  background-position: 100% 50% !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 18px 36px -12px rgba(13, 148, 136, 0.55) !important;
+}
+.auth-btn:active:not(:disabled) {
+  transform: translateY(0) !important;
+}
+.auth-btn:focus-visible {
+  outline: 3px solid rgba(16, 185, 129, 0.45);
+  outline-offset: 2px;
+}
+
+/* ── Links: emerald primary, indigo forgot, violet admin ──────────── */
+.auth-switch {
+  color: #64748b;
+  font-size: 14.5px;
+  margin-top: 14px;
+}
+.auth-switch a {
+  color: #059669;
+  font-weight: 700;
+}
+.auth-switch a:hover {
+  color: #047857;
+  text-decoration: underline;
+}
+.auth-switch a:focus-visible {
+  outline: 2px solid #10b981;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.auth-switch--admin {
+  margin-top: 12px;
+}
+.auth-switch--admin a {
+  color: #7c3aed;
+}
+.auth-switch--admin a:hover {
+  color: #6d28d9;
+}
+.auth-forgot-password {
+  margin-top: 14px;
+}
+.auth-forgot-password-link {
+  color: #2563eb;
+  font-weight: 600;
+}
+.auth-forgot-password-link:hover {
+  color: #1d4ed8;
+}
+
+/* ── Motion ───────────────────────────────────────────────────────── */
+@keyframes auth-rise {
+  from { opacity: 0; transform: translateY(22px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes auth-badge-in {
+  from { opacity: 0; transform: scale(0.5) rotate(-10deg); }
+  to   { opacity: 1; transform: scale(1) rotate(0); }
+}
+@keyframes auth-ribbon {
+  from { background-position: 0% 50%; }
+  to   { background-position: 300% 50%; }
+}
+@keyframes auth-orb-a {
+  from { transform: translate(0, 0) scale(1); }
+  to   { transform: translate(60px, 50px) scale(1.12); }
+}
+@keyframes auth-orb-b {
+  from { transform: translate(0, 0) scale(1); }
+  to   { transform: translate(-55px, -45px) scale(1.08); }
+}
+
+/* ── Reduced motion: keep the design, drop the animation ──────────── */
 @media (prefers-reduced-motion: reduce) {
-  .auth-card { animation: none; }
-  .auth-btn { transition: none; }
+  .page-wrapper::before,
+  .page-wrapper::after,
+  .auth-card,
+  .auth-card::before,
+  .auth-badge {
+    animation: none !important;
+  }
+  .auth-btn,
+  .auth-field input,
+  .eye-btn,
+  .auth-remember {
+    transition: none;
+  }
 }

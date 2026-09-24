@@ -602,7 +602,13 @@ function LogIn() {
       <Navbar />
       <div className="auth-container">
         <form className="auth-card" onSubmit={handleLogin}>
+          <div className="auth-badge" aria-hidden="true">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 12h4l2.5-6 4 12L16 12h5" />
+            </svg>
+          </div>
           <h2 className="auth-title">Sign In to your account</h2>
+          <p className="auth-subtitle">Welcome back — sign in to continue to your dashboard and insights.</p>
 
           {/* Banner shown when redirected from assessment */}
           {fromAssessment && (
@@ -627,24 +633,32 @@ function LogIn() {
 
           <div className={`auth-field ${fieldErrors.email ? 'field-has-error' : ''}`}>
             <label>Email</label>
-            <input
-              id="login-email"
-              name="email"
-              type="email"
-              value={email}
-              onChange={(e) => { setEmail(e.target.value); revalidateOnChange('email', e.target.value); }}
-              onBlur={(e) => { if (e.target.value) validateField('email', e.target.value); }}
-              onInput={(e) => { if (e.target.value && e.target.value !== email) setEmail(e.target.value); }}
-              placeholder="your.email@example.com"
-              autoComplete="email"
-              required
-            />
+            <div className="auth-input-ic">
+              <span className="auth-ic" aria-hidden="true">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="4" width="20" height="16" rx="3"/><path d="m3 7 8.4 5.6a2 2 0 0 0 2.2 0L21 7"/></svg>
+              </span>
+              <input
+                id="login-email"
+                name="email"
+                type="email"
+                value={email}
+                onChange={(e) => { setEmail(e.target.value); revalidateOnChange('email', e.target.value); }}
+                onBlur={(e) => { if (e.target.value) validateField('email', e.target.value); }}
+                onInput={(e) => { if (e.target.value && e.target.value !== email) setEmail(e.target.value); }}
+                placeholder="your.email@example.com"
+                autoComplete="email"
+                required
+              />
+            </div>
             {fieldErrors.email && <span className="auth-field-error">{fieldErrors.email}</span>}
           </div>
 
           <div className={`auth-field ${fieldErrors.password ? 'field-has-error' : ''}`}>
             <label>Password</label>
-            <div className="auth-input-wrap">
+            <div className="auth-input-wrap auth-input-pw">
+              <span className="auth-ic" aria-hidden="true">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+              </span>
               <input
                 id="login-password"
                 name="password"
@@ -695,7 +709,8 @@ function LogIn() {
             Don't have an account?{' '}
             <NavLink to="/signup" state={location.state}>Create one</NavLink>
           </p>
-          <p className="auth-switch">
+          {/* Admin entry point — the only admin shortcut on user-facing pages */}
+          <p className="auth-switch auth-switch--admin">
             Are You an Admin?{' '}
             <NavLink to="/admin/login">Administrator access</NavLink>
           </p>
@@ -704,9 +719,15 @@ function LogIn() {
 
       {/* OTP Verification Modal */}
       {showOtpModal && (
-        <div className="profile-modal-overlay" onClick={() => !otpLoading && handleCancelOtp()}>
+        <div
+          className="profile-modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="login-otp-title"
+          onClick={() => !otpLoading && handleCancelOtp()}
+        >
           <div className="profile-modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Login Verification</h2>
+            <h2 id="login-otp-title">Login Verification</h2>
             <p>{requiresTwoFactor ? 'Enter the current code from Google Authenticator.' : "For your security, we've sent a 6-digit verification code to:"}</p>
             {!requiresTwoFactor && <p className="profile-modal-email">{email}</p>}
             <p className="profile-modal-note">Please enter the code to complete your login.</p>
@@ -736,6 +757,8 @@ function LogIn() {
                 setError('');
               }}
               maxLength="6"
+              inputMode="numeric"
+              autoComplete="one-time-code"
               disabled={otpLoading || (!requiresTwoFactor && otpTimeLeft === 0)}
               autoFocus
             />

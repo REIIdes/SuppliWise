@@ -1,8 +1,20 @@
-:root { --admin-ink: #17231f; --admin-muted: #6b7771; --admin-line: #d9e1dc; --admin-paper: #f5f7f3; --admin-white: #fff; --admin-accent: #d46b35; --admin-green: #2d6a4f; }
+:root {
+  --admin-ink: #17231f; --admin-muted: #6b7771; --admin-line: #d9e1dc;
+  --admin-paper: #f5f7f3; --admin-white: #fff; --admin-accent: #d46b35; --admin-green: #2d6a4f;
+  /* Topbar height — declared in AdminTopbar.css too; repeated here so the
+     shell lays out correctly even if only this sheet is applied. */
+  --admin-topbar-h: 60px;
+  /* Vibrant accents shared across the admin shell */
+  --admin-emerald: #10b981; --admin-teal: #0d9488; --admin-indigo: #4f6bed;
+  --admin-violet: #8b5cf6; --admin-amber: #f59e0b; --admin-rose: #f43f5e;
+}
 /* ── Shell: full viewport background only ─────────── */
 .admin-shell {
   min-height: 100vh;
-  background: var(--admin-paper);
+  background:
+    radial-gradient(900px 380px at 0% 0%, rgba(217,107,53,.07), transparent 55%),
+    radial-gradient(820px 420px at 100% 6%, rgba(79,107,237,.07), transparent 55%),
+    var(--admin-paper);
   color: var(--admin-ink);
   font-family: Georgia, 'Times New Roman', serif;
 }
@@ -14,12 +26,12 @@
 /* ── Sidebar — fixed, pins below topbar ───────────── */
 .admin-sidebar {
   position: fixed;
-  top: 56px;
+  top: var(--admin-topbar-h, 60px);
   left: 0;
   bottom: 0;
   width: 240px;
   padding: 0;
-  background: #18342a;
+  background: linear-gradient(180deg, #1c3d31 0%, #18342a 45%, #12281f 100%);
   color: #eff6ee;
   display: flex;
   flex-direction: column;
@@ -58,18 +70,19 @@
   width: 38px;
   height: 38px;
   margin-top: 4px;
-  border: 1px solid rgba(255,255,255,.32);
-  border-radius: 10px;
-  background: rgba(255,255,255,.14);
+  border: 1px solid rgba(255,255,255,.24);
+  border-radius: 11px;
+  background: rgba(255,255,255,.1);
   color: #ffffff;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.15s;
+  transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.15s, box-shadow 0.15s;
   box-shadow: 0 1px 4px rgba(0,0,0,.25);
 }
 .hamburger-btn:hover {
-  background: rgba(255,255,255,.24);
-  border-color: rgba(255,255,255,.5);
+  background: linear-gradient(135deg, #f97316, #e11d48);
+  border-color: transparent;
   color: #fff;
+  box-shadow: 0 6px 16px -6px rgba(225,29,72,.9);
 }
 .hamburger-btn:active {
   transform: scale(0.95);
@@ -77,6 +90,16 @@
 .hamburger-btn:focus-visible {
   outline: 2px solid #fff;
   outline-offset: 2px;
+}
+
+/* Keyboard focus for nav + sign-out: without this the focus ring is
+   swallowed by the dark sidebar (only the hamburger had one). */
+.admin-sidebar nav button:focus-visible,
+.admin-sidebar .sidebar-signout:focus-visible {
+  outline: 2px solid #fbbf24;
+  outline-offset: 2px;
+  background: rgba(255, 255, 255, .12);
+  color: #fff;
 }
 
 /* ── Nav list ─────────────────────────────────────── */
@@ -88,42 +111,50 @@
 
 .admin-sidebar nav button {
   border: 0;
-  border-left: 2px solid transparent;
-  border-radius: 6px;
+  border-radius: 11px;
   background: transparent;
   color: #c6d8cc;
   text-align: left;
-  padding: 11px 10px;
+  padding: 11px 12px;
   cursor: pointer;
   font: inherit;
-  font-size: 15px;
+  font-size: 14.5px;
+  font-weight: 600;
   display: flex;
   align-items: center;
-  gap: 10px;
-  transition: background 0.15s, color 0.15s, border-color 0.15s, padding 0.25s;
+  gap: 11px;
+  transition: background 0.18s, color 0.18s, transform 0.18s, box-shadow 0.18s, padding 0.25s;
   white-space: nowrap;
   overflow: hidden;
+  position: relative;
 }
 
 /* Collapsed nav buttons: centre the icon, hide labels */
 .admin-sidebar--collapsed nav button {
   justify-content: center;
   padding: 11px 0;
-  border-left-color: transparent !important;
   color: #eef5f0;
 }
 .admin-sidebar--collapsed nav button.active,
 .admin-sidebar--collapsed nav button:hover {
-  background: rgba(255,255,255,.08);
-  border-left-color: transparent !important;
+  background: rgba(255,255,255,.12);
 }
 
+/* Active + hover: tinted pill with a soft glow, plus a gradient icon chip */
 .admin-sidebar nav button.active,
 .admin-sidebar nav button:hover {
   color: #fff;
-  border-left-color: transparent;
-  background: rgba(255,255,255,.08);
+  background: linear-gradient(92deg, rgba(217,107,53,.26), rgba(225,29,72,.16));
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.1);
 }
+.admin-sidebar nav button.active {
+  background: linear-gradient(92deg, rgba(217,107,53,.42), rgba(225,29,72,.24));
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.16), 0 6px 16px -10px rgba(225,29,72,.9);
+}
+.admin-sidebar nav button:hover  { transform: translateX(3px); }
+.admin-sidebar nav button:active { transform: translateX(3px) scale(.98); }
+.admin-sidebar--collapsed nav button:hover,
+.admin-sidebar--collapsed nav button:active { transform: scale(1.03); }
 
 /* ── Tab entrance: staggered slide-in on sidebar mount ─────────────── */
 @keyframes sidebar-tab-in {
@@ -137,7 +168,11 @@
   }
 }
 .admin-sidebar nav button {
-  animation: sidebar-tab-in 0.35s ease both;
+  /* `backwards` (not `both`): the entrance still holds its start keyframe during
+     the stagger delay, but once it finishes no keyframe persists — a filled
+     `to { transform }` sits above normal author rules and would permanently
+     kill the :hover / :active transforms below. */
+  animation: sidebar-tab-in 0.35s ease backwards;
 }
 .admin-sidebar nav button:nth-child(1) { animation-delay: 0.03s; }
 .admin-sidebar nav button:nth-child(2) { animation-delay: 0.06s; }
@@ -148,26 +183,28 @@
 .admin-sidebar nav button:nth-child(7) { animation-delay: 0.21s; }
 .admin-sidebar nav button:nth-child(8) { animation-delay: 0.24s; }
 
-/* ── Active tab indicator sweep ────────────────────────────────────── */
-.admin-sidebar nav button {
-  position: relative;
-  overflow: hidden;
-}
+/* ── Active tab indicator rail ────────────────────────────────────────── */
 .admin-sidebar nav button::after {
   content: '';
   position: absolute;
   left: 0;
-  top: 8px;
-  bottom: 8px;
+  top: 10px;
+  bottom: 10px;
   width: 3px;
   border-radius: 999px;
-  background: #ed9a62;
+  background: linear-gradient(180deg, #f97316, #e11d48);
   transform: scaleY(0);
   transform-origin: center;
   transition: transform 0.25s ease;
 }
 .admin-sidebar nav button.active::after {
   transform: scaleY(1);
+}
+/* Icon gets a gradient chip when its tab is active */
+.admin-sidebar nav button.active .sidebar-nav-icon {
+  background: linear-gradient(135deg, #f97316, #e11d48);
+  border-radius: 8px;
+  box-shadow: 0 4px 10px -4px rgba(225,29,72,.9);
 }
 
 /* ── Icon micro-interactions ───────────────────────────────────────── */
@@ -182,8 +219,11 @@
 }
 
 /* ── Label slide on expand ─────────────────────────────────────────── */
+/* `backwards` not `both`: a filled `to { opacity:1; transform:translateX(0) }`
+   outranks normal author rules, so it beat the width/opacity:0 the <=820px
+   media query sets on labels (base opacity below is 1, so no visual change). */
 .admin-sidebar:not(.admin-sidebar--collapsed) .sidebar-nav-label {
-  animation: sidebar-label-in 0.25s ease both;
+  animation: sidebar-label-in 0.25s ease backwards;
 }
 @keyframes sidebar-label-in {
   from {
@@ -215,10 +255,13 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 18px;
-  height: 18px;
-  opacity: 0.75;
-  transition: opacity 0.15s, transform 0.2s ease;
+  width: 28px;
+  height: 28px;
+  margin: -5px 0;
+  padding: 5px;
+  box-sizing: content-box;
+  opacity: 0.8;
+  transition: opacity 0.15s, transform 0.2s ease, background 0.2s ease;
 }
 
 .admin-sidebar nav button.active .sidebar-nav-icon,
@@ -241,44 +284,50 @@
 }
 
 /* ── Sign-out button at the bottom ───────────────── */
-.sidebar-signout {
+/* This button also carries `.admin-link`, which is declared later in this
+   file and would otherwise win the cascade — hence the .admin-sidebar prefix. */
+.admin-sidebar .sidebar-signout {
   margin-top: auto;
-  color: #bed3c5;
+  color: #f8b7bd;
   text-align: left;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 11px 10px 28px;
-  margin-left: 10px;
-  margin-right: 10px;
-  font-size: 15px;
-  border: 0;
-  border-left: 2px solid transparent;
-  border-radius: 6px;
-  background: transparent;
+  gap: 11px;
+  padding: 11px 12px;
+  margin: auto 10px 18px;
+  font: 600 14.5px/1 Arial, sans-serif;
+  text-transform: none;
+  border: 1px solid rgba(244,63,94,.28);
+  border-radius: 11px;
+  background: rgba(244,63,94,.1);
   white-space: nowrap;
   overflow: hidden;
   cursor: pointer;
-  transition: color 0.15s, background 0.15s;
+  transition: color 0.15s, background 0.15s, border-color 0.15s, transform 0.15s;
 }
-.sidebar-signout:hover { color: #fff; background: rgba(255,255,255,.08); }
-.sidebar-signout .sidebar-nav-icon { opacity: 0.65; }
-.sidebar-signout:hover .sidebar-nav-icon { opacity: 1; }
+.admin-sidebar .sidebar-signout:hover {
+  color: #fff;
+  background: linear-gradient(92deg, #f43f5e, #e11d48);
+  border-color: transparent;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px -10px rgba(225,29,72,.95);
+}
+.admin-sidebar .sidebar-signout .sidebar-nav-icon { opacity: 0.9; }
+.admin-sidebar .sidebar-signout:hover .sidebar-nav-icon { opacity: 1; }
 
-.admin-sidebar--collapsed .sidebar-signout {
+.admin-sidebar--collapsed .sidebar-signout,
+.admin-sidebar .admin-sidebar--collapsed .sidebar-signout {
   justify-content: center;
-  padding: 11px 0 28px;
-  margin-left: 0;
-  margin-right: 0;
-  border-left-color: transparent;
+  padding: 11px 0;
+  margin: auto 10px 18px;
 }
 .admin-main {
-  margin-top: 56px;         /* below fixed topbar */
+  margin-top: var(--admin-topbar-h, 60px);   /* below fixed topbar */
   margin-left: 240px;       /* beside expanded sidebar */
-  min-height: calc(100vh - 56px);
-  height: calc(100vh - 56px);
+  min-height: calc(100vh - var(--admin-topbar-h, 60px));
+  height: calc(100vh - var(--admin-topbar-h, 60px));
   overflow-y: auto;
-  padding: 40px clamp(20px, 5vw, 72px);
+  padding: 34px clamp(20px, 5vw, 64px) 56px;
   position: relative;
   transition: margin-left 0.25s ease;
   box-sizing: border-box;
@@ -288,7 +337,15 @@
 .admin-shell--collapsed .admin-main {
   margin-left: 64px;
 }
-.admin-header { display: flex; justify-content: space-between; align-items: end; gap: 24px; margin-bottom: 34px; }
+/* Page header: kicker pill + gradient title, sits above the tab content */
+.admin-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 24px;
+  margin-bottom: 28px;
+  position: relative;
+}
 
 /* Notification panel — fixed + JS-anchored to the bell: left/top/width are
    written before paint by a layout effect in AdminDashboard, so the panel
@@ -299,7 +356,7 @@
 .admin-notif-panel {
   position: fixed;
   z-index: 200;
-  top: 66px;
+  top: calc(var(--admin-topbar-h, 60px) + 8px);
   right: 24px;
   left: auto;
   width: min(360px, calc(100vw - 36px));
@@ -309,11 +366,28 @@
   padding: 18px;
   border: 1px solid var(--admin-line);
   background: #fff;
-  box-shadow: 0 12px 30px rgba(23,35,31,.16);
-  border-radius: 8px;
+  box-shadow: 0 22px 48px -22px rgba(23,35,31,.55);
+  border-radius: 16px;
   overflow: visible;
 }
-.admin-notif-panel h3 { margin-bottom: 0; }
+/* Colour rail across the top */
+.admin-notif-panel h3 {
+  margin-bottom: 0;
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.admin-notif-panel h3::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #f97316, #e11d48);
+  box-shadow: 0 0 0 4px rgba(225,29,72,.16);
+}
 
 /* Scroll area for the items — header stays pinned above it. min-height:0
    lets this flex child shrink so the panel's max-height actually caps it. */
@@ -347,13 +421,15 @@
   border-bottom: 10px solid #fff;
 }
 
-/* Item entrance: light stagger so the list reads as it arrives. */
+/* Item entrance: light stagger so the list reads as it arrives.
+   `backwards` not `both` — a filled `to { transform }` outranks normal author
+   rules and would permanently kill .notification:hover translateX(3px) below. */
 @keyframes admin-notif-item-in {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 .admin-notif-panel__list .notification {
-  animation: admin-notif-item-in 0.28s ease both;
+  animation: admin-notif-item-in 0.28s ease backwards;
 }
 .admin-notif-panel__list .notification:nth-child(1) { animation-delay: 0.04s; }
 .admin-notif-panel__list .notification:nth-child(2) { animation-delay: 0.08s; }
@@ -372,20 +448,22 @@
 .admin-notif-panel__action {
   background: none;
   border: none;
-  color: #24734e;
+  color: #047857;
   font: 700 12px Arial, sans-serif;
   cursor: pointer;
-  padding: 4px 6px;
-  border-radius: 6px;
+  padding: 5px 9px;
+  border-radius: 8px;
   white-space: nowrap;
+  transition: background .15s ease, color .15s ease;
 }
 .admin-notif-panel__action:hover {
-  background: #eef7f0;
+  background: linear-gradient(120deg, #ecfdf5, #d1fae5);
+  color: #065f46;
 }
 .notification--flag {
-  border-left-color: #b91c1c !important;
-  background: #fef2f2;
-  border-radius: 0 6px 6px 0;
+  border-left-color: #e11d48 !important;
+  background: linear-gradient(100deg, #fff1f2, #ffe4e6);
+  border-radius: 0 10px 10px 0;
 }
 .notification__delete {
   float: right;
@@ -396,6 +474,8 @@
   line-height: 1;
   cursor: pointer;
   padding: 0 0 0 8px;
+  border-radius: 6px;
+  transition: color .15s ease, background .15s ease, transform .15s ease;
 }
 .notification__delete:hover {
   color: #b91c1c;
@@ -594,9 +674,152 @@
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-}
 .user-count-pill {
   background: linear-gradient(135deg, #ecfdf5, #d1fae5);
+}
+
+.profile-panel {
+  background: var(--admin-white);
+  border: 1px solid var(--admin-line);
+  border-radius: 14px;
+  padding: 24px;
+  box-shadow: 0 8px 24px rgba(23, 35, 31, 0.08);
+}
+
+.profile-panel .text-muted {
+  color: var(--admin-muted);
+}
+
+.profile-panel .space-y-6 > * + * {
+  margin-top: 1.5rem;
+}
+
+.profile-panel .flex {
+  display: flex;
+}
+
+.profile-panel .items-center {
+  align-items: center;
+}
+
+.profile-panel .space-x-4 > * + * {
+  margin-left: 1rem;
+}
+
+.profile-panel .w-24 {
+  width: 6rem;
+}
+
+.profile-panel .h-24 {
+  height: 6rem;
+}
+
+.profile-panel .rounded-full {
+  border-radius: 9999px;
+}
+
+.profile-panel .rounded-md {
+  border-radius: 0.375rem;
+}
+
+.profile-panel .bg-gray-200 {
+  background-color: #e5e7eb;
+}
+
+.profile-panel .justify-center {
+  justify-content: center;
+}
+
+.profile-panel .text-4xl {
+  font-size: 2.25rem;
+}
+
+.profile-panel .text-gray-500 {
+  color: #6b7280;
+}
+
+.profile-panel .object-cover {
+  object-fit: cover;
+}
+
+.profile-panel .text-lg {
+  font-size: 1.125rem;
+}
+
+.profile-panel .font-semibold {
+  font-weight: 600;
+}
+
+.profile-panel .text-sm {
+  font-size: 0.875rem;
+}
+
+.profile-panel .mt-2 {
+  margin-top: 0.5rem;
+}
+
+.profile-panel .space-x-2 > * + * {
+  margin-left: 0.5rem;
+}
+
+.profile-panel .px-4 {
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+.profile-panel .py-2 {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+
+.profile-panel .bg-blue-500 {
+  background-color: #3b82f6;
+}
+
+.profile-panel .text-white {
+  color: #fff;
+}
+
+.profile-panel .hover\:bg-blue-600:hover {
+  background-color: #2563eb;
+}
+
+.profile-panel .bg-red-500 {
+  background-color: #ef4444;
+}
+
+.profile-panel .hover\:bg-red-600:hover {
+  background-color: #dc2626;
+}
+
+.profile-panel .hidden {
+  display: none;
+}
+
+.profile-panel .mt-6 {
+  margin-top: 1.5rem;
+}
+
+.profile-panel .justify-end {
+  justify-content: flex-end;
+}
+
+.profile-panel .px-6 {
+  padding-left: 1.5rem;
+  padding-right: 1.5rem;
+}
+
+.profile-panel .bg-green-500 {
+  background-color: #22c55e;
+}
+
+.profile-panel .hover\:bg-green-600:hover {
+  background-color: #16a34a;
+}
+
+.profile-panel .disabled\:opacity-50:disabled {
+  opacity: 0.5;
+}
   border: 1px solid #a7f3d0;
   color: #065f46;
   font-weight: 700;
@@ -608,7 +831,9 @@
 
 .user-details {
   background: linear-gradient(180deg, #f6fdf8 0%, #eef8f0 100%);
-  animation: user-details-in 0.3s ease both;
+  /* `backwards` not `both`: a filled `to { transform }` outranks normal author
+     rules and turns this into a containing block for position:fixed descendants. */
+  animation: user-details-in 0.3s ease backwards;
 }
 @keyframes user-details-in {
   from { opacity: 0; transform: translateY(-8px); }
@@ -739,28 +964,160 @@
   outline-offset: 1px;
 }
 
-.admin-header h1 { font-size: clamp(28px, 4vw, 45px); line-height: 1; margin: 7px 0 0; font-weight: 500; }
+.admin-header h1 { font-size: clamp(28px, 4vw, 45px); line-height: 1.05; margin: 10px 0 0; font-weight: 700; }
 
 .admin-kicker { color: #df8650; letter-spacing: .12em; font: 700 11px Arial, sans-serif; margin: 0; }
 .admin-muted { color: var(--admin-muted); font: 14px/1.55 Arial, sans-serif; }
-.admin-primary, .admin-secondary, .admin-link { cursor: pointer; font: 600 13px Arial, sans-serif; }
-.admin-primary { border: 0; background: var(--admin-accent); color: #fff; padding: 13px 17px; }
-.admin-secondary { border: 1px solid var(--admin-line); background: #fff; color: var(--admin-ink); padding: 11px 14px; }
+.admin-primary, .admin-secondary, .admin-link { cursor: pointer; font: 700 13px Arial, sans-serif; }
+
+/* Primary action — brand orange → rose gradient */
+.admin-primary {
+  border: 0;
+  background: linear-gradient(120deg, #f97316, #e11d48);
+  background-size: 140% 140%;
+  color: #fff;
+  padding: 13px 19px;
+  border-radius: 11px;
+  box-shadow: 0 10px 22px -12px rgba(225,29,72,.95);
+  transition: background-position .3s ease, transform .15s ease, box-shadow .15s ease;
+}
+.admin-primary:hover:not(:disabled) {
+  background-position: 100% 50%;
+  transform: translateY(-2px);
+  box-shadow: 0 14px 28px -12px rgba(225,29,72,.95);
+}
+.admin-primary:active:not(:disabled) { transform: translateY(0); }
+.admin-primary:disabled { opacity: .6; cursor: not-allowed; }
+
+/* Secondary action — outlined pill that fills on hover */
+.admin-secondary {
+  border: 1px solid var(--admin-line);
+  background: #fff;
+  color: var(--admin-ink);
+  padding: 11px 16px;
+  border-radius: 11px;
+  transition: background .15s, border-color .15s, color .15s, transform .15s, box-shadow .15s;
+}
+.admin-secondary:hover:not(:disabled) {
+  background: linear-gradient(120deg, #fff7ed, #fff1f2);
+  border-color: #fdba74;
+  color: #c2410c;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px -12px rgba(217,107,53,.9);
+}
+.admin-secondary:disabled { opacity: .6; cursor: not-allowed; }
 .admin-link { border: 0; background: transparent; color: inherit; padding: 8px 0; }
+
 .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 13px; margin-bottom: 18px; }
 .metric, .admin-panel { border: 1px solid var(--admin-line); background: var(--admin-white); }
 .metric { padding: 20px; min-height: 105px; display: flex; flex-direction: column; justify-content: space-between; }
 .metric span { color: var(--admin-muted); font: 11px Arial, sans-serif; text-transform: uppercase; letter-spacing: .09em; }
 .metric strong { color: var(--admin-green); font-size: 30px; font-weight: 500; }
 .admin-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(280px, .8fr); gap: 18px; }
-.admin-panel { padding: 23px; margin-bottom: 18px; }
-.admin-panel h3 { margin: 0 0 18px; font-size: 21px; font-weight: 500; }
-.panel-heading { display: flex; justify-content: space-between; gap: 20px; align-items: start; }
-.search-row { display: flex; gap: 8px; } .search-row input, .admin-login-card input { border: 1px solid var(--admin-line); padding: 11px; font: 14px Arial, sans-serif; background: #fbfcfa; }
-.table-wrap { overflow-x: auto; } table { border-collapse: collapse; width: 100%; font: 13px Arial, sans-serif; } th { color: var(--admin-muted); font-size: 10px; text-transform: uppercase; text-align: left; letter-spacing: .06em; } th, td { border-bottom: 1px solid #edf0ed; padding: 12px 8px; vertical-align: top; white-space: nowrap; } td small, .provider small, .security-row small, .notification span { display: block; color: var(--admin-muted); font-size: 11px; margin-top: 4px; white-space: normal; }
-.status { border: 1px solid var(--admin-line); background: #f7f8f6; padding: 6px 9px; cursor: pointer; } .status.active, .healthy { color: #24734e; } .attention { color: #b34b28; }
-.security-active { color: #24734e; } .security-email { color: #96602b; }
-.danger-action { color: #a23a29; border-color: #e7b8ae; } select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px; font: 12px Arial, sans-serif; }
+
+/* Content panel — rounded card with a colour-tinted top rail */
+.admin-panel {
+  position: relative;
+  padding: 24px;
+  margin-bottom: 18px;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 3px 14px rgba(23,35,31,.05);
+  transition: box-shadow .2s ease, border-color .2s ease;
+}
+.admin-panel::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--admin-accent), var(--admin-rose) 38%, var(--admin-indigo) 72%, var(--admin-emerald));
+  opacity: .9;
+}
+.admin-panel:hover { box-shadow: 0 10px 30px -18px rgba(23,35,31,.55); border-color: #cfdad3; }
+.admin-panel h3 {
+  margin: 0 0 10px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--admin-ink);
+}
+/* Sub-heading immediately after an h3 reads as the panel description */
+.admin-panel h3 + .admin-muted { margin: 0 0 4px; }
+
+.panel-heading { display: flex; justify-content: space-between; gap: 20px; align-items: start; margin-bottom: 6px; }
+.panel-heading .admin-muted { margin-bottom: 0; }
+
+/* Search controls */
+.search-row { display: flex; gap: 8px; }
+.search-row input {
+  border: 1.5px solid var(--admin-line);
+  padding: 10px 14px;
+  font: 14px Arial, sans-serif;
+  background: #fbfcfa;
+  border-radius: 11px;
+  min-width: 190px;
+  transition: border-color .15s, box-shadow .15s, background .15s;
+}
+.search-row input:focus {
+  outline: none;
+  background: #fff;
+  border-color: var(--admin-indigo);
+  box-shadow: 0 0 0 4px rgba(79,107,237,.15);
+}
+.admin-login-card input { border: 1px solid var(--admin-line); padding: 11px; font: 14px Arial, sans-serif; background: #fbfcfa; }
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font: 13px Arial, sans-serif; }
+th {
+  color: var(--admin-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  text-align: left;
+  letter-spacing: .06em;
+  background: linear-gradient(180deg, #f7faf7, #f2f6f3);
+}
+th, td { border-bottom: 1px solid #edf0ed; padding: 12px 10px; vertical-align: top; white-space: nowrap; }
+th:first-child, td:first-child { padding-left: 12px; }
+tbody tr { transition: background .12s ease; }
+tbody tr:hover { background: #f8fbf9; }
+td small, .provider small, .security-row small, .notification span { display: block; color: var(--admin-muted); font-size: 11px; margin-top: 4px; white-space: normal; }
+
+/* Status chips + destructive action */
+.status {
+  border: 1px solid var(--admin-line);
+  background: #f7f8f6;
+  padding: 6px 11px;
+  border-radius: 9px;
+  cursor: pointer;
+  font: 700 12px Arial, sans-serif;
+  transition: background .15s, border-color .15s, color .15s, transform .15s;
+}
+.status:hover { transform: translateY(-1px); border-color: #c9d5cd; }
+.status.active, .healthy { color: #047857; font-weight: 700; }
+.attention { color: #b45309; font-weight: 700; }
+.healthy, .attention { display: inline-flex; align-items: center; gap: 6px; }
+.healthy::before, .attention::before {
+  content: '';
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px rgba(4,120,87,.14);
+}
+.attention::before { box-shadow: 0 0 0 3px rgba(180,83,9,.14); }
+
+.security-active { color: #047857; font-weight: 700; }
+.security-email { color: #b45309; }
+.danger-action {
+  color: #be123c;
+  border-color: #fecdd3;
+  background: #fff1f2;
+}
+.danger-action:hover:not(:disabled) {
+  background: linear-gradient(120deg, #fff1f2, #ffe4e6);
+  border-color: #fda4af;
+  color: #9f1239;
+  box-shadow: 0 8px 18px -12px rgba(225,29,72,.9);
+}
+select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px; font: 12px Arial, sans-serif; border-radius: 7px; }
 
 /* ── Profile page ──────────────────────────────────────────────────────
    Scoped under .admin-shell: ProfilePage.css (the member-facing profile)
@@ -812,37 +1169,191 @@
 .admin-shell .profile-qr__secret-label { font: 700 10px Arial, sans-serif; text-transform: uppercase; letter-spacing: .06em; color: var(--admin-muted); }
 .admin-shell .profile-qr__secret-value { font: 12px/1.5 'Courier New', monospace; color: var(--admin-ink); word-break: break-all; background: #f1f5f3; padding: 6px 8px; border-radius: 4px; }
 
-@media (max-width: 820px) { .admin-shell .profile-grid { grid-template-columns: 1fr; } }.notification { border-left: 3px solid #d46b35; padding: 10px 0 10px 12px; margin: 12px 0; font: 13px Arial, sans-serif; }
+@media (max-width: 820px) { .admin-shell .profile-grid { grid-template-columns: 1fr; } }
+
+/* Base notification row: accent rail, rounded */
+.notification {
+  position: relative;
+  border-left: 3px solid #d46b35;
+  padding: 11px 4px 11px 13px;
+  margin: 10px 0;
+  font: 13px Arial, sans-serif;
+  color: var(--admin-ink);
+}
 .notification-panel .notification {
   display: block;
-  padding: 10px;
-  border-bottom: 1px solid var(--admin-line);
+  border: none;
+  border-left: 3px solid #d46b35;
+  border-radius: 0 10px 10px 0;
+  padding: 11px 12px;
+  margin: 6px 0;
   cursor: pointer;
+  transition: background .15s ease, transform .15s ease;
 }
 
 .notification-panel .notification:hover {
-  background: var(--admin-paper);
+  background: linear-gradient(100deg, #f7faf7, #f2f6f3);
+  transform: translateX(3px);
 }
-.provider-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 25px; } .provider { border: 1px solid var(--admin-line); padding: 17px; font: 15px Arial, sans-serif; } .provider span { display: block; font-size: 12px; margin-top: 10px; } .provider small { font-size: 11px; }
+.notification-panel .notification strong {
+  display: block;
+  font-weight: 700;
+  color: var(--admin-ink);
+  margin-bottom: 2px;
+  padding-right: 18px;
+}
+.provider-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 25px; }
+.provider {
+  position: relative;
+  border: 1px solid var(--admin-line);
+  padding: 18px;
+  font: 15px Arial, sans-serif;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff, #fbfefc);
+  overflow: hidden;
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+.provider::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--admin-indigo), var(--admin-violet));
+}
+.provider:hover {
+  transform: translateY(-3px);
+  border-color: #c7d2fe;
+  box-shadow: 0 14px 30px -20px rgba(79,107,237,.9);
+}
+.provider strong { display: block; font-weight: 700; color: var(--admin-ink); }
+.provider span { display: block; font-size: 12px; margin-top: 10px; font-weight: 700; }
+.provider small { font-size: 11px; }
 .security-row { border-top: 1px solid #edf0ed; display: flex; gap: 15px; padding: 15px 0; font: 14px Arial, sans-serif; align-items: start; } .security-row > span { min-width: 72px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; } .security-row strong { font-weight: 600; }
 .admin-login-page { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: radial-gradient(circle at top right, #e6eee5, transparent 45%), #f5f7f3; }
-.admin-login-card { width: min(100%, 420px); padding: 40px; border: 1px solid var(--admin-line); background: #fff; box-shadow: 14px 14px 0 #dce7db; } .admin-login-card h1 { font-size: 38px; font-weight: 500; margin: 10px 0; } .admin-login-card label { display: grid; gap: 7px; margin: 18px 0; font: 12px Arial, sans-serif; color: var(--admin-muted); text-transform: uppercase; letter-spacing: .05em; } .admin-login-card input { width: 100%; } .admin-login-card .admin-primary { width: 100%; margin-top: 8px; } .admin-alert { padding: 12px 14px; font: 13px Arial, sans-serif; margin-bottom: 18px; } .admin-alert.danger { color: #8c321b; background: #fff0e9; border: 1px solid #f4c5b1; }
+.admin-login-card { width: min(100%, 420px); padding: 40px; border: 1px solid var(--admin-line); background: #fff; box-shadow: 14px 14px 0 #dce7db; } .admin-login-card h1 { font-size: 38px; font-weight: 500; margin: 10px 0; } .admin-login-card label { display: grid; gap: 7px; margin: 18px 0; font: 12px Arial, sans-serif; color: var(--admin-muted); text-transform: uppercase; letter-spacing: .05em; } .admin-login-card input { width: 100%; } .admin-login-card .admin-primary { width: 100%; margin-top: 8px; }
+
+/* Error banner — rose gradient with a solid icon rail */
+.admin-alert {
+  position: relative;
+  padding: 13px 16px 13px 18px;
+  font: 600 13px/1.5 Arial, sans-serif;
+  margin-bottom: 18px;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.admin-alert.danger {
+  color: #9f1239;
+  background: linear-gradient(120deg, #fff1f2, #ffe4e6);
+  border: 1px solid #fecdd3;
+  box-shadow: 0 10px 24px -20px rgba(225,29,72,.9);
+}
+.admin-alert.danger::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 4px;
+  background: linear-gradient(180deg, #f43f5e, #e11d48);
+}
+/* Success banner — same shape, emerald rail (e.g. "account disabled") */
+.admin-alert.success {
+  color: #065f46;
+  background: linear-gradient(120deg, #ecfdf5, #d1fae5);
+  border: 1px solid #6ee7b7;
+  box-shadow: 0 10px 24px -20px rgba(16,185,129,.9);
+}
+.admin-alert.success::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 4px;
+  background: linear-gradient(180deg, #22c55e, #059669);
+}
+
+/* ── Destructive-action warning (shown above Delete account) ──────────── */
+.user-actions--stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+.user-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  padding: 11px 14px;
+  border: 1px solid #fecdd3;
+  border-radius: 12px;
+  background: linear-gradient(120deg, #fff1f2, #ffe4e6);
+  color: #9f1239;
+  font: 600 12.5px/1.5 Arial, sans-serif;
+}
+.user-warning__icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #f43f5e, #e11d48);
+  color: #fff;
+  font: 800 13px/1 Arial, sans-serif;
+}
+.user-actions--stacked .danger-action { align-self: flex-end; }
 /* ── Responsive ──────────────────────────────────────────────────────── */
 @media (max-width: 820px) {
-  .admin-main { padding: 28px 18px; margin-left: 64px; }
+  .admin-main { padding: 26px 16px 48px; margin-left: 64px; }
   .admin-shell--collapsed .admin-main { margin-left: 64px; }
-  .admin-notif-panel { top: 10px; right: 18px; }
+  .admin-notif-panel { right: 14px; width: min(360px, calc(100vw - 28px)); }
   .admin-header, .panel-heading { display: block; }
   .admin-header-actions { margin-top: 18px; justify-content: flex-end; }
   .admin-header .admin-secondary { margin-top: 0; }
+  .admin-header h1 { font-size: clamp(26px, 7vw, 34px); }
   .metric-grid { grid-template-columns: repeat(2, 1fr); }
   .admin-grid, .provider-grid { grid-template-columns: 1fr; }
   .search-row { margin-top: 15px; }
-  /* Start collapsed on small screens */
-  .admin-sidebar { width: 64px; }
+  .search-row input { min-width: 0; flex: 1; }
+  /* Sidebar is always icon-only on small screens */
+  .admin-sidebar,
   .admin-sidebar--collapsed { width: 64px; }
+  .admin-sidebar nav { padding: 0 8px; }
+  .admin-sidebar nav button,
+  .admin-sidebar--collapsed nav button {
+    justify-content: center;
+    padding: 11px 0;
+    margin: 0;
+  }
+  .admin-sidebar .sidebar-nav-label,
+  .admin-sidebar--collapsed .sidebar-nav-label {
+    width: 0;
+    opacity: 0;
+    flex: 0;
+    pointer-events: none;
+  }
+  .admin-sidebar:not(.admin-sidebar--collapsed) .sidebar-header {
+    justify-content: center;
+    padding: 14px 0;
+  }
+  .admin-sidebar .sidebar-signout,
+  .admin-sidebar--collapsed .sidebar-signout,
+  .admin-sidebar .admin-sidebar--collapsed .sidebar-signout {
+    justify-content: center;
+    padding: 11px 0;
+    margin: auto 8px 16px;
+  }
+  .admin-sidebar .sidebar-signout .sidebar-nav-label { display: none; }
 }
-@media (max-width: 480px) { .metric-grid { gap: 8px; } .metric { padding: 14px; } .metric strong { font-size: 24px; } .admin-login-card { padding: 26px; } }
+@media (max-width: 480px) {
+  .metric-grid { gap: 8px; }
+  .metric { padding: 14px; }
+  .metric strong { font-size: 24px; }
+  .admin-login-card { padding: 26px; }
+  .admin-main { padding: 22px 13px 44px; }
+  .admin-panel { padding: 18px 15px; border-radius: 14px; }
+  .admin-header { margin-bottom: 22px; }
+  .admin-header h1 { font-size: 26px; }
+  .admin-notif-panel { right: 10px; padding: 15px; }
+  .panel-heading { margin-bottom: 2px; }
+}
 
 /* ══════════════════════════════════════════════════════════════════════════
    Overview  (ov- prefix)
@@ -1169,9 +1680,13 @@
   }
 }
 
-/* Applied to the wrapper div around every tab's content */
+/* Applied to the wrapper div around every tab's content.
+   `backwards` not `both`: a filled `to { transform: translateY(0) }` outranks
+   normal author rules AND makes this a containing block for fixed descendants —
+   it was trapping .am-modal / .mam-overlay (position:fixed; inset:0) inside this
+   box, so the modal backdrop rendered at the panel's rect instead of the viewport. */
 .admin-tab-panel {
-  animation: tabFadeSlide 0.22s ease both;
+  animation: tabFadeSlide 0.22s ease backwards;
 }
 
 /* Sidebar nav button — subtle scale press feedback */
@@ -1236,7 +1751,9 @@
 /* User / assessment expand rows — smooth height reveal */
 .user-details,
 .am-assessment-list {
-  animation: tabFadeSlide 0.18s ease both;
+  /* `backwards` not `both` — see .admin-tab-panel: a persisted identity transform
+     is still a transform, so it would trap any position:fixed child. */
+  animation: tabFadeSlide 0.18s ease backwards;
 }
 
 /* Lockout status */
@@ -1267,20 +1784,49 @@
    ════════════════════════════════════════════════════════════════════ */
 .admin-main {
   background:
-    radial-gradient(700px 240px at 10% 0%, rgba(34, 197, 94, 0.07), transparent 60%),
-    radial-gradient(620px 260px at 95% 10%, rgba(79, 107, 237, 0.07), transparent 60%);
+    radial-gradient(700px 240px at 8% 0%, rgba(16, 185, 129, 0.09), transparent 60%),
+    radial-gradient(640px 260px at 96% 6%, rgba(79, 107, 237, 0.09), transparent 60%);
   border-radius: 18px;
 }
 
 .admin-header h1 {
-  letter-spacing: -0.01em;
-}
-.admin-kicker {
-  background: linear-gradient(92deg, #d46b35, #b34b28);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  letter-spacing: -0.02em;
   font-weight: 800;
+}
+/* Gradient title with a solid-colour fallback so the text never goes invisible
+   in browsers without background-clip:text */
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .admin-header h1 {
+    background: linear-gradient(92deg, #0f172a 0%, #047857 42%, #4f46e5 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+}
+
+/* Breadcrumb kicker rendered as a vibrant pill */
+.admin-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 13px;
+  margin: 0;
+  border-radius: 999px;
+  font: 800 10.5px/1.4 Arial, sans-serif;
+  letter-spacing: .13em;
+  color: #fff;
+  background: linear-gradient(92deg, #f97316, #e11d48);
+  box-shadow: 0 6px 16px -8px rgba(225, 29, 72, .9);
+  -webkit-text-fill-color: #fff;
+}
+.admin-kicker::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .95);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, .3);
 }
 
 /* Metric cards: color-coded top accent, lift, staggered entrance */
@@ -1291,7 +1837,9 @@
   border: 1px solid var(--admin-line);
   box-shadow: 0 2px 8px rgba(23, 35, 31, 0.05);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
-  animation: ov-metric-in 0.4s ease both;
+  /* `backwards` not `both`: a filled `to { transform }` outranks normal author
+     rules, which would permanently kill the .ov-metric:hover lift below. */
+  animation: ov-metric-in 0.4s ease backwards;
 }
 .ov-metric-grid .ov-metric:nth-child(1) { animation-delay: 0.03s; }
 .ov-metric-grid .ov-metric:nth-child(2) { animation-delay: 0.08s; }
@@ -1727,13 +2275,138 @@
   font-weight: 700;
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   SETTINGS → EDIT PROFILE (avatar pill menu target)
+
+   The Edit profile panel reuses the same rose accent as the rest of the
+   profile page, and every anchor is scroll-offset so the fixed topbar never
+   covers the section the avatar-pill menu deep-linked to.
+   ════════════════════════════════════════════════════════════════════ */
+#admin-account-card,
+#admin-edit-profile {
+  scroll-margin-top: calc(var(--admin-topbar-h, 60px) + 18px);
+}
+.admin-shell .profile-panel--rose::before { background: linear-gradient(90deg, #fbbf24, #f97316 45%, #e11d48); }
+.admin-shell .profile-section-icon--rose { background: linear-gradient(135deg, #f97316, #e11d48); }
+.admin-shell .profile-panel--rose .profile-section-desc::before { background: linear-gradient(180deg, #f97316, #e11d48); }
+
+/* Collapsible section header */
+.admin-shell .profile-section-title { flex: 1; min-width: 0; }
+.admin-shell .profile-collapse {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.admin-shell .profile-collapse:hover .profile-collapse__chev { color: #e11d48; }
+.admin-shell .profile-collapse:focus-visible { outline: 2px solid #f97316; outline-offset: 4px; border-radius: 6px; }
+.admin-shell .profile-collapse__chev {
+  display: flex;
+  color: var(--admin-muted);
+  transition: transform .2s ease, color .2s ease;
+}
+.admin-shell .profile-collapse__chev svg { color: inherit; }
+.admin-shell .profile-collapse__chev.is-open { transform: rotate(180deg); color: #e11d48; }
+
+.admin-shell .profile-edit-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: pf-rise .3s ease backwards;
+}
+
+/* Picture / background pickers */
+.admin-shell .pf-look__row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px;
+  border: 1px solid #eef2f0;
+  border-radius: 14px;
+  background: linear-gradient(160deg, #fffdfb, #fbf7f4);
+}
+.admin-shell .pf-look__preview {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid #e3eae6;
+  background: #f1f5f2;
+  color: var(--admin-muted);
+  font: 700 12px Arial, sans-serif;
+}
+.admin-shell .pf-look__preview--avatar {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  font-size: 26px;
+  color: #fff;
+  background: linear-gradient(140deg, #fbbf24, #f97316 55%, #e11d48);
+}
+.admin-shell .pf-look__preview--banner {
+  width: 132px;
+  height: 76px;
+  border-radius: 14px;
+  background-size: cover;
+  background-position: center;
+}
+.admin-shell .pf-look__preview img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.admin-shell .pf-look__info { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+.admin-shell .pf-look__info strong { font: 800 14px/1.3 Arial, sans-serif; color: var(--admin-ink); }
+.admin-shell .pf-look__info .admin-muted { font-size: 12.5px; }
+.admin-shell .pf-look__actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.admin-shell .pf-look__actions .admin-secondary { padding: 9px 14px; font-size: 12.5px; }
+.admin-shell .pf-look__remove:hover:not(:disabled) {
+  background: linear-gradient(120deg, #fff1f2, #fee2e2);
+  border-color: #fca5a5;
+  color: #b91c1c;
+}
+/* The native file input stays in the DOM (so .click() opens the picker) but
+   is never painted or reachable by keyboard. */
+.admin-shell .pf-look__file { display: none; }
+
+/* Account card: uploaded banner + avatar photo */
+.admin-shell .profile-card__banner-shade {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: linear-gradient(120deg, rgba(6,32,24,.78), rgba(8,40,32,.62) 55%, rgba(10,45,36,.74));
+  pointer-events: none;
+}
+.admin-shell .profile-card__avatar { overflow: hidden; }
+.admin-shell .profile-card__avatar-img { display: block; width: 100%; height: 100%; object-fit: cover; }
+
 /* ── Narrow screens ────────────────────────────────────────────────── */
 @media (max-width: 640px) {
   .admin-shell .profile-card { flex-wrap: wrap; gap: 16px; padding: 22px; }
   .admin-shell .profile-card__avatar { width: 64px; height: 64px; font-size: 26px; border-radius: 18px; }
   .admin-shell .profile-card__stats { width: 100%; }
   .admin-shell .profile-card__stat { flex: 1 1 150px; }
+  .admin-shell .pf-look__row { flex-direction: column; align-items: flex-start; }
+  .admin-shell .pf-look__preview--banner { width: 100%; height: 110px; }
 }
+
+/* ── Reduced motion ──────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .admin-shell *,
+  .admin-shell *::before,
+  .admin-shell *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 
 @media (prefers-reduced-motion: reduce) {
   .admin-shell .profile-card,

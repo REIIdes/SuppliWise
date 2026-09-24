@@ -279,7 +279,13 @@ function SignIn() {
       <Navbar />
       <div className="auth-container">
         <form className="auth-card" onSubmit={handleSubmit}>
+          <div className="auth-badge" aria-hidden="true">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 12h4l2.5-6 4 12L16 12h5" />
+            </svg>
+          </div>
           <h2 className="auth-title">Create Account</h2>
+          <p className="auth-subtitle">Create your free account to save assessments, track progress and get AI-powered recommendations.</p>
           <hr className="auth-divider" />
 
           {fromAssessment && (

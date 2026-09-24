@@ -137,7 +137,9 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  animation: mam-rise 0.35s ease both;
+  /* `backwards` not `both`: a filled `to { transform }` outranks normal author
+     rules, so `both` permanently killed the :hover / :active feedback below. */
+  animation: mam-rise 0.35s ease backwards;
 }
 .mam-actions .mam-btn:nth-child(2) { animation-delay: 0.06s; }
 .mam-actions .mam-btn:nth-child(3) { animation-delay: 0.12s; }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import './SecurityStatus.css';
 
 // ── Status pill — matches the existing Security Checks pill style ──────────
@@ -37,6 +37,28 @@ const MONITOR_FRAMEWORK = {
   email_enumeration:  'OWASP',
   sensitive_data:     'OWASP',
   rate_limit_lockout: 'STRIDE',
+  // Blockchain layer — every on-chain feature probes as its own row
+  bc_ledger:          'Blockchain',
+  bc_supply:          'Blockchain',
+  bc_certifications:  'Blockchain',
+  bc_escrow:          'Blockchain',
+  bc_market:          'Blockchain',
+  bc_wallet:          'Blockchain',
+  bc_health_ledger:   'Blockchain',
+  bc_data_consent:    'Blockchain',
+  bc_storage:         'Blockchain',
+  bc_rewards:         'Blockchain',
+  bc_nfts:            'Blockchain',
+  bc_staking:         'Blockchain',
+  bc_loyalty:         'Blockchain',
+  bc_dao:             'Blockchain',
+  bc_knowledge:       'Blockchain',
+  bc_disputes:        'Blockchain',
+  bc_share_links:     'Blockchain',
+  bc_ai_proof:        'Blockchain',
+  bc_trials:          'Blockchain',
+  bc_oracle:          'Blockchain',
+  bc_experts:         'Blockchain',
 };
 
 // Full label for the Description column title
@@ -65,6 +87,27 @@ const MONITOR_LABEL = {
   email_enumeration:  'Email Enumeration',
   sensitive_data:     'Sensitive Data Exposure',
   rate_limit_lockout: 'Rate-Limit Lockouts',
+  bc_ledger:          'PoW Ledger & Integrity',
+  bc_supply:          'Supply Chain Tracking (QR)',
+  bc_certifications:  'On-chain Certifications',
+  bc_escrow:          'Smart-contract Escrow',
+  bc_market:          'Verified P2P Marketplace',
+  bc_wallet:          'Wallets / Decentralized ID',
+  bc_health_ledger:   'Health Records Anchor',
+  bc_data_consent:    'Data Sovereignty Consent',
+  bc_storage:         'Encrypted Decentralized Storage',
+  bc_rewards:         'WELL Rewards Engine',
+  bc_nfts:            'Achievement NFTs',
+  bc_staking:         'Token Staking',
+  bc_loyalty:         'Loyalty Program',
+  bc_dao:             'DAO Governance',
+  bc_knowledge:       'Community Knowledge Base',
+  bc_disputes:        'Dispute Resolution (jurors)',
+  bc_share_links:     'Health Profile Share Links',
+  bc_ai_proof:        'Verifiable AI Recommendations',
+  bc_trials:          'Clinical Trial Consent',
+  bc_oracle:          'Decentralized Oracles',
+  bc_experts:         'Professional Bookings',
 };
 
 // Implementation path shown below the label — mirrors existing table
@@ -93,6 +136,27 @@ const MONITOR_IMPL = {
   email_enumeration:  'routes/auth.js · generic responses',
   sensitive_data:     'middleware/auth.js · projection',
   rate_limit_lockout: 'utils/lockout.js · 15m→1d ladder',
+  bc_ledger:          'blockchain/ledger.js · models/Web3.js (SwBlock)',
+  bc_supply:          'routes/web3/supply.js (feature 1)',
+  bc_certifications:  'routes/web3/supply.js (feature 2)',
+  bc_escrow:          'routes/web3/market.js (feature 3)',
+  bc_market:          'routes/web3/market.js (feature 4)',
+  bc_wallet:          'routes/web3/chain.js · blockchain/engine.js (feature 5)',
+  bc_health_ledger:   'routes/web3/data.js (feature 6)',
+  bc_data_consent:    'routes/web3/data.js (feature 7)',
+  bc_storage:         'routes/web3/data.js (feature 8)',
+  bc_rewards:         'routes/web3/rewards.js (feature 9)',
+  bc_nfts:            'routes/web3/rewards.js (feature 10)',
+  bc_staking:         'routes/web3/rewards.js (feature 11)',
+  bc_loyalty:         'routes/web3/rewards.js (feature 12)',
+  bc_dao:             'routes/web3/govern.js (feature 13)',
+  bc_knowledge:       'routes/web3/govern.js (feature 14)',
+  bc_disputes:        'routes/web3/market.js (feature 15)',
+  bc_share_links:     'routes/web3/data.js (feature 16)',
+  bc_ai_proof:        'routes/web3/data.js (feature 17)',
+  bc_trials:          'routes/web3/ecosystem.js (feature 18)',
+  bc_oracle:          'routes/web3/ecosystem.js (feature 19)',
+  bc_experts:         'routes/web3/ecosystem.js (feature 20)',
 };
 
 // Display order — same visual grouping as before but shown as table sections
@@ -121,7 +185,43 @@ const MONITOR_ORDER = [
   'email_enumeration',
   'sensitive_data',
   'rate_limit_lockout',
+  // ── Blockchain layer — all 20 Web3 features + the ledger they anchor to ──
+  'bc_ledger',
+  'bc_supply',
+  'bc_certifications',
+  'bc_escrow',
+  'bc_market',
+  'bc_wallet',
+  'bc_health_ledger',
+  'bc_data_consent',
+  'bc_storage',
+  'bc_rewards',
+  'bc_nfts',
+  'bc_staking',
+  'bc_loyalty',
+  'bc_dao',
+  'bc_knowledge',
+  'bc_disputes',
+  'bc_share_links',
+  'bc_ai_proof',
+  'bc_trials',
+  'bc_oracle',
+  'bc_experts',
 ];
+
+// Framework → coloured chip variant used in the "Security Implement" column
+const FW_TONE = {
+  'Auth / JWT':     'fw--indigo',
+  'Auth / Email':   'fw--violet',
+  'STRIDE':         'fw--amber',
+  'Infrastructure': 'fw--cyan',
+  'AI / API':       'fw--pink',
+  'AI / OWASP':     'fw--pink',
+  'AI / Privacy':   'fw--rose',
+  'OWASP':          'fw--emerald',
+  'Blockchain':     'fw--chain',
+};
+const fwTone = (fw) => FW_TONE[fw] || 'fw--slate';
 
 // ── Pill badge (same look as existing .status-label pills) ────────────────
 function MonitorPill({ status }) {
@@ -145,6 +245,21 @@ function SyncIcon({ spinning }) {
       <polyline points="1 4 1 10 7 10" />
       <polyline points="23 20 23 14 17 14" />
       <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M23 14l-4.64 4.36A9 9 0 0 1 3.51 15" />
+    </svg>
+  );
+}
+
+// ── Small icon used by the summary stat cards ─────────────────────────────
+function StatIcon({ name }) {
+  const paths = {
+    grid:   <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
+    check:  <><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></>,
+    warn:   <><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></>,
+    shield: <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />,
+  };
+  return (
+    <svg className="rt-stat__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {paths[name] || paths.grid}
     </svg>
   );
 }
@@ -175,18 +290,22 @@ function MonitorRow({ monitor }) {
         </td>
 
         {/* SECURITY IMPLEMENT */}
-        <td className="rt-td rt-td--fw">{fw}</td>
+        <td className="rt-td rt-td--fw">
+          <span className={`rt-fw ${fwTone(fw)}`}>{fw}</span>
+        </td>
 
         {/* DESCRIPTION / IMPLEMENTATION */}
         <td className="rt-td rt-td--desc">
-          <div className="rt-desc">
-            <strong>{label}</strong>
-            <span className="rt-impl">{impl}</span>
+          <div className="rt-desc-row">
+            <div className="rt-desc">
+              <strong>{label}</strong>
+              <span className="rt-impl">{impl}</span>
+            </div>
+            {monitor.latencyMs != null && (
+              <span className="rt-latency">{monitor.latencyMs} ms</span>
+            )}
+            <span className="rt-chevron" aria-hidden="true">{open ? '▲' : '▼'}</span>
           </div>
-          {monitor.latencyMs != null && (
-            <span className="rt-latency">{monitor.latencyMs} ms</span>
-          )}
-          <span className="rt-chevron" aria-hidden="true">{open ? '▲' : '▼'}</span>
         </td>
       </tr>
 
@@ -208,11 +327,11 @@ function MonitorRow({ monitor }) {
 
 // ── Overall status banner ─────────────────────────────────────────────────
 const BANNER_META = {
-  healthy:  { label: 'All Systems Healthy',  color: '#16a34a', bg: '#f0fdf4', dot: 'dot--healthy'  },
+  healthy:  { label: 'All Systems Healthy',  color: '#059669', bg: '#ecfdf5', dot: 'dot--healthy'  },
   warning:  { label: 'Some Warnings',        color: '#d97706', bg: '#fffbeb', dot: 'dot--warning'  },
-  critical: { label: 'Critical Issues',      color: '#dc2626', bg: '#fef2f2', dot: 'dot--critical' },
-  error:    { label: 'Probe Error',          color: '#7c3aed', bg: '#faf5ff', dot: 'dot--error'    },
-  loading:  { label: 'Checking…',            color: '#6b7280', bg: '#f9fafb', dot: 'dot--loading'  },
+  critical: { label: 'Critical Issues',      color: '#e11d48', bg: '#fff1f2', dot: 'dot--critical' },
+  error:    { label: 'Probe Error',          color: '#7c3aed', bg: '#f5f3ff', dot: 'dot--error'    },
+  loading:  { label: 'Checking…',            color: '#64748b', bg: '#f8fafc', dot: 'dot--loading'  },
 };
 
 function OverallBanner({ status, syncedAt, syncing, onSync, onDownload }) {
@@ -459,6 +578,18 @@ const SecurityStatus = ({ adminRequest, onDownloadReport }) => {
     return found || { key, label: MONITOR_LABEL[key], status: 'loading', detail: '', latencyMs: null, checkedAt: null };
   });
 
+  // Quick-glance counters for the summary strip
+  const counts = orderedMonitors.reduce((acc, m) => {
+    acc[m.status] = (acc[m.status] || 0) + 1;
+    return acc;
+  }, {});
+  const summaryCards = [
+    { label: 'Monitors',  value: orderedMonitors.length, cls: 'rt-stat--total',    icon: 'grid'  },
+    { label: 'Healthy',   value: counts.healthy  || 0,    cls: 'rt-stat--healthy',  icon: 'check' },
+    { label: 'Warnings',  value: counts.warning  || 0,    cls: 'rt-stat--warning',  icon: 'warn'  },
+    { label: 'Critical',  value: (counts.critical || 0) + (counts.error || 0), cls: 'rt-stat--critical', icon: 'shield' },
+  ];
+
   return (
     <div className="security-status-container">
 
@@ -476,7 +607,7 @@ const SecurityStatus = ({ adminRequest, onDownloadReport }) => {
             </svg>
             <h2 className="rt-header__title">Real-time Security Monitor</h2>
           </div>
-          <p className="rt-header__sub">Live probe of all critical security functions — auto-refreshes every 30 s. Click any row to see details.</p>
+          <p className="rt-header__sub">Live probe of all critical security functions and every blockchain feature (ledger, wallet, marketplace, DAO, rewards, privacy, AI proofs…) — auto-refreshes every 30 s. Click any row to see details.</p>
         </div>
 
         {/* Overall status banner */}
@@ -493,6 +624,17 @@ const SecurityStatus = ({ adminRequest, onDownloadReport }) => {
           <div className="rt-error" role="alert">{monitorError}</div>
         )}
 
+        {/* Quick-glance summary strip */}
+        <div className="rt-stats">
+          {summaryCards.map(card => (
+            <div className={`rt-stat ${card.cls}`} key={card.label}>
+              <span className="rt-stat__icon-wrap"><StatIcon name={card.icon} /></span>
+              <span className="rt-stat__value">{card.value}</span>
+              <span className="rt-stat__label">{card.label}</span>
+            </div>
+          ))}
+        </div>
+
         {/* Monitor table — same column structure as Security Checks */}
         <div className="rt-table-wrap">
           <table className="rt-table">
@@ -505,7 +647,17 @@ const SecurityStatus = ({ adminRequest, onDownloadReport }) => {
             </thead>
             <tbody>
               {orderedMonitors.map(m => (
-                <MonitorRow key={m.key} monitor={m} />
+                <Fragment key={m.key}>
+                  {/* Divider where the blockchain feature rows begin */}
+                  {m.key === 'bc_ledger' && (
+                    <tr className="rt-group-row" aria-hidden="true">
+                      <td colSpan={3} className="rt-group-cell">
+                        ⛓ Blockchain Layer — all 20 Web3 features, probed live
+                      </td>
+                    </tr>
+                  )}
+                  <MonitorRow monitor={m} />
+                </Fragment>
               ))}
             </tbody>
           </table>

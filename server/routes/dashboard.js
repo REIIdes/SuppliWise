@@ -11,7 +11,9 @@ const { notExpiredFilter, expiryFromCreatedAt } = require('../utils/assessments'
 // Objects (e.g. {"$ne": "x"}) would otherwise become NoSQL operators and
 // match/delete the wrong records — String() neutralizes them to literals.
 const str = (value) => (typeof value === 'string' ? value : value == null ? '' : String(value));
-const cleanSupplementName = (value) => str(value).trim().slice(0, 200);
+// Strip any HTML/markup first (defense-in-depth: React escapes on render, but
+// the API must never persist or echo raw markup back to a client).
+const cleanSupplementName = (value) => str(value).replace(/<[^>]*>/g, '').trim().slice(0, 200);
 
 // Helper: Get today's date in YYYY-MM-DD format
 const getTodayKey = () => {
@@ -824,6 +826,11 @@ router.post('/add-supplement', protect, async (req, res) => {
   try {
     const { dosage, timing, priority } = req.body;
     const name = cleanSupplementName(req.body.name);
+    // Coerce/whitelist before Mongoose sees them: an object dosage → CastError,
+    // and a non-enum priority (e.g. {"$gt": ""}) → ValidationError — both 500s.
+    const safeDosage = str(dosage).trim().slice(0, 100);
+    const safeTiming = str(timing).trim().slice(0, 50);
+    const safePriority = ['High', 'Medium', 'Low'].includes(priority) ? priority : 'Medium';
 
     if (!name) {
       return res.status(400).json({ message: 'Supplement name is required.' });
@@ -855,9 +862,9 @@ router.post('/add-supplement', protect, async (req, res) => {
       user: req.user._id,
       assessment: latestAssessment._id,
       supplementName: name,
-      dosage: dosage || '',
-      priority: priority || 'Medium',
-      scheduledTime: timing || 'Anytime',
+      dosage: safeDosage,
+      priority: safePriority,
+      scheduledTime: safeTiming || 'Anytime',
       taken: false,
       date: new Date(),
       dayKey: todayKey,
