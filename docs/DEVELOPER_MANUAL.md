@@ -266,6 +266,7 @@ legitimately hold an unstaked wallet, so that is not a failure.
 | Symptom | Cause / fix |
 | --- | --- |
 | `EADDRINUSE :::5000` | Another API instance is running. The crash guard logs and keeps the process alive *without* a listener — kill the stale process, then start one. Verify with `Get-NetTCPConnection -LocalPort 5000 -State Listen`. |
+| Health check fails right after start | Atlas can take **30–60 s** to connect on this network; the process is alive but silent until the first successful connect. Retry `/api/health` for a minute before assuming it failed, and check the log for `Connected to MongoDB` (an empty log + a live PID = still connecting, not crashed). |
 | `privateKeyEnc: Cast to string failed` | The envelope must be an object column (`{iv, ct, tag}`), never a `String`. If you see this, the schema was edited back. |
 | `E11000 … tokenId_1` on achievements | Lost a mint race. The route now treats it as "already owned" and recomputes a serial; if you mint elsewhere, do the same. |
 | `Insufficient WELL balance` unexpectedly | A concurrent purge deleted the wallet mid‑request (see the smoke warning), or the DAO genuinely spent it. Check `GET /wallet` and the reward/transfer history. |
