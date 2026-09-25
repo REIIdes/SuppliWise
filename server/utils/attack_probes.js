@@ -4,11 +4,124 @@
  * it runs the same code path an attacker would hit and checks the outcome.
  */
 
+const path = require('node:path');
+const http = require('node:http');
 const { sanitizeTextField } = require('./sanitize');
 const { scrubKeys } = require('./sanitize');
 const { verifyTotpOnce } = require('./totp');
 const mongoose = require('mongoose');
 const speakeasy = require('speakeasy');
+
+// A successful traversal must be observable without returning any source text
+// to the dashboard. This marker exists in this runtime file, which is outside
+// the built client directory; finding it in a response proves arbitrary file
+// disclosure rather than merely finding a suspicious middleware name.
+const TRAVERSAL_CANARY = 'SUPPLIWISE_TRAVERSAL_CANARY_DO_NOT_SERVE';
+const MAX_PROBE_BODY_BYTES = 64 * 1024;
+
+function toPosixPath(value) {
+  return String(value).replace(/\\/g, '/');
+}
+
+function traversalProbePaths(staticRoot) {
+  const relativeTarget = toPosixPath(path.relative(staticRoot, __filename));
+  const dotEncodedTarget = relativeTarget.replace(/\./g, '%2e');
+  const separatorEncodedTarget = relativeTarget.replace(/\//g, '%2f');
+  const doubleEncodedTarget = encodeURIComponent(separatorEncodedTarget);
+
+  return [
+    `/${relativeTarget}`,
+    `/${dotEncodedTarget}`,
+    `/${separatorEncodedTarget}`,
+    `/${doubleEncodedTarget}`,
+    `/assets/${relativeTarget}`,
+    `/assets/${dotEncodedTarget}`,
+  ];
+}
+
+/**
+ * Send a request without allowing URL normalization to rewrite the attack.
+ * WHATWG fetch normalizes dot segments, which would make a traversal test look
+ * safe even when the server is vulnerable, so this probe uses node:http's raw
+ * `path` option instead.
+ */
+function requestRawPath(rawPath, {
+  host = '127.0.0.1',
+  port = process.env.PORT || 5000,
+  timeoutMs = 3000,
+} = {}) {
+  return new Promise((resolve, reject) => {
+    const request = http.request({
+      host,
+      port,
+      method: 'GET',
+      path: rawPath,
+      headers: {
+        Accept: 'text/plain',
+        'User-Agent': 'SuppliWise-Security-Monitor/1.0',
+      },
+    }, (response) => {
+      const chunks = [];
+      let bytes = 0;
+
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => {
+        if (bytes >= MAX_PROBE_BODY_BYTES) return;
+        const remaining = MAX_PROBE_BODY_BYTES - bytes;
+        const text = String(chunk).slice(0, remaining);
+        chunks.push(text);
+        bytes += Buffer.byteLength(text);
+      });
+      response.on('end', () => resolve({
+        status: response.statusCode || 0,
+        headers: response.headers,
+        body: chunks.join(''),
+      }));
+      response.on('error', reject);
+    });
+
+    request.setTimeout(timeoutMs, () => request.destroy(new Error('Traversal probe timed out.')));
+    request.on('error', reject);
+    request.end();
+  });
+}
+
+async function auditStaticPathTraversal(app, request = requestRawPath) {
+  const configuredRoot = app && app.locals && app.locals.staticFileRoot;
+  const staticRoot = path.resolve(configuredRoot || path.join(__dirname, '..', '..', 'my-react-app', 'dist'));
+  const attempts = await Promise.all(traversalProbePaths(staticRoot).map(async (rawPath) => {
+    try {
+      const response = await request(rawPath);
+      return {
+        rawPath,
+        exposed: String(response && response.body || '').includes(TRAVERSAL_CANARY),
+      };
+    } catch (error) {
+      return { rawPath, error: error && error.message ? error.message : String(error) };
+    }
+  }));
+
+  const exposed = attempts.find((attempt) => attempt.exposed);
+  if (exposed) {
+    return {
+      status: 'critical',
+      detail: `Path traversal exposed a server file through ${exposed.rawPath}.`,
+    };
+  }
+
+  const failures = attempts.filter((attempt) => attempt.error);
+  if (failures.length > 0) {
+    return {
+      status: 'warning',
+      detail: `${failures.length} of ${attempts.length} path-traversal probes could not complete; full coverage was not verified.`,
+    };
+  }
+
+  return {
+    status: 'healthy',
+    detail: `${attempts.length} raw, encoded, and double-encoded traversal payloads were blocked; static files stay inside the client build directory.`,
+  };
+}
 
 // Walk the Express router stack collecting middleware/handler names.
 function stackNames(app) {
@@ -51,14 +164,19 @@ const probes = {
     return { status: 'healthy', detail: 'Object-typed email/password/OTP coerced to inert strings with 400 guards; operators never reach queries.' };
   },
 
-  // ── Path traversal: no user-controlled file serving may exist ──────────
-  path_traversal: async (app) => {
+  // ── Path traversal: actively attack every static-file URL encoding ──────
+  path_traversal: async (app, request = requestRawPath) => {
     const names = stackNames(app).map(n => String(n).toLowerCase());
-    const risky = names.filter(n => n.includes('servestatic') || n.includes('sendfile'));
-    if (risky.length > 0) {
-      return { status: 'warning', detail: `Static file handlers present (${[...new Set(risky)].join(', ')}) — verify no user input reaches file paths.` };
+    const hasStaticHandlers = names.some(n => n.includes('servestatic') || n.includes('sendfile'));
+    const hasStaticRoot = Boolean(app && app.locals && app.locals.staticFileRoot);
+
+    // The API-only development mode has no filesystem handler and no client
+    // build to attack. Keep the fast, definitive healthy result in that mode.
+    if (!hasStaticHandlers && !hasStaticRoot) {
+      return { status: 'healthy', detail: 'No static file serving in the API layer; images travel as capped base64 JSON (2–3 MB), never filesystem paths.' };
     }
-    return { status: 'healthy', detail: 'No static file serving in the API layer; images travel as capped base64 JSON (2–3 MB), never filesystem paths.' };
+
+    return auditStaticPathTraversal(app, request);
   },
 
   // ── Prototype pollution: __proto__ keys scrubbed + ODM patched ─────────
@@ -233,4 +351,9 @@ Object.assign(probes, {
   },
 });
 
-module.exports = { attackProbes: probes };
+module.exports = {
+  attackProbes: probes,
+  auditStaticPathTraversal,
+  requestRawPath,
+  traversalProbePaths,
+};

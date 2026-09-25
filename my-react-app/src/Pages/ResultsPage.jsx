@@ -29,7 +29,7 @@ function fixChars(str) {
 // Detect placeholder/template evidence text the AI failed to fill in
 function isPlaceholderEvidence(text) {
   if (!text) return true;
-  const t = text.toLowerCase();
+  const t = String(text).toLowerCase();
   return (
     t.includes('author et al') ||
     t.includes('(year)') ||
@@ -69,7 +69,7 @@ const SUPPLEMENT_ICONS = {
 };
 
 function getSupplementIcon(name) {
-  const n = (name || '').toLowerCase();
+  const n = String(name || '').toLowerCase();
   for (const [key, icon] of Object.entries(SUPPLEMENT_ICONS)) {
     if (n.includes(key)) return icon;
   }
@@ -77,15 +77,16 @@ function getSupplementIcon(name) {
 }
 
 function ConfidenceBar({ score, delay = 0 }) {
+  const numericScore = Math.max(0, Math.min(100, Number(score) || 0));
   const [width, setWidth] = useState(0);
   const [displayed, setDisplayed] = useState(0);
   const rafRef = useRef(null);
 
   // Animate the bar fill after mount (with optional stagger delay)
   useEffect(() => {
-    const timer = setTimeout(() => setWidth(score), delay);
+    const timer = setTimeout(() => setWidth(numericScore), delay);
     return () => clearTimeout(timer);
-  }, [score, delay]);
+  }, [numericScore, delay]);
 
   // Count-up the number in sync with the bar
   useEffect(() => {
@@ -100,16 +101,16 @@ function ConfidenceBar({ score, delay = 0 }) {
       const progress = Math.min(elapsed / duration, 1);
       // ease-out curve
       const eased = 1 - Math.pow(1 - progress, 3);
-      setDisplayed(Math.round(from + (score - from) * eased));
+      setDisplayed(Math.round(from + (numericScore - from) * eased));
       if (progress < 1) rafRef.current = requestAnimationFrame(tick);
     };
 
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [width]);
+  }, [width, numericScore]);
 
-  const color = score >= 85 ? '#22c55e' : score >= 75 ? '#d97706' : '#6b7280';
+  const color = numericScore >= 85 ? '#22c55e' : numericScore >= 75 ? '#d97706' : '#6b7280';
 
   return (
     <div className="confidence-bar-wrap">
@@ -148,29 +149,31 @@ const FOOD_SPECIFICS = {
 };
 
 function expandFoodItem(item) {
-  const lower = item.toLowerCase().trim();
+  const text = String(item || '');
+  const lower = text.toLowerCase().trim();
   // If already expanded (has parentheses with examples), don't double-expand
-  if (item.includes('(') && item.includes(')')) return item;
+  if (text.includes('(') && text.includes(')')) return text;
   for (const [key, expanded] of Object.entries(FOOD_SPECIFICS)) {
     if (lower === key || lower.startsWith(key + ' ') || lower.endsWith(' ' + key)) {
       // Preserve original casing of first letter
       return expanded.charAt(0).toUpperCase() + expanded.slice(1);
     }
   }
-  return item;
+  return text;
 }
 
 // Strip sentence-like fragments from food strings (AI sometimes returns prose)
 function sanitizeFoods(str) {
-  if (!str) return str;
+  if (!str) return '';
+  const source = String(str);
   // Remove trailing sentence fragments that start with connective words
   // e.g. ", such as salmon and sardines, are naturally rich in omega-3 fatty acids"
-  let cleaned = str
+  const cleaned = source
     .replace(/,?\s*(such as|which are|are naturally|naturally rich|found in|including)[^,;]*/gi, '')
     .replace(/,?\s*are\s+[a-z].*$/gi, '')
     .trim()
     .replace(/,\s*$/, ''); // remove trailing comma
-  return cleaned || str; // fallback to original if cleaning removed everything
+  return cleaned || source;
 }
 
 // Split food string on commas/semicolons that are NOT inside parentheses
@@ -178,9 +181,9 @@ function splitFoods(str) {
   const items = [];
   let current = '';
   let depth = 0;
-  for (const ch of str) {
+  for (const ch of String(str || '')) {
     if (ch === '(') { depth++; current += ch; }
-    else if (ch === ')') { depth--; current += ch; }
+    else if (ch === ')') { depth = Math.max(0, depth - 1); current += ch; }
     else if ((ch === ',' || ch === ';') && depth === 0) {
       if (current.trim()) items.push(current.trim());
       current = '';
@@ -306,7 +309,7 @@ function writeSdmCache(key, data) {
 
 function SupplementDetailModal({ supplementName, assessmentId, context, cache, onClose }) {
   // localStorage key — scoped to assessment ID so new assessments always fetch fresh from Groq
-  const storageKey = `sdm_${assessmentId}_${supplementName.toLowerCase().trim()}`;
+  const storageKey = `sdm_${assessmentId}_${String(supplementName || 'supplement').toLowerCase().trim()}`;
 
   // Resolve cache hits during init so cached details render instantly (no loading flash).
   // Note: the shared in-memory session cache lives in a parent-owned ref on purpose.
@@ -398,14 +401,14 @@ function SupplementDetailModal({ supplementName, assessmentId, context, cache, o
               )}
 
               {/* Key Benefits */}
-              {detail.keyBenefits?.length > 0 && (
+              {Array.isArray(detail.keyBenefits) && detail.keyBenefits.length > 0 && (
                 <div className="sdm-section">
                   <h3 className="sdm-section-title">Key Benefits &amp; Use Cases</h3>
                   <div className="sdm-benefits">
                     {detail.keyBenefits.map((b, i) => (
                       <div key={i} className="sdm-benefit-item">
-                        <span className="sdm-benefit-title">{b.title}</span>
-                        <p className="sdm-benefit-desc">{b.description}</p>
+                        <span className="sdm-benefit-title">{b?.title || 'Benefit'}</span>
+                        <p className="sdm-benefit-desc">{b?.description || ''}</p>
                       </div>
                     ))}
                   </div>
@@ -413,14 +416,14 @@ function SupplementDetailModal({ supplementName, assessmentId, context, cache, o
               )}
 
               {/* How to Take */}
-              {detail.howToTake?.length > 0 && (
+              {Array.isArray(detail.howToTake) && detail.howToTake.length > 0 && (
                 <div className="sdm-section">
                   <h3 className="sdm-section-title">How to Take It</h3>
                   <div className="sdm-howtotake">
                     {detail.howToTake.map((h, i) => (
                       <div key={i} className="sdm-howtotake-item">
-                        <span className="sdm-howtotake-label">{h.title}</span>
-                        <p className="sdm-howtotake-desc">{h.description}</p>
+                        <span className="sdm-howtotake-label">{h?.title || 'Instructions'}</span>
+                        <p className="sdm-howtotake-desc">{h?.description || ''}</p>
                       </div>
                     ))}
                   </div>
@@ -428,7 +431,7 @@ function SupplementDetailModal({ supplementName, assessmentId, context, cache, o
               )}
 
               {/* Considerations & Safety */}
-              {detail.considerations?.length > 0 && (
+              {Array.isArray(detail.considerations) && detail.considerations.length > 0 && (
                 <div className="sdm-section">
                   <h3 className="sdm-section-title">Considerations &amp; Safety</h3>
                   <ul className="sdm-considerations">
@@ -522,7 +525,19 @@ function SupplementCard({ rec, index = 0, expanded, onToggle, onOpenDetail, deta
       </div>
 
       {/* Supplement name — clickable to open detail modal */}
-      <div className="rec-name-row rec-name-clickable" onClick={onOpenDetail} title="Click for detailed info" role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && onOpenDetail()}>
+      <div
+        className="rec-name-row rec-name-clickable"
+        onClick={onOpenDetail}
+        title="Click for detailed info"
+        role="button"
+        tabIndex={0}
+        onKeyDown={e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onOpenDetail();
+          }
+        }}
+      >
         <span className="rec-icon-large">{icon}</span>
         <div className="rec-name-text-wrap">
           <h3 className="rec-name-large">{rec.name}</h3>
@@ -531,7 +546,7 @@ function SupplementCard({ rec, index = 0, expanded, onToggle, onOpenDetail, deta
       </div>
 
       {/* Confidence bar — larger and more prominent */}
-      {rec.confidenceScore && (
+      {rec.confidenceScore !== null && rec.confidenceScore !== undefined && rec.confidenceScore !== '' && (
         <div className="rec-confidence-section">
           <span className="rec-confidence-title">Recommendation Match</span>
           <ConfidenceBar score={rec.confidenceScore} delay={index * 120} />
@@ -626,7 +641,9 @@ function SupplementCard({ rec, index = 0, expanded, onToggle, onOpenDetail, deta
 function ResultsPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { recommendations: r, assessment, garbageFields = [] } = location.state || {};
+  const { recommendations: r, assessment, garbageFields: rawGarbageFields = [] } = location.state || {};
+  const garbageFields = (Array.isArray(rawGarbageFields) ? rawGarbageFields : [])
+    .filter((field) => field && typeof field === 'object');
 
   // Scroll to top when results page mounts
   useEffect(() => {
@@ -651,6 +668,7 @@ function ResultsPage() {
   });
   
   const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState('');
   const [expandedCardsSimplified, setExpandedCardsSimplified] = useState(new Set());
   const [expandedCardsDetailed, setExpandedCardsDetailed] = useState(new Set());
   const [showAllRecs, setShowAllRecs] = useState(false);
@@ -662,6 +680,7 @@ function ResultsPage() {
   // Reactive plan object { active, plan, rank }: the PDF gate re-renders the
   // instant the subscription changes.
   const livePlan = useSubscription();
+  const { canAccessTier: canAccessLiveTier, plan: livePlanName, rank: livePlanRank } = livePlan;
   const INITIAL_REC_COUNT = 6;
   
   // Use the appropriate expanded cards set based on current mode
@@ -673,11 +692,11 @@ function ResultsPage() {
   useEffect(() => {
     const onPlan = () => setUpgradeInfo((prev) => {
       if (!prev) return prev;
-      return livePlan.canAccessTier(prev.requiresPlan) ? null : { ...prev, currentPlan: livePlan.plan };
+      return canAccessLiveTier(prev.requiresPlan) ? null : { ...prev, currentPlan: livePlanName };
     });
     window.addEventListener(SUBSCRIPTION_EVENT, onPlan);
     return () => window.removeEventListener(SUBSCRIPTION_EVENT, onPlan);
-  }, [livePlan.rank, livePlan.plan]);
+  }, [livePlanRank, livePlanName, canAccessLiveTier]);
 
   // Save preference to localStorage when changed
   useEffect(() => {
@@ -694,11 +713,11 @@ function ResultsPage() {
     return {
       age: assessment.age,
       gender: assessment.gender,
-      symptoms: (assessment.symptoms || []).filter(s => s !== 'No current symptoms'),
-      goals: assessment.healthGoals || [],
-      conditions: (assessment.medicalConditions || []).filter(c => c !== 'None'),
+      symptoms: (Array.isArray(assessment.symptoms) ? assessment.symptoms : []).filter(s => s !== 'No current symptoms'),
+      goals: Array.isArray(assessment.healthGoals) ? assessment.healthGoals : [],
+      conditions: (Array.isArray(assessment.medicalConditions) ? assessment.medicalConditions : []).filter(c => c !== 'None'),
       allergies: assessment.allergies || null,
-      lifestyle: (assessment.lifestyleHabits || []).filter(h => h !== 'None'),
+      lifestyle: (Array.isArray(assessment.lifestyleHabits) ? assessment.lifestyleHabits : []).filter(h => h !== 'None'),
       diet: assessment.dietType || null,
       pregnancyStatus: assessment.pregnancyStatus || null,
       recommendationReason: rec?.reason || null,
@@ -722,14 +741,17 @@ function ResultsPage() {
       return;
     }
     setExporting(true);
+    setExportError('');
     try {
       await checkFeature('pdfExport');
-      exportResultsToPDF(r, assessment);
+      const generated = await exportResultsToPDF(r, assessment);
+      if (!generated) throw new Error('The report could not be generated. Please try again.');
     } catch (err) {
       if (err?.requiresPlan) {
         setUpgradeInfo({ requiresPlan: err.requiresPlan, currentPlan: err.currentPlan || livePlan.plan, feature: 'PDF Report Export' });
       } else {
         console.error('PDF export blocked:', err);
+        setExportError(err?.message || 'Unable to generate the PDF report.');
       }
     } finally {
       // Small delay so the button state is visible
@@ -753,7 +775,8 @@ function ResultsPage() {
     );
   }
 
-  const allRecommendations = r.recommendations || [];
+  const allRecommendations = (Array.isArray(r.recommendations) ? r.recommendations : [])
+    .filter((rec) => rec && typeof rec === 'object');
 
   // Sort: High → Medium → Low, then by confidenceScore descending within each group
   const PRIORITY_ORDER = { High: 0, Medium: 1, Low: 2 };
@@ -763,6 +786,12 @@ function ResultsPage() {
     if (pa !== pb) return pa - pb;
     return (b.confidenceScore || 0) - (a.confidenceScore || 0);
   });
+  const dailySchedule = Array.isArray(r.dailySchedule) ? r.dailySchedule : [];
+  const actionPlan = Array.isArray(r.actionPlan) ? r.actionPlan : [];
+  const lifestyleAdvice = Array.isArray(r.lifestyleAdvice) ? r.lifestyleAdvice : [];
+  const mealRecommendations = Array.isArray(r.mealRecommendations) ? r.mealRecommendations : [];
+  const warnings = Array.isArray(r.warnings) ? r.warnings : [];
+  const avoidList = Array.isArray(r.avoidList) ? r.avoidList : [];
 
   return (
     <div className="results-wrapper">
@@ -809,46 +838,77 @@ function ResultsPage() {
         )}
 
         {/* Medical Disclaimer Banner */}
-        <div className="results-disclaimer-banner">
-          <span className="disclaimer-icon">ℹ️</span>
-          <p>This information is for <strong>educational and wellness purposes only</strong> and does not diagnose, treat, or cure any disease. Always consult a licensed healthcare professional before starting any supplement regimen.</p>
-        </div>
+        <aside className="results-disclaimer-banner" role="note">
+          <span className="disclaimer-icon" aria-hidden="true">✦</span>
+          <div>
+            <strong>Wellness guidance, not a diagnosis</strong>
+            <p>This information is for educational and wellness purposes only and does not diagnose, treat, or cure any disease. Always consult a licensed healthcare professional before starting any supplement regimen.</p>
+          </div>
+        </aside>
 
         {/* Consult Doctor Alert */}
         {r.consultDoctor && r.consultReason && (
-          <div className="results-consult-alert">
-            <span className="consult-icon">🏥</span>
+          <aside className="results-consult-alert" role="alert">
+            <span className="consult-icon" aria-hidden="true">✚</span>
             <div>
+              <span className="results-alert-eyebrow">A little extra care goes a long way</span>
               <strong>Medical Consultation Recommended</strong>
               <p>{r.consultReason}</p>
             </div>
-          </div>
+          </aside>
         )}
 
         {/* Summary */}
-        <div className="results-header">
+        <section className="results-header" aria-labelledby="results-plan-title">
+          <div className="results-header__accent" aria-hidden="true" />
           <div className="results-header-top">
-            <h2>Your Personalized Health Plan</h2>
+            <div className="results-title-lockup">
+              <p className="results-eyebrow"><span aria-hidden="true">✦</span> PERSONALIZED WELLNESS PLAN</p>
+              <h2 id="results-plan-title">Your Personalized Health Plan</h2>
+              <p className="results-header-sub">A clear starting point shaped around your goals, habits, and wellbeing.</p>
+            </div>
             {/* Detail Mode Toggle */}
-            <div className="detail-mode-toggle">
+            <div className="detail-mode-toggle" role="group" aria-label="Recommendation detail level">
               <button
+                type="button"
                 className={`detail-mode-btn ${detailMode === 'simplified' ? 'active' : ''}`}
                 onClick={() => setDetailMode('simplified')}
+                aria-pressed={detailMode === 'simplified'}
                 title="Friendly, easy-to-understand recommendations"
               >
-                Simplified
+                <span aria-hidden="true">☀</span> Simplified
               </button>
               <button
+                type="button"
                 className={`detail-mode-btn ${detailMode === 'detailed' ? 'active' : ''}`}
                 onClick={() => setDetailMode('detailed')}
+                aria-pressed={detailMode === 'detailed'}
                 title="Technical, medical-grade information"
               >
-                Detailed
+                <span aria-hidden="true">⌕</span> Detailed
               </button>
             </div>
           </div>
+          <div className="results-quick-stats" aria-label="Plan at a glance">
+            <div className="results-quick-stat">
+              <span className="results-quick-stat__icon" aria-hidden="true">💊</span>
+              <span><small>Plan items</small><strong>{allRecommendations.length}</strong></span>
+            </div>
+            <div className="results-quick-stat">
+              <span className="results-quick-stat__icon" aria-hidden="true">🎯</span>
+              <span><small>Health goals</small><strong>{Array.isArray(assessment?.healthGoals) ? assessment.healthGoals.length : 0}</strong></span>
+            </div>
+            <div className="results-quick-stat">
+              <span className="results-quick-stat__icon" aria-hidden="true">🗓</span>
+              <span><small>Daily moments</small><strong>{dailySchedule.length}</strong></span>
+            </div>
+            <div className="results-quick-stat">
+              <span className="results-quick-stat__icon" aria-hidden="true">🩺</span>
+              <span><small>Care check</small><strong>{r.consultDoctor ? 'Review' : 'Ready'}</strong></span>
+            </div>
+          </div>
           <p className="results-summary">{fixChars(detailMode === 'detailed' ? r.summary : r.simplifiedSummary || r.summary)}</p>
-        </div>
+        </section>
 
         {/* Garbage input warning */}
         {garbageFields.length > 0 && (
@@ -884,7 +944,7 @@ function ResultsPage() {
                   index={i}
                   expanded={expandedCards.has(`rec-${i}`)}
                   onToggle={() => handleToggleCard(`rec-${i}`)}
-                  onOpenDetail={() => setDetailSupplement({ name: rec.name, context: buildDetailContext(rec) })}
+                  onOpenDetail={() => setDetailSupplement({ name: rec.name || 'Supplement', context: buildDetailContext(rec) })}
                   detailMode={detailMode}
                   setShowEvidenceInfo={setShowEvidenceInfo}
                 />
@@ -901,19 +961,19 @@ function ResultsPage() {
         )}
 
         {/* Merged Daily Schedule + Action Plan */}
-        {(r.dailySchedule?.length > 0 || r.actionPlan?.length > 0) && (
+        {(dailySchedule.length > 0 || actionPlan.length > 0) && (
           <>
             <div className="results-section-title">🗓️ Your Daily Schedule & Recovery Plan</div>
 
             {/* Daily Schedule */}
-            {r.dailySchedule?.length > 0 && (
+            {dailySchedule.length > 0 && (
               <div className="daily-schedule">
                 {(() => {
                   // Build dosage lookup — fuzzy match supplement names
                   const dosageMap = {};
-                  (r.recommendations || []).forEach(rec => {
+                  allRecommendations.forEach(rec => {
                     if (rec.name && rec.dosage) {
-                      dosageMap[rec.name.toLowerCase()] = rec.dosage;
+                      dosageMap[String(rec.name).toLowerCase()] = rec.dosage;
                     }
                   });
 
@@ -945,13 +1005,13 @@ function ResultsPage() {
                     return null;
                   };
 
-                  return r.dailySchedule.map((slot, i) => (
+                  return dailySchedule.map((slot, i) => (
                     <div key={i} className="schedule-slot">
-                      <div className="schedule-time">{fixChars(slot.time.replace(/With Lunch/gi, 'Afternoon'))}</div>
+                      <div className="schedule-time">{fixChars(String(slot?.time || '').replace(/With Lunch/gi, 'Afternoon'))}</div>
                       <div className="schedule-supplements">
-                        {slot.supplements.map((s, si) => {
+                        {(Array.isArray(slot?.supplements) ? slot.supplements : []).map((s, si) => {
                           // Strip any dosage text the AI may have included after ' - '
-                          const pillName = s.split(' - ')[0].trim();
+                          const pillName = String(s || '').split(' - ')[0].trim();
                           const dosage = getDosage(pillName);
                           return (
                             <span key={si} className="schedule-pill">
@@ -967,9 +1027,9 @@ function ResultsPage() {
             )}
 
             {/* Recovery Timeframe */}
-            {r.actionPlan?.length > 0 && (
-              <div className="recovery-plan" style={{ marginTop: r.dailySchedule?.length > 0 ? '20px' : '0' }}>
-                {r.actionPlan.map((phase, i) => {
+            {actionPlan.length > 0 && (
+              <div className="recovery-plan" style={{ marginTop: dailySchedule.length > 0 ? '20px' : '0' }}>
+                {actionPlan.map((phase, i) => {
                   // Support both structured objects and legacy plain strings
                   if (typeof phase === 'string') {
                     return (
@@ -981,21 +1041,21 @@ function ResultsPage() {
                       </div>
                     );
                   }
-                  const steps = phase.steps || [];
-                  const expected = phase.expectedChanges || [];
+                  const steps = Array.isArray(phase?.steps) ? phase.steps : [];
+                  const expected = Array.isArray(phase?.expectedChanges) ? phase.expectedChanges : [];
                   // Merge supplements/habits/activity into steps if using old fallback shape
                   const allSteps = steps.length > 0 ? steps : [
-                    ...(phase.supplements || []),
-                    ...(phase.habits || []),
-                    ...(phase.activity || []),
+                    ...(Array.isArray(phase?.supplements) ? phase.supplements : []),
+                    ...(Array.isArray(phase?.habits) ? phase.habits : []),
+                    ...(Array.isArray(phase?.activity) ? phase.activity : []),
                   ];
                   return (
                     <div key={i} className="recovery-phase">
                       <div className="recovery-phase-header">
                         <span className="recovery-phase-num">{i + 1}</span>
                         <div>
-                          <p className="recovery-phase-title">{fixChars(phase.phase || phase.week)}</p>
-                          {phase.focus && <p className="recovery-phase-focus">{fixChars(phase.focus)}</p>}
+                          <p className="recovery-phase-title">{fixChars(phase?.phase || phase?.week)}</p>
+                          {phase?.focus && <p className="recovery-phase-focus">{fixChars(phase.focus)}</p>}
                         </div>
                       </div>
                       {allSteps.length > 0 && (
@@ -1024,11 +1084,11 @@ function ResultsPage() {
         )}
 
         {/* Lifestyle Advice */}
-        {r.lifestyleAdvice?.length > 0 && (
+        {lifestyleAdvice.length > 0 && (
           <>
             <div className="results-section-title">🌿 Lifestyle Recommendations</div>
             <div className="lifestyle-grid">
-              {r.lifestyleAdvice.map((item, i) => (
+              {lifestyleAdvice.map((item, i) => (
                 <div key={i} className="lifestyle-card">
                   <div className="lifestyle-category">{item.category}</div>
                   <p className="lifestyle-advice">{item.advice}</p>
@@ -1039,11 +1099,11 @@ function ResultsPage() {
         )}
 
         {/* Meal Recommendations */}
-        {r.mealRecommendations?.length > 0 && (
+        {mealRecommendations.length > 0 && (
           <>
             <div className="results-section-title">🍽️ Meal Recommendations</div>
             <div className="meal-grid">
-              {r.mealRecommendations.map((meal, i) => (
+              {mealRecommendations.map((meal, i) => (
                 <div key={i} className="meal-card">
                   <div className="meal-type">{meal.meal}</div>
                   <p className="meal-suggestion">{meal.suggestion}</p>
@@ -1056,18 +1116,18 @@ function ResultsPage() {
 
 
         {/* Avoid List */}
-        {r.avoidList?.length > 0 && (
+        {avoidList.length > 0 && (
           <div className="results-avoid">
             <h4>🚫 Supplements to Avoid</h4>
-            <ul>{r.avoidList.map((item, i) => <li key={i}>{item}</li>)}</ul>
+            <ul>{avoidList.map((item, i) => <li key={i}>{fixChars(item)}</li>)}</ul>
           </div>
         )}
 
         {/* Warnings */}
-        {r.warnings?.length > 0 && (
+        {warnings.length > 0 && (
           <div className="results-warnings">
             <h4>⚠️ Important Warnings</h4>
-            <ul>{r.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
+            <ul>{warnings.map((w, i) => <li key={i}>{fixChars(w)}</li>)}</ul>
           </div>
         )}
 
@@ -1080,13 +1140,13 @@ function ResultsPage() {
             </div>
             <p className="seeking-support-intro">{fixChars(r.seekingSupport.intro)}</p>
             <div className="seeking-support-resources">
-              {(r.seekingSupport.resources || []).map((res, i) => (
+              {(Array.isArray(r.seekingSupport.resources) ? r.seekingSupport.resources : []).map((res, i) => (
                 <a
                   key={i}
                   // AI-generated: only http(s) or app-relative targets survive.
                   // A `javascript:` value renders the card unlinked instead of
                   // executing in our origin when clicked.
-                  href={safeUrl(res.url) || undefined}
+                  href={safeUrl(res?.url) || undefined}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="seeking-support-card"
@@ -1108,6 +1168,13 @@ function ResultsPage() {
 
         <p className="results-disclaimer">{r.disclaimer}</p>
 
+        {exportError && (
+          <div className="results-export-error" role="alert">
+            <span aria-hidden="true">!</span>
+            <p>{exportError}</p>
+            <button type="button" onClick={() => setExportError('')} aria-label="Dismiss export error">×</button>
+          </div>
+        )}
         <div className="results-actions">
           <button className="btn-export-pdf" onClick={handleExportPDF} disabled={exporting}>
             {exporting ? (

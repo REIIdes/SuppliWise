@@ -294,7 +294,13 @@
   box-shadow: 0 12px 24px -10px rgba(99, 102, 241, 1);
 }
 .rt-sync-btn:active:not(:disabled) { transform: translateY(0); }
-.rt-sync-btn:disabled { opacity: .6; cursor: not-allowed; }
+.rt-sync-btn:disabled,
+.rt-download-btn:disabled {
+  opacity: .6;
+  cursor: wait;
+  transform: none;
+  box-shadow: none;
+}
 
 .rt-download-btn {
   border: 1.5px solid transparent;

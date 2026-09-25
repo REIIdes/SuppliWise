@@ -31,13 +31,23 @@ public class MainActivity extends BridgeActivity {
                         return;
                     }
                     
-                    // Handle regular URLs
-                    DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
-                    request.setMimeType(mimeType);
-                    
-                    // Extract filename
-                    String filename = extractFilename(contentDisposition, url);
-                    
+                    // Handle regular URLs. DownloadManager must never receive a
+                    // file://, content://, or other unexpected scheme from a
+                    // WebView callback.
+                    Uri sourceUri = Uri.parse(url);
+                    String scheme = sourceUri.getScheme();
+                    if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+                        throw new IllegalArgumentException("Unsupported download URL scheme");
+                    }
+
+                    DownloadManager.Request request = new DownloadManager.Request(sourceUri);
+                    request.setMimeType(mimeType == null || mimeType.trim().isEmpty()
+                        ? "application/octet-stream" : mimeType.trim());
+
+                    // Header and URL values are untrusted. SafeDownloadName
+                    // parses them and reduces them to a bounded basename.
+                    String filename = SafeDownloadName.fromContentDisposition(contentDisposition, url);
+
                     request.setTitle(filename);
                     request.setDescription("Downloading " + filename);
                     request.allowScanningByMediaScanner();
@@ -59,7 +69,7 @@ public class MainActivity extends BridgeActivity {
     private void handleDataUri(String dataUri, String contentDisposition) {
         try {
             // Extract filename from content disposition or use default
-            String filename = extractFilename(contentDisposition, "SuppliWise_Report.pdf");
+            String filename = SafeDownloadName.fromContentDisposition(contentDisposition, "SuppliWise_Report.pdf");
             
             // Parse data URI: data:application/pdf;base64,<data>
             String[] parts = dataUri.split(",");
@@ -101,13 +111,25 @@ public class MainActivity extends BridgeActivity {
                     throw new Exception("Could not create file in Downloads");
                 }
             } else {
-                // Legacy approach for Android 9 and below
+                // Legacy approach for Android 9 and below. Resolve both paths
+                // before opening the stream so a symlink or unexpected basename
+                // cannot escape the Downloads directory.
                 java.io.File downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-                java.io.File pdfFile = new java.io.File(downloadsDir, filename);
-                
-                java.io.FileOutputStream fos = new java.io.FileOutputStream(pdfFile);
-                fos.write(pdfBytes);
-                fos.close();
+                if (!downloadsDir.exists() && !downloadsDir.mkdirs()) {
+                    throw new Exception("Could not create Downloads directory");
+                }
+                java.io.File canonicalDownloadsDir = downloadsDir.getCanonicalFile();
+                java.io.File pdfFile = new java.io.File(canonicalDownloadsDir, filename).getCanonicalFile();
+                String rootPath = canonicalDownloadsDir.getPath();
+                String filePath = pdfFile.getPath();
+                if (!filePath.equals(rootPath)
+                    && !filePath.startsWith(rootPath + java.io.File.separator)) {
+                    throw new Exception("Unsafe download destination");
+                }
+
+                try (java.io.FileOutputStream fos = new java.io.FileOutputStream(pdfFile)) {
+                    fos.write(pdfBytes);
+                }
                 
                 // Notify media scanner
                 android.media.MediaScannerConnection.scanFile(
@@ -185,16 +207,4 @@ public class MainActivity extends BridgeActivity {
         }
     }
     
-    private String extractFilename(String contentDisposition, String fallback) {
-        String filename = fallback;
-        if (contentDisposition != null && !contentDisposition.isEmpty()) {
-            int index = contentDisposition.indexOf("filename=");
-            if (index >= 0) {
-                filename = contentDisposition.substring(index + 9).replaceAll("\"", "");
-            }
-        } else if (fallback.contains("/")) {
-            filename = fallback.substring(fallback.lastIndexOf("/") + 1);
-        }
-        return filename;
-    }
 }

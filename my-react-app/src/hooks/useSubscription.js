@@ -32,6 +32,7 @@
 // - A 429 pauses refreshing for the server cooldown instead of retrying into
 //   the lockout ladder.
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import useAuth from './useAuth';
 import { getStoredPlan, applyPlanToCache, planFromUser, hasFeature, planMeetsTier } from '../utils/plan';
 import { getMyProfile, getToken, getStoredUser, BASE_URL } from '../api';
 
@@ -444,20 +445,33 @@ export function resetSubscriptionStore() {
 }
 
 export function useSubscription() {
+  const { token } = useAuth();
   const [plan, setPlan] = useState(() => readShared());
 
-  // Register the setter so store updates re-render only this component.
+  // Register the setter so store updates re-render only this component. Guest
+  // widgets (including the global chat) may mount this hook, but must never
+  // call /auth/me without a token — apiFetch treats that 401 as a dead session
+  // and redirects a perfectly valid public page to /login.
   useEffect(() => {
     subscribers.add(setPlan);
+    if (!token) {
+      const timer = setTimeout(() => setPlan(planFromUser({})), 0);
+      return () => {
+        clearTimeout(timer);
+        subscribers.delete(setPlan);
+      };
+    }
+
     attachGlobalListeners();
     startSharedPolling();
-    // Pull once on mount (throttled — safe for many simultaneous mounts).
+    // Pull once when a user session becomes active (throttled — safe for many
+    // simultaneous mounts). The token dependency also handles account switches.
     refreshShared();
     return () => {
       subscribers.delete(setPlan);
       if (subscribers.size === 0) stopSharedPolling();
     };
-  }, []);
+  }, [token]);
 
   // Accept a full user doc (server /me, login payload, profile save).
   const applyFresh = useCallback((fresh) => {

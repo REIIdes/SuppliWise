@@ -5,7 +5,9 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist', 'dev-dist']),
+  // Capacitor copies the production bundle into Android assets during a build;
+  // those generated third-party files must not be linted as app source.
+  globalIgnores(['dist', 'dev-dist', 'android/app/src/main/assets/public']),
   {
     files: ['**/*.{js,jsx}'],
     extends: [

@@ -208,8 +208,9 @@
     right: 10px !important;
     left: 10px !important;
     width: auto !important;
-    bottom: 80px !important;
-    max-height: 70vh !important;
+    bottom: calc(80px + env(safe-area-inset-bottom)) !important;
+    max-height: calc(100vh - 100px - env(safe-area-inset-bottom)) !important;
+    max-height: calc(100dvh - 100px - env(safe-area-inset-bottom)) !important;
     border-radius: 14px !important;
   }
 

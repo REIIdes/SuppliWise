@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { BASE_URL, parseJSON } from '../api';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import { exportResultsToPDF } from '../utils/exportPDF';
 import './AssessmentManagement.css';
 import AssessmentResultsDisplay from '../Components/AssessmentResultsDisplay/AssessmentResultsDisplay';
 import ModifyAssessmentModal from '../Components/ModifyAssessmentModal/ModifyAssessmentModal';
@@ -17,6 +16,8 @@ const AssessmentManagement = ({ users: propUsers = [] }) => {
   const [assessmentResults, setAssessmentResults] = useState(null);
   const [expandedUser, setExpandedUser] = useState(null);
   const [listError, setListError] = useState('');
+  const [pdfLoadingId, setPdfLoadingId] = useState(null);
+  const [pdfError, setPdfError] = useState('');
 
   // Hits /api/assessment/... directly with the admin token
   const assessmentRequest = async (path) => {
@@ -119,149 +120,35 @@ const AssessmentManagement = ({ users: propUsers = [] }) => {
   };
 
   const generatePDF = async (assessment) => {
-    const doc = new jsPDF();
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
-    const user = users.find(u => u._id === assessment.user);
-    let headerDrawnForPage = {};
+    if (!assessment?._id || pdfLoadingId) return;
+    const user = users.find((candidate) => candidate._id === assessment.user);
+    const userName = String(assessment.userName || '').trim()
+      || [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim()
+      || 'Unknown member';
 
-    // --- Fetch AI Results ---
-    let assessmentResults;
+    setPdfLoadingId(assessment._id);
+    setPdfError('');
     try {
-      assessmentResults = await assessmentRequest(`/results/${assessment._id}`);
-      if (!assessmentResults) throw new Error('Empty results returned');
+      const result = await assessmentRequest(`/results/${assessment._id}`);
+      if (!result || typeof result !== 'object') {
+        throw new Error('This assessment does not have an AI report yet.');
+      }
+
+      // Use the canonical assessment snapshot when available.  This keeps the
+      // report's identity and date stable even if the admin user list changes.
+      const reportAssessment = {
+        ...assessment,
+        userName,
+        createdAt: assessment.createdAt || new Date().toISOString(),
+      };
+      const generated = await exportResultsToPDF(result, reportAssessment);
+      if (!generated) throw new Error('The report could not be generated. Please try again.');
     } catch (error) {
-      console.error('Error fetching assessment results for PDF:', error);
-      doc.text("Failed to load AI analysis for this report.", 14, 14);
-      doc.save('report-error.pdf');
-      return;
+      console.error('Error generating assessment PDF:', error);
+      setPdfError(error?.message || 'Unable to generate the report.');
+    } finally {
+      setPdfLoadingId(null);
     }
-
-    // --- Reusable Header Function ---
-    const addReportHeader = (pageNumber) => {
-      if (headerDrawnForPage[pageNumber]) return;
-      doc.setPage(pageNumber);
-      // Green background
-      doc.setFillColor(40, 167, 69);
-      doc.rect(0, 0, pageWidth, 55, 'F');
-
-      // Main Title
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(32);
-      doc.setTextColor(255, 255, 255);
-      doc.text('SuppliWise', 14, 22);
-
-      // Subtitle
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(12);
-      doc.text('Personalized Supplement & Wellness Report', 14, 30);
-
-      // User and Date
-      doc.setFontSize(11);
-      const userName = user ? `${user.firstName} ${user.lastName}` : 'N/A';
-      doc.text('Prepared for:', 14, 45);
-      doc.setFont('helvetica', 'bold');
-      doc.text(userName, 45, 45);
-
-      const reportDate = new Date().toLocaleString('en-US', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true,
-      });
-      doc.setFont('helvetica', 'normal');
-      doc.text(reportDate, pageWidth - 14, 45, { align: 'right' });
-      headerDrawnForPage[pageNumber] = true;
-    };
-
-    // --- Reusable Footer ---
-    const addReportFooter = (pageNumber, pageCount) => {
-      doc.setPage(pageNumber);
-      doc.setFontSize(10);
-      doc.setTextColor(150);
-      doc.text(`Page ${pageNumber} of ${pageCount}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
-    };
-
-    // --- Build PDF Content ---
-    addReportHeader(1);
-    let startY = 70;
-
-    // Disclaimer Box
-    doc.setFillColor(232, 245, 233);
-    doc.roundedRect(14, startY, pageWidth - 28, 22, 3, 3, 'F');
-    doc.setFillColor(40, 167, 69);
-    doc.rect(14, startY, 2, 22, 'F');
-    doc.setFontSize(9);
-    doc.setTextColor(50);
-    const disclaimerText = 'For educational and wellness purposes only. This report does not diagnose, treat, or cure any disease. Always consult a licensed healthcare professional before starting any supplement regimen.';
-    const disclaimerLines = doc.splitTextToSize(disclaimerText, pageWidth - 40);
-    doc.text(disclaimerLines, 20, startY + 7);
-    startY += 32;
-
-    // Clinical Summary
-    doc.setFillColor(40, 167, 69);
-    doc.rect(14, startY, 2, 7, 'F');
-    doc.setFontSize(14);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(40, 167, 69);
-    doc.text('CLINICAL SUMMARY', 20, startY + 5.5);
-    startY += 15;
-
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(0);
-    const summaryLines = doc.splitTextToSize(assessmentResults.summary, pageWidth - 28);
-    doc.text(summaryLines, 14, startY);
-    startY += doc.getTextDimensions(summaryLines).h + 15;
-
-    // Recommendations Section
-    if (assessmentResults.recommendations && assessmentResults.recommendations.length > 0) {
-      doc.setFillColor(40, 167, 69);
-      doc.rect(14, startY, 2, 7, 'F');
-      doc.setFontSize(14);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(40, 167, 69);
-      doc.text('RECOMMENDATION PLAN', 20, startY + 5.5);
-      startY += 15;
-
-      assessmentResults.recommendations.forEach(rec => {
-        const recBody = [
-          ['Reason', rec.reason],
-          ['Dosage', rec.dosage],
-          ['Timing', rec.timing],
-          ['Priority', rec.priority],
-          ['Interactions', rec.interactions],
-          ['Foods', rec.foods],
-          ['Side Effects', rec.sideEffects],
-          ['Evidence', rec.evidence],
-          ['Confidence', `${rec.confidenceScore}%`],
-        ].map(([key, value]) => [key, doc.splitTextToSize(String(value || 'N/A'), pageWidth - 100)]);
-        
-        autoTable(doc, {
-          startY: startY,
-          head: [[{ content: rec.name, colSpan: 2, styles: { halign: 'center', fillColor: [40, 167, 69], textColor: 255, fontStyle: 'bold' } }]],
-          body: recBody,
-          theme: 'grid',
-          styles: { cellPadding: 2, fontSize: 9 },
-          headStyles: { halign: 'center' },
-          columnStyles: { 0: { fontStyle: 'bold', cellWidth: 30 } },
-          didDrawPage: (data) => {
-            addReportHeader(data.pageNumber);
-          }
-        });
-        startY = doc.lastAutoTable.finalY + 10;
-      });
-    }
-
-    // --- Finalize PDF with Footers ---
-    const pageCount = doc.internal.getNumberOfPages();
-    for (let i = 1; i <= pageCount; i++) {
-      addReportFooter(i, pageCount);
-    }
-
-    doc.save(`SuppliWise_Report_${user ? `${user.firstName}_${user.lastName}` : ''}_${new Date().toLocaleDateString('en-CA')}.pdf`);
   };
 
   const handleViewAssessment = (assessment) => {
@@ -298,6 +185,13 @@ const AssessmentManagement = ({ users: propUsers = [] }) => {
           {isLoading ? 'Loading…' : '↻ Refresh'}
         </button>
       </div>
+      {pdfError && (
+        <div className="am-pdf-error" role="alert">
+          <span aria-hidden="true">!</span>
+          <p>{pdfError}</p>
+          <button type="button" onClick={() => setPdfError('')} aria-label="Dismiss report error">×</button>
+        </div>
+      )}
       <div className="am-user-list">
         {isLoading ? (
           <p className="am-empty">Loading users…</p>
@@ -446,7 +340,15 @@ const AssessmentManagement = ({ users: propUsers = [] }) => {
                               <div className="am-actions">
                                 <button className="am-btn am-btn--grey"   onClick={() => handleViewAssessment(assessment)}>View</button>
                                 <button className="am-btn am-btn--blue"   onClick={() => handleViewResults(assessment._id)}>Results</button>
-                                <button className="am-btn am-btn--blue"   onClick={() => generatePDF(assessment)}>PDF</button>
+                                <button
+                                  className="am-btn am-btn--blue"
+                                  onClick={() => generatePDF(assessment)}
+                                  disabled={Boolean(pdfLoadingId)}
+                                  aria-busy={pdfLoadingId === assessment._id}
+                                  aria-label={`${pdfLoadingId === assessment._id ? 'Generating' : 'Generate'} PDF for ${assessment.userName || fullName}`}
+                                >
+                                  {pdfLoadingId === assessment._id ? 'Preparing…' : 'PDF'}
+                                </button>
                                 <button className="am-btn am-btn--blue"   onClick={() => setModifiedAssessment(assessment)}>Modify</button>
                               </div>
                             </div>

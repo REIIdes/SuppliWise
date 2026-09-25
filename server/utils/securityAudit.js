@@ -188,8 +188,13 @@ const SECURITY_AUDIT = {
     {
       id: 'L7',
       severity: 'low',
-      title: 'express.json body limit is 10 MB',
-      note: 'Required by base64 banner uploads. Reduce with a per-route limit if upload sizes are capped later.',
+      title: 'Body parsing is now limited per route rather than 10 MB everywhere',
+      note:
+        'A blanket 10 MB cap made every endpoint a CPU sink: JSON.parse blocks the single-threaded event loop, ' +
+        'so a few concurrent oversized bodies could stall all traffic while still passing every rate limit. ' +
+        '10 MB is now scoped to the two base64-picture routes (PUT /api/auth/profile, PATCH /api/admin/profile); ' +
+        'everything else is held to 1 MB, and utils/floodGuard caps the JSON buffered in flight across all ' +
+        'concurrent requests. Residual: those two upload routes still parse up to 10 MB, by design.',
     },
     {
       id: 'I1',

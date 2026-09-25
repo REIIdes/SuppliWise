@@ -906,14 +906,26 @@ export const deleteAssessment = async (assessmentId) => {
 };
 
 // Send a chat message to the AI assistant (ULTIMATE only — 403 carries requiresPlan)
-export const sendChatMessage = async (message, context = [], history = []) => {
+export const sendChatMessage = async (message, history = []) => {
   const res = await apiFetch('/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
-    body: JSON.stringify({ message, context, history }),
+    body: JSON.stringify({ message, history }),
   }, 45000);
   const data = await parseJSON(res);
-  if (!res.ok) throwFriendly(res.status, data);
+  if (!res.ok) {
+    // Chat validation errors use `reply` for the transcript while `message`
+    // remains the machine/API-friendly field. Prefer either one so a 400 never
+    // degrades into the generic "Something went wrong" copy.
+    const err = new Error(friendlyError(res.status, data?.message || data?.reply));
+    if (data?.requiresPlan) err.requiresPlan = data.requiresPlan;
+    if (data?.currentPlan) err.currentPlan = data.currentPlan;
+    err.status = res.status;
+    err.code = data?.code || null;
+    const retryAfter = Number(res.headers.get('retry-after'));
+    if (Number.isFinite(retryAfter) && retryAfter > 0) err.retryAfterSeconds = retryAfter;
+    throw err;
+  }
   return data;
 };
 

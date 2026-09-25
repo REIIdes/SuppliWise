@@ -9,7 +9,8 @@ import './ChatAssistant.css';
 
 // ── Markdown renderer (no external deps) ──────────────────────────────────
 function renderMarkdown(text) {
-  const lines = text.split('\n');
+  const source = typeof text === 'string' ? text : String(text || '');
+  const lines = source.split('\n');
   const elements = [];
   let i = 0;
 
@@ -128,10 +129,15 @@ function inlineFormat(text) {
   return parts.length > 0 ? parts : text;
 }
 
+const WELCOME_MESSAGE = {
+  role: 'assistant',
+  text: "Hi! I'm **SuppliWise AI** — your health and wellness assistant.\n\nI can help with:\n- Your supplement recommendations and results\n- Supplements, nutrition, vitamins, and wellness questions\n- How to use any feature on SuppliWise\n- Symptoms, diet, sleep, and lifestyle advice\n\nWhat would you like to know?",
+};
+
 // ── Quick prompts ──────────────────────────────────────────────────────────
 const QUICK_PROMPTS = [
   'How do I start an assessment?',
-  'What does the % score mean?',
+  'What does the confidence score mean?',
   'What is vitamin D?',
   'Can I mix supplements?',
   'How do I view my history?',
@@ -139,20 +145,19 @@ const QUICK_PROMPTS = [
 ];
 
 // ── Main component ─────────────────────────────────────────────────────────
-export default function ChatAssistant({ recommendations }) {
+export default function ChatAssistant() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   // Reactive: GlobalChat stays mounted across navigation, so a mount-time
   // snapshot would keep showing the logged-out screen after signing in.
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const isLoggedIn = !!token;
-  const [messages, setMessages] = useState([{
-    role: 'assistant',
-    text: "Hi! I'm **SuppliWise AI** — your health and wellness assistant.\n\nI can help with:\n- Your supplement recommendations and results\n- Supplements, nutrition, vitamins, and wellness questions\n- How to use any feature on SuppliWise\n- Symptoms, diet, sleep, and lifestyle advice\n\nWhat would you like to know?",
-  }]);
+  const userId = user?._id || user?.id || token || null;
+  const [messages, setMessages] = useState([WELCOME_MESSAGE]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [connectionState, setConnectionState] = useState('online');
   const [upgradeInfo, setUpgradeInfo] = useState(null);
   // Reactive plan object { active, plan, rank } — subscribing re-renders this
   // component the instant the subscription changes, so the gates below always
@@ -170,37 +175,56 @@ export default function ChatAssistant({ recommendations }) {
   const messagesContainerRef = useRef(null);
   const chatWindowRef = useRef(null);
   const fabRef = useRef(null);
-
-  // (login state is initialised lazily from localStorage above)
-
-  const getRecs = () => {
-    if (recommendations && recommendations.length) return recommendations;
-    try {
-      const s = sessionStorage.getItem('latest_recommendations');
-      return s ? JSON.parse(s) : [];
-    } catch { return []; }
-  };
+  const messagesRef = useRef(messages);
+  const loadingRef = useRef(false);
+  const conversationVersionRef = useRef(0);
+  const followBottomRef = useRef(true);
+  const previousOpenRef = useRef(false);
 
   useEffect(() => {
-    if (recommendations && recommendations.length) {
-      try { sessionStorage.setItem('latest_recommendations', JSON.stringify(recommendations)); } catch { /* storage unavailable — skip */ }
-    }
-  }, [recommendations]);
+    messagesRef.current = messages;
+  }, [messages]);
 
-  // Scroll behaviour: the first open shows the welcome message from the top,
-  // every later change follows the newest line. The container is scrolled
-  // directly — scrollIntoView() walks every ancestor and used to yank the page
-  // behind the panel along with the chat.
+  // A global chat stays mounted while the account changes. Resetting only the
+  // visible branch is not enough: the old transcript would reappear for the
+  // next account. The version guard also makes an in-flight reply from the old
+  // account harmless after the switch.
+  useEffect(() => {
+    conversationVersionRef.current += 1;
+    loadingRef.current = false;
+    setMessages([WELCOME_MESSAGE]);
+    setInput('');
+    setLoading(false);
+    setShowScrollButton(false);
+    setConnectionState('online');
+    setUpgradeInfo(null);
+    setOpen(false);
+  }, [userId]);
+
+  // Follow new content only while the reader is already at the bottom. If a
+  // user scrolls up to read an older answer, a late reply must not yank them
+  // away; the explicit jump-to-bottom button remains available.
   useEffect(() => {
     const el = messagesContainerRef.current;
-    if (!open || !el) return;
-    // setTimeout so the freshly committed DOM has been laid out first.
-    const t = setTimeout(() => {
-      const atWelcome = messages.length === 1 && !loading;
-      el.scrollTop = atWelcome ? 0 : el.scrollHeight;
-      setShowScrollButton(false);
+    if (!open || !el) {
+      previousOpenRef.current = false;
+      return;
+    }
+
+    const reopened = !previousOpenRef.current;
+    const shouldFollow = followBottomRef.current;
+    previousOpenRef.current = true;
+    const timer = setTimeout(() => {
+      if (reopened) {
+        el.scrollTop = 0;
+        followBottomRef.current = true;
+        setShowScrollButton(el.scrollHeight > el.clientHeight);
+      } else if (shouldFollow) {
+        el.scrollTop = el.scrollHeight;
+        setShowScrollButton(false);
+      }
     }, 0);
-    return () => clearTimeout(t);
+    return () => clearTimeout(timer);
   }, [open, messages.length, loading]);
 
   // Detect if user has scrolled up
@@ -211,6 +235,7 @@ export default function ChatAssistant({ recommendations }) {
     const handleScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = container;
       const isAtBottom = scrollHeight - scrollTop - clientHeight < 50; // Within 50px of bottom
+      followBottomRef.current = isAtBottom;
       setShowScrollButton(!isAtBottom && scrollHeight > clientHeight);
     };
 
@@ -249,40 +274,59 @@ export default function ChatAssistant({ recommendations }) {
   // Focus the composer when the panel opens and whenever a reply lands, so
   // typing can resume without clicking back into the box after each answer.
   useEffect(() => {
-    if (!open) return;
+    if (!open || (typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches)) return;
     const t = setTimeout(() => inputRef.current?.focus(), 100);
     return () => clearTimeout(t);
   }, [open, loading]);
 
   const send = async (text) => {
-    const q = (text || input).trim();
-    if (!q || loading) return;
+    const q = String(text || input).trim();
+    if (!q || loadingRef.current) return;
+    if (q.length > 1000) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        kind: 'error',
+        text: 'Please keep messages under 1000 characters.',
+      }]);
+      return;
+    }
     // Client-side ULTIMATE gate — prevents wasted request for under-tier users
     // (the backend re-verifies via requireFeature('chat') regardless).
     if (!livePlan.canAccess('chat')) {
       setUpgradeInfo({ requiresPlan: 'custom', currentPlan: livePlan.plan });
       return;
     }
+
+    const version = conversationVersionRef.current;
+    loadingRef.current = true;
+    followBottomRef.current = true;
     setInput('');
 
     const newUserMsg = { role: 'user', text: q };
     setMessages(prev => [...prev, newUserMsg]);
     setLoading(true);
+    setConnectionState('connecting');
 
-    const recs = getRecs();
-
-    // Build history for context (exclude the welcome message)
-    const history = messages
-      .filter((_, i) => i > 0) // skip welcome
-      .slice(-8); // last 4 exchanges
+    // Only successful conversation turns are sent back to the model. Error
+    // bubbles are UI state, not assistant advice, and must not poison context.
+    const history = messagesRef.current
+      .filter((message, index) => index > 0 && message.kind !== 'error')
+      .slice(-8);
 
     try {
-      const data = await sendChatMessage(q, recs.slice(0, 5), history);
+      const data = await sendChatMessage(q, history);
+      if (version !== conversationVersionRef.current) return;
+      const reply = typeof data?.reply === 'string' ? data.reply.trim() : '';
+      if (!reply) throw new Error("I couldn't find an answer. Try rephrasing your question.");
+      setConnectionState(data.source === 'fallback' ? 'degraded' : 'online');
       setMessages(prev => [...prev, {
         role: 'assistant',
-        text: data.reply || "I couldn't find an answer. Try rephrasing your question.",
+        text: reply,
+        ...(data.source === 'fallback' ? { kind: 'error' } : {}),
       }]);
     } catch (err) {
+      if (version !== conversationVersionRef.current) return;
+      setConnectionState(err.status === 429 ? 'busy' : 'offline');
       if (err.requiresPlan) {
         setUpgradeInfo({ requiresPlan: err.requiresPlan, currentPlan: err.currentPlan || livePlan.plan });
         // Remove the optimistic user message if blocked (so chat doesn't look sent)
@@ -291,14 +335,21 @@ export default function ChatAssistant({ recommendations }) {
       }
       setMessages(prev => [...prev, {
         role: 'assistant',
+        kind: 'error',
         text: err.message || "I'm having trouble connecting right now. Please try again in a moment.",
       }]);
     } finally {
-      setLoading(false);
+      if (version === conversationVersionRef.current) {
+        loadingRef.current = false;
+        setLoading(false);
+      }
     }
   };
 
   const handleKey = (e) => {
+    // Enter commits an IME candidate on some mobile keyboards. Sending here
+    // would submit a partial word; wait for compositionend instead.
+    if (e.nativeEvent?.isComposing || e.isComposing || e.keyCode === 229) return;
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   };
 
@@ -333,7 +384,7 @@ export default function ChatAssistant({ recommendations }) {
       </button>
 
       {open && (
-        <div ref={chatWindowRef} className="chat-window" role="dialog" aria-label="SuppliWise AI Assistant">
+        <div ref={chatWindowRef} className="chat-window" role="dialog" aria-modal="false" aria-label="SuppliWise AI Assistant">
           <div className="chat-header">
             <div className="chat-header-info">
               <div className="chat-header-avatar">
@@ -372,9 +423,12 @@ export default function ChatAssistant({ recommendations }) {
               </div>
               <div>
                 <div className="chat-header-name">SuppliWise AI</div>
-                <div className="chat-header-status">
-                  <span className="status-dot" />
-                  Online
+                <div className={`chat-header-status ${connectionState}`}>
+                  {connectionState === 'online' && 'Online'}
+                  {connectionState === 'connecting' && 'Connecting…'}
+                  {connectionState === 'degraded' && 'Reconnecting'}
+                  {connectionState === 'busy' && 'Busy'}
+                  {connectionState === 'offline' && 'Unavailable'}
                 </div>
               </div>
             </div>
@@ -435,9 +489,16 @@ export default function ChatAssistant({ recommendations }) {
               </div>
 
               <div className="chat-messages-region">
-                <div className="chat-messages" ref={messagesContainerRef}>
+                <div
+                  className="chat-messages"
+                  ref={messagesContainerRef}
+                  role="log"
+                  aria-live="polite"
+                  aria-relevant="additions"
+                  aria-busy={loading}
+                >
                   {messages.map((msg, i) => (
-                    <div key={i} className={`chat-bubble ${msg.role}`}>
+                    <div key={i} className={`chat-bubble ${msg.role}${msg.kind === 'error' ? ' chat-error' : ''}`}>
                       {msg.role === 'assistant'
                         ? renderMarkdown(msg.text)
                         : <p className="md-p">{msg.text}</p>
@@ -445,7 +506,7 @@ export default function ChatAssistant({ recommendations }) {
                     </div>
                   ))}
                   {loading && (
-                    <div className="chat-bubble assistant chat-typing">
+                    <div className="chat-bubble assistant chat-typing" aria-label="SuppliWise AI is typing">
                       <span className="typing-dot" />
                       <span className="typing-dot" />
                       <span className="typing-dot" />
@@ -492,6 +553,8 @@ export default function ChatAssistant({ recommendations }) {
                   onKeyDown={handleKey}
                   placeholder="Ask about supplements, nutrition, wellness..."
                   aria-label="Chat input"
+                  maxLength={1000}
+                  enterKeyHint="send"
                   disabled={loading}
                 />
                 <button

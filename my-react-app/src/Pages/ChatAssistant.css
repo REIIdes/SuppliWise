@@ -36,6 +36,7 @@
      pushed the top of the panel — header first — off the top of the screen,
      so the chat appeared to start mid-way down at the disclaimer banner. */
   max-height: min(580px, calc(100vh - 110px));
+  max-height: min(580px, calc(100dvh - 110px));
   /* Belt-and-braces: the panel can never be wider than the viewport, so it
      can never be the thing that opens a horizontal scrollbar. */
   max-width: calc(100vw - 20px);
@@ -147,6 +148,8 @@
   justify-content: center;
   padding: 24px;
   background: linear-gradient(135deg, #f0fdf4 0%, #e8f5e9 100%);
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .auth-required-content {
@@ -287,6 +290,14 @@
   border-bottom-left-radius: 4px;
   border: 1px solid #e2e8f0;
 }
+.chat-bubble.chat-error {
+  background: #fff7ed !important;
+  border-color: #fed7aa !important;
+  color: #9a3412 !important;
+}
+.chat-bubble.chat-error .md-p,
+.chat-bubble.chat-error .md-ul,
+.chat-bubble.chat-error .md-ol { color: inherit; }
 
 /* ── Markdown elements inside bubbles ── */
 .md-p {
@@ -397,7 +408,7 @@
 .chat-input-row {
   display: flex;
   gap: 8px;
-  padding: 8px 12px 14px;
+  padding: 8px 12px calc(14px + env(safe-area-inset-bottom));
   border-top: 1px solid #f1f5f9;
   flex-shrink: 0;
 }
@@ -533,6 +544,7 @@
     width: auto;
     bottom: 80px;
     max-height: min(72vh, calc(100vh - 100px));
+    max-height: min(72dvh, calc(100dvh - 100px));
     border-radius: 14px;
   }
   .chat-fab {
@@ -593,6 +605,20 @@
   background: #4ade80;
   box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.35);
   animation: online-pulse 2s ease-in-out infinite;
+}
+.chat-header-status.connecting::before {
+  background: #fbbf24;
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.30);
+}
+.chat-header-status.degraded::before,
+.chat-header-status.busy::before {
+  background: #fb923c;
+  box-shadow: 0 0 0 3px rgba(251, 146, 60, 0.30);
+}
+.chat-header-status.offline::before {
+  background: #f87171;
+  box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.30);
+  animation: none;
 }
 @keyframes online-pulse {
   0%, 100% { box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.35); }

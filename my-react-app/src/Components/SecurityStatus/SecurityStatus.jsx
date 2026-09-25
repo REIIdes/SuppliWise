@@ -124,7 +124,7 @@ const MONITOR_IMPL = {
   salting:            'models/User.js · bcryptjs (built-in salt)',
   xss_stored:         'utils/sanitize.js · stripTags',
   nosql_injection:    'routes/auth.js · str() coercion',
-  path_traversal:     'server/index.js · no static serving',
+  path_traversal:     'attack_probes.js · Android SafeDownloadName',
   prototype_pollution: 'utils/sanitize.js · scrubKeys',
   auth_bruteforce:    'utils/totp.js · rate-limit',
   csrf_stateless:     'middleware/auth.js · JWT header',
@@ -334,7 +334,7 @@ const BANNER_META = {
   loading:  { label: 'Checking…',            color: '#64748b', bg: '#f8fafc', dot: 'dot--loading'  },
 };
 
-function OverallBanner({ status, syncedAt, syncing, onSync, onDownload }) {
+function OverallBanner({ status, syncedAt, syncing, onSync, onDownload, downloading = false }) {
   const meta = BANNER_META[status] || BANNER_META.loading;
   return (
     <div className="rt-banner" style={{ '--rt-color': meta.color, '--rt-bg': meta.bg }}>
@@ -366,7 +366,9 @@ function OverallBanner({ status, syncedAt, syncing, onSync, onDownload }) {
           <button
             className="rt-download-btn"
             onClick={onDownload}
-            aria-label="Download security report PDF"
+            aria-label={downloading ? 'Preparing security report PDF' : 'Download security report PDF'}
+            aria-busy={downloading}
+            disabled={downloading}
             title="Download full security report as PDF"
           >
             <svg className="rt-download-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -374,7 +376,7 @@ function OverallBanner({ status, syncedAt, syncing, onSync, onDownload }) {
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
-            Download Report
+            {downloading ? 'Preparing…' : 'Download Report'}
           </button>
         )}
       </div>
@@ -540,6 +542,7 @@ const SecurityStatus = ({ adminRequest, onDownloadReport }) => {
   const [syncing,              setSyncing]              = useState(false);
   const [monitorError,         setMonitorError]         = useState('');
   const [audit,                setAudit]                = useState(null);
+  const [downloading,          setDownloading]          = useState(false);
   const intervalRef = useRef(null);
 
   const fetchMonitor = useCallback(async (force = false) => {
@@ -571,6 +574,19 @@ const SecurityStatus = ({ adminRequest, onDownloadReport }) => {
   }, [fetchMonitor]);
 
   // (adminRequest-based live monitor is the source of truth)
+
+  const handleDownload = async () => {
+    if (!onDownloadReport || downloading) return;
+    setDownloading(true);
+    setMonitorError('');
+    try {
+      await onDownloadReport();
+    } catch (error) {
+      setMonitorError(error?.message || 'Unable to generate the security report.');
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   // Build ordered rows — include skeleton placeholders while loading
   const orderedMonitors = MONITOR_ORDER.map(key => {
@@ -616,7 +632,8 @@ const SecurityStatus = ({ adminRequest, onDownloadReport }) => {
           syncedAt={syncedAt}
           syncing={syncing}
           onSync={() => fetchMonitor(true)}
-          onDownload={onDownloadReport}
+          onDownload={handleDownload}
+          downloading={downloading}
         />
 
         {/* Error message */}

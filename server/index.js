@@ -79,7 +79,11 @@ app.use(cors({
   ], 
   credentials: true 
 }));
-app.use(express.json({ limit: '10mb' })); // Increase limit for profile/banner images
+// express.json() is deliberately NOT mounted here. It used to sit above every
+// rate limiter, so each request body was fully read into memory before any
+// limiter could see the request: a flood of 10 MB bodies was buffered and only
+// *then* counted and answered 429. Metering has to run ahead of parsing or it
+// protects nothing — the parser is mounted below, after the limiters (STAGE 2).
 
 // Add a middleware to set Cache-Control headers
 app.use('/api', (req, res, next) => {
@@ -92,8 +96,14 @@ app.use('/api', (req, res, next) => {
 // Every 429 escalates that IP up the lockout ladder (15 min → 1 h → 6 h → 1 day)
 // via lockoutCheck (hard stop) + limitReachedHandler (escalation on each hit).
 const { lockoutCheck, limitReachedHandler } = require('./utils/lockout');
-const isLocalDevRequest = (req) => process.env.NODE_ENV !== 'production' ||
-  ['localhost', '127.0.0.1'].includes(req.hostname) || req.ip.includes('127.0.0.1') || req.ip.includes('::1');
+const { floodGuard, bodyBudget, rejectOversized, logClientError, isLocalDevRequest } = require('./utils/floodGuard');
+
+// Coarse outer meter over every path. /api/health and the JSON 404 below had
+// no limiter at all, so they were an unbounded source of cheap requests; this
+// covers them and anything a future route forgets to guard. It runs FIRST and
+// is looser than every specific limit, so legitimate traffic is still governed
+// by the tight per-family rule — this only ever catches what those cannot see.
+const requestFloodGuard = floodGuard();
 
 // GET /api/auth/me is read-only session/plan traffic: the reactive plan store
 // refreshes it on focus and on a slow interval. It must NEVER consume the
@@ -168,30 +178,85 @@ const adminLimiter = rateLimit({
   handler: limitReachedHandler('Too many admin requests. Lockout escalated — please wait and try again.'),
 });
 
-// Routes — admin vs user buckets are isolated; lockoutCheck hard-stops IPs
-// serving an escalated lockout before any limiter or handler runs.
+// ── STAGE 1 — METER (before a single body byte is buffered) ────────────────
+// Admin vs user buckets are isolated; lockoutCheck hard-stops IPs serving an
+// escalated lockout before any limiter or handler runs.
 // Session/plan reads get their own non-escalating bucket (registered first so
 // it applies to /api/auth/me before the strict auth limiter).
+app.use('/api', requestFloodGuard);
 app.use('/api/auth/me', sessionLimiter);
-app.use('/api/auth', lockoutCheck, authLimiter, authRoutes);
-app.use('/api/assessment', userLimiter, assessmentRoutes);
+app.use('/api/auth', lockoutCheck, authLimiter);
+app.use('/api/assessment', userLimiter);
 // Subscription state is polled/streamed by every open session — use the
 // non-escalating session bucket so it can never trip lockouts.
-app.use('/api/subscription', sessionLimiter, subscriptionRoutes);
-app.use('/api/recommend', recommendLimiter, recommendRoutes);
-app.use('/api/chat', userLimiter, chatRoutes);
-app.use('/api/polish', aiLimiter, polishRoutes);
-app.use('/api/supplement-detail', aiLimiter, supplementDetailRoutes);
-app.use('/api/dashboard', userLimiter, dashboardRoutes);
-app.use('/api/insights', userLimiter, insightsRoutes);
-app.use('/api/notifications', userLimiter, notificationRoutes);
+app.use('/api/subscription', sessionLimiter);
+app.use('/api/recommend', recommendLimiter);
+app.use('/api/chat', userLimiter);
+app.use('/api/polish', aiLimiter);
+app.use('/api/supplement-detail', aiLimiter);
+app.use('/api/dashboard', userLimiter);
+app.use('/api/insights', userLimiter);
+app.use('/api/notifications', userLimiter);
 // Blockchain layer (wallets, supply chain, marketplace, DAO, rewards, data
 // sovereignty). Same non-escalating user bucket: normal feature traffic must
 // never climb the brute-force lockout ladder.
-app.use('/api/web3', userLimiter, web3Routes);
-app.use('/api/admin', lockoutCheck, adminLimiter, adminRoutes);
+app.use('/api/web3', userLimiter);
+app.use('/api/admin', lockoutCheck, adminLimiter);
 
-// Health check
+// ── STAGE 2 — PARSE (only requests that passed metering reach here) ────────
+// The byte budget caps how much JSON may be buffered *in total* across all
+// concurrent requests. Rate limits bound requests/second; they do not bound
+// the heap — N allowed requests × 10 MB each can still exhaust memory while
+// every limiter happily answers 200.
+const JSON_LIMIT_BYTES = 1 * 1024 * 1024;           // every text payload
+const JSON_UPLOAD_LIMIT_BYTES = 10 * 1024 * 1024;   // base64 pictures only
+// Reserve BEFORE parsing, using the largest parser limit anywhere as the
+// worst case for a chunked body (which declares no length).
+app.use(bodyBudget(JSON_UPLOAD_LIMIT_BYTES));
+
+// Two base64-picture routes need the wide limit; everything else is text.
+// body-parser sets req._body once it has run, so mounting the 10 mb parser on
+// just these paths *ahead of* the blanket parser scopes the allowance to them
+// and only them (audit finding L7 — "reduce with a per-route limit").
+//
+// Oversized bodies are refused from Content-Length by rejectOversized() BELOW,
+// which must be mounted per-route in exactly the same shape — otherwise the
+// blanket 1 mb guard would start rejecting the picture routes' own payloads.
+//
+// Why it matters: JSON.parse blocks Node's single-threaded event loop for the
+// whole parse, so a blanket 10 mb cap turned every endpoint into a CPU sink —
+// a handful of concurrent oversized bodies could stall *all* traffic for
+// seconds while still passing every rate limit. Held to 1 mb, one request can
+// only ever monopolise the loop for a few milliseconds.
+// Refuse oversized payloads from their headers, ahead of the parsers. This has
+// to sit *before* express.json(): body-parser's own 413 path dumps the whole
+// request first (see rejectOversized), which would mean paying for exactly the
+// upload we are trying to refuse — and never answering at all for a body that
+// stops mid-flight.
+app.use('/api/auth/profile', rejectOversized(JSON_UPLOAD_LIMIT_BYTES));
+app.use('/api/admin/profile', rejectOversized(JSON_UPLOAD_LIMIT_BYTES));
+app.use(rejectOversized(JSON_LIMIT_BYTES));
+
+app.use('/api/auth/profile', express.json({ limit: JSON_UPLOAD_LIMIT_BYTES }));
+app.use('/api/admin/profile', express.json({ limit: JSON_UPLOAD_LIMIT_BYTES }));
+app.use(express.json({ limit: JSON_LIMIT_BYTES }));
+
+// ── STAGE 3 — HANDLE ───────────────────────────────────────────────────────
+app.use('/api/auth', authRoutes);
+app.use('/api/assessment', assessmentRoutes);
+app.use('/api/subscription', subscriptionRoutes);
+app.use('/api/recommend', recommendRoutes);
+app.use('/api/chat', chatRoutes);
+app.use('/api/polish', polishRoutes);
+app.use('/api/supplement-detail', supplementDetailRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/insights', insightsRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/web3', web3Routes);
+app.use('/api/admin', adminRoutes);
+
+// Health check — metered like every other /api path (it was the cheapest
+// unbounded endpoint before: no limiter, no headers, no ceiling).
 app.get('/api/health', (req, res) => {
   res.json({ status: 'Server is running' });
 });
@@ -209,19 +274,43 @@ app.use('/api', (req, res) => {
 // Must be defined AFTER all routes and have 4 parameters (err, req, res, next)
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
-  // Log the full technical error internally
-  console.error('[Global Error Handler]', {
-    message: err.message,
-    stack: err.stack,
-    path: req.path,
-    method: req.method,
-  });
+  // Malformed JSON is an expected client input error, not an application
+  // failure. Do not log parser internals or echo the raw SyntaxError text.
+  if (err && err.type === 'entity.parse.failed') {
+    if (!req.complete) res.set('Connection', 'close');
+    return res.status(400).json({ message: 'Invalid JSON request body.' });
+  }
 
   // Never expose stack traces or raw DB errors to the client
   const status = err.status || err.statusCode || 500;
+
+  if (status >= 500) {
+    // A genuine server fault — full detail is exactly what we want in the log.
+    console.error('[Global Error Handler]', {
+      message: err.message,
+      stack: err.stack,
+      path: req.path,
+      method: req.method,
+    });
+  } else {
+    // 4xx here are EXPECTED client outcomes (413 entity-too-large, malformed
+    // JSON, unsupported media type…). Printing a multi-KB stack for each one
+    // hands any caller a denial-of-service lever over the log itself: one
+    // oversized body per request writes unbounded megabytes and burns CPU on
+    // stack formatting. A flood test proved it — dozens of full traces from a
+    // single 80-request run. Throttle to a fixed budget per minute instead;
+    // after the burst we summarise how many were suppressed.
+    logClientError(status, req.method, req.path, err.message);
+  }
+
   const userMessage = status < 500
     ? (err.message || 'An error occurred.')
     : 'Something went wrong. Please try again later.';
+
+  // A body-parser rejection (413, "entity too large") fires before the body
+  // has been read, so req.complete is false. Ending gracefully on close lets
+  // the client receive this response instead of an RST that discards it.
+  if (!req.complete) res.set('Connection', 'close');
 
   res.status(status).json({ message: userMessage });
 });
@@ -237,6 +326,15 @@ process.on('unhandledRejection', (reason) => {
   } catch { /* keep serving */ }
 });
 process.on('uncaughtException', (err) => {
+  // Some failures mean "there is no server left to keep serving" — swallowing
+  // those would strand a zombie process. A bind error is the classic case:
+  // the crash guard exists to survive a bad *request*, not a failed boot.
+  if (err && typeof err.code === 'string' && ['EADDRINUSE', 'EACCES', 'EADDRNOTAVAIL'].includes(err.code)) {
+    try {
+      console.error(`[uncaughtException] fatal bind error (${err.code}): ${err.message} — exiting.`);
+    } catch { /* logging must not throw */ }
+    process.exit(1);
+  }
   try {
     console.error('[uncaughtException]', err instanceof Error ? err.stack || err.message : err);
   } catch { /* keep serving */ }
@@ -275,7 +373,24 @@ mongoose
         const inserted = results.filter(r => r.upsertedCount > 0).length;
         console.log(`[admin-sync] ${accounts.length} admin account(s) ensured (${inserted} newly inserted): ${accounts.map(a => a.alias).join(', ')}`);
       })
-      .then(() => app.listen(PORT, () => console.log(`Server running on port ${PORT}`)))
+      .then(() => new Promise((resolve, reject) => {
+        const server = app.listen(PORT, () => {
+          // Slowloris / idle-connection hygiene. Node's defaults allow 60 s
+          // for headers and 300 s for a whole body, so a flood of half-open
+          // sockets can pin an fd for minutes each; these bound it. Node
+          // warns if headersTimeout <= keepAliveTimeout, hence the ordering.
+          server.headersTimeout = 15 * 1000;
+          server.requestTimeout = 60 * 1000;
+          server.keepAliveTimeout = 5 * 1000;
+          console.log(`Server running on port ${PORT}`);
+          resolve(server);
+        });
+        // A bind failure is FATAL, not transient. Without this listener the
+        // 'error' escapes as an uncaughtException, which the crash guard below
+        // deliberately swallows — leaving a zombie that holds a MongoDB pool
+        // and serves nothing on the port while a second copy "appears" to run.
+        server.once('error', reject);
+      }))
       .then(() => {
         // Genesis for the Web3 layer: chain + reference data. Non-blocking —
         // a seed hiccup must never keep the API from serving requests (the
@@ -289,6 +404,16 @@ mongoose
       });
   })
   .catch((err) => {
+    // Name the failing subsystem. Every boot failure used to print as a
+    // MongoDB error, which sent me hunting the database for a port conflict.
+    if (err && typeof err.code === 'string' && ['EADDRINUSE', 'EACCES', 'EADDRNOTAVAIL'].includes(err.code)) {
+      console.error(`[server] Cannot bind port ${PORT} — ${err.code}: ` + (
+        err.code === 'EADDRINUSE'
+          ? `another process is already listening on ${PORT}. Stop it (or set PORT to a free port) and retry.`
+          : err.message
+      ));
+      process.exit(1);
+    }
     console.error('MongoDB connection error:', err.message);
     process.exit(1);
   });
