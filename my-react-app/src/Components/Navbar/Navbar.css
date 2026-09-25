@@ -161,68 +161,11 @@
   outline-offset: 1px;
 }
 
-/* ── Profile chip: pill hover + gradient ring avatar ──────────────── */
-.navbar-profile-link {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  text-decoration: none;
-  padding: 4px 10px 4px 4px;
-  border-radius: 999px;
-  transition: background 0.2s ease;
-}
-
-.navbar-profile-link:hover {
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.10), rgba(129, 140, 248, 0.10));
-}
-
-.navbar-profile-link .navbar-avatar {
-  transition: transform 0.2s;
-}
-
-.navbar-profile-link:hover .navbar-avatar {
-  transform: scale(1.1);
-}
-
-.navbar-profile {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.navbar-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #34d399 0%, #0d9488 100%);
-  box-shadow:
-    0 0 0 3px rgba(52, 211, 153, 0.22),
-    0 4px 10px -4px rgba(16, 185, 129, 0.5);
-  color: #fff;
-  font-size: 14px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.navbar-username {
-  font-size: 14px;
-  font-weight: 600;
-  color: #0f172a;
-}
-
-.navbar-nav-label {
-  font-size: 14px;
-}
-
-/* Web3 / Market / DAO text labels collapse to icons on small screens so the
-   navbar never overflows on mobile. */
-@media (max-width: 768px) {
-  .navbar-nav-label {
-    display: none;
-  }
-}
+/* The profile chip used to be a <NavLink> with its own avatar + username
+   styles here. It is now ProfileActionsMenu's pill trigger, which owns its own
+   avatar/label styling — so these rules went away with the markup. The
+   `.navbar-nav-label` rules went too: the Web3 / Market / DAO text labels they
+   collapsed are now menu items, and History is icon-only. */
 
 /* ── Sign In CTA: vibrant gradient pill matching the auth pages ───── */
 .navbar-signin-btn {
@@ -269,7 +212,6 @@
   .navbar-signin-btn,
   .navbar-logo-box svg,
   .navbar-brand,
-  .navbar-profile-link,
   .navbar-history-link {
     transition: none;
   }

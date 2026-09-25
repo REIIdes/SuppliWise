@@ -1775,6 +1775,8 @@ function ProfilePanel({ profile, appearance, onSaveAppearance, editOpen, onToggl
       >
         <span className="profile-card__glow profile-card__glow--a" aria-hidden="true" />
         <span className="profile-card__glow profile-card__glow--b" aria-hidden="true" />
+        <span className="profile-card__glow profile-card__glow--c" aria-hidden="true" />
+        <span className="profile-card__mesh" aria-hidden="true" />
         {draftState.bannerPicture && (
           <span className="profile-card__banner-shade" aria-hidden="true" />
         )}
@@ -1783,23 +1785,42 @@ function ProfilePanel({ profile, appearance, onSaveAppearance, editOpen, onToggl
           {draftState.profilePicture
             ? <img className="profile-card__avatar-img" src={draftState.profilePicture} alt="" aria-hidden="true" />
             : (profile?.alias || 'A')[0].toUpperCase()}
+          <span className="profile-card__avatar-ring" aria-hidden="true" />
         </div>
 
         <div className="profile-card__info">
+          <p className="profile-card__eyebrow">
+            <span className="profile-card__pulse" aria-hidden="true" />
+            Signed in · full access
+          </p>
           <div className="profile-card__title">
-            <p className="profile-card__name">{profile?.alias || 'administrator'}</p>
+            <h2 className="profile-card__name">{profile?.alias || 'administrator'}</h2>
             <span className="profile-card__badge">Administrator</span>
           </div>
           <p className="profile-card__meta">Full administrative access to SuppliWise</p>
 
           <div className="profile-card__stats">
             <span className="profile-card__stat">
-              <em>Last login</em>
-              {profile?.lastLoginAt ? new Date(profile.lastLoginAt).toLocaleString() : '—'}
+              <span className="profile-card__stat-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15.5 14" />
+                </svg>
+              </span>
+              <span className="profile-card__stat-body">
+                <em>Last login</em>
+                <strong>{profile?.lastLoginAt ? new Date(profile.lastLoginAt).toLocaleString() : '—'}</strong>
+              </span>
             </span>
             <span className="profile-card__stat">
-              <em>Member since</em>
-              {profile?.createdAt ? new Date(profile.createdAt).toLocaleDateString() : '—'}
+              <span className="profile-card__stat-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="4" width="18" height="17" rx="2" /><path d="M3 9h18M8 2v4M16 2v4" />
+                </svg>
+              </span>
+              <span className="profile-card__stat-body">
+                <em>Member since</em>
+                <strong>{profile?.createdAt ? new Date(profile.createdAt).toLocaleDateString() : '—'}</strong>
+              </span>
             </span>
           </div>
         </div>
@@ -1812,6 +1833,8 @@ function ProfilePanel({ profile, appearance, onSaveAppearance, editOpen, onToggl
           {message}
         </div>
       )}
+
+      <div className="profile-layout">
 
       {/* ── Edit profile: picture + background picture (collapsible) ──── */}
       <section className="admin-panel profile-panel profile-panel--rose" id="admin-edit-profile">
@@ -1844,6 +1867,7 @@ function ProfilePanel({ profile, appearance, onSaveAppearance, editOpen, onToggl
           <div className="profile-edit-body" id="admin-edit-profile-body">
             <p className="admin-muted profile-section-desc">Change your picture, your background picture, and the other details shown across the admin panel.</p>
 
+            <div className="pf-look__grid">
             {/* Profile picture */}
             <div className="pf-look__row">
               <div className="pf-look__preview pf-look__preview--avatar">
@@ -1908,6 +1932,7 @@ function ProfilePanel({ profile, appearance, onSaveAppearance, editOpen, onToggl
                 />
               </div>
             </div>
+            </div>
 
             {appearanceNote && (
               <div className={`profile-alert ${appearanceNote.ok ? 'profile-alert--success' : 'profile-alert--error'}`} role="alert">
@@ -1928,7 +1953,8 @@ function ProfilePanel({ profile, appearance, onSaveAppearance, editOpen, onToggl
         )}
       </section>
 
-      <div className="profile-grid">
+      <div className="profile-layout__side">
+        <div className="profile-layout__main">
 
         {/* ── Change password ────────────────────────────────────────── */}
         <section className="admin-panel profile-panel profile-panel--violet">
@@ -2049,6 +2075,8 @@ function ProfilePanel({ profile, appearance, onSaveAppearance, editOpen, onToggl
           )}
         </section>
 
+        </div>
+      </div>
       </div>
     </div>
   );

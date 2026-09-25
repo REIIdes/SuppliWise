@@ -1,13 +1,71 @@
-import { NavLink, useLocation } from 'react-router-dom';
+import { useState } from 'react';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import UserNotifications from '../UserNotifications/UserNotifications';
+import ProfileActionsMenu from '../ProfileActionsMenu/ProfileActionsMenu';
+import ConfirmLogoutModal from '../ConfirmLogoutModal/ConfirmLogoutModal';
 import useAuth from '../../hooks/useAuth';
+import { signOutCurrentAccount } from '../../api';
 import './Navbar.css';
+
+// Product destinations rendered inside the account menu. Module scope so the
+// array identity is stable — rebuilding it each render would hand the menu a
+// new `navItems` prop on every parent render for no reason.
+//
+// Icons are inline SVG rather than the emoji the top bar used: emoji render
+// differently per platform, so the same menu looked inconsistent across
+// Windows/macOS/Android.
+const NAV_ITEMS = [
+  {
+    key: 'web3',
+    label: 'Web3',
+    hint: 'Wallet, supply chain & proofs',
+    to: '/web3',
+    tone: 'web3',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="3" y="3" width="7" height="7" rx="1.5" />
+        <rect x="14" y="3" width="7" height="7" rx="1.5" />
+        <rect x="3" y="14" width="7" height="7" rx="1.5" />
+        <path d="M14 17.5h7M17.5 14v7" />
+      </svg>
+    ),
+  },
+  {
+    key: 'market',
+    label: 'Market',
+    hint: 'Buy & sell with WELL',
+    to: '/marketplace',
+    tone: 'market',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <circle cx="9" cy="20" r="1.4" />
+        <circle cx="18" cy="20" r="1.4" />
+        <path d="M2 3h2.2l2.4 12.2a1.6 1.6 0 0 0 1.6 1.3h9.1a1.6 1.6 0 0 0 1.6-1.3L21 7H5.4" />
+      </svg>
+    ),
+  },
+  {
+    key: 'dao',
+    label: 'DAO',
+    hint: 'Proposals, votes & treasury',
+    to: '/governance',
+    tone: 'dao',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M3 21h18" />
+        <path d="M5 21V10l7-5 7 5v11" />
+        <path d="M9 21v-6h6v6" />
+      </svg>
+    ),
+  },
+];
 
 function Navbar() {
   // Reactive session: the navbar flips between signed-in/out the instant
   // the token changes (login, logout, account switch) — no reload needed.
   const { token, user } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   // The auth pages must never wear the signed-in chip: /login is reachable
   // while signed in only for "add another account" (?add=1), and showing the
   // active account over the Sign In form reads as a glitch. Account
@@ -22,6 +80,36 @@ function Navbar() {
     user?.name?.charAt(0) ||
     'A'
   ).toUpperCase();
+
+  // The account menu drives the profile page through the URL rather than
+  // through shared component state. The Navbar and ProfilePage are siblings
+  // with no common owner, so a query param is the one channel that works
+  // without lifting state or publishing a global event — and it survives a
+  // reload, so the deep link is shareable and the back button behaves.
+  const goToProfile = (params) => {
+    const query = new URLSearchParams(params).toString();
+    navigate(`/profile${query ? `?${query}` : ''}`);
+  };
+
+  // Sign-out confirmation lives HERE, in the navbar, rather than being reached
+  // by navigating to /profile?action=signout and raising a dialog there.
+  //
+  // That round trip was wrong: picking "Sign out" dragged the user to the
+  // profile page just to show a prompt, so the page visibly changed underneath
+  // them and cancelling left them somewhere they never asked to go. Signing out
+  // is not a navigation, so it must not navigate — the prompt appears in place
+  // and only a confirmed sign-out leaves the page.
+  const [signOutPending, setSignOutPending] = useState(false);
+
+  const confirmSignOut = async () => {
+    setSignOutPending(false);
+    // Revoke this account's token server-side and forget it here. This is the
+    // same path the profile page used, so behaviour (including the cross-tab
+    // "this session is dead" broadcast) is unchanged.
+    await signOutCurrentAccount();
+    // `replace` so Back cannot return to a page that now needs a session.
+    navigate('/login', { replace: true });
+  };
 
   return (
     <nav className="navbar">
@@ -47,36 +135,28 @@ function Navbar() {
         {showSession ? (
           <>
             <UserNotifications />
-            <NavLink to="/web3" className="navbar-nav-link" title="Web3 Hub">
-              ⛓<span className="navbar-nav-label">Web3</span>
-            </NavLink>
-            <NavLink to="/marketplace" className="navbar-nav-link" title="Marketplace">
-              🛒<span className="navbar-nav-label">Market</span>
-            </NavLink>
-            <NavLink to="/governance" className="navbar-nav-link" title="Governance">
-              🏛️<span className="navbar-nav-label">DAO</span>
-            </NavLink>
             <NavLink to="/history" className="navbar-nav-link" title="History">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10" />
                 <polyline points="12 6 12 12 16 14" />
               </svg>
             </NavLink>
-            <NavLink to="/profile" className="navbar-profile-link" title="Profile Settings">
-              <div 
-                className="navbar-avatar"
-                style={{
-                  backgroundImage: user.profilePicture ? `url(${user.profilePicture})` : 'none',
-                  backgroundSize: 'cover',
-                  backgroundPosition: 'center',
-                }}
-              >
-                {!user.profilePicture && avatarInitial}
-              </div>
-              <span className="navbar-username">
-                {displayName}
-              </span>
-            </NavLink>
+            {/* Product navigation lives in the account menu now. It used to be
+                three more items in the top bar, which crowded the row on
+                phones and left no breathing room around the account pill. The
+                routes and icons are still owned here, so the menu stays a
+                generic component that renders whatever it is handed. */}
+            <ProfileActionsMenu
+              displayName={displayName}
+              profilePicture={user.profilePicture || ''}
+              initials={avatarInitial}
+              showLabel
+              navItems={NAV_ITEMS}
+              onNavigate={(to) => navigate(to)}
+              onEditProfile={() => goToProfile({ view: 'personal', edit: '1' })}
+              onOpenView={(view) => goToProfile({ view })}
+              onSignOut={() => setSignOutPending(true)}
+            />
           </>
         ) : (
           // Strictly user-facing: this navbar never offers admin entry —
@@ -88,6 +168,20 @@ function Navbar() {
           </NavLink>
         )}
       </div>
+
+      {/* Rendered as a SIBLING of the menu, not inside its panel: choosing
+          "Sign out" closes the panel, and a dialog nested inside the thing
+          that just unmounted would disappear with it. */}
+      {signOutPending && (
+        <ConfirmLogoutModal
+          title="Sign out?"
+          message="You'll be returned to the sign-in page. Other accounts on this browser stay signed in."
+          confirmText="Sign out"
+          cancelText="Cancel"
+          onConfirm={confirmSignOut}
+          onCancel={() => setSignOutPending(false)}
+        />
+      )}
     </nav>
   );
 }

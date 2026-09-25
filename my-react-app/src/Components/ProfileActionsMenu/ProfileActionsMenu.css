@@ -1,0 +1,263 @@
+/* ProfileActionsMenu — light-theme account menu for the member profile.
+   Same emerald/teal/indigo tokens as the rest of the profile page, so it reads
+   as part of the product rather than a dark admin widget dropped onto a white
+   card. */
+
+.pam { position: relative; }
+
+/* ── Trigger: the avatar itself ────────────────────────────────────────
+   Icon-only, so the chevron sits on the rim as a badge rather than as a
+   second piece of text. The white ring is what separates the avatar from the
+   cover artwork behind it. */
+.pam-trigger {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.2s ease;
+}
+.pam-trigger:hover { transform: translateY(-2px) scale(1.04); }
+.pam-trigger:active { transform: translateY(0) scale(0.98); }
+.pam-trigger:focus-visible {
+  outline: 3px solid rgba(79, 70, 229, 0.6);
+  outline-offset: 3px;
+}
+.pam-trigger.is-open { transform: scale(1.04); }
+
+.pam-trigger__avatar {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  overflow: hidden;
+  color: #ffffff;
+  font: 800 17px/1 Arial, sans-serif;
+  background: linear-gradient(140deg, #34d399, #10b981 40%, #0d9488 72%, #6366f1);
+  box-shadow:
+    0 0 0 3px #ffffff,
+    0 10px 20px -10px rgba(5, 46, 35, 0.85),
+    0 0 18px rgba(16, 185, 129, 0.45);
+  transition: box-shadow 0.2s ease;
+}
+.pam-trigger.is-open .pam-trigger__avatar {
+  box-shadow:
+    0 0 0 3px #ffffff,
+    0 0 0 5px rgba(13, 148, 136, 0.55),
+    0 12px 24px -10px rgba(5, 46, 35, 0.9);
+}
+.pam-trigger__img {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+.pam-trigger__chev {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  color: #ffffff;
+  background: linear-gradient(140deg, #0d9488, #4f46e5);
+  border: 2px solid #ffffff;
+  box-shadow: 0 4px 10px -4px rgba(5, 46, 35, 0.9);
+  transition: transform 0.2s ease;
+}
+.pam-trigger.is-open .pam-trigger__chev { transform: rotate(180deg); }
+
+/* ── Pill variant (navbar) ─────────────────────────────────────────────
+   Avatar + name + chevron, matching the account pill the navbar already had,
+   so moving the trigger into the navbar does not change its silhouette. */
+.pam--pill .pam-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  width: auto;
+  height: auto;
+  padding: 4px 12px 4px 4px;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  color: #334155;
+  box-shadow: 0 4px 12px -8px rgba(15, 23, 42, 0.45);
+  transition: transform 0.16s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.pam--pill .pam-trigger:hover { border-color: #a5b4fc; }
+.pam--pill .pam-trigger__avatar {
+  width: 34px;
+  height: 34px;
+  font-size: 14px;
+  box-shadow:
+    0 0 0 2px #ffffff,
+    0 6px 14px -8px rgba(5, 46, 35, 0.8);
+}
+.pam--pill .pam-trigger.is-open .pam-trigger__avatar {
+  box-shadow:
+    0 0 0 2px #ffffff,
+    0 0 0 3px rgba(13, 148, 136, 0.5);
+}
+.pam--pill .pam-trigger__label {
+  font: 700 13.5px/1 Arial, sans-serif;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* In the pill the chevron is inline, not a rim badge. */
+.pam--pill .pam-trigger__chev {
+  position: static;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #64748b;
+}
+.pam--pill .pam-trigger.is-open .pam-trigger__chev { color: #0d9488; }
+
+/* ── Panel ───────────────────────────────────────────────────────────── */
+.pam-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 60;
+  width: min(292px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px;
+  border-radius: 18px;
+  border: 1px solid #e2e8f0;
+  background: linear-gradient(165deg, #ffffff 0%, #f8fafc 62%, #f0fdfa 100%);
+  box-shadow:
+    0 28px 54px -24px rgba(15, 23, 42, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.7) inset;
+  animation: pam-in 0.16s ease both;
+}
+@keyframes pam-in {
+  from { opacity: 0; transform: translateY(-8px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ── Items ───────────────────────────────────────────────────────────── */
+/* Each entry is wrapped so the separator can sit between items without
+   becoming a child of either button (which would put a non-interactive node
+   inside the menu item's hit area and pollute its accessible name). */
+.pam-slot { display: flex; flex-direction: column; gap: 3px; }
+
+.pam-sep {
+  height: 1px;
+  margin: 3px 6px;
+  background: #e2e8f0;
+}
+
+/* Group caption ("Explore", "Account"). aria-hidden because it is a visual
+   grouping cue, not an action — the menuitem labels already say what they are. */
+.pam-group {
+  padding: 7px 10px 4px;
+  font: 800 9.5px/1 Arial, sans-serif;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.pam-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #334155;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+.pam-item:hover,
+.pam-item:focus-visible {
+  background: #ecfdf5;
+  color: #065f46;
+  transform: translateX(2px);
+  outline: none;
+}
+.pam-item:focus-visible { box-shadow: inset 0 0 0 2px rgba(13, 148, 136, 0.55); }
+
+.pam-item__icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  color: #0d9488;
+  background: #e0f2fe;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.pam-item:hover .pam-item__icon { color: #ffffff; background: linear-gradient(140deg, #10b981, #0d9488); }
+.pam-item--accent .pam-item__icon { color: #ffffff; background: linear-gradient(140deg, #fb923c, #e11d48); }
+/* Security reads as a shield in emerald, Personal Info as a person in
+   teal, Accounts as a people glyph in indigo. Distinct hues so the rows are
+   separable at a glance rather than four identical blue-grey tiles. */
+.pam-item--personal .pam-item__icon  { color: #ffffff; background: linear-gradient(140deg, #2dd4bf, #0d9488); }
+.pam-item--security .pam-item__icon  { color: #ffffff; background: linear-gradient(140deg, #10b981, #0d9488); }
+.pam-item--accounts .pam-item__icon  { color: #ffffff; background: linear-gradient(140deg, #6366f1, #4f46e5); }
+
+/* Product navigation. Cooler, more saturated hues than the account rows so the
+   "Explore" group reads as somewhere you GO rather than something you CHANGE. */
+.pam-item--web3 .pam-item__icon   { color: #ffffff; background: linear-gradient(140deg, #22d3ee, #0891b2); }
+.pam-item--market .pam-item__icon { color: #ffffff; background: linear-gradient(140deg, #f472b6, #db2777); }
+.pam-item--dao .pam-item__icon    { color: #ffffff; background: linear-gradient(140deg, #818cf8, #6366f1); }
+
+.pam-item__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pam-item__text strong { font: 700 13px/1.25 Arial, sans-serif; }
+.pam-item__text em {
+  font: 500 11px/1.35 Arial, sans-serif;
+  font-style: normal;
+  color: #64748b;
+}
+
+.pam-item--danger { color: #be123c; }
+.pam-item--danger .pam-item__icon { color: #e11d48; background: #ffe4e6; }
+.pam-item--danger:hover,
+.pam-item--danger:focus-visible { background: #fff1f2; color: #9f1239; }
+.pam-item--danger:hover .pam-item__icon { color: #ffffff; background: linear-gradient(140deg, #f43f5e, #e11d48); }
+
+/* ── Responsive ──────────────────────────────────────────────────────── */
+@media (max-width: 560px) {
+  .pam-trigger__label { display: none; }
+  .pam-trigger { padding: 8px 10px; }
+  /* Anchor to the viewport edge on narrow screens so the panel can never
+     overflow horizontally when the trigger sits near the right gutter. */
+  .pam-panel { right: -6px; width: min(272px, calc(100vw - 28px)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pam-panel { animation: none; }
+  .pam-trigger,
+  .pam-trigger__chev,
+  .pam-item,
+  .pam-item__icon { transition: none; }
+  .pam-trigger:hover,
+  .pam-item:hover,
+  .pam-item:focus-visible { transform: none; }
+}

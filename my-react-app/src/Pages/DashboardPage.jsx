@@ -707,19 +707,22 @@ function DashboardPage() {
                         }
                       </p>
                     </div>
+                    {/* No Undo button by request. A read-only "Taken" pill takes
+                        its place so the row does not end in empty space and the
+                        state is still legible. */}
                     {supplement.taken ? (
-                      <button 
-                        className="supplement-btn btn-undo"
-                        onClick={() => handleSupplementToggle(supplement.id)}
-                      >
-                        Undo
-                      </button>
+                      <span className="supplement-taken-pill">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        Taken
+                      </span>
                     ) : (
                       <button 
                         className="supplement-btn btn-mark-taken"
                         onClick={() => handleSupplementToggle(supplement.id)}
                       >
-                        Mark Taken
+                        Mark as Taken
                       </button>
                     )}
                   </div>

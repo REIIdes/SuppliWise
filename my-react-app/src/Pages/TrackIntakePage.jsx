@@ -298,88 +298,6 @@ function TrackIntakePage() {
     }
   };
 
-  const handleUndoTaken = async (supplementId) => {
-    const supplement = todaysSupplements.find(s => s.id === supplementId);
-    if (!supplement) return;
-
-    // Optimistically update UI
-    setTodaysSupplements(prev => {
-      const updated = prev.map(sup =>
-        sup.id === supplementId
-          ? { ...sup, taken: false, takenAt: null }
-          : sup
-      );
-      // Sort by taken status first, then schedule time, then priority
-      const PRIORITY_ORDER = { High: 0, Medium: 1, Low: 2 };
-      const TIME_ORDER = {
-        'morning': 0, 'breakfast': 0, 'before breakfast': 0, 'with breakfast': 0,
-        'lunch': 1, 'afternoon': 1, 'midday': 1, 'with lunch': 1,
-        'dinner': 2, 'evening': 2, 'night': 2, 'bedtime': 2, 'before bed': 2, 'with dinner': 2,
-        'anytime': 3
-      };
-      
-      const getTimeOrder = (scheduledTime) => {
-        if (!scheduledTime) return 3;
-        const time = scheduledTime.toLowerCase();
-        for (const [key, value] of Object.entries(TIME_ORDER)) {
-          if (time.includes(key)) return value;
-        }
-        return 3;
-      };
-      
-      return updated.sort((a, b) => {
-        // First: taken status (untaken first, taken last)
-        if (a.taken !== b.taken) return a.taken ? 1 : -1;
-        
-        // Then: schedule time (morning → lunch → evening)
-        const ta = getTimeOrder(a.scheduledTime);
-        const tb = getTimeOrder(b.scheduledTime);
-        if (ta !== tb) return ta - tb;
-        
-        // Finally: priority (High → Medium → Low)
-        const pa = PRIORITY_ORDER[a.priority] ?? 3;
-        const pb = PRIORITY_ORDER[b.priority] ?? 3;
-        return pa - pb;
-      });
-    });
-
-    try {
-      const result = await updateIntake(supplementId, false);
-
-      if (result.stats) {
-        setStreak(result.stats.daysStreak);
-        setWeeklyAdherence(prev => ({
-          ...prev,
-          percentage: result.stats.overallAdherence,
-        }));
-      }
-      // Strict gate: undo after an auto-lift reinstates the restriction
-      if (result.priorityReflagged) {
-        setMarkTakenToastKey(prev => prev + 1);
-        setMarkTakenToastMessage('Priority review reinstated — new assessments paused again.');
-      }
-      // Realtime: refresh calendar colors + weekly stats immediately
-      fetchCalendarData();
-      try {
-        const weeklyData = await getWeeklyAdherence();
-        setWeeklyAdherence({
-          percentage: weeklyData.overallAdherence || 0,
-          days: weeklyData.weeklyDays || [],
-        });
-      } catch {
-        // Weekly panel keeps previous values on failure
-      }
-    } catch (err) {
-      console.error('Error undoing supplement:', err);
-      // Revert on error
-      setTodaysSupplements(prev =>
-        prev.map(sup =>
-          sup.id === supplementId ? { ...sup, taken: true, takenAt: supplement.takenAt } : sup
-        )
-      );
-    }
-  };
-
   const renderCalendar = () => {
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
@@ -748,19 +666,22 @@ function TrackIntakePage() {
                           }
                         </p>
                       </div>
+                      {/* No Undo button by request. A read-only "Taken" pill
+                          takes its place so the row does not end in empty space
+                          and the state is still legible. */}
                       {supplement.taken ? (
-                        <button 
-                          className="btn-undo"
-                          onClick={() => handleUndoTaken(supplement.id)}
-                        >
-                          Undo
-                        </button>
+                        <span className="supplement-taken-pill">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                          Taken
+                        </span>
                       ) : (
                         <button 
                           className="btn-mark-taken"
                           onClick={() => handleMarkTaken(supplement.id)}
                         >
-                          Mark taken
+                          Mark as Taken
                         </button>
                       )}
                     </div>

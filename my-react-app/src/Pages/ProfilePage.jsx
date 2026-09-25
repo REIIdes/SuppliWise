@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
-import ConfirmLogoutModal from '../Components/ConfirmLogoutModal/ConfirmLogoutModal';
 import AccountSwitcher from '../Components/AccountSwitcher/AccountSwitcher';
-import { BASE_URL, getMyProfile, getNotifications, markNotificationRead, isSecurityNotification, signOutCurrentAccount, getToken, getStoredUser, setStoredUser } from '../api';
+import { BASE_URL, getMyProfile, getNotifications, markNotificationRead, isSecurityNotification, getToken, getStoredUser, setStoredUser } from '../api';
 import ProfileSecurityControls from '../Components/ProfileSecurityControls/ProfileSecurityControls';
+import ProfileAvatarImage from '../Components/ProfileAvatar/ProfileAvatarImage';
 import { useSubscription, SUBSCRIPTION_EVENT } from '../hooks/useSubscription';
-import { PLAN_LABELS, PLAN_RANK, FEATURES, planFromUser } from '../utils/plan';
+import { PLAN_LABELS, planFromUser } from '../utils/plan';
 import './ProfilePage.css';
 
 // Relative time for the security activity feed
@@ -21,39 +21,6 @@ function secTimeAgo(iso) {
   const days = Math.floor(hours / 24);
   if (days < 30) return `${days}d ago`;
   return new Date(iso).toLocaleDateString();
-}
-
-// Display metadata for the feature showcase — the tier for each entry comes
-// from the canonical registry (subscription/features.js), never from a local
-// copy, so the profile can't disagree with the API.
-const FEATURE_CARDS = [
-  { key: 'healthAssessment',   icon: 'clipboard', text: 'Guided 4-step assessments with instant results' },
-  { key: 'recommendations',    icon: 'pill',      text: 'Personalized AI picks with dosage & timing' },
-  { key: 'dailyIntake',        icon: 'check',     text: 'Mark taken, streaks, calendar & adherence stats' },
-  { key: 'insights',           icon: 'chart',     text: 'Wellness score, trends and phase guidance' },
-  { key: 'pdfExport',          icon: 'pdf',       text: 'Download & share full assessment reports' },
-  { key: 'historyFull',        icon: 'history',   text: 'Every assessment kept, searchable anytime' },
-  { key: 'priorityAssessment', icon: 'flag',      text: 'Severe cases flagged for fast admin review' },
-  { key: 'chat',               icon: 'spark',     text: 'Ask anything about supplements & wellness' },
-];
-
-function FeatureIcon({ icon }) {
-  const paths = {
-    clipboard: (<><rect x="8" y="2" width="8" height="4" rx="1" ry="1" /><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /><path d="M9 14l2 2 4-4" /></>),
-    pill: (<><path d="M10.5 20.5 3.5 13.5a5 5 0 0 1 7-7l7 7a5 5 0 0 1-7 7z" /><line x1="7" y1="10" x2="14" y2="17" /></>),
-    check: (<><polyline points="22 4 12 14.01 9 11.01" /><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /></>),
-    chart: (<><polyline points="22 7 13.5 15.5 8.5 10.5 2 17" /><polyline points="16 7 22 7 22 13" /></>),
-    pdf: (<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></>),
-    history: (<><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></>),
-    flag: (<><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><line x1="4" y1="22" x2="4" y2="15" /></>),
-    spark: (<><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" /><circle cx="12" cy="12" r="3" /></>),
-    lock: (<><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></>),
-  };
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      {paths[icon] || paths.spark}
-    </svg>
-  );
 }
 
 function ProfilePage() {
@@ -73,7 +40,6 @@ function ProfilePage() {
   const [success, setSuccess] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [showOtpModal, setShowOtpModal] = useState(false);
-  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showDisable2FAConfirm, setShowDisable2FAConfirm] = useState(false);
   const [show2FASetup, setShow2FASetup] = useState(false);
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(() => storedUser.twoFactorEnabled === true);
@@ -122,13 +88,13 @@ function ProfilePage() {
   const [secLoading, setSecLoading] = useState(true);
   const [secFlash, setSecFlash] = useState(false);
   const securityRef = useRef(null);
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // Subscription status (starts from cache — resolved incl. expiry — then
   // syncs live + from server). Subscribing here means upgrades/downgrades by
   // admin, expiry, or another tab update the card + feature list instantly —
   // no reopen needed.
-  const { active: liveActive, plan: livePlan, entitlements: liveEntitlements, refresh: refreshLivePlan, applyFresh, canAccess } = useSubscription();
+  const { active: liveActive, plan: livePlan, entitlements: liveEntitlements, refresh: refreshLivePlan, applyFresh } = useSubscription();
   const [subscription, setSubscription] = useState(() => {
     const resolved = planFromUser(storedUser);
     return {
@@ -276,17 +242,60 @@ function ProfilePage() {
     return () => { cancelled = true; };
   }, []);
 
-  // Deep link from notification bell (?section=security): scroll the Account
-  // Security card into view and flash it so users land where they can act.
+  // ── Which card is open ────────────────────────────────────────────────
+  // The profile shows ONE card at a time, chosen by the navbar account menu.
+  // There is no in-page switcher, so `view` is the only navigation state.
+  //
+  //   ?view=personal | security | accounts   — from the account menu
+  //   ?section=security                     — legacy deep link kept working
+  //                                            for the notification bell
+  //   ?edit=1                               — implies view=personal
+  //
+  // Anything unrecognised (including no param at all) falls back to
+  // 'personal', so /profile always opens on a real card. It previously fell
+  // back to an empty hub that only existed to tell you to pick a card.
+  //
+  // It lives in the URL because the Navbar and this page are siblings with no
+  // shared owner; a query param needs no lifted state or global event, and it
+  // survives reload, so the deep link is shareable and Back behaves.
+  const urlView = searchParams.get('view') || searchParams.get('section');
+  const view = urlView === 'security' || urlView === 'accounts' ? urlView : 'personal';
+
+  // The Security card still flashes when it is opened from a notification,
+  // because that is the one case where its contents changed underneath the
+  // user (2FA toggled, a device revoked) and the card should acknowledge it.
+  // Opening it from the menu does not flash — the user chose it deliberately.
   useEffect(() => {
-    if (searchParams.get('section') !== 'security') return;
+    if (searchParams.get('section') !== 'security') return undefined;
     const timer = window.setTimeout(() => {
-      securityRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       setSecFlash(true);
       window.setTimeout(() => setSecFlash(false), 2200);
     }, 350);
     return () => window.clearTimeout(timer);
   }, [searchParams]);
+
+  // `?edit=1` is adjusted DURING RENDER, not in an effect. It is a pure reaction
+  // to the URL changing, and React's supported way to handle that is to derive it
+  // where the value is read: an effect would set state after commit, so every
+  // such navigation would paint once with the wrong state and then again with
+  // the right one.
+  //
+  // The previous value is seeded with a SENTINEL (false), never with the
+  // current param. Seeding it with the current value looks harmless but was the
+  // whole bug: on the FIRST render they are equal, so the guard never fired.
+  // ProfilePage is lazy-loaded and mounts fresh on every navigation to
+  // /profile, which means the deep link arrives WITH that first render — so
+  // `?edit=1` from the dashboard was swallowed and edit mode never engaged.
+  // The sentinel makes the arrival count as a change.
+  //
+  // clearTransientParams() drops the param, which resets this to false and
+  // leaves edit mode for good.
+  const urlEdit = searchParams.get('edit') === '1';
+  const [lastUrlEdit, setLastUrlEdit] = useState(false);
+  if (urlEdit !== lastUrlEdit) {
+    setLastUrlEdit(urlEdit);
+    if (urlEdit) setIsEditing(true);
+  }
 
   const startOtpExpiryTimer = () => {
     setOtpTimeLeft(600); // Reset to 10 minutes
@@ -753,8 +762,33 @@ function ProfilePage() {
     }
   };
 
+  /**
+   * Drop the transient deep-link param (`?edit=1`), keeping only `view`.
+   * `replace` keeps this out of history so Back does not replay the edit the
+   * user just cancelled.
+   */
+  const clearTransientParams = () => {
+    if (!searchParams.get('edit')) return;
+    const next = {};
+    if (urlView && urlView !== 'personal') next.view = urlView;
+    setSearchParams(next, { replace: true });
+  };
+
   const handleCancel = () => {
-    // Reload user data from the tab session
+    // Discard every unsaved edit by restoring the last SERVER-CONFIRMED values.
+    //
+    // The pictures come from this component's own `profilePicture` /
+    // `bannerPicture` state (written when a save succeeds, or when the profile
+    // is first loaded) rather than from the shared localStorage cache. The
+    // cache is a different concern — it is browser-wide, another tab can
+    // rewrite it, and it may be ahead of or behind this page.
+    //
+    // The banner preview used to be left out of this reset entirely, which is
+    // why Cancel appeared broken: pick a new banner, press Cancel, and the
+    // unsaved banner stayed on screen. Both previews are now reset together.
+    setProfilePicturePreview(profilePicture);
+    setBannerPicturePreview(bannerPicture);
+
     const user = getStoredUser();
     if (user) {
       setFormData({
@@ -764,8 +798,21 @@ function ProfilePage() {
         dateOfBirth: user.dateOfBirth ? new Date(user.dateOfBirth).toISOString().split('T')[0] : '',
         gender: user.gender || '',
       });
-      setProfilePicturePreview(user.profilePicture || '');
     }
+
+    // THE CRITICAL PART — drop `?edit=1` (and any stray `?action=`) from the URL.
+    //
+    // Edit mode is entered by the `?edit=1` deep link, and that param used to
+    // stay in the URL forever. The render-time rule that reads it then undid
+    // every Cancel: the click set isEditing=false, the very next render saw
+    // `?edit=1` still present with !isEditing, and turned edit mode straight
+    // back on. That is why Cancel looked completely dead.
+    //
+    // Clearing it makes the deep link one-shot, so Cancel finally sticks AND
+    // choosing "Edit Profile" from the menu again still works (it re-adds the
+    // param, which is a fresh transition).
+    clearTransientParams();
+
     setIsEditing(false);
     setError('');
     setSuccess('');
@@ -776,6 +823,24 @@ function ProfilePage() {
     if (resendTimer) clearInterval(resendTimer);
     if (otpExpiryTimer) clearInterval(otpExpiryTimer);
   };
+
+  // Leaving the Personal Info card while editing discards the draft, so a
+  // half-typed form cannot follow the user to another card.
+  //
+  // This is an effect, not render-time derivation, because leaving edit mode
+  // has to WRITE to the router (clear `?edit=1`) — and navigating during render
+  // is not allowed. The lint rule prefers deriving during render, but the URL
+  // is an external system, so reacting to it in an effect is the correct
+  // trade-off. It also reuses handleCancel, so "discard my edits" is defined
+  // exactly once.
+  useEffect(() => {
+    if (view === 'personal' || !isEditing) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reacting to a URL change (external system)
+    handleCancel();
+    // Intentionally only `view`: isEditing/handleCancel are excluded so this
+    // cannot re-fire and loop while cancelling.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
 
   const calculateAge = (dob) => {
     if (!dob) return '';
@@ -789,38 +854,26 @@ function ProfilePage() {
     return age;
   };
 
-  const handleLogout = async () => {
-    // Revokes this account's token server-side (so no copy of it survives)
-    // and forgets only THIS account — other accounts signed in on this
-    // browser remain in the switcher, ready to be picked up.
-    await signOutCurrentAccount();
-    sessionStorage.removeItem('pending_assessment');
-    // replace: the now-dead profile page must not linger in history, or
-    // Back after sign-out bounces through the guards into /admin.
-    navigate('/login', { replace: true });
-  };
-
-  const handleLogoutClick = () => {
-    setShowLogoutConfirm(true);
-  };
-
-  const confirmLogout = () => {
-    setShowLogoutConfirm(false);
-    handleLogout();
-  };
+  // Sign-out is NOT handled here. It used to be reached by navigating to
+  // /profile?action=signout, which meant choosing "Sign out" dragged the user
+  // to this page just to show a prompt. The confirmation now lives in the
+  // Navbar's account menu and signs out in place, so this page has no logout
+  // machinery at all.
 
   return (
     <>
       <Navbar />
       <div className="profile-page">
         <div className="profile-container">
-          <div 
-            className="profile-header"
-            style={{
-              backgroundImage: bannerPicturePreview ? `url(${bannerPicturePreview})` : 'linear-gradient(135deg, #22c55e, #16a34a)',
+          {/* ── Cover banner ── pure artwork; identity sits on the card below,
+              so a very wide photo is never cropped just to fit a name. ── */}
+          <div
+            className="profile-cover"
+            style={bannerPicturePreview ? {
+              backgroundImage: `url(${bannerPicturePreview})`,
               backgroundSize: 'cover',
               backgroundPosition: 'center',
-            }}
+            } : undefined}
           >
             {isEditing && (
               <button
@@ -828,6 +881,7 @@ function ProfilePage() {
                 className="banner-edit-btn"
                 onClick={handleBannerPictureClick}
                 title="Change banner"
+                aria-label="Change banner picture"
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
@@ -835,30 +889,48 @@ function ProfilePage() {
                 </svg>
               </button>
             )}
-            <input
-              ref={bannerInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleBannerPictureChange}
-              style={{ display: 'none' }}
-            />
+            {isEditing && bannerPicturePreview && (
+              <button
+                type="button"
+                className="profile-remove-banner"
+                onClick={handleRemoveBannerPicture}
+              >
+                Remove Banner
+              </button>
+            )}
+          </div>
+
+          <input
+            ref={bannerInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleBannerPictureChange}
+            style={{ display: 'none' }}
+          />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleProfilePictureChange}
+            style={{ display: 'none' }}
+          />
+
+          {/* ── Identity card: avatar straddles the cover edge ── */}
+          <div className="profile-identity">
             <div
               className="profile-avatar-large"
               onClick={handleProfilePictureClick}
               style={{ cursor: isEditing ? 'pointer' : 'default' }}
+              role={isEditing ? 'button' : undefined}
+              tabIndex={isEditing ? 0 : undefined}
+              onKeyDown={isEditing ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleProfilePictureClick(); } } : undefined}
+              aria-label={isEditing ? 'Change profile picture' : undefined}
             >
-              <span className="profile-avatar-initial" aria-hidden="true">
-                {(formData.firstName || 'U').charAt(0).toUpperCase()}
-              </span>
-              {profilePicturePreview && (
-                <img
-                  src={profilePicturePreview}
-                  alt=""
-                  aria-hidden="true"
-                  className="profile-avatar-img"
-                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                />
-              )}
+              <ProfileAvatarImage
+                src={profilePicturePreview}
+                name={formData.firstName}
+                className="profile-avatar-img"
+              />
               {isEditing && (
                 <div className="profile-avatar-overlay">
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -869,37 +941,44 @@ function ProfilePage() {
                 </div>
               )}
             </div>
-            {isEditing && profilePicturePreview && (
-              <button 
-                type="button"
-                className="profile-remove-picture"
-                onClick={handleRemoveProfilePicture}
-              >
-                Remove Picture
-              </button>
-            )}
-            {isEditing && bannerPicturePreview && (
-              <button 
-                type="button"
-                className="profile-remove-banner"
-                onClick={handleRemoveBannerPicture}
-              >
-                Remove Banner
-              </button>
-            )}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleProfilePictureChange}
-              style={{ display: 'none' }}
-            />
-            <h1 className="profile-title">Profile Settings</h1>
-            <p className="profile-subtitle">Manage your account information</p>
+
+            <div className="profile-identity__text">
+              <p className="profile-eyebrow">Your account</p>
+              <h1 className="profile-title">
+                {[formData.firstName, formData.lastName].filter(Boolean).join(' ') || 'Profile Settings'}
+              </h1>
+              <p className="profile-subtitle">
+                {formData.email || 'Manage your account information'}
+              </p>
+            </div>
+
+            <div className="profile-identity__actions">
+              {isEditing && profilePicturePreview && (
+                <button
+                  type="button"
+                  className="profile-chip-btn"
+                  onClick={handleRemoveProfilePicture}
+                >
+                  Remove picture
+                </button>
+              )}
+              <span className={`profile-plan-chip${subscription.active ? ' profile-plan-chip--active' : ''}`}>
+                <span className="profile-plan-chip__dot" aria-hidden="true" />
+                {subscription.active
+                  ? (PLAN_LABELS[subscription.plan] || PLAN_LABELS.free)
+                  : PLAN_LABELS.free}
+              </span>
+            </div>
           </div>
 
           <form onSubmit={handleSubmit} className="profile-form">
-            {isEditing && (
+            {/* No section switcher here on purpose. The account menu in the
+                navbar is the single way between cards, so there is exactly one
+                place to look for "where do I go" instead of two competing
+                ones. Personal Info is the default view, so /profile with no
+                query param lands somewhere useful rather than an empty hub. */}
+
+            {isEditing && view === 'personal' && (
               <div className="profile-info-notice">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <circle cx="12" cy="12" r="10" />
@@ -914,7 +993,8 @@ function ProfilePage() {
               </div>
             )}
 
-            <div className="profile-section">
+            {view === 'personal' && (
+            <div className="profile-section profile-section--personal" id="profile-personal">
               <h2 className="profile-section-title">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
@@ -1000,146 +1080,65 @@ function ProfilePage() {
                 </div>
               </div>
             </div>
+            )}
 
-            <div className="profile-section">
-              <h2 className="profile-section-title">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <rect x="2" y="5" width="20" height="14" rx="2" />
-                  <line x1="2" y1="10" x2="22" y2="10" />
-                </svg>
-                Subscription Status
-              </h2>
-              <p className="profile-section-subtitle">Your Plan is based on what you purchase.</p>
-              {!profileLoading && (() => {
-                // Server entitlements first; tier table as the UI fallback.
-                const planState = {
-                  active: subscription.active,
-                  plan: subscription.plan,
-                  rank: subscription.active ? (PLAN_RANK[subscription.plan] ?? 0) : 0,
-                  entitlements: subscription.entitlements || null,
-                };
-                return (
-                <div className="plan-features">
-                  <p className="plan-features__heading">
-                    {subscription.active
-                      ? `Unlocked with ${PLAN_LABELS[subscription.plan] || 'your plan'}`
-                      : `Included in ${PLAN_LABELS.free} — upgrade to unlock more`}
-                  </p>
-                  <div className="plan-features__grid">
-                    {FEATURE_CARDS.map(f => {
-                      const def = FEATURES[f.key];
-                      const unlocked = canAccess(f.key);
-                      return (
-                        <div key={f.key} className={`plan-feature${unlocked ? ' plan-feature--on' : ' plan-feature--locked'}`}>
-                          <span className="plan-feature__icon"><FeatureIcon icon={unlocked ? f.icon : 'lock'} /></span>
-                          <div>
-                            <span className="plan-feature__title">{def.label}</span>
-                            <span className="plan-feature__text">{f.text}</span>
-                          </div>
-                          <span className="plan-feature__check" aria-label={unlocked ? 'Included' : 'Locked'}>
-                            {unlocked ? '✓' : <FeatureIcon icon="lock" />}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {planState.rank < PLAN_RANK.custom && (
-                    <p className="plan-features__note">Want more? Contact an administrator to upgrade your plan.</p>
-                  )}
-                </div>
-                );
-              })()}
-              {profileLoading ? (
-                <div className="subscription-card subscription-card--loading" aria-live="polite">
-                  <span className="subscription-skeleton subscription-skeleton--badge" />
-                  <span className="subscription-skeleton subscription-skeleton--line" />
-                </div>
-              ) : (
-                <div className={`subscription-card${subscription.active ? ' subscription-card--active' : ''}`}>
-                  <span className={`subscription-badge${subscription.active ? ' subscription-badge--active' : ' subscription-badge--free'}`}>
-                    {subscription.active ? 'Active ✓' : PLAN_LABELS.free}
-                  </span>
-                  <div className="subscription-details">
-                    <span className="subscription-plan">
-                      {subscription.active
-                        ? (PLAN_LABELS[subscription.plan] || PLAN_LABELS.free)
-                        : `${PLAN_LABELS.free} — core assessments, recommendations & tracking included`}
-                    </span>
-                    {subscription.updatedAt && (
-                      <span className="subscription-updated">
-                        Updated {new Date(subscription.updatedAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )}
-              {profileError && (
-                <div className="subscription-error" role="alert">
-                  <span>{profileError}</span>
-                  <button
-                    type="button"
-                    className="profile-btn profile-btn-secondary"
-                    disabled={profileLoading}
-                    onClick={() => {
-                      profileLoadedRef.current = false;
-                      setProfileError('');
-                      setProfileLoading(true);
-                      getMyProfile()
-                        .then((fresh) => {
-                          // Resolve through the shared store so this retry
-                          // also refreshes every gated surface (expiry-aware).
-                          const live = applyFresh(fresh);
-                          setSubscription({
-                            active: live.active,
-                            plan: live.plan,
-                            updatedAt: fresh.subscriptionUpdatedAt || null,
-                            entitlements: live.entitlements,
-                          });
-                          setFormData(prev => ({
-                            ...prev,
-                            firstName: fresh.firstName || prev.firstName,
-                            lastName: fresh.lastName || prev.lastName,
-                            email: fresh.email || prev.email,
-                            gender: fresh.gender || prev.gender,
-                          }));
-                        })
-                        .catch((err) => handleProfileRefreshError(err))
-                        .finally(() => {
-                          profileLoadedRef.current = true;
-                          setProfileLoading(false);
-                        });
-                    }}
-                  >
-                    {profileLoading ? 'Retrying…' : 'Retry'}
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {isEditing && (
-              <div className="profile-section">
-                <h2 className="profile-section-title">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <rect x="3" y="11" width="18" height="11" rx="2" />
-                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            {/* ── Load-failure recovery ──
+                The retry affordance used to live inside the Subscription Status
+                card. That card is gone, but the failure it reported concerns the
+                PROFILE fetch (that fills this form), not billing — so recovery
+                stays, promoted to the top of the form. Without it, a failed
+                /auth/me would silently leave stale cached details on screen with
+                no way to try again. */}
+            {profileError && (
+              <div className="profile-load-alert" role="alert">
+                <span className="profile-load-alert__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="9" /><path d="M12 8v5M12 16.2v.1" />
                   </svg>
-                  Change Password
-                </h2>
-                <p className="profile-section-subtitle">Leave blank to keep your current password</p>
-
-                {/* Password fields used to live here. They now have their own
-                    card under "Account Security" below, where a credential
-                    change belongs — it is a distinct action with its own
-                    verification and it signs other devices out, neither of
-                    which should hang off a profile save. */}
-                <p className="profile-form-hint">
-                  To change your password, use the <a href="#account-security">Change Password</a> card under Account Security.
-                </p>
+                </span>
+                <span className="profile-load-alert__body">{profileError}</span>
+                <button
+                  type="button"
+                  className="profile-load-alert__retry"
+                  disabled={profileLoading}
+                  onClick={() => {
+                    profileLoadedRef.current = false;
+                    setProfileError('');
+                    setProfileLoading(true);
+                    getMyProfile()
+                      .then((fresh) => {
+                        // Resolve through the shared store so this retry
+                        // also refreshes every gated surface (expiry-aware).
+                        const live = applyFresh(fresh);
+                        setSubscription({
+                          active: live.active,
+                          plan: live.plan,
+                          updatedAt: fresh.subscriptionUpdatedAt || null,
+                          entitlements: live.entitlements,
+                        });
+                        setFormData(prev => ({
+                          ...prev,
+                          firstName: fresh.firstName || prev.firstName,
+                          lastName: fresh.lastName || prev.lastName,
+                          email: fresh.email || prev.email,
+                          gender: fresh.gender || prev.gender,
+                        }));
+                      })
+                      .catch((err) => handleProfileRefreshError(err))
+                      .finally(() => {
+                        profileLoadedRef.current = true;
+                        setProfileLoading(false);
+                      });
+                  }}
+                >
+                  {profileLoading ? 'Retrying…' : 'Retry'}
+                </button>
               </div>
             )}
 
+            {view === 'security' && (
             <div
-              className={`profile-section${secFlash ? ' profile-section--flash' : ''}`}
+              className={`profile-section profile-section--security${secFlash ? ' profile-section--flash' : ''}`}
               ref={securityRef}
               id="account-security"
             >
@@ -1210,8 +1209,10 @@ function ProfilePage() {
                 )}
               </div>
             </div>
+            )}
 
-            <div className="profile-section">
+            {view === 'accounts' && (
+            <div className="profile-section profile-section--accounts" id="profile-accounts">
               <h2 className="profile-section-title">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
@@ -1226,6 +1227,7 @@ function ProfilePage() {
               </p>
               <AccountSwitcher />
             </div>
+            )}
 
             {error && (
               <div className="profile-alert profile-alert-error">
@@ -1248,63 +1250,35 @@ function ProfilePage() {
               </div>
             )}
 
-            <div className="profile-actions">
-              {!isEditing ? (
-                <>
-                  <button
-                    type="button"
-                    className="profile-btn profile-btn-logout"
-                    onClick={handleLogoutClick}
-                  >
-                    Log Out
-                  </button>
-                  <button
-                    type="button"
-                    className="profile-btn profile-btn-primary"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setIsEditing(true);
-                    }}
-                  >
-                    Edit Profile
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    className="profile-btn profile-btn-secondary"
-                    onClick={handleCancel}
-                    disabled={loading}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="profile-btn profile-btn-primary"
-                    disabled={loading}
-                  >
-                    {loading ? 'Saving...' : 'Save Changes'}
-                  </button>
-                </>
-              )}
-            </div>
+            {/* Only the edit-state controls live here. "Edit Profile" and
+                "Log Out" were removed from this bar and now live in the
+                account menu in the navbar, which is reachable from every page
+                rather than only from here. Cancel/Save must stay inline: they
+                act on this <form>, and a form whose submit button lives in
+                another component is a keyboard trap and breaks the native
+                Enter-to-submit behaviour. */}
+            {isEditing && view === 'personal' && (
+              <div className="profile-actions">
+                <button
+                  type="button"
+                  className="profile-btn profile-btn-secondary"
+                  onClick={handleCancel}
+                  disabled={loading}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="profile-btn profile-btn-primary"
+                  disabled={loading}
+                >
+                  {loading ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            )}
           </form>
         </div>
       </div>
-
-      {/* Logout Confirmation Modal — vibrant shared dialog */}
-      {showLogoutConfirm && (
-        <ConfirmLogoutModal
-          title="Confirm Logout"
-          message="Are you sure you want to log out?"
-          confirmText="Log Out"
-          cancelText="Cancel"
-          onConfirm={confirmLogout}
-          onCancel={() => setShowLogoutConfirm(false)}
-        />
-      )}
 
       {show2FASetup && (
         <div className="profile-modal-overlay">
