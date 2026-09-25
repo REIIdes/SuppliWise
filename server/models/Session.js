@@ -50,6 +50,37 @@ const sessionSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    // ── Device attribution (display only) ──────────────────────────────
+    // Recorded at sign-in so "Signed-in devices" can name a device. NEVER
+    // used as an authorisation input: user-agent is attacker-controlled, so
+    // trusting it for identity would be a hole. These fields exist to help a
+    // person recognise their own sessions, nothing more.
+    deviceLabel: {
+      type: String,
+      default: '',
+      maxlength: 120,
+    },
+    platform: {
+      type: String,
+      default: '',
+      maxlength: 80,
+    },
+    ip: {
+      type: String,
+      default: '',
+      maxlength: 64,
+    },
+    location: {
+      type: String,
+      default: '',
+      maxlength: 120,
+    },
+    // Set when this session holds a "save my login" credential, i.e. this is
+    // a TRUSTED DEVICE the user can revoke individually.
+    trustedAt: {
+      type: Date,
+      default: null,
+    },
     // null = the session never expires on its own. Kept as a field so a
     // future policy (e.g. admin-only TTL) can opt in per session type.
     expiresAt: {

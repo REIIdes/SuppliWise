@@ -6,6 +6,7 @@ const Assessment = require('../models/Assessment');
 const IntakeRecord = require('../models/IntakeRecord');
 const DashboardMetrics = require('../models/DashboardMetrics');
 const { notExpiredFilter, expiryFromCreatedAt } = require('../utils/assessments');
+const { can } = require('../utils/plan');
 
 // Coerce any JSON value to a plain string for DB equality filters.
 // Objects (e.g. {"$ne": "x"}) would otherwise become NoSQL operators and
@@ -208,11 +209,19 @@ router.get('/', protect, async (req, res) => {
 
     // Priority assessments needing review (cap 3, own recommendations each).
     // These block new assessments until resolved and are surfaced on the dashboard.
-    const priorityDocs = await Assessment.find({ user: req.user._id, priority: 'Priority' })
-      .sort({ createdAt: -1 })
-      .limit(3)
-      .select('createdAt flagReasons flaggedAt aiResults.recommendations')
-      .lean();
+    //
+    // Gated on the CURRENT plan: Priority Assessment is a premium entitlement,
+    // so a user who downgraded keeps the flagged assessment (history badge, admin
+    // view) but is no longer paused — the banner and the "Paused" card must not
+    // be produced for them, or the dashboard keeps selling a premium lockout
+    // the API no longer enforces.
+    const priorityDocs = can(req.user, 'priorityAssessment')
+      ? await Assessment.find({ user: req.user._id, priority: 'Priority' })
+        .sort({ createdAt: -1 })
+        .limit(3)
+        .select('createdAt flagReasons flaggedAt aiResults.recommendations')
+        .lean()
+      : [];
     const priorityAssessments = (priorityDocs || []).map(doc => ({
       id: doc._id,
       createdAt: doc.createdAt,
@@ -392,10 +401,15 @@ router.post('/intake', protect, async (req, res) => {
 
       // Auto-lift: all of today's AI-suggested supplements taken on a
       // Priority assessment finishes its review (strict two-way gate below).
+      // Both directions are premium bookkeeping (the re-flag also notifies), so
+      // they follow the same entitlement as the pause itself: after a downgrade
+      // a stale Priority document must stay untouched instead of being resolved
+      // and then reinstated behind the user's back.
       let priorityLifted = false;
       let priorityReflagged = false;
+      const priorityEntitled = can(req.user, 'priorityAssessment');
       const completedNow = takenToday === totalToday && totalToday > 0;
-      if (completedNow && assessmentDoc && assessmentDoc.priority === 'Priority') {
+      if (priorityEntitled && completedNow && assessmentDoc && assessmentDoc.priority === 'Priority') {
         try {
           await Assessment.findByIdAndUpdate(record.assessment, {
             // Resolved by completion: Standard again, with the normal 5-year
@@ -430,7 +444,7 @@ router.post('/intake', protect, async (req, res) => {
         } catch (liftError) {
           console.error('[dashboard POST /intake] priority auto-lift failed:', liftError.message);
         }
-      } else if (!completedNow && assessmentDoc && assessmentDoc.priority === 'Standard' && assessmentDoc.resolvedReason === 'intake-complete') {
+      } else if (priorityEntitled && !completedNow && assessmentDoc && assessmentDoc.priority === 'Standard' && assessmentDoc.resolvedReason === 'intake-complete') {
         // Strict gate: undoing after an auto-lift breaks 100% completion,
         // so the restriction comes back. Admin-resolved flags are never touched.
         try {

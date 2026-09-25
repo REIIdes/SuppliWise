@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import ConfirmLogoutModal from '../Components/ConfirmLogoutModal/ConfirmLogoutModal';
 import AccountSwitcher from '../Components/AccountSwitcher/AccountSwitcher';
 import { BASE_URL, getMyProfile, getNotifications, markNotificationRead, isSecurityNotification, signOutCurrentAccount, getToken, getStoredUser, setStoredUser } from '../api';
+import ProfileSecurityControls from '../Components/ProfileSecurityControls/ProfileSecurityControls';
 import { useSubscription, SUBSCRIPTION_EVENT } from '../hooks/useSubscription';
 import { PLAN_LABELS, PLAN_RANK, FEATURES, planFromUser } from '../utils/plan';
 import './ProfilePage.css';
@@ -76,6 +77,31 @@ function ProfilePage() {
   const [showDisable2FAConfirm, setShowDisable2FAConfirm] = useState(false);
   const [show2FASetup, setShow2FASetup] = useState(false);
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(() => storedUser.twoFactorEnabled === true);
+  // WHICH second factor, and WHEN the password last changed — both come from
+  // /auth/me and drive the Account Security cards below.
+  const [twoFactorMethod, setTwoFactorMethod] = useState(() => storedUser.twoFactorMethod || null);
+  const [passwordChangedAt, setPasswordChangedAt] = useState(() => storedUser.passwordChangedAt || null);
+
+  // Re-read the security facts after any of the cards changes one. Deliberately
+  // a fresh /me rather than trusting the local response, so the card can never
+  // show a value the server disagrees with.
+  const refreshSecurityFacts = useCallback(async () => {
+    try {
+      const fresh = await getMyProfile();
+      setTwoFactorEnabled(fresh.twoFactorEnabled === true);
+      setTwoFactorMethod(fresh.twoFactorEnabled ? (fresh.twoFactorMethod || 'authenticator') : null);
+      setPasswordChangedAt(fresh.passwordChangedAt || null);
+      try {
+        const current = getStoredUser() || {};
+        setStoredUser({
+          ...current,
+          twoFactorEnabled: fresh.twoFactorEnabled,
+          twoFactorMethod: fresh.twoFactorMethod ?? null,
+          passwordChangedAt: fresh.passwordChangedAt ?? null,
+        });
+      } catch { /* cache write best-effort */ }
+    } catch { /* keep the last known values rather than blanking the card */ }
+  }, []);
   const [twoFactorQrCode, setTwoFactorQrCode] = useState('');
   const [twoFactorCode, setTwoFactorCode] = useState('');
   const [otp, setOtp] = useState('');
@@ -89,9 +115,7 @@ function ProfilePage() {
   const [resendTimer, setResendTimer] = useState(null);
   const [otpTimeLeft, setOtpTimeLeft] = useState(600); // 10 minutes in seconds
   const [otpExpiryTimer, setOtpExpiryTimer] = useState(null);
-  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
-  const [showNewPassword, setShowNewPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  // (password show/hide toggles live with the Change Password card now)
 
   // Recent security activity (lockouts, 2FA changes, password changes…)
   const [securityItems, setSecurityItems] = useState([]);
@@ -144,9 +168,6 @@ function ProfilePage() {
     email: storedUser.email || '',
     dateOfBirth: storedUser.dateOfBirth ? new Date(storedUser.dateOfBirth).toISOString().split('T')[0] : '',
     gender: storedUser.gender || '',
-    currentPassword: '',
-    newPassword: '',
-    confirmPassword: '',
   });
 
   useEffect(() => {
@@ -177,6 +198,8 @@ function ProfilePage() {
             gender: fresh.gender || prev.gender,
           }));
           setTwoFactorEnabled(fresh.twoFactorEnabled === true);
+          setTwoFactorMethod(fresh.twoFactorEnabled ? (fresh.twoFactorMethod || 'authenticator') : null);
+          setPasswordChangedAt(fresh.passwordChangedAt || null);
           const live = applyFresh(fresh);
           setSubscription({
             active: live.active,
@@ -196,6 +219,8 @@ function ProfilePage() {
               dateOfBirth: fresh.dateOfBirth,
               gender: fresh.gender,
               twoFactorEnabled: fresh.twoFactorEnabled,
+              twoFactorMethod: fresh.twoFactorEnabled ? (fresh.twoFactorMethod || 'authenticator') : null,
+              passwordChangedAt: fresh.passwordChangedAt || null,
               subscriptionActive: fresh.subscriptionActive,
               subscriptionPlan: fresh.subscriptionPlan,
               subscriptionUpdatedAt: fresh.subscriptionUpdatedAt,
@@ -328,10 +353,11 @@ function ProfilePage() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Invalid authenticator code.');
       setTwoFactorEnabled(true);
+      setTwoFactorMethod('authenticator');
       setShow2FASetup(false);
       setTwoFactorCode('');
       setSuccess('Google Authenticator is now enabled.');
-      setStoredUser({ ...(getStoredUser() || {}), twoFactorEnabled: true });
+      setStoredUser({ ...(getStoredUser() || {}), twoFactorEnabled: true, twoFactorMethod: 'authenticator' });
     } catch (err) {
       setError(err.message || 'Unable to verify the authenticator code.');
     } finally {
@@ -339,8 +365,19 @@ function ProfilePage() {
     }
   };
 
+  // Which proof the server wants depends on the active method: an authenticator
+  // account has a TOTP to present, an email account has to confirm with the
+  // password instead (there is no code held on the device).
+  const disableNeedsPassword = twoFactorEnabled && twoFactorMethod === 'email';
+  const [disablePassword, setDisablePassword] = useState('');
+
   const handleDisable2FA = async () => {
-    if (!/^\d{6}$/.test(twoFactorCode)) {
+    if (disableNeedsPassword) {
+      if (!disablePassword) {
+        setError('Enter your current password to turn off two-factor authentication.');
+        return;
+      }
+    } else if (!/^\d{6}$/.test(twoFactorCode)) {
       setError('Enter the current 6-digit authenticator code to disable 2FA.');
       return;
     }
@@ -350,17 +387,19 @@ function ProfilePage() {
       const response = await fetch(`${BASE_URL}/auth/disable-2fa`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ otp: twoFactorCode }),
+        body: JSON.stringify(disableNeedsPassword ? { currentPassword: disablePassword } : { otp: twoFactorCode }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.message || 'Unable to disable Google Authenticator.');
+      if (!response.ok) throw new Error(data.message || 'Unable to disable two-factor authentication.');
       setTwoFactorEnabled(false);
+      setTwoFactorMethod(null);
       setShowDisable2FAConfirm(false);
       setTwoFactorCode('');
-      setStoredUser({ ...(getStoredUser() || {}), twoFactorEnabled: false });
-      setSuccess('Google Authenticator has been disabled. Email OTP will be used at login.');
+      setDisablePassword('');
+      setStoredUser({ ...(getStoredUser() || {}), twoFactorEnabled: false, twoFactorMethod: null });
+      setSuccess('Two-factor authentication has been turned off.');
     } catch (err) {
-      setError(err.message || 'Unable to disable Google Authenticator.');
+      setError(err.message || 'Unable to disable two-factor authentication.');
     } finally {
       setOtpLoading(false);
     }
@@ -635,36 +674,11 @@ function ProfilePage() {
         }
       }
 
-      // Add password fields only if user wants to change password
-      if (formData.newPassword) {
-        if (!formData.currentPassword) {
-          setError('Please enter your current password to change it.');
-          setLoading(false);
-          return;
-        }
-        if (formData.newPassword !== formData.confirmPassword) {
-          setError('Passwords do not match.');
-          setLoading(false);
-          return;
-        }
-        if (formData.newPassword.length < 8) {
-          setError('New password must be at least 8 characters.');
-          setLoading(false);
-          return;
-        }
-        if (!/[A-Z]/.test(formData.newPassword)) {
-          setError('New password must contain at least one uppercase letter.');
-          setLoading(false);
-          return;
-        }
-        if (!/[0-9]/.test(formData.newPassword)) {
-          setError('New password must contain at least one number.');
-          setLoading(false);
-          return;
-        }
-        updateData.currentPassword = formData.currentPassword;
-        updateData.newPassword = formData.newPassword;
-      }
+      // Password is deliberately NOT sent from here. It has its own form in
+      // Account Security (POST /auth/change-password) because a credential
+      // change is a different action with different rules: it verifies the
+      // current password, signs out other devices, and must not be reachable
+      // as a side effect of saving a profile form.
 
       const response = await fetch(`${BASE_URL}/auth/profile`, {
         method: 'PUT',
@@ -724,14 +738,6 @@ function ProfilePage() {
       setProfilePicture(data.profilePicture || '');
       setBannerPicture(data.bannerPicture || '');
 
-      // Clear password fields
-      setFormData(prev => ({
-        ...prev,
-        currentPassword: '',
-        newPassword: '',
-        confirmPassword: '',
-      }));
-
       setPendingEmailChange('');
       setSuccess('Profile updated successfully! Changes will apply to future assessments.');
       setIsEditing(false);
@@ -757,9 +763,6 @@ function ProfilePage() {
         email: user.email || '',
         dateOfBirth: user.dateOfBirth ? new Date(user.dateOfBirth).toISOString().split('T')[0] : '',
         gender: user.gender || '',
-        currentPassword: '',
-        newPassword: '',
-        confirmPassword: '',
       });
       setProfilePicturePreview(user.profilePicture || '');
     }
@@ -1124,106 +1127,14 @@ function ProfilePage() {
                 </h2>
                 <p className="profile-section-subtitle">Leave blank to keep your current password</p>
 
-                <div className="profile-form-group">
-                  <label htmlFor="currentPassword">Current Password</label>
-                  <div className="profile-password-input-wrap">
-                    <input
-                      type={showCurrentPassword ? 'text' : 'password'}
-                      id="currentPassword"
-                      name="currentPassword"
-                      value={formData.currentPassword}
-                      onChange={handleChange}
-                      placeholder="Required to change password"
-                    />
-                    <button 
-                      type="button" 
-                      className="profile-eye-btn" 
-                      onClick={() => setShowCurrentPassword(!showCurrentPassword)}
-                      aria-label="Toggle current password visibility"
-                    >
-                      {showCurrentPassword ? (
-                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
-                          <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
-                          <line x1="1" y1="1" x2="23" y2="23"/>
-                        </svg>
-                      ) : (
-                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                          <circle cx="12" cy="12" r="3"/>
-                        </svg>
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="profile-form-row">
-                  <div className="profile-form-group">
-                    <label htmlFor="newPassword">New Password</label>
-                    <div className="profile-password-input-wrap">
-                      <input
-                        type={showNewPassword ? 'text' : 'password'}
-                        id="newPassword"
-                        name="newPassword"
-                        value={formData.newPassword}
-                        onChange={handleChange}
-                        placeholder="At least 8 characters"
-                      />
-                      <button 
-                        type="button" 
-                        className="profile-eye-btn" 
-                        onClick={() => setShowNewPassword(!showNewPassword)}
-                        aria-label="Toggle new password visibility"
-                      >
-                        {showNewPassword ? (
-                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
-                            <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
-                            <line x1="1" y1="1" x2="23" y2="23"/>
-                          </svg>
-                        ) : (
-                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                            <circle cx="12" cy="12" r="3"/>
-                          </svg>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="profile-form-group">
-                    <label htmlFor="confirmPassword">Confirm New Password</label>
-                    <div className="profile-password-input-wrap">
-                      <input
-                        type={showConfirmPassword ? 'text' : 'password'}
-                        id="confirmPassword"
-                        name="confirmPassword"
-                        value={formData.confirmPassword}
-                        onChange={handleChange}
-                        placeholder="Re-enter new password"
-                      />
-                      <button 
-                        type="button" 
-                        className="profile-eye-btn" 
-                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                        aria-label="Toggle confirm password visibility"
-                      >
-                        {showConfirmPassword ? (
-                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
-                            <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
-                            <line x1="1" y1="1" x2="23" y2="23"/>
-                          </svg>
-                        ) : (
-                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                            <circle cx="12" cy="12" r="3"/>
-                          </svg>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                {/* Password fields used to live here. They now have their own
+                    card under "Account Security" below, where a credential
+                    change belongs — it is a distinct action with its own
+                    verification and it signs other devices out, neither of
+                    which should hang off a profile save. */}
+                <p className="profile-form-hint">
+                  To change your password, use the <a href="#account-security">Change Password</a> card under Account Security.
+                </p>
               </div>
             )}
 
@@ -1239,17 +1150,19 @@ function ProfilePage() {
                 Account Security
               </h2>
               <p className="profile-section-subtitle">
-                {twoFactorEnabled ? 'Google Authenticator is active. It is the only second factor used at login.' : 'Email verification codes are used at login.'}
+                {twoFactorEnabled
+                  ? `Two-factor authentication is on — you're signing in with ${twoFactorMethod === 'email' ? 'a code emailed to you' : 'your authenticator app'}.`
+                  : 'Add a second step at sign-in so a stolen password alone is not enough.'}
               </p>
-              {!twoFactorEnabled ? (
-                <button type="button" className="profile-btn profile-btn-primary" onClick={handleSetup2FA} disabled={loading}>
-                  {loading ? 'Preparing...' : 'Enable Google Authenticator'}
-                </button>
-              ) : (
-                <button type="button" className="profile-btn profile-btn-secondary" onClick={() => { setTwoFactorCode(''); setError(''); setShowDisable2FAConfirm(true); }}>
-                  Turn Off Google Authenticator
-                </button>
-              )}
+
+              <ProfileSecurityControls
+                twoFactorEnabled={twoFactorEnabled}
+                twoFactorMethod={twoFactorMethod}
+                passwordChangedAt={passwordChangedAt}
+                onSecurityChange={refreshSecurityFacts}
+                onStartAuthenticatorSetup={handleSetup2FA}
+                onDisableTwoFactor={() => { setTwoFactorCode(''); setError(''); setShowDisable2FAConfirm(true); }}
+              />
 
               {/* Recent security activity — lockouts, 2FA and password events */}
               <div className="security-activity">
@@ -1411,12 +1324,35 @@ function ProfilePage() {
       {showDisable2FAConfirm && (
         <div className="profile-modal-overlay">
           <div className="profile-modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Turn Off Google Authenticator?</h2>
-            <p>Enter your current authenticator code to confirm. Email OTP will be restored after removal.</p>
-            <input className="profile-otp-input" inputMode="numeric" maxLength="6" placeholder="Enter 6-digit code" value={twoFactorCode} onChange={(e) => setTwoFactorCode(e.target.value.replace(/\D/g, '').slice(0, 6))} />
+            <h2>Turn Off Two-Factor Authentication?</h2>
+            {disableNeedsPassword ? (
+              <>
+                <p>You're using email codes as your second factor. Confirm with your current password to remove it.</p>
+                <input
+                  className="profile-otp-input"
+                  type="password"
+                  autoComplete="current-password"
+                  placeholder="Enter your current password"
+                  value={disablePassword}
+                  onChange={(e) => { setDisablePassword(e.target.value); setError(''); }}
+                />
+              </>
+            ) : (
+              <>
+                <p>Enter your current authenticator code to confirm. Email verification codes will be used at sign-in after removal.</p>
+                <input className="profile-otp-input" inputMode="numeric" maxLength="6" placeholder="Enter 6-digit code" value={twoFactorCode} onChange={(e) => setTwoFactorCode(e.target.value.replace(/\D/g, '').slice(0, 6))} />
+              </>
+            )}
             <div className="profile-modal-actions">
               <button type="button" className="profile-modal-btn profile-modal-btn-secondary" onClick={() => setShowDisable2FAConfirm(false)} disabled={otpLoading}>Cancel</button>
-              <button type="button" className="profile-modal-btn profile-modal-btn-primary" onClick={handleDisable2FA} disabled={otpLoading || twoFactorCode.length !== 6}>{otpLoading ? 'Verifying...' : 'Confirm Removal'}</button>
+              <button
+                type="button"
+                className="profile-modal-btn profile-modal-btn-primary"
+                onClick={handleDisable2FA}
+                disabled={otpLoading || (disableNeedsPassword ? !disablePassword : twoFactorCode.length !== 6)}
+              >
+                {otpLoading ? 'Verifying...' : 'Confirm Removal'}
+              </button>
             </div>
           </div>
         </div>

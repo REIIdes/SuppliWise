@@ -194,7 +194,9 @@ const SECURITY_AUDIT = {
         'so a few concurrent oversized bodies could stall all traffic while still passing every rate limit. ' +
         '10 MB is now scoped to the two base64-picture routes (PUT /api/auth/profile, PATCH /api/admin/profile); ' +
         'everything else is held to 1 MB, and utils/floodGuard caps the JSON buffered in flight across all ' +
-        'concurrent requests. Residual: those two upload routes still parse up to 10 MB, by design.',
+        'concurrent requests. Oversized bodies are additionally refused from Content-Length ahead of body-parser, ' +
+        "whose own 413 path drains the entire upload before responding (so the price of refusing would otherwise " +
+        'be reading all of it). Residual: those two upload routes still parse up to 10 MB, by design.',
     },
     {
       id: 'I1',

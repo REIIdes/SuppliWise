@@ -15,6 +15,7 @@ const dashboardRoutes = require('./routes/dashboard');
 const insightsRoutes = require('./routes/insights');
 const adminRoutes = require('./routes/admin');
 const notificationRoutes = require('./routes/notifications');
+const securityRoutes = require('./routes/security');
 const subscriptionRoutes = require('./routes/subscription');
 const web3Routes = require('./routes/web3');
 const AdminAccount = require('./models/AdminAccount');
@@ -197,6 +198,11 @@ app.use('/api/supplement-detail', aiLimiter);
 app.use('/api/dashboard', userLimiter);
 app.use('/api/insights', userLimiter);
 app.use('/api/notifications', userLimiter);
+// Account-security dashboard. Its own limiter inside the router is stricter
+// (these are credential-adjacent endpoints), and it is deliberately NOT part
+// of the escalating auth bucket: reviewing your own security page must never
+// count toward a lockout.
+app.use('/api/security', userLimiter);
 // Blockchain layer (wallets, supply chain, marketplace, DAO, rewards, data
 // sovereignty). Same non-escalating user bucket: normal feature traffic must
 // never climb the brute-force lockout ladder.
@@ -252,6 +258,7 @@ app.use('/api/supplement-detail', supplementDetailRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/insights', insightsRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/security', securityRoutes);
 app.use('/api/web3', web3Routes);
 app.use('/api/admin', adminRoutes);
 

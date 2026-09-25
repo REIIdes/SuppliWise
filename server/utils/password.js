@@ -68,6 +68,24 @@ async function upgradeHashIfLegacy(plaintext, hash) {
   return hashPassword(plaintext);
 }
 
+// Burn roughly the same CPU a real verification would, without needing a user.
+//
+// Used on the "no such account" branch of sign-in so that answering takes about
+// as long as a wrong-password answer. Without it, an unknown email returns in
+// microseconds while a known one takes an argon2id verify (~tens of ms), and
+// the timing gap alone confirms whether an account exists.
+//
+// Verified against a throwaway hash, so the cost tracks the real algorithm
+// rather than a hard-coded sleep that would drift if the parameters change.
+const BURN_HASH = '$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHR2YWx1ZQ$0Q1wJ8S0Y7bYl6m0Zx3kQ8x1Jq0k4h6l0mQ';
+async function burnPasswordCompare() {
+  try {
+    await verifyPassword('timing-equaliser', BURN_HASH);
+  } catch {
+    // A failed burn only weakens timing, never correctness — never throw here.
+  }
+}
+
 module.exports = {
   ARGON2_OPTS,
   isArgon2id,
@@ -76,4 +94,5 @@ module.exports = {
   hashPassword,
   verifyPassword,
   upgradeHashIfLegacy,
+  burnPasswordCompare,
 };

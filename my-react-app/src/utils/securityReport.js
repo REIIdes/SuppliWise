@@ -262,8 +262,13 @@ export async function downloadSecurityReport({ security = {}, overview = {}, req
     renderAutoTable(doc, {
       margin: tableMargin,
       ...options,
-      didDrawPage: (data) => {
-        if (data.pageNumber > 1) drawContinuationHeader(data.pageNumber);
+      didDrawPage: () => {
+        // autoTable numbers pages of THIS table (1, 2, 3 ...), not document
+        // pages. setPage() with that index moved the cursor back to a page the
+        // table had already left, so the next section was drawn on top of the
+        // rows. The document's current page is the page actually being drawn.
+        const pageNumber = doc.getCurrentPageInfo().pageNumber;
+        if (pageNumber > 1) drawContinuationHeader(pageNumber);
       },
     });
     const rawFinalY = doc.lastAutoTable?.finalY;
@@ -391,11 +396,13 @@ export async function downloadSecurityReport({ security = {}, overview = {}, req
 
   // Audit record -----------------------------------------------------------
   if (audit) {
-    y = ensureSpace(20);
-    y = drawSectionHeading(doc, 'Security audit record', y, C.violet);
     const scope = reportText(audit.scope, 'Scope details were not supplied.');
     const scopeLines = doc.splitTextToSize(scope, L.contentWidth - 18);
     const scopeHeight = Math.max(19, 12 + scopeLines.length * 4.5);
+    // Reserve the heading and the scope card together, otherwise a table that
+    // ends near the bottom leaves the heading alone at the foot of a page.
+    y = ensureSpace(20 + scopeHeight);
+    y = drawSectionHeading(doc, 'Security audit record', y, C.violet);
     y = ensureSpace(scopeHeight);
     doc.setFillColor(...C.violetLight);
     // Must be spread: passing the array itself makes jsPDF compute

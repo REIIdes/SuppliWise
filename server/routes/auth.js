@@ -15,13 +15,17 @@ const {
   issueUserSession,
   verifyUserSession,
   attachRememberToken,
+  markSessionTrusted,
   mintFromRememberToken,
   revokeUserSession,
   revokeAllUserSessions,
+  revokeOtherUserSessions,
   SESSION_INVALID,
   SESSION_ENDED_MESSAGE,
 } = require('../utils/sessions');
 const { describeSubscription } = require('../utils/entitlements');
+const SecurityEvent = require('../models/SecurityEvent');
+const { describeDevice } = require('../utils/device');
 const { sendOtpEmail } = require('../utils/email');
 const { normalizeIp, ipKind, resolveLoginLocation } = require('../utils/geo');
 const { verifyTotpOnce } = require('../utils/totp');
@@ -32,18 +36,10 @@ const { newChallenge, verifyCaptcha } = require('../utils/captcha');
 router.get('/captcha', (req, res) => {
   res.json(newChallenge());
 });
-const { recordOffense, recordAccountFailure, lockRemainingMs, clearOffenses, clearAccountState, accountKey, limitReachedHandler, reportAccountLockout, deviceFingerprint, noteIpAccountFailure } = require('../utils/lockout');
+const { recordOffense, recordAccountFailure, lockRemainingMs, clearOffenses, clearAccountState, accountKey, limitReachedHandler, reportAccountLockout, deviceFingerprint, noteIpAccountFailure, lockMeta } = require('../utils/lockout');
 
-// Evidence bundle attached to lockout entries (IP + device fingerprint +
-// UA) so rotating IPs can't dodge an account lock unnoticed.
-function lockMeta(req, ip) {
-  const cleanIp = ip || (req && req.ip) || '';
-  return {
-    ip: cleanIp,
-    fp: deviceFingerprint(req, cleanIp),
-    agent: String((req && req.get && req.get('user-agent')) || '').slice(0, 120),
-  };
-}
+// lockMeta (the evidence bundle attached to lockout entries) now lives in
+// utils/lockout.js so every caller builds the same shape.
 
 // Stricter brute-force guard for the most sensitive auth steps (admin login,
 // 2FA and OTP verification). Layered on top of the global /api/auth limiter;
@@ -75,11 +71,15 @@ router.use(
   sensitiveLimiter
 );
 
-// Instant, offline location label for a login: explicit client header wins,
-// then loopback/private IPs get a local label; anything else stays unknown
-// until the background resolver fills in the real geo location.
+// Instant, offline location label for a login.
+//
+// The client-supplied `x-login-location` header is DELIBERATELY IGNORED. It
+// used to win outright, which meant the "location" stored against a sign-in —
+// and later shown to the user as evidence about their own account — was
+// whatever the caller typed. That is attacker-controlled text presented as if
+// the server had determined it. Only server-derivable facts are used now, and
+// the background resolver fills in the real geo location for public IPs.
 function describeIpLocation(headerValue, rawIp) {
-  if (headerValue && headerValue !== 'Unknown location') return headerValue;
   const ip = normalizeIp(rawIp);
   const kind = ipKind(ip);
   if (kind === 'loopback') return 'This device';
@@ -179,16 +179,9 @@ function adminToken(account) {
   return generateToken(String(account._id), { role: 'admin', alias: account.alias, adminId: String(account._id) }, { expiresIn: '5m' });
 }
 
-// Email regex — requires a real TLD (2+ letters), rejects .con, .cmo, etc.
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/;
-const SUSPICIOUS_TLDS = ['.con', '.cmo', '.ocm', '.nte', '.ogr', '.cpm'];
-
-function isValidEmail(email) {
-  if (!EMAIL_REGEX.test(email)) return false;
-  const lower = email.toLowerCase();
-  if (SUSPICIOUS_TLDS.some(tld => lower.endsWith(tld))) return false;
-  return true;
-}
+// Email validation is shared with /api/security (recovery email) so both
+// surfaces accept and reject exactly the same addresses.
+const { isValidEmail } = require('../utils/emailValidation');
 
 // @route   POST /api/auth/register
 // @desc    Register a new user
@@ -317,7 +310,9 @@ router.post('/register', async (req, res) => {
       // client never bootstraps a stale plan from raw fields alone.
       subscription: describeSubscription(user),
       // New account → first session becomes the account's active session.
-      token: await issueUserSession(user._id),
+      token: await issueUserSession(user._id, describeDevice({
+        userAgent: req.get('user-agent'), ip: req.ip,
+      })),
     });
   } catch (error) {
     console.error('[register]', error.message);
@@ -364,7 +359,26 @@ router.post('/login', async (req, res) => {
     }
 
     const user = await User.findOne({ email: trimmedEmail });
+
+    // Enumeration-safe rejection. An unknown address and a wrong password must
+    // be indistinguishable in BOTH message and timing:
+    //
+    //   • Same 401, same body. (Already true.)
+    //   • Same lockout behaviour. This used to record a failure ONLY when the
+    //     account existed, so a real account eventually answered 429 while a
+    //     nonexistent one stayed 401 forever — which confirms the account
+    //     exists to anyone patient enough to send 3 bad passwords.
+    //   • Comparable work. The unknown-user path hashes a throwaway password so
+    //     it costs roughly what matchPassword costs, instead of returning in
+    //     microseconds and leaking existence through response time.
     if (!user) {
+      recordAccountFailure(emailLockKey, lockMeta(req, req.ip));
+      noteIpAccountFailure(req.ip, trimmedEmail);
+      const { burnPasswordCompare } = require('../utils/password');
+      await burnPasswordCompare();
+      // Recorded against the submitted address where possible, but with no
+      // account to own it we cannot attach a user id — so this stays a lockout
+      // signal only, never a row in somebody's history.
       return res.status(401).json({ message: 'Invalid email or password.' });
     }
 
@@ -372,6 +386,12 @@ router.post('/login', async (req, res) => {
     if (!isMatch) {
       recordAccountFailure(emailLockKey, lockMeta(req, req.ip));
       noteIpAccountFailure(req.ip, trimmedEmail);
+      await SecurityEvent.write({
+        user: user._id, type: 'login-failure', success: false,
+        ip: req.ip, userAgent: req.get('user-agent'),
+        location: user.lastLoginLocation || '',
+        reason: 'Incorrect password',
+      });
       return res.status(401).json({ message: 'Invalid email or password.' });
     }
 
@@ -397,18 +417,48 @@ router.post('/login', async (req, res) => {
     user.lastLoginAt = new Date();
     user.lastLoginIp = loginIp;
     user.lastLoginUserAgent = String(req.get('user-agent') || '').slice(0, 500);
-    // Instant local answer first (header > loopback/private > Unknown);
-    // public IPs resolve in the background without slowing login.
-    user.lastLoginLocation = describeIpLocation(
-      String(req.get('x-login-location') || '').slice(0, 120),
-      loginIp
-    );
+    // Server-derived only. The client's x-login-location header is ignored —
+    // it is caller-controlled text and this value is shown back to the user as
+    // where they signed in from.
+    user.lastLoginLocation = describeIpLocation('', loginIp);
     if (typeof user.save === 'function') await user.save();
-    if (previousUserAgent && previousUserAgent !== user.lastLoginUserAgent) {
+    const isNewDevice = !!(previousUserAgent && previousUserAgent !== user.lastLoginUserAgent);
+    if (isNewDevice) {
       AdminEvent.create({ type: 'new-device-login', title: 'New device login', detail: `${user.email} signed in from ${user.lastLoginLocation}.`, user: user._id }).catch(() => {});
     }
+    // Neutral wording on purpose: an unfamiliar device is worth a look, not
+    // proof of an attack.
+    await SecurityEvent.write({
+      user: user._id,
+      type: isNewDevice ? 'unrecognized-login' : 'login-success',
+      success: true,
+      ip: loginIp,
+      userAgent: user.lastLoginUserAgent,
+      location: user.lastLoginLocation,
+      reason: isNewDevice ? 'Signed in from a device not seen before' : 'Password accepted',
+    });
+    if (isNewDevice) {
+      try {
+        const UserNotification = require('../models/UserNotification');
+        await UserNotification.create({
+          user: user._id, type: 'info', title: 'New sign-in to your account',
+          detail: `Your account was signed in from a device we had not seen before (${user.lastLoginLocation || 'location unknown'}). If this wasn't you, change your password and sign out other devices.`,
+        }).catch(() => {});
+        if (process.env.EMAIL_USER && process.env.EMAIL_PASSWORD) {
+          const { sendStatusEmail } = require('../utils/email');
+          await sendStatusEmail(user.email, 'new-device', {}).catch(() => {});
+        }
+      } catch { /* best-effort */ }
+    }
 
-    if (user.twoFactorEnabled) {
+    // Which second factor this account uses. Rows written before the field
+    // existed have no value, and the fallback is deliberately 'authenticator':
+    // an account that already had 2FA on was using an authenticator app, and
+    // defaulting them to email here would silently downgrade their login.
+    const twoFactorMethod = user.twoFactorMethod || 'authenticator';
+    const usesAuthenticator = user.twoFactorEnabled === true && twoFactorMethod === 'authenticator';
+
+    if (usesAuthenticator) {
       // Kick off background geo-resolution (never blocks the response)
       resolveLoginLocation(user._id, loginIp, user.lastLoginLocation);
       return res.json({
@@ -438,6 +488,9 @@ router.post('/login', async (req, res) => {
       message: 'Verification code sent to your email successfully',
       requiresOtp: true,
       userId: user._id,
+      // Lets the client label the step honestly: "your second factor" when the
+      // user chose email as their method, plain email verification otherwise.
+      twoFactorMethod: user.twoFactorEnabled === true ? 'email' : null,
     });
   } catch (error) {
     console.error('[login]', error.message);
@@ -630,7 +683,10 @@ router.post('/verify-login-otp', async (req, res) => {
     // current session and revokes the previous one — in ANY other tab,
     // browser or device (the "last session gets logged out" rule). Other
     // accounts are untouched.
-    const token = await issueUserSession(user._id);
+    const token = await issueUserSession(user._id, describeDevice({
+      userAgent: req.get('user-agent'), ip: req.ip,
+      location: user.lastLoginLocation || '',
+    }));
 
     // OPT-IN "save my login": attach a remember credential to THIS session so
     // this browser can re-enter (and switch back) without retyping the
@@ -639,6 +695,22 @@ router.post('/verify-login-otp', async (req, res) => {
     if (remember === true || remember === 'true') {
       try { rememberToken = await attachRememberToken(token); } catch { rememberToken = ''; }
     }
+    if (rememberToken) {
+      // Marks the device as trusted in its own right so the security page can
+      // list it and the user can revoke it. The credential hash stays the
+      // trust anchor; trustedAt is only a timestamp for display.
+      await markSessionTrusted(token).catch(() => {});
+    }
+
+    await SecurityEvent.write({
+      user: user._id,
+      type: user.twoFactorEnabled === true ? 'mfa-success' : 'login-success',
+      success: true,
+      ip: req.ip,
+      userAgent: req.get('user-agent'),
+      location: user.lastLoginLocation || '',
+      reason: user.twoFactorEnabled === true ? 'Signed in with an emailed code' : 'Password accepted',
+    });
 
     // Return user data and token (no expiry — revocation is session-based)
     res.json({
@@ -744,6 +816,9 @@ router.post('/verify-2fa', protect, async (req, res) => {
     const verified = verifyTotpOnce(user.twoFactorSecret, req.body.otp);
     if (!verified) return res.status(401).json({ message: 'Invalid verification code.' });
     user.twoFactorEnabled = true;
+    // Verifying a TOTP IS choosing the authenticator method — record it, so
+    // the UI and the login branch agree on which factor this account uses.
+    user.twoFactorMethod = 'authenticator';
     await user.save();
     // Security trail: enabling 2FA shows up in Recent security activity
     try {
@@ -780,19 +855,35 @@ router.post('/login-2fa', async (req, res) => {
     const verified = verifyTotpOnce(user.twoFactorSecret, req.body.otp);
     if (!verified) {
       recordAccountFailure(tfaLockKey, lockMeta(req, req.ip));
+      await SecurityEvent.write({
+        user: user._id, type: 'mfa-failure', success: false,
+        ip: req.ip, userAgent: req.get('user-agent'),
+        location: user.lastLoginLocation || '',
+        reason: 'Authenticator code rejected at sign-in',
+      });
       return res.status(401).json({ message: 'Invalid Google Authenticator code.' });
     }
     clearAccountState(tfaLockKey);
     // One active session per account (same atomic rotation as /verify-login-otp):
     // this sign-in displaces the account's previous session only — other
     // accounts' sessions are never affected.
-    const token = await issueUserSession(user._id);
+    const token = await issueUserSession(user._id, describeDevice({
+      userAgent: req.get('user-agent'), ip: req.ip,
+      location: user.lastLoginLocation || '',
+    }));
     // OPT-IN "save my login" (same contract as /verify-login-otp): best-effort
     // attach — a failed attach never fails the sign-in itself.
     let rememberToken = '';
     if (req.body.remember === true || req.body.remember === 'true') {
       try { rememberToken = await attachRememberToken(token); } catch { rememberToken = ''; }
     }
+    if (rememberToken) await markSessionTrusted(token).catch(() => {});
+    await SecurityEvent.write({
+      user: user._id, type: 'mfa-success', success: true,
+      ip: req.ip, userAgent: req.get('user-agent'),
+      location: user.lastLoginLocation || '',
+      reason: 'Signed in with your authenticator app',
+    });
     res.json({ _id: user._id, firstName: user.firstName, lastName: user.lastName, name: user.fullName, email: user.email, dateOfBirth: user.dateOfBirth, age: user.age, gender: user.gender, profilePicture: user.profilePicture, bannerPicture: user.bannerPicture, twoFactorEnabled: true, subscriptionActive: user.subscriptionActive, subscriptionPlan: user.subscriptionPlan, subscription: describeSubscription(user), token, ...(rememberToken ? { rememberToken } : {}) });
   } catch (error) {
     res.status(401).json({ message: 'Unable to verify the 2FA code.' });
@@ -803,10 +894,28 @@ router.post('/disable-2fa', protect, async (req, res) => {
   try {
     if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
     const user = await User.findById(req.user._id).select('+twoFactorSecret');
-    const verified = user && user.twoFactorEnabled && verifyTotpOnce(user.twoFactorSecret, req.body.otp);
-    if (!verified) return res.status(401).json({ message: 'Invalid Google Authenticator code.' });
+    if (!user || !user.twoFactorEnabled) {
+      return res.status(400).json({ message: 'Two-factor authentication is not currently enabled.' });
+    }
+
+    // The proof required depends on WHICH factor is being turned off.
+    //   authenticator — a live TOTP code, because that secret is what an
+    //                   attacker who stole the session would be reaching for.
+    //   email        — there is no TOTP to present, so demand the account
+    //                   password instead. Without this, holding a stolen token
+    //                   would be enough to silently drop the second factor.
+    const method = user.twoFactorMethod || 'authenticator';
+    if (method === 'authenticator') {
+      const verified = verifyTotpOnce(user.twoFactorSecret, req.body.otp);
+      if (!verified) return res.status(401).json({ message: 'Invalid Google Authenticator code.' });
+    } else {
+      const ok = await user.matchPassword(str(req.body.currentPassword));
+      if (!ok) return res.status(401).json({ message: 'Enter your current password to turn off two-factor authentication.' });
+    }
+
     user.twoFactorEnabled = false;
     user.twoFactorSecret = '';
+    user.twoFactorMethod = 'authenticator'; // reset so a later re-enable defaults to the strong factor
     await user.save();
     // Security trail: disabling 2FA shows up in Recent security activity
     try {
@@ -815,10 +924,12 @@ router.post('/disable-2fa', protect, async (req, res) => {
         user: user._id,
         type: 'info',
         title: 'Two-factor authentication disabled',
-        detail: 'Google Authenticator was turned off. If this wasn\'t you, re-enable it and change your password immediately.',
+        detail: method === 'email'
+          ? 'Email sign-in codes were turned off. If this wasn\'t you, re-enable two-factor authentication and change your password immediately.'
+          : 'Google Authenticator was turned off. If this wasn\'t you, re-enable it and change your password immediately.',
       }).catch(() => {});
     } catch { /* best-effort */ }
-    res.json({ message: 'Google Authenticator has been disabled successfully.', twoFactorEnabled: false });
+    res.json({ message: 'Two-factor authentication has been disabled successfully.', twoFactorEnabled: false });
   } catch (error) {
     res.status(401).json({ message: 'Your session has expired or the code is invalid.' });
   }
@@ -1142,6 +1253,9 @@ router.get('/me', protect, async (req, res) => {
       // Authoritative entitlement state — every client surface renders from this.
       subscription: describeSubscription(user),
       twoFactorEnabled: user.twoFactorEnabled,
+      twoFactorMethod: user.twoFactorEnabled ? (user.twoFactorMethod || 'authenticator') : null,
+      // Drives the "Last password changed" readout in Account Security.
+      passwordChangedAt: user.passwordChangedAt || null,
       hasVisitedDashboard: user.hasVisitedDashboard,
     });
   } catch (error) {
@@ -1166,6 +1280,185 @@ router.post('/logout', protect, async (req, res) => {
     // Never block a sign-out: the client clears its own copy regardless.
     console.error('[logout]', error.message);
     res.json({ message: 'Signed out successfully.' });
+  }
+});
+
+// @route   POST /api/auth/change-password
+// @desc    Change the password on its own, decoupled from the profile form.
+//          Verifies the CURRENT password (so a borrowed unlocked session can't
+//          take the account over), enforces the same strength rules the signup
+//          form uses, and stamps passwordChangedAt via the model's pre-save
+//          hook. Every OTHER session of this account is revoked — a password
+//          change is the standard response to "I think someone else got in",
+//          so leaving old sessions alive would defeat the point. The caller's
+//          own session survives, or the user would be logged out of the very
+//          tab they just fixed the password in.
+// @access  Private
+router.post('/change-password', protect, async (req, res) => {
+  try {
+    if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
+    const user = await User.findById(req.user._id).select('+twoFactorSecret');
+    if (!user) return res.status(401).json({ message: 'Your session is no longer valid. Please sign in again.' });
+
+    const currentPassword = str(req.body?.currentPassword);
+    const newPassword = str(req.body?.newPassword);
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: 'Your current password and a new password are both required.' });
+    }
+    if (newPassword.length < 8) {
+      return res.status(400).json({ message: 'New password must be at least 8 characters.' });
+    }
+    if (!/[A-Z]/.test(newPassword)) {
+      return res.status(400).json({ message: 'New password must contain at least one uppercase letter.' });
+    }
+    if (!/[0-9]/.test(newPassword)) {
+      return res.status(400).json({ message: 'New password must contain at least one number.' });
+    }
+    if (newPassword === currentPassword) {
+      return res.status(400).json({ message: 'Your new password must be different from your current one.' });
+    }
+
+    const ok = await user.matchPassword(currentPassword);
+    if (!ok) {
+      // Deliberately the same wording a wrong username gets, and no detail:
+      // this endpoint must not confirm that the account exists.
+      return res.status(401).json({ message: 'Your current password is incorrect.' });
+    }
+
+    // Assigning the plaintext lets the pre-save hook hash it (argon2id) and
+    // stamp passwordChangedAt in the same write — the date can never drift
+    // from the hash it describes.
+    user.password = newPassword;
+    await user.save();
+
+    // Kill every other session (see route note). req.sessionId is the caller's.
+    const killed = await revokeOtherUserSessions(user._id, req.sessionId);
+
+    try {
+      const UserNotification = require('../models/UserNotification');
+      await UserNotification.create({
+        user: user._id,
+        type: 'info',
+        title: 'Password changed',
+        detail: killed > 0
+          ? `Your password was changed and ${killed} other ${killed === 1 ? 'session was' : 'sessions were'} signed out. If this wasn't you, reset your password and contact support immediately.`
+          : "Your password was just changed. If this wasn't you, reset it and contact support immediately.",
+      }).catch(() => {});
+    } catch { /* best-effort trail */ }
+
+    res.json({
+      message: 'Your password has been updated.',
+      passwordChangedAt: user.passwordChangedAt,
+      otherSessionsRevoked: killed,
+    });
+  } catch (error) {
+    console.error('[change-password]', error.message);
+    res.status(500).json({ message: 'Something went wrong. Please try again later.' });
+  }
+});
+
+// @route   POST /api/auth/sign-out-all
+// @desc    Revoke every session for this account EXCEPT the one making the
+//          request, and clear the "save my login" credential stored on all of
+//          them. Revocation is what ends those sessions; dropping the saved
+//          credential is defence-in-depth that leaves nothing behind on those
+//          devices (see revokeOtherUserSessions for the precise reasoning).
+// @access  Private
+router.post('/sign-out-all', protect, async (req, res) => {
+  try {
+    if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
+    const revoked = await revokeOtherUserSessions(req.user._id, req.sessionId);
+
+    try {
+      const UserNotification = require('../models/UserNotification');
+      await UserNotification.create({
+        user: req.user._id,
+        type: 'info',
+        title: 'Signed out other devices',
+        detail: revoked > 0
+          ? `${revoked} other ${revoked === 1 ? 'session was' : 'sessions were'} signed out. Saved logins on those devices were removed too.`
+          : 'No other active sessions were found.',
+      }).catch(() => {});
+    } catch { /* best-effort trail */ }
+
+    res.json({
+      message: revoked > 0
+        ? `Signed out ${revoked} other ${revoked === 1 ? 'device' : 'devices'}.`
+        : 'No other active sessions were found.',
+      revoked,
+    });
+  } catch (error) {
+    console.error('[sign-out-all]', error.message);
+    res.status(500).json({ message: 'Something went wrong. Please try again later.' });
+  }
+});
+
+// @route   POST /api/auth/two-factor-method
+// @desc    Choose WHICH second factor is used at sign-in.
+//          Switching TO 'authenticator' is refused here — that has to go
+//          through setup-2fa/verify-2fa so a hijacked session can't silently
+//          install an authenticator it controls. Switching TO 'email' requires
+//          the current password, because it removes a stronger factor.
+// @access  Private
+router.post('/two-factor-method', protect, async (req, res) => {
+  try {
+    if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
+    const method = str(req.body?.method);
+    if (!['authenticator', 'email'].includes(method)) {
+      return res.status(400).json({ message: 'Choose either the authenticator app or email codes.' });
+    }
+
+    // twoFactorSecret is `select: false`, so it has to be asked for explicitly —
+    // and it is the ONLY thing that proves an authenticator was actually set up.
+    const user = await User.findById(req.user._id).select('+twoFactorSecret');
+    if (!user) return res.status(401).json({ message: 'Your session is no longer valid. Please sign in again.' });
+
+    // Switching TO the authenticator requires a real, already-verified
+    // authenticator. Checking `twoFactorEnabled` here is NOT enough: an account
+    // on email 2FA has that flag set, so the old guard let them "choose" an
+    // authenticator they never configured — and then login demanded a TOTP
+    // they had no way to produce, locking them out of their own account.
+    if (method === 'authenticator' && !user.twoFactorSecret) {
+      return res.status(409).json({ message: 'Set up an authenticator app first, then choose it here.' });
+    }
+    if (user.twoFactorEnabled && method === 'email') {
+      const ok = await user.matchPassword(str(req.body?.currentPassword));
+      if (!ok) {
+        return res.status(401).json({ message: 'Enter your current password to switch to email codes.' });
+      }
+    }
+
+    user.twoFactorMethod = method;
+    user.twoFactorEnabled = true;
+    // Leaving the authenticator method for email must not leave a live TOTP
+    // secret behind: it is dead weight that a future switch back would silently
+    // re-enable. Disabled accounts already clear it below.
+    if (method === 'email') user.twoFactorSecret = '';
+    await user.save();
+
+    try {
+      const UserNotification = require('../models/UserNotification');
+      await UserNotification.create({
+        user: user._id,
+        type: 'info',
+        title: 'Two-factor method changed',
+        detail: method === 'email'
+          ? 'Sign-in codes are now sent to your email address. This is weaker than an authenticator app — it protects your password, but not an attacker who already has your mailbox.'
+          : 'Your authenticator app is now the second factor used at sign-in.',
+      }).catch(() => {});
+    } catch { /* best-effort trail */ }
+
+    res.json({
+      message: method === 'email'
+        ? 'Sign-in codes will now be emailed to you.'
+        : 'Your authenticator app is now used at sign-in.',
+      twoFactorMethod: user.twoFactorMethod,
+      twoFactorEnabled: user.twoFactorEnabled,
+    });
+  } catch (error) {
+    console.error('[two-factor-method]', error.message);
+    res.status(500).json({ message: 'Something went wrong. Please try again later.' });
   }
 });
 
@@ -1576,6 +1869,8 @@ router.put('/profile', async (req, res) => {
       subscriptionUpdatedAt: user.subscriptionUpdatedAt,
       subscription: describeSubscription(user),
       twoFactorEnabled: user.twoFactorEnabled,
+      twoFactorMethod: user.twoFactorEnabled ? (user.twoFactorMethod || 'authenticator') : null,
+      passwordChangedAt: user.passwordChangedAt || null,
     });
   } catch (error) {
     console.error('[profile update]', error.message);

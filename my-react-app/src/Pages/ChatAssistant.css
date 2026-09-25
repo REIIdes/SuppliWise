@@ -1,42 +1,57 @@
-/* ── Floating Action Button ── */
-.chat-fab {
+/* ── Edge handle: hide / show the assistant ──
+   A slim tab parked on the right edge. It is the assistant's ONLY control:
+   it shows the panel and hides it again. (The floating "Ask AI" pill that
+   used to sit in the bottom corner duplicated it and was removed.)
+   A slim tab parked on the right edge. It is always the way back in, and
+   while the panel is open it is the way to tuck everything away again. */
+.chat-edge-toggle {
   position: fixed;
-  bottom: 28px;
-  right: 28px;
-  background: linear-gradient(135deg, #22c55e, #16a34a);
-  color: #fff;
-  border: none;
-  border-radius: 999px;
-  padding: 13px 20px;
-  font-size: 18px;
-  cursor: pointer;
-  box-shadow: 0 4px 24px rgba(34, 197, 94, 0.45);
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1000;
+  /* 28px, not 30: the open panel starts 28px from the right edge, so the tab
+     meets it exactly instead of sliding underneath its rounded corner. */
+  width: 28px;
+  height: 64px;
+  padding: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
-  z-index: 1000;
-  transition: transform 0.2s, box-shadow 0.2s;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  justify-content: center;
+  border: 1px solid #a7f3d0;
+  border-right: none;
+  border-radius: 12px 0 0 12px;
+  background: linear-gradient(180deg, #34d399, #059669);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: -3px 0 14px rgba(6, 95, 70, 0.22);
+  transition: width 0.15s ease, background 0.15s ease, box-shadow 0.2s ease;
 }
-.chat-fab:hover {
-  transform: scale(1.05) translateY(-1px);
-  box-shadow: 0 6px 28px rgba(34, 197, 94, 0.55);
+.chat-edge-toggle svg { width: 18px; height: 18px; }
+.chat-edge-toggle:hover {
+  width: 32px;
+  background: linear-gradient(180deg, #10b981, #047857);
+  box-shadow: -4px 0 18px rgba(6, 95, 70, 0.30);
 }
-.chat-fab-icon { line-height: 1; display: flex; align-items: center; }
-.chat-fab-label { font-size: 13px; font-weight: 600; letter-spacing: 0.01em; }
+.chat-edge-toggle:active { transform: translateY(-50%) scale(0.96); }
+.chat-edge-toggle:focus-visible {
+  outline: 3px solid rgba(16, 185, 129, 0.55);
+  outline-offset: 3px;
+}
 
 /* ── Chat Window ── */
 .chat-window {
   position: fixed;
-  bottom: 90px;
+  /* Sits just above the bottom edge now that nothing is anchored below it
+     (the old 90px gap existed only to clear the "Ask AI" pill). */
+  bottom: 24px;
   right: 28px;
   width: 380px;
-  /* Never taller than the room above the FAB. With a flat 580px the panel
-     needed 670px of viewport (580 + 90 gap); any window shorter than that
-     pushed the top of the panel — header first — off the top of the screen,
-     so the chat appeared to start mid-way down at the disclaimer banner. */
-  max-height: min(580px, calc(100vh - 110px));
-  max-height: min(580px, calc(100dvh - 110px));
+  /* Never taller than the room below the header offset. A flat 580px on a
+     short window pushed the top of the panel — header first — off screen, so
+     the chat appeared to start mid-way down at the disclaimer banner. */
+  max-height: min(580px, calc(100vh - 48px));
+  max-height: min(580px, calc(100dvh - 48px));
   /* Belt-and-braces: the panel can never be wider than the viewport, so it
      can never be the thing that opens a horizontal scrollbar. */
   max-width: calc(100vw - 20px);
@@ -145,6 +160,11 @@
   flex: 1;
   display: flex;
   align-items: center;
+  /* `safe center` keeps the card centred while it fits and falls back to
+     top-alignment when the content is taller than the panel. Plain `center`
+     pushed the top of the content (and its glow) outside a scrollable box,
+     where it could not be scrolled back into view. */
+  align-items: safe center;
   justify-content: center;
   padding: 24px;
   background: linear-gradient(135deg, #f0fdf4 0%, #e8f5e9 100%);
@@ -547,30 +567,17 @@
     max-height: min(72dvh, calc(100dvh - 100px));
     border-radius: 14px;
   }
-  .chat-fab {
-    right: 16px;
-    bottom: 18px;
-  }
+}
+@media (max-width: 768px) {
+  /* The open panel spans the viewport on small screens, so an edge tab on top
+     of it would just be in the way — the panel's own ✕ covers hide there. */
+  .chat-edge-toggle.is-open { display: none; }
+  .chat-edge-toggle { width: 28px; height: 56px; }
 }
 
 /* ════════════════════════════════════════════════════════════════════
    VIBRANT THEME REFRESH
    ════════════════════════════════════════════════════════════════════ */
-.chat-fab {
-  background: linear-gradient(135deg, #34d399, #059669 60%, #0d9488) !important;
-  box-shadow: 0 10px 26px rgba(16, 185, 129, 0.42) !important;
-  transition: transform 0.2s ease, box-shadow 0.2s ease !important;
-  animation: fab-float 3.5s ease-in-out infinite;
-}
-@keyframes fab-float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-5px); }
-}
-.chat-fab:hover {
-  transform: translateY(-3px) scale(1.05) !important;
-  box-shadow: 0 14px 32px rgba(16, 185, 129, 0.50) !important;
-  animation-play-state: paused;
-}
 .chat-window {
   border-radius: 22px !important;
   border: 1px solid #bbf7d0 !important;
@@ -685,6 +692,123 @@
 }
 .chat-send:active:not(:disabled) { transform: scale(0.92) !important; }
 
+/* ── In-chat paywall (premium gate inside the panel) ───────────────────
+   Same vibrant language as the standalone upgrade modal: gradient hero
+   ring, tier badge, clear hierarchy. The button classes stay the shared
+   `auth-btn` ones so the LogIn.css hijack guard further down still wins. */
+.chat-auth-required--paywall {
+  background:
+    radial-gradient(520px 320px at 50% -6%, rgba(16, 185, 129, 0.20), transparent 68%),
+    linear-gradient(180deg, #f0fdfa 0%, #ecfeff 55%, #f5f3ff 100%);
+}
+.chat-auth-required--paywall .auth-required-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+.paywall__hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 13px;
+}
+.paywall__ring {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 22px;
+  color: #047857;
+  background: linear-gradient(140deg, #ffffff 0%, #ecfdf5 100%);
+  border: 1px solid #a7f3d0;
+  box-shadow:
+    0 14px 30px rgba(5, 150, 105, 0.26),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  position: relative;
+}
+/* Soft colour bloom behind the lock badge. */
+.paywall__ring::before {
+  content: '';
+  position: absolute;
+  inset: -14px;
+  border-radius: 30px;
+  background: radial-gradient(circle, rgba(20, 184, 166, 0.30) 0%, rgba(20, 184, 166, 0) 70%);
+  z-index: -1;
+}
+.paywall__ring svg { width: 30px; height: 30px; }
+.paywall__tier {
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: #065f46;
+  background: #ffffff;
+  border: 1px solid #a7f3d0;
+  box-shadow: 0 6px 14px rgba(5, 150, 105, 0.18);
+}
+.paywall__eyebrow {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: #0d9488;
+}
+.paywall__title {
+  margin-bottom: 8px !important;
+  font-size: 20px !important;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: #0f172a;
+}
+.paywall__body {
+  margin-bottom: 10px !important;
+  color: #475569;
+  line-height: 1.6;
+}
+.paywall__body strong { color: #0f766e; }
+.paywall__note {
+  /* Flex holds the icon and ONE wrapped copy run. Bare inline chunks would
+     each become their own flex item and lay out as columns. */
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 18px !important;
+  padding: 10px 12px;
+  border-radius: 12px;
+  text-align: left;
+  font-size: 12.5px !important;
+  line-height: 1.55;
+  color: #475569;
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid #ccfbf1;
+}
+.paywall__note-icon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  color: #0d9488;
+}
+.paywall__note span { min-width: 0; }
+.paywall__note strong { color: #0f172a; }
+.paywall__actions {
+  width: 100%;
+  flex-direction: column-reverse;
+  gap: 10px !important;
+}
+.paywall__actions .auth-btn { width: 100%; }
+.paywall__cta-icon { width: 17px; height: 17px; margin-left: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-auth-required--paywall { animation: none !important; }
+}
+
 /* ── Locked-gate buttons ──────────────────────────────────────────────
    Scoped under .chat-auth-required on purpose: LogIn.css redefines the
    bare .auth-btn class globally (999px pill + !important gradient), and
@@ -733,8 +857,8 @@
   box-shadow: 0 8px 18px rgba(16, 185, 129, 0.20) !important;
 }
 @media (prefers-reduced-motion: reduce) {
-  .chat-fab, .chat-window, .chat-header, .chat-bubble,
+  .chat-window, .chat-header, .chat-bubble,
   .chat-header-status::before, .typing-dot { animation: none !important; }
-  .quick-prompt, .chat-input, .chat-send, .chat-fab,
+  .quick-prompt, .chat-input, .chat-send, .chat-edge-toggle,
   .chat-auth-required .auth-btn { transition: none !important; }
 }

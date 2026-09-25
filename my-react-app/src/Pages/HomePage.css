@@ -8,29 +8,69 @@
 }
 
 /* ── Hero ── */
+/* Layered tints + two slow colour blobs give the fold depth without images.
+   `isolation` keeps the negative-z blobs above the section's own background
+   but behind its content. */
 .hero-section {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 72px 24px 56px;
+  padding: 84px 24px 68px;
   text-align: center;
-  background: linear-gradient(180deg, #f0faf0 0%, #dcfce7 100%);
+  background:
+    radial-gradient(900px 520px at 10% -12%, rgba(16, 185, 129, 0.22), transparent 62%),
+    radial-gradient(760px 480px at 92% -4%, rgba(99, 102, 241, 0.18), transparent 64%),
+    linear-gradient(180deg, #f3fdf8 0%, #e7fbf2 46%, #eef1ff 100%);
+}
+.hero-section::before,
+.hero-section::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  border-radius: 50%;
+  filter: blur(48px);
+  pointer-events: none;
+}
+.hero-section::before {
+  width: 280px;
+  height: 280px;
+  top: -90px;
+  left: -70px;
+  background: rgba(16, 185, 129, 0.30);
+  animation: hero-blob 15s ease-in-out infinite;
+}
+.hero-section::after {
+  width: 230px;
+  height: 230px;
+  bottom: -90px;
+  right: -50px;
+  background: rgba(99, 102, 241, 0.24);
+  animation: hero-blob 19s ease-in-out infinite reverse;
+}
+@keyframes hero-blob {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(20px, -24px, 0) scale(1.09); }
 }
 
 .hero-badge {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  background: #fff;
-  border: 1px solid #bbf7d0;
-  color: #15803d;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(167, 243, 208, 0.95);
+  color: #065f46;
   border-radius: 999px;
-  padding: 8px 18px;
+  padding: 8px 20px 8px 10px;
   font-size: 13px;
-  font-weight: 600;
-  margin-bottom: 24px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  margin-bottom: 26px;
+  box-shadow: 0 12px 30px rgba(5, 150, 105, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(6px);
 }
 
 .hero-badge-icon {
@@ -38,31 +78,46 @@
   align-items: center;
   justify-content: center;
   line-height: 1;
-  width: 28px;
-  height: 20px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: #fff;
+  background: linear-gradient(135deg, #34d399, #059669 60%, #0d9488);
+  box-shadow: 0 4px 12px rgba(5, 150, 105, 0.35);
 }
 
 .hero-badge-icon svg {
-  width: 28px;
-  height: 20px;
-  transform: scaleX(1.35);
+  width: 17px;
+  height: 17px;
 }
 
 .hero-title {
-  font-size: 48px;
+  font-size: clamp(34px, 5.6vw, 58px);
   font-weight: 800;
-  color: #14532d;
-  line-height: 1.15;
-  margin: 0 0 20px 0;
-  letter-spacing: -0.5px;
+  color: #064e3b;
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+  margin: 0 0 18px 0;
+  max-width: 900px;
+}
+
+/* The payoff words carry the brand gradient; the first line stays solid so the
+   headline still reads as one sentence. The solid colour is declared first so a
+   browser without background-clip:text shows readable text, not nothing. */
+.hero-title__accent {
+  color: #059669;
+  background: linear-gradient(115deg, #059669 0%, #10b981 38%, #0d9488 66%, #6366f1 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 .hero-sub {
-  font-size: 16px;
-  color: #374151;
-  max-width: 540px;
+  font-size: clamp(15px, 1.5vw, 17px);
+  color: #3f4b5b;
+  max-width: 620px;
   line-height: 1.7;
-  margin: 0 0 32px 0;
+  margin: 0 0 34px 0;
 }
 
 .hero-actions {
@@ -70,9 +125,12 @@
   gap: 14px;
   flex-wrap: wrap;
   justify-content: center;
-  margin-bottom: 48px;
+  margin-bottom: 54px;
 }
 
+/* Baseline for the shared `.btn-primary` / `.btn-secondary` names. Pages with
+   their own stylesheet override these; Dashboard and TrackIntake rely on this
+   one, so it must stay. The hero's richer look is scoped below. */
 .btn-primary {
   padding: 13px 28px;
   background: #22c55e;
@@ -101,42 +159,117 @@
 }
 .btn-secondary:hover { background: #f9fafb; }
 
-/* Stats row */
+/* Scoped to the hero: `.btn-primary` / `.btn-secondary` are shared class
+   names that other pages style in their own CSS files. */
+.hero-actions .btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 15px 30px;
+  background: linear-gradient(135deg, #10b981 0%, #059669 55%, #0d9488 100%);
+  color: #fff;
+  border: none;
+  border-radius: 14px;
+  font-size: 15.5px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 14px 30px rgba(5, 150, 105, 0.30);
+  transition: transform 0.18s ease, box-shadow 0.22s ease;
+}
+.hero-actions .btn-primary:hover {
+  background: linear-gradient(135deg, #10b981 0%, #059669 55%, #0d9488 100%);
+  transform: translateY(-3px);
+  box-shadow: 0 20px 40px rgba(5, 150, 105, 0.38);
+}
+.hero-actions .btn-primary svg { width: 18px; height: 18px; transition: transform 0.18s ease; }
+.hero-actions .btn-primary:hover svg { transform: translateX(3px); }
+
+.hero-actions .btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  padding: 15px 30px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #065f46;
+  border: 1.5px solid #a7f3d0;
+  border-radius: 14px;
+  font-size: 15.5px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 8px 20px rgba(6, 95, 70, 0.10);
+  transition: transform 0.18s ease, background 0.18s ease, box-shadow 0.22s ease;
+}
+.hero-actions .btn-secondary:hover {
+  background: #fff;
+  transform: translateY(-3px);
+  box-shadow: 0 14px 28px rgba(6, 95, 70, 0.18);
+}
+.hero-actions .btn-primary:focus-visible,
+.hero-actions .btn-secondary:focus-visible {
+  outline: 3px solid rgba(16, 185, 129, 0.5);
+  outline-offset: 3px;
+}
+
+/* Stats row — three liftable cards instead of one flat white slab */
 .hero-stats {
   display: flex;
-  align-items: center;
-  gap: 32px;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 16px;
-  padding: 20px 36px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  align-items: stretch;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  box-shadow: none;
 }
 
 .hero-stat {
+  position: relative;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
+  min-width: 172px;
+  padding: 18px 26px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(167, 243, 208, 0.9);
+  border-radius: 18px;
+  box-shadow: 0 12px 28px rgba(6, 95, 70, 0.10);
+  transition: transform 0.18s ease, box-shadow 0.22s ease;
+}
+.hero-stat::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #10b981, #0d9488 55%, #6366f1);
+}
+.hero-stat:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 18px 36px rgba(6, 95, 70, 0.16);
 }
 
 .hero-stat-num {
-  font-size: 22px;
+  font-size: 24px;
   font-weight: 800;
-  color: #22c55e;
+  letter-spacing: -0.01em;
+  color: #059669;
+  background: linear-gradient(120deg, #059669, #0d9488);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 .hero-stat-label {
-  font-size: 12px;
-  color: #6b7280;
-  font-weight: 500;
+  font-size: 12.5px;
+  color: #5b6b7c;
+  font-weight: 600;
 }
 
-.hero-stat-divider {
-  width: 1px;
-  height: 36px;
-  background: #e5e7eb;
-}
+/* The cards now separate themselves — no divider rules needed. */
+.hero-stat-divider { display: none; }
 
 /* ── Section Divider ── */
 .section-divider {
@@ -288,10 +421,23 @@
 
 /* ── Mobile ── */
 @media (max-width: 640px) {
+  .hero-section { padding: 64px 18px 52px; }
   .hero-title { font-size: 32px; }
-  .hero-stats { flex-direction: column; gap: 16px; padding: 20px 24px; }
-  .hero-stat-divider { width: 40px; height: 1px; }
+  .hero-actions { gap: 10px; margin-bottom: 44px; }
+  .hero-actions .btn-primary,
+  .hero-actions .btn-secondary { width: 100%; justify-content: center; }
+  .hero-stats { flex-direction: column; align-items: stretch; gap: 12px; }
+  .hero-stat { min-width: 0; }
   .how-cards { flex-direction: column; align-items: center; }
   .how-card { width: 100%; max-width: 400px; }
   .section-divider { padding: 0 24px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-section::before,
+  .hero-section::after { animation: none !important; }
+  .hero-stat,
+  .hero-actions .btn-primary,
+  .hero-actions .btn-secondary,
+  .hero-actions .btn-primary svg { transition: none !important; }
 }

@@ -4,6 +4,7 @@ import Navbar from '../Components/Navbar/Navbar';
 import Toast from '../Components/Toast/Toast';
 import ConfirmModal from '../Components/ConfirmModal/ConfirmModal';
 import { getDashboard, updateIntake, getToken, getStoredUser, getMyProfile, setStoredUser } from '../api';
+import useSubscription from '../hooks/useSubscription';
 import './DashboardPage.css';
 
 function DashboardPage() {
@@ -36,6 +37,14 @@ function DashboardPage() {
   const [showPriorityBlock, setShowPriorityBlock] = useState(false);
   const [priorityBlock, setPriorityBlock] = useState({ blocked: false, count: 0 });
   const [priorityAssessments, setPriorityAssessments] = useState([]);
+  // Priority Review is a premium entitlement. The API only reports it while the
+  // plan includes it, and this guard makes the UI follow a downgrade in the
+  // same tick — otherwise the banner, the "Paused" card and the lockout modal
+  // kept showing premium behaviour until the next dashboard fetch landed.
+  const { canAccess } = useSubscription();
+  const priorityEntitled = canAccess('priorityAssessment');
+  const priorityItems = priorityEntitled ? priorityAssessments : [];
+  const priorityPaused = priorityEntitled && priorityBlock.blocked;
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
   const [isFirstLogin, setIsFirstLogin] = useState(false);
 
@@ -278,7 +287,7 @@ function DashboardPage() {
     switch (cardName) {
       case 'assessment': {
         // Priority gate: an unresolved Priority assessment must finish first
-        if (priorityBlock.blocked) {
+        if (priorityPaused) {
           setShowPriorityBlock(true);
           break;
         }
@@ -375,7 +384,7 @@ function DashboardPage() {
       )}
 
       {/* Priority Block Modal — new assessments locked until review finishes */}
-      {showPriorityBlock && (
+      {showPriorityBlock && priorityPaused && (
         <ConfirmModal
           title="Priority Review In Progress"
           message={`You have ${priorityBlock.count} prioritized assessment${priorityBlock.count === 1 ? '' : 's'} that must finish review first. New assessments are paused until an administrator resolves it. Please follow your current plan and check your notifications.`}
@@ -502,14 +511,14 @@ function DashboardPage() {
         </div>
 
         {/* Priority Review Banner — surfaced whenever an assessment is flagged */}
-        {priorityAssessments.length > 0 && (
+        {priorityItems.length > 0 && (
           <div className="priority-banner" role="alert">
             <div className="priority-banner__icon" aria-hidden="true">⚑</div>
             <div className="priority-banner__body">
               <strong>
-                Priority review{priorityAssessments.length === 1 ? '' : 's'} in progress ({priorityAssessments.length})
+                Priority review{priorityItems.length === 1 ? '' : 's'} in progress ({priorityItems.length})
               </strong>
-              {priorityAssessments.slice(0, 2).map(item => (
+              {priorityItems.slice(0, 2).map(item => (
                 <span key={item.id} className="priority-banner__item">
                   Flagged {item.flaggedAt ? new Date(item.flaggedAt).toLocaleDateString() : new Date(item.createdAt).toLocaleDateString()}
                   {(item.reasons || []).length > 0 ? ` — ${(item.reasons || []).slice(0, 2).join('; ')}` : ''}
@@ -532,9 +541,9 @@ function DashboardPage() {
         {/* Action Cards */}
         <div className="dashboard-cards">
           <div
-            className={`dashboard-card card-green${priorityBlock.blocked ? ' dashboard-card--blocked' : ''}`}
+            className={`dashboard-card card-green${priorityPaused ? ' dashboard-card--blocked' : ''}`}
             onClick={() => navigateToCard('assessment')}
-            title={priorityBlock.blocked ? 'Paused until the priority review finishes' : 'Start a new assessment'}
+            title={priorityPaused ? 'Paused until the priority review finishes' : 'Start a new assessment'}
           >
             <div className="card-icon">
               <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -544,7 +553,7 @@ function DashboardPage() {
               </svg>
             </div>
             <h3 className="card-title">New Assessment</h3>
-            {priorityBlock.blocked && <span className="card-blocked-tag">Paused</span>}
+            {priorityPaused && <span className="card-blocked-tag">Paused</span>}
           </div>
 
           <div className="dashboard-card card-blue" onClick={() => navigateToCard('recommendations')}>

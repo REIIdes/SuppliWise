@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import { getInsights, getToken } from '../api';
-import { PLAN_LABELS } from '../utils/plan';
+import PlanLockedCard from '../Components/PlanLockedCard/PlanLockedCard';
 import { useSubscription, SUBSCRIPTION_EVENT } from '../hooks/useSubscription';
 import './InsightsPage.css';
 
@@ -609,19 +609,19 @@ function InsightsPage() {
         {/* Content */}
         <div className="insights-content">
           {upgradeInfo ? (
-            <div className="plan-locked">
-              <div className="plan-locked__icon">🔒</div>
-              <h3 className="plan-locked__title">Insights & Analytics is locked</h3>
-              <p className="plan-locked__body">
-                Insights & Analytics requires the <strong>{PLAN_LABELS[upgradeInfo.requiresPlan] || upgradeInfo.requiresPlan}</strong>.
-                Your current plan is <strong>{PLAN_LABELS[upgradeInfo.currentPlan] || upgradeInfo.currentPlan || PLAN_LABELS.free}</strong>.
-              </p>
-              <p className="plan-locked__note">Contact an administrator to upgrade your plan and unlock this feature.</p>
-              <div className="plan-locked__actions">
-                <button type="button" className="upgrade-btn upgrade-btn-secondary" onClick={() => navigate('/dashboard')}>Back to Dashboard</button>
-                <button type="button" className="upgrade-btn upgrade-btn-primary" onClick={() => navigate('/profile')}>View my plan</button>
-              </div>
-            </div>
+            <PlanLockedCard
+              featureLabel="Insights & Analytics"
+              requiresPlan={upgradeInfo.requiresPlan}
+              currentPlan={upgradeInfo.currentPlan}
+              benefits={[
+                'Adherence trends over time',
+                'AI-generated health insights',
+                'Progress tracking & streaks',
+                'Downloadable PDF reports',
+              ]}
+              onViewPlans={() => navigate('/profile')}
+              onBack={() => navigate('/dashboard')}
+            />
           ) : loading ? (
             <div className="empty-state-message" style={{ textAlign: 'center', padding: '60px 20px' }}>
               <p style={{ color: '#6b7280' }}>Loading your insights…</p>

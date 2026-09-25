@@ -174,7 +174,7 @@ export default function ChatAssistant() {
   const inputRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const chatWindowRef = useRef(null);
-  const fabRef = useRef(null);
+  const edgeRef = useRef(null);
   const messagesRef = useRef(messages);
   const loadingRef = useRef(false);
   const conversationVersionRef = useRef(0);
@@ -248,14 +248,12 @@ export default function ChatAssistant() {
     if (!open) return;
 
     const handleClickOutside = (e) => {
-      if (
-        chatWindowRef.current &&
-        fabRef.current &&
-        !chatWindowRef.current.contains(e.target) &&
-        !fabRef.current.contains(e.target)
-      ) {
-        setOpen(false);
-      }
+      const target = e.target;
+      // The edge handle is part of the assistant's chrome, so pressing it must
+      // not count as "outside" — the button's own handler decides show vs hide.
+      if (chatWindowRef.current?.contains(target)) return;
+      if (edgeRef.current?.contains(target)) return;
+      setOpen(false);
     };
 
     document.addEventListener('mousedown', handleClickOutside);
@@ -353,38 +351,41 @@ export default function ChatAssistant() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   };
 
-  const handleOpen = () => {
-    setOpen(o => !o);
+  // Edge handle — the assistant's ONLY control: it shows the panel and hides
+  // it again. (The old floating pill duplicated this and was removed.)
+  const handleEdgeShow = () => {
+    setOpen(true);
+  };
+
+  const handleEdgeHide = () => {
+    setOpen(false);
   };
 
   return (
     <>
+      {/* Edge handle — the assistant's hide/show control. Pointing right while
+          the panel is closed ("show the contents"), left while it is open. */}
       <button
-        ref={fabRef}
-        className="chat-fab"
-        onClick={handleOpen}
-        aria-label={open ? 'Close chat' : 'Open SuppliWise AI assistant'}
+        type="button"
+        ref={edgeRef}
+        className={`chat-edge-toggle${open ? ' is-open' : ''}`}
+        onClick={open ? handleEdgeHide : handleEdgeShow}
+        aria-label={open ? 'Hide the AI assistant' : 'Show the AI assistant'}
+        aria-expanded={open}
+        aria-controls="suppliwise-chat-window"
+        title={open ? 'Hide the AI assistant' : 'Show the AI assistant'}
       >
-        {open ? (
-          <svg className="chat-fab-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        ) : (
-          <>
-            <svg className="chat-fab-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-              <circle cx="9" cy="10" r="1" fill="currentColor" />
-              <circle cx="12" cy="10" r="1" fill="currentColor" />
-              <circle cx="15" cy="10" r="1" fill="currentColor" />
-            </svg>
-            <span className="chat-fab-label">Ask AI</span>
-          </>
-        )}
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+          {open ? (
+            <polyline points="15 6 9 12 15 18" />
+          ) : (
+            <polyline points="9 6 15 12 9 18" />
+          )}
+        </svg>
       </button>
 
       {open && (
-        <div ref={chatWindowRef} className="chat-window" role="dialog" aria-modal="false" aria-label="SuppliWise AI Assistant">
+        <div id="suppliwise-chat-window" ref={chatWindowRef} className="chat-window" role="dialog" aria-modal="false" aria-label="SuppliWise AI Assistant">
           <div className="chat-header">
             <div className="chat-header-info">
               <div className="chat-header-avatar">
@@ -463,21 +464,52 @@ export default function ChatAssistant() {
             </div>
           ) : !livePlan.canAccess('chat') ? (
             // Subscription gate — ULTIMATE only
-            <div className="chat-auth-required">
-              <div className="auth-required-content">
-                <div className="auth-required-icon" style={{ color: '#16a34a' }}>🔒</div>
-                <h3 className="auth-required-title">AI Chat is an {PLAN_LABELS.custom} perk</h3>
-                <p className="auth-required-message">
-                  The AI Chat Assistant requires the <strong>{PLAN_LABELS.custom} plan</strong>.
+            <div className="chat-auth-required chat-auth-required--paywall">
+              <div className="auth-required-content paywall">
+                <div className="paywall__hero" aria-hidden="true">
+                  <span className="paywall__ring">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="4" y="10.5" width="16" height="10" rx="3" />
+                      <path d="M8 10.5V7.8a4 4 0 0 1 8 0v2.7" />
+                      <circle cx="12" cy="15.4" r="1.5" fill="currentColor" stroke="none" />
+                    </svg>
+                  </span>
+                  <span className="paywall__tier">{PLAN_LABELS.custom}</span>
+                </div>
+                <p className="paywall__eyebrow">Premium feature</p>
+                <h3 className="auth-required-title paywall__title">AI Chat is included with {PLAN_LABELS.custom}</h3>
+                <p className="auth-required-message paywall__body">
+                  Supplement answers, results guidance and plan help — all inside the <strong>{PLAN_LABELS.custom} plan</strong>.
                 </p>
-                <p className="auth-required-description">
-                  Your current plan is <strong>{PLAN_LABELS[livePlan.plan] || PLAN_LABELS.free}</strong>. Contact an administrator to upgrade and unlock AI chat.
+                <p className="auth-required-description paywall__note">
+                  <svg className="paywall__note-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M12 8h.01M11 12h1v4h1" />
+                  </svg>
+                  <span>
+                    You&rsquo;re on <strong>{PLAN_LABELS[livePlan.plan] || PLAN_LABELS.free}</strong>. Ask an administrator to upgrade
+                    and it switches on instantly, no re-login needed.
+                  </span>
                 </p>
-                <div className="auth-required-buttons">
-                  <button className="auth-btn auth-btn-primary" onClick={() => { setOpen(false); navigate('/profile'); }}>
+                <div className="auth-required-buttons paywall__actions">
+                  {/* Both actions just close the panel: the edge handle is the
+                      only assistant control now, and re-opening would land
+                      straight back on this paywall. */}
+                  <button
+                    className="auth-btn auth-btn-primary"
+                    onClick={() => { setOpen(false); navigate('/profile'); }}
+                  >
                     View my plan
+                    <svg className="paywall__cta-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M5 12h14M13 6l6 6-6 6" />
+                    </svg>
                   </button>
-                  <button className="auth-btn auth-btn-secondary" onClick={() => setOpen(false)}>Maybe later</button>
+                  <button
+                    className="auth-btn auth-btn-secondary"
+                    onClick={() => setOpen(false)}
+                  >
+                    Maybe later
+                  </button>
                 </div>
               </div>
             </div>

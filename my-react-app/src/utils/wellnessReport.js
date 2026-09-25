@@ -108,9 +108,13 @@ function drawKpi(doc, x, y, width, height, value, label, color, fill) {
   doc.text(reportText(label, '').toUpperCase(), x + 5, y + 19, { maxWidth: width - 10 });
 }
 
-function drawTableHeader(drawContinuationHeader) {
-  return (data) => {
-    if (data.pageNumber > 1) drawContinuationHeader(data.pageNumber);
+function drawTableHeader(doc, drawContinuationHeader) {
+  return () => {
+    // autoTable numbers pages of THIS table (1, 2, 3 ...), not document pages;
+    // setPage() with that index moved the cursor backwards and let the next
+    // section render over the table rows. The current page is the real one.
+    const pageNumber = doc.getCurrentPageInfo().pageNumber;
+    if (pageNumber > 1) drawContinuationHeader(pageNumber);
   };
 }
 
@@ -167,7 +171,7 @@ export async function downloadWellnessReport({ results = {}, assessment = {}, us
     renderAutoTable(doc, {
       margin: tableMargin,
       ...options,
-      didDrawPage: drawTableHeader(drawContinuationHeader),
+      didDrawPage: drawTableHeader(doc, drawContinuationHeader),
     });
     const rawFinalY = doc.lastAutoTable?.finalY;
     const finalY = rawFinalY === null || rawFinalY === undefined ? NaN : Number(rawFinalY);

@@ -1,0 +1,474 @@
+/* ProfileSecurityControls — Account Security cards.
+   Same emerald/teal/indigo/violet tokens as the rest of the app so the security
+   area feels like part of the product, not a bolted-on widget. */
+
+.psc-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 20px;
+}
+
+/* No global border-box reset in this app, so `width: 100%` on a padded input
+   would render 100% + its padding and spill past the card edge. */
+.psc-card,
+.psc-card *,
+.psc-card *::before,
+.psc-card *::after {
+  box-sizing: border-box;
+}
+
+.psc-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  padding: 22px;
+  box-shadow: 0 6px 18px -12px rgba(15, 23, 42, 0.35);
+}
+
+.psc-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.psc-card__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.psc-card__icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  color: #fff;
+  flex: 0 0 auto;
+}
+
+.psc-card__icon--shield { background: linear-gradient(140deg, #10b981, #0d9488); }
+.psc-card__icon--key { background: linear-gradient(140deg, #6366f1, #8b5cf6); }
+.psc-card__icon--devices { background: linear-gradient(140deg, #14b8a6, #4f46e5); }
+
+.psc-badge {
+  flex: 0 0 auto;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #64748b;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+}
+
+.psc-badge--on {
+  color: #047857;
+  background: #d1fae5;
+  border-color: #6ee7b7;
+}
+
+.psc-card__lede {
+  margin: 0 0 16px;
+  color: #475569;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* ── Second-factor method picker ────────────────────────────────────── */
+
+.psc-methods {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.psc-method {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 14px;
+  background: #fff;
+  transition: border-color 0.16s ease, background-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.psc-method:hover:not(:disabled) {
+  border-color: #a5b4fc;
+  background: #f8fafc;
+}
+
+.psc-method--selected {
+  border-color: transparent;
+  background: linear-gradient(112deg, rgba(16, 185, 129, 0.09), rgba(79, 70, 229, 0.09));
+  box-shadow: inset 0 0 0 1.5px #10b981;
+}
+
+.psc-method:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.psc-method:focus-visible {
+  outline: 3px solid rgba(79, 70, 229, 0.5);
+  outline-offset: 2px;
+}
+
+.psc-method__icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  border-radius: 11px;
+  color: #fff;
+}
+
+.psc-method__icon--authenticator { background: linear-gradient(140deg, #6366f1, #8b5cf6); }
+.psc-method__icon--email { background: linear-gradient(140deg, #14b8a6, #0d9488); }
+
+.psc-method__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.psc-method__label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.psc-method__warn {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #b45309;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+}
+
+.psc-method__blurb {
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.psc-method__tick {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  color: #fff;
+  background: transparent;
+}
+
+.psc-method--selected .psc-method__tick {
+  background: linear-gradient(140deg, #10b981, #0d9488);
+}
+
+.psc-note {
+  margin: 14px 0 0;
+  padding: 11px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.psc-note--warn {
+  color: #92400e;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+}
+
+/* ── Inline "last changed" row ──────────────────────────────────────── */
+
+.psc-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #f8fafc, #f1f5f9);
+  border: 1px solid #e2e8f0;
+}
+
+.psc-row__icon {
+  color: #0d9488;
+  margin-top: 2px;
+  flex: 0 0 auto;
+}
+
+.psc-row__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.psc-row__label {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.psc-row__value {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+  overflow-wrap: anywhere;
+}
+
+.psc-row__value--muted {
+  color: #64748b;
+  font-weight: 500;
+}
+
+.psc-row__exact {
+  font-weight: 400;
+  color: #64748b;
+  font-size: 12.5px;
+}
+
+/* ── Alerts ─────────────────────────────────────────────────────────── */
+
+.psc-alert {
+  margin: 0 0 14px;
+  padding: 11px 14px;
+  border-radius: 12px;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.psc-alert--error {
+  color: #991b1b;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+}
+
+.psc-alert--ok {
+  color: #065f46;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+}
+
+/* ── Form ───────────────────────────────────────────────────────────── */
+
+.psc-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.psc-field {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.psc-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.psc-input {
+  width: 100%;
+  padding: 11px 13px;
+  font: inherit;
+  font-size: 14px;
+  color: #0f172a;
+  background: #fff;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 11px;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.psc-input:focus {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+}
+
+.psc-rules {
+  margin: 0;
+  font-size: 12.5px;
+  color: #64748b;
+}
+
+/* ── Confirm blocks ─────────────────────────────────────────────────── */
+
+.psc-confirm {
+  margin-top: 14px;
+  padding: 16px;
+  border-radius: 14px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+}
+
+.psc-confirm__text {
+  margin: 0 0 12px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: #78350f;
+}
+
+.psc-confirm .psc-input {
+  margin-bottom: 12px;
+}
+
+.psc-confirm__actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* ── Buttons ────────────────────────────────────────────────────────── */
+
+.psc-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 20px;
+  border-radius: 11px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease,
+    border-color 0.15s ease, color 0.15s ease;
+}
+
+.psc-btn:focus-visible {
+  outline: 3px solid rgba(79, 70, 229, 0.5);
+  outline-offset: 2px;
+}
+
+.psc-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.psc-btn--primary {
+  color: #fff;
+  background: linear-gradient(112deg, #10b981 0%, #14b8a6 40%, #4f46e5 100%);
+  box-shadow: 0 12px 24px -10px rgba(20, 184, 166, 0.7);
+}
+
+.psc-btn--primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 30px -12px rgba(79, 70, 229, 0.8);
+}
+
+.psc-btn--outline {
+  color: #4f46e5;
+  background: #fff;
+  border-color: #c7d2fe;
+}
+
+.psc-btn--outline:hover:not(:disabled) {
+  background: #eef2ff;
+  border-color: #a5b4fc;
+  transform: translateY(-2px);
+}
+
+.psc-btn--danger {
+  color: #fff;
+  background: linear-gradient(112deg, #e11d48, #be123c);
+  box-shadow: 0 12px 24px -10px rgba(225, 29, 72, 0.6);
+}
+
+.psc-btn--danger:hover:not(:disabled) {
+  transform: translateY(-2px);
+}
+
+.psc-btn--danger-ghost {
+  margin-top: 14px;
+  color: #be123c;
+  background: transparent;
+  border-color: transparent;
+  padding-left: 0;
+}
+
+.psc-btn--danger-ghost:hover:not(:disabled) {
+  color: #9f1239;
+  text-decoration: underline;
+}
+
+.psc-btn--ghost {
+  color: #334155;
+  background: #fff;
+  border-color: #cbd5e1;
+}
+
+.psc-btn--ghost:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #94a3b8;
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────── */
+
+@media (max-width: 560px) {
+  .psc-card {
+    padding: 18px 16px;
+    border-radius: 16px;
+  }
+
+  .psc-card__head {
+    flex-wrap: wrap;
+  }
+
+  .psc-confirm__actions,
+  .psc-form .psc-btn {
+    width: 100%;
+  }
+
+  .psc-confirm__actions .psc-btn {
+    flex: 1 1 auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .psc-btn,
+  .psc-method {
+    transition: none;
+  }
+
+  .psc-btn:hover:not(:disabled),
+  .psc-method:hover:not(:disabled) {
+    transform: none;
+  }
+}

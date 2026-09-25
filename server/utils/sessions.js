@@ -63,7 +63,7 @@ function signUserToken(userId, sessionId) {
  *      concurrent login's: a session read in step 1 can no longer become the
  *      final pointer, because any later pointer write commits after ours)
  */
-async function issueUserSession(userId) {
+async function issueUserSession(userId, deviceMeta = {}) {
   const uid = asId(userId);
   const sid = new mongoose.Types.ObjectId();
 
@@ -79,6 +79,9 @@ async function issueUserSession(userId) {
     lastActivityAt: new Date(),
     expiresAt: null,
     revokedAt: null,
+    // Display-only attribution so "Signed-in devices" can name a session.
+    // Never consulted for an authorisation decision — see utils/device.js.
+    ...(deviceMeta && typeof deviceMeta === 'object' ? deviceMeta : {}),
   });
 
   const flip = await User.updateOne({ _id: uid }, [
@@ -237,6 +240,26 @@ async function mintFromRememberToken(raw) {
 }
 
 /**
+ * Stamp `trustedAt` on the session behind an issued token.
+ *
+ * Called once a "save my login" credential is attached, so the security page
+ * can show WHEN a device became trusted. This is a display stamp only — trust
+ * itself is anchored to the presence of `rememberHash`, which every validation
+ * path re-checks. Best-effort by design: a missing stamp must never fail a
+ * sign-in.
+ */
+async function markSessionTrusted(issuedToken) {
+  const decoded = jwt.decode(String(issuedToken || ''));
+  const sid = decoded && toObjectId(decoded.sid);
+  if (!sid || !decoded.id) return false;
+  const res = await Session.updateOne(
+    { _id: sid, user: asId(decoded.id), revokedAt: null },
+    { $set: { trustedAt: new Date() } }
+  ).exec();
+  return res.matchedCount > 0;
+}
+
+/**
  * Revoke ONE session (sign-out). Scoped to the account AND the session id,
  * so signing out Account A can never touch Account B, and a stale token can
  * never revoke a newer session. The pointer is cleared only when it still
@@ -281,13 +304,67 @@ async function revokeAllUserSessions(userId) {
   return revoked.modifiedCount > 0;
 }
 
+/**
+ * Revoke every session of this account EXCEPT `keepSid`, and clear the
+ * "save my login" credential from all of them.
+ *
+ * Backs both "Sign out of all other devices" and the session sweep that
+ * follows a password change.
+ *
+ *   1. `revokedAt` is stamped — this is what actually ends those sessions. Any
+ *      live JWT for them stops validating on the very next request.
+ *   2. `rememberHash` is cleared as well. To be precise about why: this is
+ *      defence-in-depth, NOT the load-bearing part. A saved-login credential
+ *      re-runs the full session validation (exists → owned → unrevoked →
+ *      still current), so a revoked session's hash can never mint a new token
+ *      today. Clearing it removes the stored credential outright, so the
+ *      device is genuinely signed out rather than merely holding a hash that
+ *      happens to be inert — and a future relaxation of the mint can't
+ *      resurrect those devices by accident.
+ *
+ * `keepSid` (the caller's own session) is excluded from both — the device you
+ * clicked the button on stays signed in, which is the whole point of the
+ * exclude. Scoped strictly to `userId`; other accounts are never touched.
+ * Returns the number of other sessions affected.
+ */
+async function revokeOtherUserSessions(userId, keepSid) {
+  const uid = asId(userId);
+  if (!uid) return 0;
+  const keep = toObjectId(keepSid);
+
+  const filter = { user: uid, revokedAt: null };
+  if (keep) filter._id = { $ne: keep };
+
+  const now = new Date();
+  const ended = await Session.updateMany(
+    filter,
+    { $set: { revokedAt: now, rememberHash: '' } }
+  ).catch(() => null);
+
+  // Count what the caller actually lost, not just what we tried to touch.
+  // A session already carrying a rememberHash is a device we just cut off
+  // from re-entering, so it counts even if its row was already revoked.
+  const cleared = await Session.updateMany(
+    keep
+      ? { user: uid, _id: { $ne: keep }, rememberHash: { $nin: ['', null] } }
+      : { user: uid, rememberHash: { $nin: ['', null] } },
+    { $set: { rememberHash: '' } }
+  ).catch(() => null);
+
+  const revoked = ended ? ended.modifiedCount : 0;
+  const alsoCleared = cleared ? cleared.modifiedCount : 0;
+  return Math.max(revoked, alsoCleared);
+}
+
 module.exports = {
   issueUserSession,
   verifyUserSession,
   attachRememberToken,
+  markSessionTrusted,
   mintFromRememberToken,
   revokeUserSession,
   revokeAllUserSessions,
+  revokeOtherUserSessions,
   SESSION_ENDED_MESSAGE,
   SESSION_INVALID,
   SESSION_REVOKED,

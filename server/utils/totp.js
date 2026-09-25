@@ -2,17 +2,28 @@ const crypto = require('crypto');
 const speakeasy = require('speakeasy');
 
 // One-time-use TOTP cache — prevents code replay inside the validity window.
-// Keyed by a hash of (secret + code + 30s time-step); entries live 90 s.
+// Keyed by a hash of (secret + code); entries live 90 s.
 const usedTokens = new Map();
 const USED_TTL_MS = 90 * 1000;
+// Prune on a timer, not on a size threshold.
+//
+// This used to return early below 500 entries, so a quiet server accumulated
+// consumed codes indefinitely: replay protection kept working, but the map
+// grew without bound and could also reject a legitimately reused code long
+// after its window had passed. A cheap interval keeps it honest at any load.
+const PRUNE_INTERVAL_MS = 60 * 1000;
 
-function prune() {
-  if (usedTokens.size < 500) return;
+function prune(force = false) {
+  if (!force && usedTokens.size < 500) return;
   const now = Date.now();
   for (const [key, at] of usedTokens) {
     if (now - at > USED_TTL_MS) usedTokens.delete(key);
   }
 }
+
+// Unref'd so this timer can never hold the process open on shutdown.
+const pruneTimer = setInterval(() => prune(true), PRUNE_INTERVAL_MS);
+if (typeof pruneTimer.unref === 'function') pruneTimer.unref();
 
 // Keyed by (secret + code) ONLY — deliberately WITHOUT the wall-clock time
 // step. Verification uses speakeasy's `window: 1`, so a code minted for step

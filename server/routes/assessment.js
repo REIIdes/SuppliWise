@@ -95,9 +95,19 @@ router.post('/', protect, async (req, res) => {
     // ── Priority gate: while a Priority assessment is unresolved the user
     // must finish it first (admin resolves via Standard, or it is deleted).
     // This keeps severe cases from being buried under newer assessments.
-    const blockingPriority = await Assessment.findOne({ user: req.user._id, priority: 'Priority' })
-      .select('_id createdAt flagReasons flaggedAt')
-      .lean();
+    //
+    // The pause is part of the Priority Assessment entitlement and is therefore
+    // evaluated against the CURRENT plan on every attempt. Auto-flagging below
+    // is gated the same way; without the same check here, a user who was
+    // flagged while Premium and then downgraded kept a stale Priority document
+    // that locked them out of new assessments forever — a premium restriction
+    // they no longer had. The flag itself is kept (history badge, admin view).
+    const priorityEntitled = can(req.user, 'priorityAssessment');
+    const blockingPriority = priorityEntitled
+      ? await Assessment.findOne({ user: req.user._id, priority: 'Priority' })
+        .select('_id createdAt flagReasons flaggedAt')
+        .lean()
+      : null;
     if (blockingPriority) {
       return res.status(403).json({
         message: 'You have a prioritized assessment that needs to finish first. Please complete its review before starting a new assessment.',
@@ -181,6 +191,11 @@ router.post('/', protect, async (req, res) => {
 // @access  Private
 router.get('/priority-status', protect, async (req, res) => {
   try {
+    // Same entitlement rule as the POST gate, so the client never shows the
+    // "paused" screen to a user the server would not actually pause.
+    if (!can(req.user, 'priorityAssessment')) {
+      return res.json({ blocked: false, assessments: [] });
+    }
     const items = await Assessment.find({ user: req.user._id, priority: 'Priority' })
       .sort({ createdAt: -1 })
       .limit(3)

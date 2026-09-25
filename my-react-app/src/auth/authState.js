@@ -15,6 +15,13 @@
 //     (id/email/name only — never credentials).
 export const AUTH_CHANGED_EVENT = 'suppliwise:auth-changed';
 
+// Fired by the API layer when the SERVER rejects a request for plan reasons
+// (403 + requiresPlan/currentPlan). That answer is proof this tab's plan
+// snapshot is stale, so the subscription store re-reads the authoritative
+// state. Lives here because authState is a leaf module: api.js and the store
+// can both import it without a cycle.
+export const SUBSCRIPTION_REVALIDATE_EVENT = 'suppliwise:subscription-revalidate';
+
 // Tab-scoped session keys. Defined here (not in api.js) so this module can
 // read them without importing api.js — api.js imports US, and cycles around
 // module init are how auth state ends up reading `undefined`.

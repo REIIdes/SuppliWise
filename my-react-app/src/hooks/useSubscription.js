@@ -35,12 +35,16 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import useAuth from './useAuth';
 import { getStoredPlan, applyPlanToCache, planFromUser, hasFeature, planMeetsTier } from '../utils/plan';
 import { getMyProfile, getToken, getStoredUser, BASE_URL } from '../api';
+import { SUBSCRIPTION_REVALIDATE_EVENT } from '../auth/authState';
 
 export const SUBSCRIPTION_EVENT = 'suppliwise:subscription';
 export const SUBSCRIPTION_ADMIN_EVENT = 'suppliwise:subscription-admin';
 
-// How often one shared background refresh runs (visible tabs only).
-export const SUBSCRIPTION_POLL_MS = 120000;
+// How often one shared background refresh runs (visible tabs only). Kept at
+// 60s: it is the safety net for a downgrade whose live push was missed (closed
+// SSE stream, asleep tab, admin edited the record outside the panel), and a
+// stale premium UI is worse than one extra lightweight /auth/me per minute.
+export const SUBSCRIPTION_POLL_MS = 60000;
 // Hard floor between two shared network refreshes.
 const MIN_REFRESH_INTERVAL_MS = 30000;
 // Escalating client-side cool-down when the server says 429.
@@ -393,8 +397,16 @@ function attachGlobalListeners() {
 
   const onVisible = () => { if (document.visibilityState === 'visible') refreshShared(); };
 
+  // The API layer fires this when the SERVER refuses a request for plan
+  // reasons (403 + requiresPlan). That verdict is authoritative proof this
+  // tab's plan is stale — a revoked/expired plan must lock every gate at once
+  // rather than wait for the next push or poll. Forced (not throttled) because
+  // it is triggered by a real rejection, and deduped + gap-floored by the store.
+  const onRevalidate = () => { refreshShared({ force: true }); };
+
   window.addEventListener(SUBSCRIPTION_EVENT, onEvent);
   window.addEventListener(SUBSCRIPTION_ADMIN_EVENT, onAdminEvent);
+  window.addEventListener(SUBSCRIPTION_REVALIDATE_EVENT, onRevalidate);
   window.addEventListener('focus', onVisible);
   document.addEventListener('visibilitychange', onVisible);
 

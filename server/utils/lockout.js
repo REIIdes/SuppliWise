@@ -9,6 +9,19 @@
 const LADDER_MS = [15 * 60 * 1000, 60 * 60 * 1000, 6 * 60 * 60 * 1000, 24 * 60 * 60 * 1000];
 const MAX_ENTRIES = 2000;
 
+// How long an offense history survives after the last incident.
+//
+// The ladder is meant to escalate: 3 bad passwords, wait out 15 minutes, 3
+// more, and the next pause is an HOUR. That only works if the offense count
+// outlives the lock. It previously did not — `lockRemainingMs` deleted the
+// whole entry the moment the lock expired, so every subsequent incident
+// restarted at rung 1 and the 1 h / 6 h / 24 h rungs were unreachable on the
+// ordinary request path.
+//
+// The count still has to decay, or a user who had one bad month would still be
+// served a 24 h lock a year later. A month of clean sign-ins resets the ladder.
+const OFFENSE_DECAY_MS = 30 * 24 * 60 * 60 * 1000;
+
 const crypto = require('crypto');
 
 // Browsers never expose MAC addresses to web apps, so bypass resistance
@@ -30,18 +43,42 @@ const IP_ACCOUNT_THRESHOLD = 3;
 const IP_ACCOUNT_WINDOW_MS = 15 * 60 * 1000;
 const ipAccountHits = new Map(); // ip -> { emails: Set, firstAt }
 
-// key -> { offenses, lockedUntil, ips: [], fps: [], agents: [] }
+// key -> { offenses, lockedUntil, lastOffenseAt, ips: [], fps: [], agents: [] }
 const buckets = new Map();
+
+/**
+ * Evidence bundle attached to lockout entries (IP + device fingerprint + UA)
+ * so rotating IPs cannot dodge an account lock unnoticed.
+ *
+ * Lives here rather than in a route so every caller builds the same shape —
+ * this was previously private to routes/auth.js, and a second caller reaching
+ * for it got `undefined`, which turned a handled 401 into a 500.
+ */
+function lockMeta(req, ip) {
+  const cleanIp = ip || (req && req.ip) || '';
+  return {
+    ip: cleanIp,
+    fp: deviceFingerprint(req, cleanIp),
+    agent: String((req && req.get && req.get('user-agent')) || '').slice(0, 120),
+  };
+}
 
 function normKey(key) {
   return String(key || '').trim().toLowerCase().slice(0, 160);
+}
+
+// True when this entry's offense history is too old to still count.
+function decayed(entry, now) {
+  return !entry.lastOffenseAt || (now - entry.lastOffenseAt) > OFFENSE_DECAY_MS;
 }
 
 function prune() {
   if (buckets.size <= MAX_ENTRIES) return;
   const now = Date.now();
   for (const [key, entry] of buckets) {
-    if (now > entry.lockedUntil) buckets.delete(key);
+    // Evict only entries that are BOTH unlocked and fully decayed — never one
+    // still serving a lock, and never one whose offense count still matters.
+    if (now > entry.lockedUntil && decayed(entry, now)) buckets.delete(key);
     if (buckets.size <= MAX_ENTRIES) break;
   }
 }
@@ -55,9 +92,15 @@ function ladderFor(offenses) {
 function recordOffense(rawKey, meta) {
   const key = normKey(rawKey);
   if (!key) return 0;
-  const prev = buckets.get(key) || { offenses: 0, lockedUntil: 0, ips: [], fps: [], agents: [] };
-  const offenses = prev.offenses + 1;
-  const lockedUntil = Date.now() + ladderFor(offenses);
+  const now = Date.now();
+  const prev = buckets.get(key);
+  // Resume the ladder rather than restarting it: an expired-but-not-decayed
+  // entry keeps its offense count, so the next incident escalates. A decayed
+  // one starts clean, so a long-quiet account isn't punished forever.
+  const carried = prev && !decayed(prev, now) ? prev.offenses : 0;
+  const base = (prev && !decayed(prev, now)) ? prev : { ips: [], fps: [], agents: [] };
+  const offenses = carried + 1;
+  const lockedUntil = now + ladderFor(offenses);
   const push = (arr, value, max) => {
     const v = String(value || '').slice(0, 200);
     if (v && !arr.includes(v)) arr.push(v);
@@ -66,9 +109,10 @@ function recordOffense(rawKey, meta) {
   buckets.set(key, {
     offenses,
     lockedUntil,
-    ips: push(prev.ips || [], meta && meta.ip, 5),
-    fps: push(prev.fps || [], meta && meta.fp, 5),
-    agents: push(prev.agents || [], meta && meta.agent, 3),
+    lastOffenseAt: now,
+    ips: push(base.ips || [], meta && meta.ip, 5),
+    fps: push(base.fps || [], meta && meta.fp, 5),
+    agents: push(base.agents || [], meta && meta.agent, 3),
   });
   prune();
   return lockedUntil;
@@ -132,6 +176,10 @@ function noteIpAccountFailure(ip, accountId) {
 }
 
 // Milliseconds remaining, or 0 when not locked.
+//
+// An expired lock is CLEARED but the entry is kept, so the offense count that
+// drives escalation survives the wait. Deleting the entry here (as this once
+// did) is what silently pinned every account to the 15-minute rung.
 function lockRemainingMs(rawKey) {
   const key = normKey(rawKey);
   if (!key) return 0;
@@ -139,7 +187,8 @@ function lockRemainingMs(rawKey) {
   if (!entry) return 0;
   const left = entry.lockedUntil - Date.now();
   if (left <= 0) {
-    buckets.delete(key);
+    if (decayed(entry, Date.now())) buckets.delete(key);
+    else entry.lockedUntil = 0;
     return 0;
   }
   return left;
@@ -331,6 +380,7 @@ module.exports = {
   clientIp,
   ipKey,
   accountKey,
+  lockMeta,
   lockoutCheck,
   limitReachedHandler,
   lockoutStats,

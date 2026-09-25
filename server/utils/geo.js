@@ -59,6 +59,12 @@ async function lookupLocation(rawIp) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), GEO_TIMEOUT_MS);
   try {
+    // NOTE: plain http, because the provider's HTTPS endpoint is paid-only.
+    // The trade-off is that the request — which carries the user's IP — and
+    // the reply are not integrity-protected, so the result is treated as
+    // UNTRUSTED INPUT and sanitised before it is stored or displayed. A
+    // tampered reply must not be able to plant arbitrary text in a field the
+    // user reads as "your location was here".
     const res = await fetch(
       `http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,country,regionName,city`,
       { signal: controller.signal }
@@ -66,8 +72,10 @@ async function lookupLocation(rawIp) {
     if (!res.ok) return null;
     const data = await res.json();
     if (data?.status !== 'success') return null;
-    const parts = [data.city, data.regionName, data.country].filter(Boolean);
-    const value = parts.length > 0 ? parts.join(', ') : null;
+    const parts = [data.city, data.regionName, data.country]
+      .map(sanitisePlace)
+      .filter(Boolean);
+    const value = parts.length > 0 ? parts.slice(0, 3).join(', ') : null;
     if (value) {
       geoCache.set(ip, { value, at: Date.now() });
       pruneCache();
@@ -78,6 +86,16 @@ async function lookupLocation(rawIp) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+// Allow only characters a real place name uses. Anything else is dropped rather
+// than escaped, so a poisoned upstream response degrades to "Unknown location"
+// instead of reaching the UI at all.
+const PLACE_ALLOWED = /^[A-Za-z0-9À-ɏ .,'’()\-]+$/;
+function sanitisePlace(value) {
+  const text = String(value || '').trim().slice(0, 60);
+  if (!text || !PLACE_ALLOWED.test(text)) return '';
+  return text;
 }
 
 /**

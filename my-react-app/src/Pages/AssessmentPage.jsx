@@ -2106,7 +2106,11 @@ function AssessmentPage() {
   // subscription changes: Premium upgrade lifts the "no flag" state for the
   // next save; downgrade/expiry re-applies Standard-only immediately.
   const [priorityGate, setPriorityGate] = useState({ checking: !routeReadOnly, blocked: false, items: [] });
-  const { refresh: refreshPlan } = useSubscription();
+  const { refresh: refreshPlan, canAccess } = useSubscription();
+  // The pause is a Priority Assessment entitlement. The server already reports
+  // "not blocked" for lower tiers, and this render-time check makes a downgrade
+  // release the screen immediately instead of one fetch later.
+  const priorityEntitled = canAccess('priorityAssessment');
   const checkPriorityGate = () => {
     if (routeReadOnly) return Promise.resolve();
     setPriorityGate((prev) => ({ ...prev, checking: true }));
@@ -2406,7 +2410,7 @@ function AssessmentPage() {
   return (
     <div className="assessment-wrapper">
       <Navbar />
-      {priorityGate.blocked && !isReadOnly ? (
+      {priorityGate.blocked && priorityEntitled && !isReadOnly ? (
         <div className="assessment-container">
           <div className="priority-gate" role="alert">
             <div className="priority-gate__icon" aria-hidden="true">⚑</div>

@@ -33,6 +33,22 @@ const HOST = process.env.STRESS_HOST || '127.0.0.1';
 const PORT = Number(process.env.PORT || 5000);
 const BASE = `http://${HOST}:${PORT}`;
 
+// Built ONCE. Rebuilding a multi-megabyte body per request inside a flood loop
+// spends the measurement on the HARNESS's own allocation rather than on the
+// server: 80 x 4 MB of .repeat() + JSON.stringify() + Buffer.from() blocks this
+// process's event loop for long enough that it stops parsing responses, and it
+// then reports the resulting TCP resets as if they were server faults. (They
+// were. The same flood run against a pre-built payload completes 80/80.)
+function fillerBody(key, bytes) {
+  return Buffer.concat([
+    Buffer.from(`{"${key}":"`),
+    Buffer.alloc(bytes, 0x61),
+    Buffer.from('"}'),
+  ]);
+}
+const FLOOD_BODY = fillerBody('message', 4 * 1024 * 1024);
+const OVERSIZE_BODY = fillerBody('email', 20 * 1024 * 1024);
+
 // ── Loopback guard ─────────────────────────────────────────────────────────
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
 const isLoopback = (h) => LOOPBACK.has(h) || /^127\.\d+\.\d+\.\d+$/.test(h);
@@ -71,7 +87,7 @@ function request(method, path, { body = null, headers = {}, timeout = 15000 } = 
   return new Promise((resolve) => {
     const started = process.hrtime.bigint();
     const url = new URL(path, BASE);
-    const payload = body == null ? null : Buffer.from(body);
+    const payload = body == null ? null : (Buffer.isBuffer(body) ? body : Buffer.from(body));
     const req = http.request(
       {
         host: url.hostname,
@@ -272,10 +288,14 @@ async function main() {
         + ' instead of being refused from headers — a body flood would have to be uploaded in full before it can be turned away.');
     } else if (percentile(ms, 50) > 1000) {
       failures.push(`Header-only rejections on ${c.path} took p50=${percentile(ms, 50).toFixed(0)}ms — far slower than a header check.`);
-    } else if (answered.some((r) => r.status !== 413)) {
-      failures.push(`Oversized requests to ${c.path} answered ${[...new Set(answered.map((r) => r.status))].join(',')} instead of 413.`);
+    } else if (answered.some((r) => r.status !== 413 && r.status !== 503)) {
+      // 413 = refused by the size cap, 503 = refused by the in-flight byte
+      // budget. Both are header-level refusals that never touch the body; only
+      // anything else (2xx in particular) means an oversized payload got through.
+      failures.push(`Oversized requests to ${c.path} answered ${[...new Set(answered.map((r) => r.status))].join(',')} — expected 413 or 503.`);
     } else {
-      console.log('    ✓ refused 413 from headers alone; the body never touched memory.');
+      const seen = [...new Set(answered.map((r) => r.status))].join('/');
+      console.log(`    ✓ refused (${seen}) from headers alone; the body never touched memory.`);
     }
   }
 
@@ -286,7 +306,7 @@ async function main() {
   // this client pushing ≈320 MB, which measures the harness, not the server.
   console.log('\n[3b] Volume flood — 80 x 4 MB JSON POSTed concurrently (≈320 MB offered)');
   const flood = await ramp('80 x 4 MB concurrent', 80, 80, () => request('POST', '/api/chat', {
-    body: JSON.stringify({ message: 'a'.repeat(4 * 1024 * 1024) }),
+    body: FLOOD_BODY,
     timeout: 30000,
   }));
   const shedNow = flood.shed + flood.clientErr;
@@ -298,7 +318,7 @@ async function main() {
   // ── 4. Oversized body ────────────────────────────────────────────────────
   console.log('\n[4] Oversized body — 6 concurrent 20 MB bodies vs the 10 MB cap');
   const over = await ramp('6 x 20 MB', 6, 6, () => request('POST', '/api/auth/register', {
-    body: JSON.stringify({ email: 'b'.repeat(20 * 1024 * 1024) }),
+    body: OVERSIZE_BODY,
     timeout: 30000,
   }));
   const rejected = over.shed + over.clientErr + over.rateLimited;

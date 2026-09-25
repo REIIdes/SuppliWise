@@ -1,75 +1,223 @@
+/* ═══════════════════════════════════════════════════════════════════
+   PAYWALL MODAL — vibrant "premium unlock" card
+   ═══════════════════════════════════════════════════════════════════ */
 .upgrade-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(17, 24, 39, 0.55);
+  background:
+    radial-gradient(1100px 620px at 50% -10%, rgba(16, 185, 129, 0.22), transparent 62%),
+    rgba(15, 23, 42, 0.62);
+  backdrop-filter: blur(3px);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
   z-index: 1200;
+  animation: upgrade-fade 0.18s ease-out both;
 }
 
 .upgrade-box {
+  position: relative;
   background: #fff;
-  border-radius: 16px;
-  max-width: 420px;
+  border-radius: 24px;
+  max-width: 440px;
   width: 100%;
-  padding: 32px 28px;
+  overflow: hidden;
   text-align: center;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+  box-shadow:
+    0 30px 80px rgba(4, 47, 46, 0.28),
+    0 2px 8px rgba(15, 23, 42, 0.10);
+  animation: upgrade-rise 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.upgrade-icon {
-  font-size: 44px;
-  margin-bottom: 12px;
+@keyframes upgrade-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes upgrade-rise {
+  from { opacity: 0; transform: translateY(14px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ── Hero band ─────────────────────────────────────────────────────── */
+.upgrade-hero {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 26px 24px 30px;
+  background: linear-gradient(135deg, #059669 0%, #10b981 42%, #14b8a6 68%, #6366f1 130%);
+  overflow: hidden;
+}
+.upgrade-hero__glow {
+  position: absolute;
+  top: -60px;
+  left: 50%;
+  width: 220px;
+  height: 220px;
+  transform: translateX(-50%);
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.38) 0%, rgba(255, 255, 255, 0) 68%);
+  pointer-events: none;
+}
+.upgrade-hero__sheen {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg, transparent 38%, rgba(255, 255, 255, 0.20) 50%, transparent 62%);
+  transform: translateX(-100%);
+  animation: upgrade-sheen 4.5s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes upgrade-sheen {
+  0%, 62% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.upgrade-badge {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 62px;
+  height: 62px;
+  border-radius: 20px;
+  color: #047857;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow:
+    0 10px 24px rgba(4, 120, 87, 0.28),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.7);
+}
+.upgrade-badge svg { width: 30px; height: 30px; }
+
+.upgrade-tier {
+  position: relative;
+  padding: 5px 14px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #065f46;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 6px 16px rgba(4, 120, 87, 0.22);
+}
+
+/* ── Content ───────────────────────────────────────────────────────── */
+.upgrade-content { padding: 22px 26px 26px; }
+
+.upgrade-eyebrow {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #059669;
 }
 
 .upgrade-title {
-  margin: 0 0 10px;
-  font-size: 20px;
-  color: #111827;
+  margin: 0 0 8px;
+  font-size: 22px;
+  line-height: 1.25;
+  font-weight: 800;
+  color: #0f172a;
+}
+.upgrade-title__accent {
+  color: #059669;
+  background: linear-gradient(120deg, #059669, #14b8a6 55%, #6366f1);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 .upgrade-body {
-  margin: 0 0 8px;
-  font-size: 15px;
-  color: #374151;
+  margin: 0 0 12px;
+  font-size: 14.5px;
+  color: #475569;
   line-height: 1.6;
 }
+.upgrade-body strong { color: #0f172a; font-weight: 700; }
 
 .upgrade-note {
+  /* Flex holds the icon and ONE wrapped copy run — bare inline chunks would
+     each become their own flex item and lay out as columns. */
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   margin: 0 0 20px;
-  font-size: 13px;
-  color: #6b7280;
+  padding: 10px 12px;
+  border-radius: 12px;
+  text-align: left;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #475569;
+  background: linear-gradient(180deg, #f0fdfa, #ecfeff);
+  border: 1px solid #ccfbf1;
+}
+.upgrade-note span { min-width: 0; }
+.upgrade-note__icon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  color: #0d9488;
 }
 
+/* ── Actions ───────────────────────────────────────────────────────── */
 .upgrade-actions {
   display: flex;
   gap: 10px;
   justify-content: center;
+  flex-wrap: wrap;
 }
 
 .upgrade-btn {
-  padding: 10px 20px;
-  border-radius: 10px;
-  font-weight: 600;
-  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 12px 20px;
+  border-radius: 14px;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 14.5px;
   cursor: pointer;
   border: none;
+  transition: transform 0.16s ease, box-shadow 0.2s ease, background 0.2s ease;
 }
+.upgrade-btn svg { width: 17px; height: 17px; }
 
 .upgrade-btn-secondary {
-  background: #f3f4f6;
-  color: #374151;
+  background: #fff;
+  color: #0f766e;
+  border: 2px solid #99f6e4;
+}
+.upgrade-btn-secondary:hover {
+  background: #f0fdfa;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 18px rgba(13, 148, 136, 0.16);
 }
 
 .upgrade-btn-primary {
-  background: #16a34a;
   color: #fff;
+  background: linear-gradient(135deg, #10b981 0%, #059669 55%, #0d9488 100%);
+  box-shadow: 0 12px 26px rgba(5, 150, 105, 0.32);
+}
+.upgrade-btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 32px rgba(5, 150, 105, 0.42);
+}
+.upgrade-btn:active { transform: scale(0.97); }
+
+.upgrade-btn:focus-visible {
+  outline: 3px solid rgba(16, 185, 129, 0.5);
+  outline-offset: 3px;
 }
 
-.upgrade-btn-primary:hover {
-  background: #15803d;
+@media (max-width: 420px) {
+  .upgrade-actions { flex-direction: column-reverse; }
+  .upgrade-btn { width: 100%; }
+  .upgrade-content { padding: 20px 20px 22px; }
 }
 
 /* Full-page locked state (used by gated pages instead of the modal) */
@@ -113,4 +261,11 @@
   gap: 10px;
   justify-content: center;
   flex-wrap: wrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .upgrade-overlay,
+  .upgrade-box,
+  .upgrade-hero__sheen { animation: none !important; }
+  .upgrade-btn { transition: none !important; }
 }

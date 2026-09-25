@@ -63,7 +63,7 @@ const getTransporter = () => {
  * Send OTP email for email verification or login
  * @param {string} toEmail - Recipient email address
  * @param {string} otp - 6-digit OTP code
- * @param {string} type - 'email-change' or 'login'
+ * @param {string} type - 'email-change' | 'login' | 'password-reset' | 'recovery'
  * @returns {Promise<boolean>} - Success status
  */
 const sendOtpEmail = async (toEmail, otp, type = 'email-change') => {
@@ -80,10 +80,20 @@ const sendOtpEmail = async (toEmail, otp, type = 'email-change') => {
     // Configure content based on type
     const isLogin = type === 'login';
     const isPasswordReset = type === 'password-reset';
+    // Recovery-email confirmation. Deliberately worded so the recipient knows
+    // they are being added as a backup contact and that it does not grant
+    // access on its own.
+    const isRecovery = type === 'recovery';
     
     let subject, title, subtitle, bodyText, securityText;
     
-    if (isPasswordReset) {
+    if (isRecovery) {
+      subject = 'Confirm Your Recovery Email - SuppliWise';
+      title = 'Confirm Recovery Email';
+      subtitle = 'SuppliWise Account Security';
+      bodyText = 'You asked to use this address as a recovery email on your SuppliWise account. Use the verification code below to confirm it:';
+      securityText = "This address is only used to warn you about activity on your account. It cannot be used to sign in. If you didn't request this, ignore this email and change your password.";
+    } else if (isPasswordReset) {
       subject = 'Password Reset Verification Code - SuppliWise';
       title = 'Reset Your Password';
       subtitle = 'SuppliWise Password Recovery';
@@ -349,6 +359,33 @@ async function sendStatusEmail(toEmail, kind, context = {}) {
         accent: '#16a34a',
         body: 'Good news — your SuppliWise account has been reactivated and you can sign in again right now.',
         advice: 'Thanks for your patience. Contact support if anything looks wrong.',
+      },
+      // A sign-in from a device we have not seen before. Wording is neutral on
+      // purpose: an unfamiliar device is worth checking, but it is NOT evidence
+      // of an attack, and accusing the user would be wrong as often as not.
+      'new-device': {
+        subject: 'New sign-in to your SuppliWise account',
+        title: 'New Sign-In',
+        subtitle: 'SuppliWise Account Security',
+        accent: '#4f46e5',
+        body: 'Your account was just signed into from a device we had not seen before. If this was you, no action is needed.',
+        advice: "If you don't recognise this sign-in, change your password and sign out your other devices.",
+      },
+      'recovery-email': {
+        subject: 'Your SuppliWise recovery email was changed',
+        title: 'Recovery Email Changed',
+        subtitle: 'SuppliWise Account Security',
+        accent: '#d97706',
+        body: `The recovery email on your account was set to ${context.address || 'a new address'}. It can only be used to warn you about account activity — never to sign in.`,
+        advice: "If you didn't do this, change your password and contact support immediately.",
+      },
+      'security-change': {
+        subject: 'A security setting on your SuppliWise account changed',
+        title: 'Security Setting Changed',
+        subtitle: 'SuppliWise Account Security',
+        accent: '#d97706',
+        body: `A security setting on your account was just changed: ${context.change || 'an update'}.`,
+        advice: "If you didn't make this change, reset your password and contact support immediately.",
       },
     };
     const p = presets[kind];

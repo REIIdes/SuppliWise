@@ -1,8 +1,8 @@
 /**
  * Flood protection that runs BEFORE a single body byte is buffered.
  *
- * Two independent layers, because rate limiting and memory exhaustion are
- * different attacks:
+ * Three independent layers, because rate limiting, memory exhaustion and
+ * wasted upload are different attacks:
  *
  *   floodGuard() — a coarse per-IP meter over EVERY request path. It closes
  *                  the gaps the per-family limiters cannot see: /api/health
@@ -18,7 +18,12 @@
  *                  to an unbounded allocation — so a flood can exhaust memory
  *                  even while every limiter happily answers 200.
  *
- * Both must be mounted ahead of express.json(); mounted behind it they run
+ *   rejectOversized() — a Content-Length check ahead of body-parser. Its own
+ *                  413 path drains the whole body before responding, so
+ *                  without this the price of refusing an oversized upload is
+ *                  reading all of it. See its comment for the measurements.
+ *
+ * All three must be mounted ahead of express.json(); mounted behind it they run
  * only after the body has already been read, which is exactly backwards.
  */
 
@@ -86,7 +91,7 @@ function logClientError(status, method, path, message) {
   const now = Date.now();
   if (now - clientErrWindowStart >= 60_000) {
     if (clientErrSuppressed > 0) {
-      console.error(`[client-error] … and ${clientErrSuppressed} more in the last minute (suppressed to bound log growth)`);
+      console.error(`[client-error] ... and ${clientErrSuppressed} more in the last minute (suppressed to bound log growth)`);
     }
     clientErrWindowStart = now;
     clientErrLogged = 0;
@@ -98,6 +103,41 @@ function logClientError(status, method, path, message) {
   } else {
     clientErrSuppressed += 1;
   }
+}
+
+// ── Graceful rejection send ─────────────────────────────────────────────────
+// An early rejection is written while the request body is still unread. The
+// instant the response "finishes", Node tears the socket down — and because
+// those unread bytes are still in the receive buffer, that teardown is a TCP
+// RST, not a FIN. An RST DISCARDS whatever the peer has not yet read, which
+// includes the response we just wrote. The client therefore reports a plain
+// network error instead of the 413/503 it was actually given.
+//
+// This was measured, not guessed: the server logged every rejection, curl
+// received 6/6 of them, and yet both Node's http client and undici fetch
+// reported ECONNRESET with bytesRead=0 — zero bytes ever reached the parser.
+//
+// Sending the full body immediately but delaying only the FIN gives the peer
+// time to read it. There is no added latency for the client: it has the whole
+// message (Content-Length satisfied) the moment we write it, and completes
+// without waiting for the close. The cost is holding the socket for the grace
+// period, which is bounded — rejections can only arrive at whatever rate the
+// global limiter already admitted, so this pins a few dozen sockets at most,
+// never a growing number. (Measured: a client pushing 80 x 4 MB concurrently
+// still needs ~200 ms to get its own writes out of the way and read the reply,
+// so 150 ms was measurably too tight; 400 ms clears it with room to spare.)
+const CLOSE_GRACE_MS = 400;
+
+function sendAndClose(res, status, payload) {
+  const body = JSON.stringify(payload);
+  res.status(status);
+  res.set('Content-Type', 'application/json; charset=utf-8');
+  res.set('Content-Length', Buffer.byteLength(body));
+  res.set('Connection', 'close');
+  res.write(body);
+  const timer = setTimeout(() => res.end(), CLOSE_GRACE_MS);
+  // If the peer goes away first, stop holding the timer open.
+  res.on('close', () => clearTimeout(timer));
 }
 
 /**
@@ -132,13 +172,10 @@ function bodyBudget(maxBodyBytes, budgetBytes = DEFAULT_INFLIGHT_BUDGET) {
 
     if (inFlight + reserve > max) {
       res.set('Retry-After', '1');
-      // Reject WITHOUT reading the body. That leaves req.complete === false,
-      // and Node would otherwise reuse the keep-alive socket anyway, destroying
-      // it mid-upload — an RST that swallows this very response before the
-      // client can read it. Declaring close tells the stack to finish the
-      // response gracefully instead, so the rejection actually arrives.
-      res.set('Connection', 'close');
-      return res.status(503).json({
+      // Reject WITHOUT reading the body — that is the whole point of the
+      // budget. sendAndClose() keeps the refusal deliverable anyway (see its
+      // comment): an immediate teardown would RST and swallow the response.
+      return sendAndClose(res, 503, {
         message: 'The server is busy. Please try again in a moment.',
       });
     }
@@ -196,12 +233,14 @@ function rejectOversized(limitBytes) {
     const declared = Number(req.headers['content-length']);
     if (!Number.isFinite(declared) || declared <= limitBytes) return next();
 
-    logClientError(413, req.method, req.path, 'request entity too large');
-    // The body is never read, so req.complete is false. Without this Node
-    // reuses the keep-alive socket and destroys it mid-upload, an RST that
-    // swallows this very response — same reasoning as bodyBudget's 503.
-    res.set('Connection', 'close');
-    return res.status(413).json({ message: 'request entity too large' });
+    // originalUrl, not path: as a mounted middleware `req.path` is already
+    // stripped to the mount remainder ("/"), which makes the log useless for
+    // the two scoped profile routes.
+    logClientError(413, req.method, String(req.originalUrl || req.url || '').split('?')[0], 'request entity too large');
+    // Never read the body, and never absorb it: draining would hand an attacker
+    // exactly the work this guard exists to refuse. sendAndClose() makes the
+    // refusal deliverable without doing so.
+    return sendAndClose(res, 413, { message: 'request entity too large' });
   };
 }
 

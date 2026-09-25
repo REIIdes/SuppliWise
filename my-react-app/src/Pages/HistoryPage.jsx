@@ -327,6 +327,18 @@ function HistoryPage() {
         // state — the shared subscription store is the only writer now.
       })
       .catch((err) => {
+        // A plan-gate 403 is the server saying this account no longer has
+        // `historyFull` (downgrade/expiry). Show the paywall instead of a bare
+        // toast; api.js also fires the revalidation event, so every other gate
+        // in the app locks at the same moment.
+        if (err?.requiresPlan) {
+          setUpgradeInfo({
+            requiresPlan: err.requiresPlan,
+            currentPlan: err.currentPlan || livePlan.plan,
+            feature: '5-Year Record History',
+          });
+          return;
+        }
         if (append) showToast(err.message || 'Could not load more history.');
         else setError(err.message);
       })

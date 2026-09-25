@@ -6,6 +6,7 @@ import {
   DIRECTORY_KEY,
   markUserSignedOut,
   clearUserSignedOut,
+  SUBSCRIPTION_REVALIDATE_EVENT,
 } from './auth/authState';
 
 // Resolve the backend URL: explicit env override wins; otherwise derive it
@@ -751,6 +752,22 @@ const friendlyError = (status, serverMessage, isLoginAttempt = false, code = nul
   }
 };
 
+// A plan-gate rejection is also proof that THIS tab's plan snapshot is stale —
+// the server just told us the account no longer qualifies. Nudge the shared
+// subscription store to re-read the authoritative state so every gate in the
+// app (profile grid, history paging, PDF, chat, insights) locks at once instead
+// of waiting for the next push/poll.
+//
+// Dispatched as a DOM event on purpose: api.js is imported BY the store, so a
+// direct import here would create a module cycle.
+const notePlanRejection = (data) => {
+  if (typeof window === 'undefined') return;
+  if (!data || (!data.requiresPlan && !data.currentPlan && !data.feature)) return;
+  try {
+    window.dispatchEvent(new CustomEvent(SUBSCRIPTION_REVALIDATE_EVENT, { detail: data }));
+  } catch { /* non-browser safe */ }
+};
+
 // Build an Error that also carries plan-gate info (403 requiresPlan/currentPlan)
 // so gated pages can show an upgrade prompt instead of a generic message.
 const throwFriendly = (status, data, isLoginAttempt = false) => {
@@ -759,6 +776,7 @@ const throwFriendly = (status, data, isLoginAttempt = false) => {
   if (data?.currentPlan) err.currentPlan = data.currentPlan;
   err.status = status;
   err.code = data?.code || null;
+  notePlanRejection(status === 403 ? data : null);
   throw err;
 };
 
@@ -922,6 +940,7 @@ export const sendChatMessage = async (message, history = []) => {
     if (data?.currentPlan) err.currentPlan = data.currentPlan;
     err.status = res.status;
     err.code = data?.code || null;
+    notePlanRejection(res.status === 403 ? data : null);
     const retryAfter = Number(res.headers.get('retry-after'));
     if (Number.isFinite(retryAfter) && retryAfter > 0) err.retryAfterSeconds = retryAfter;
     throw err;
@@ -956,6 +975,178 @@ export const getMyProfile = async (timeoutMs = 15000) => {
       : (Number(data?.remainingSeconds) || 0);
     throw err;
   }
+  return data;
+};
+
+// ── Account security ───────────────────────────────────────────────────────
+// All three live here rather than inline in ProfilePage so the endpoint,
+// auth header and error shape stay in one place.
+
+/**
+ * Change the password on its own (POST /auth/change-password).
+ * Deliberately NOT part of the profile form: mixing a credential change into
+ * a profile save means a user who only wanted to fix a typo has to satisfy
+ * the password-strength rules, and one who only wants to change their password
+ * has to fill in every profile field.
+ */
+export const changePassword = async (currentPassword, newPassword) => {
+  const res = await apiFetch('/auth/change-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data; // { message, passwordChangedAt, otherSessionsRevoked }
+};
+
+/** Revoke every other session and drop their saved-login credentials. */
+export const signOutAllOtherDevices = async () => {
+  const res = await apiFetch('/auth/sign-out-all', {
+    method: 'POST',
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data; // { message, revoked }
+};
+
+/**
+ * Choose the second factor used at sign-in: 'authenticator' or 'email'.
+ * `currentPassword` is required when DOWNGRADING to email, because that removes
+ * a stronger factor — the server enforces it, this only avoids a round trip.
+ */
+export const setTwoFactorMethod = async (method, currentPassword = '') => {
+  const res = await apiFetch('/auth/two-factor-method', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify({ method, currentPassword }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data; // { message, twoFactorMethod, twoFactorEnabled }
+};
+
+// ── Account security dashboard (/api/security) ─────────────────────────────
+// Step-up is passed as the X-Step-Up header. The token is short-lived and
+// bound to the session that earned it, so it is held in component state only —
+// never persisted, and never written to storage.
+
+/** Everything the dashboard header needs, in one call. */
+export const getSecuritySummary = async () => {
+  const res = await apiFetch('/security/summary', { headers: { ...authHeader() } });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+/** Live session(s) + any trusted devices. Never includes token material. */
+export const getSecurityDevices = async () => {
+  const res = await apiFetch('/security/devices', { headers: { ...authHeader() } });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+/** Sign out one other device. Requires stepUp. */
+export const revokeSecurityDevice = async (id, stepUp) => {
+  const res = await apiFetch(`/security/devices/${encodeURIComponent(id)}/revoke`, {
+    method: 'POST',
+    headers: { ...authHeader(), ...(stepUp ? { 'X-Step-Up': stepUp } : {}) },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+/** Sign out every other device. Requires stepUp. */
+export const revokeOtherSecurityDevices = async (stepUp) => {
+  const res = await apiFetch('/security/devices/revoke-others', {
+    method: 'POST',
+    headers: { ...authHeader(), ...(stepUp ? { 'X-Step-Up': stepUp } : {}) },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+/** This account's own security history, newest first. */
+export const getSecurityEvents = async (limit = 25) => {
+  const res = await apiFetch(`/security/events?limit=${limit}`, { headers: { ...authHeader() } });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+/**
+ * Prove possession of the account: password, plus a TOTP when the
+ * authenticator is the active factor. Returns a short-lived step-up token.
+ */
+export const securityStepUp = async (password, otp = '') => {
+  const res = await apiFetch('/security/step-up', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify({ password, otp }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data; // { stepUp, expiresInSeconds }
+};
+
+/** Mint a new set of single-use recovery codes. Returns the ONLY copy. */
+export const generateBackupCodes = async (stepUp) => {
+  const res = await apiFetch('/security/backup-codes/generate', {
+    method: 'POST',
+    headers: { ...authHeader(), ...(stepUp ? { 'X-Step-Up': stepUp } : {}) },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data; // { codes: [...], message }
+};
+
+/** Destroy every unused recovery code. */
+export const invalidateBackupCodes = async (stepUp) => {
+  const res = await apiFetch('/security/backup-codes', {
+    method: 'DELETE',
+    headers: { ...authHeader(), ...(stepUp ? { 'X-Step-Up': stepUp } : {}) },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+/** Email a confirmation code to a candidate recovery address (not yet saved). */
+export const requestRecoveryEmail = async (email, stepUp) => {
+  const res = await apiFetch('/security/recovery-email/request', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader(), ...(stepUp ? { 'X-Step-Up': stepUp } : {}) },
+    body: JSON.stringify({ email }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+/** Confirm the candidate address and activate it. */
+export const verifyRecoveryEmail = async (code) => {
+  const res = await apiFetch('/security/recovery-email/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify({ code }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+/** Remove the recovery email. Requires stepUp. */
+export const removeRecoveryEmail = async (stepUp) => {
+  const res = await apiFetch('/security/recovery-email', {
+    method: 'DELETE',
+    headers: { ...authHeader(), ...(stepUp ? { 'X-Step-Up': stepUp } : {}) },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
   return data;
 };
 
