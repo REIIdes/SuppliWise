@@ -24,6 +24,12 @@ import {
 // The spellings the subscription spec names explicitly. Each must resolve to a
 // canonical key that the SERVER actually registers at the expected tier.
 const SPEC_SPELLINGS = {
+  // The three surfaces the navbar groups under "Explore" must each resolve to
+  // their own DELUXE-gated key — not collapse into one shared "blockchain"
+  // entry, or the upgrade card for the wrong area would be shown.
+  web3: { key: 'web3', minTier: 'monthly' },
+  market: { key: 'market', minTier: 'monthly' },
+  dao: { key: 'dao', minTier: 'monthly' },
   health_assessment: { key: 'healthAssessment', minTier: 'free' },
   supplement_recommendations: { key: 'recommendations', minTier: 'free' },
   daily_intake: { key: 'dailyIntake', minTier: 'free' },
@@ -36,6 +42,53 @@ const SPEC_SPELLINGS = {
   five_year_record_history: { key: 'historyFull', minTier: 'annual' },
   ai_chat: { key: 'chat', minTier: 'custom' },
 };
+
+test('the blockchain layer is DELUXE-only on both sides', () => {
+  // The product rule: Web3, Market and DAO are DELUXE. Asserted on the SERVER
+  // registry too, because that is the enforcement point — the frontend table
+  // is only a mirror and cannot grant access.
+  for (const key of ['web3', 'market', 'dao']) {
+    assert.equal(server.FEATURES[key]?.minTier, 'monthly', `${key} must require DELUXE`);
+    assert.equal(FEATURES[key]?.minTier, 'monthly', `${key} mirror drifted`);
+  }
+
+  // FREE is the only tier below DELUXE, so it is the one that must be refused.
+  const free = { subscriptionActive: true, subscriptionPlan: 'free', subscriptionExpiresAt: null };
+  for (const key of ['web3', 'market', 'dao']) {
+    assert.equal(server.can(free, key), false, `FREE must not reach ${key}`);
+    assert.equal(server.can({ ...free, role: 'admin' }, key), true, 'admins bypass');
+  }
+  for (const plan of ['monthly', 'annual', 'custom']) {
+    const paid = { subscriptionActive: true, subscriptionPlan: plan, subscriptionExpiresAt: null };
+    for (const key of ['web3', 'market', 'dao']) {
+      assert.equal(server.can(paid, key), true, `${plan} must reach ${key}`);
+    }
+  }
+});
+
+test('the blockchain aliases all land on the right key', () => {
+  // Aliases are a convenience, but a mis-pointed one silently unlocks the
+  // wrong screen. Each spelling here is checked against its intended target.
+  const expected = {
+    blockchain: 'web3', web_3: 'web3', wallet: 'web3', supply_chain: 'web3', provenance: 'web3',
+    marketplace: 'market', shop: 'market', store: 'market', trading: 'market', escrow: 'market',
+    governance: 'dao', voting: 'dao', treasury: 'dao', proposals: 'dao',
+  };
+  for (const [spelling, key] of Object.entries(expected)) {
+    assert.equal(resolveFeatureKey(spelling), key, `"${spelling}" must resolve to ${key}`);
+    assert.equal(server.hasFeature(key), true, `server must register ${key}`);
+  }
+});
+
+test('the blockchain keys are distinct, not aliases of one another', () => {
+  // A copy/paste that pointed all three at one key would let the Market or
+  // DAO card claim the wrong entitlement and the server would 403 the user on
+  // a screen the UI had already unlocked.
+  assert.notEqual(server.FEATURES.market.minTier, undefined);
+  for (const [a, b] of [['web3', 'market'], ['web3', 'dao'], ['market', 'dao']]) {
+    assert.notEqual(resolveFeatureKey(a), resolveFeatureKey(b), `${a} and ${b} must be separate keys`);
+  }
+});
 
 test('frontend feature registry is identical to the server registry', () => {
   assert.deepEqual(
@@ -97,7 +150,9 @@ test('canonical camelCase keys resolve to themselves', () => {
 test('unknown features fail closed (never resolve to something real)', () => {
   // Fail-open here would make a gate render as unlocked for a feature that
   // does not exist — the frontend twin of the server getFeature() guard.
-  const unknown = ['blockchain', 'unlimited', 'god_mode', 'export', 'reports',
+  // 'blockchain' was removed from this list when the Web3 area was registered:
+  // it is now a real alias for 'web3', so asserting it misses would be wrong.
+  const unknown = ['unlimited', 'god_mode', 'export', 'reports',
     'priorityFlag', 'not_a_feature', 'ADMIN', 'features'];
   for (const probe of unknown) {
     assert.equal(resolveFeatureKey(probe), null, `"${probe}" must not resolve`);

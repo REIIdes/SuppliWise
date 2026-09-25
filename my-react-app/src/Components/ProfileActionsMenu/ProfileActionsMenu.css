@@ -242,6 +242,29 @@
 .pam-item--danger:focus-visible { background: #fff1f2; color: #9f1239; }
 .pam-item--danger:hover .pam-item__icon { color: #ffffff; background: linear-gradient(140deg, #f43f5e, #e11d48); }
 
+/* ── Plan-locked entries (DELUXE blockchain layer) ────────────────────────
+   These stay clickable on purpose: the item routes to the page, which renders
+   the upgrade card. Removing them would leave a sub-tier user with no way to
+   discover the feature exists, and disabling the button would make the reason
+   invisible until hover. */
+.pam-item--locked { color: #64748b; }
+.pam-item--locked .pam-item__text em { color: #b45309; font-weight: 600; }
+.pam-item--locked .pam-item__icon { opacity: 0.55; }
+.pam-item--locked:hover,
+.pam-item--locked:focus-visible { background: #fffbeb; color: #92400e; }
+.pam-item--locked:hover .pam-item__icon { opacity: 0.75; }
+
+.pam-item__lock {
+  display: grid;
+  place-items: center;
+  margin-left: auto;
+  flex-shrink: 0;
+  color: #b45309;
+  opacity: 0.85;
+}
+.pam-item--locked:hover .pam-item__lock,
+.pam-item--locked:focus-visible .pam-item__lock { color: #92400e; }
+
 /* ── Responsive ──────────────────────────────────────────────────────── */
 @media (max-width: 560px) {
   .pam-trigger__label { display: none; }

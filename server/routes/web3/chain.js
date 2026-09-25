@@ -2,8 +2,13 @@ const express = require('express');
 const mongoose = require('mongoose');
 const engine = require('../../blockchain/engine');
 const ledger = require('../../blockchain/ledger');
+const { web3Guard } = require('./guards');
 
 const router = express.Router();
+
+// DELUXE plan gate + user-only. The per-handler `req.user.role === 'admin'`
+// checks below are now redundant; they are left in place as defence in depth.
+router.use(...web3Guard('web3'));
 
 // The stored key is base64 PKCS#8 DER (exactly what blockchain/crypto.js
 // sign() consumes). For export we wrap it in standard PEM armor so external

@@ -5,8 +5,20 @@ const { SupplyBatch, SUPPLY_STEPS } = require('../../models/Web3');
 const engine = require('../../blockchain/engine');
 const ledger = require('../../blockchain/ledger');
 const { hashPayload, sha256Hex } = require('../../blockchain/crypto');
+const { web3Guard } = require('./guards');
 
 const router = express.Router();
+
+// DELUXE plan gate + user-only for every route in this file.
+//
+// The two public bottle-verification handlers (`verifyBatch`, `batchQr`) are
+// exported from here and registered DIRECTLY in index.js, before `protect`:
+//   router.get('/verify/:code', supplyRouter.verifyBatch);
+// Because they are mounted as plain handler functions rather than through
+// `router.use('/', supplyRouter)`, this guard does not run for them — which is
+// exactly what is wanted. A consumer scanning a bottle has no account and no
+// plan.
+router.use(...web3Guard('web3'));
 
 const STEP_LABELS = {
   'raw-sourcing': 'Raw material sourcing',

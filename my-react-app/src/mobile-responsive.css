@@ -978,9 +978,20 @@
     line-height: 1.5 !important;
   }
 
-  /* ═══ COMPREHENSIVE: HIDE ALL HELP ICONS (?) ON MOBILE ═══ */
-  /* This targets ALL possible help icon variations across all steps */
-  .diet-tooltip-wrap,
+  /* ═══ Help (?) ICONS ON MOBILE ═══
+     The diet/activity/goal help trigger used to be `display: none` here, which
+     deleted those explanations outright on phones. It is shown again.
+
+     `.diet-tooltip-wrap` is deliberately NOT in this list. On mobile it has to
+     become `display: contents` so the panel can span its own option, and an
+     `!important` display here would block that.
+
+     The tooltip PANEL's mobile layout is NOT here either. This file is
+     imported by main.jsx, but every page stylesheet is injected later by its
+     lazy chunk, so an equal-specificity rule here always loses to
+     AssessmentPage.css. Those panel rules therefore live at the end of
+     AssessmentPage.css, where they actually take effect. */
+
   .diet-info-btn,
   .help-icon-btn,
   .info-btn,
@@ -988,13 +999,8 @@
   button[aria-label*="info"],
   button[title*="Why"],
   button[title*="important"] {
-    display: none !important;
-    visibility: hidden !important;
-  }
-
-  /* Remove any tooltip boxes that might appear */
-  .diet-tooltip-box {
-    display: none !important;
+    display: inline-flex !important;
+    visibility: visible !important;
   }
 
   /* Add helpful banner at top of assessment */

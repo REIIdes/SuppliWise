@@ -4,6 +4,8 @@ import UserNotifications from '../UserNotifications/UserNotifications';
 import ProfileActionsMenu from '../ProfileActionsMenu/ProfileActionsMenu';
 import ConfirmLogoutModal from '../ConfirmLogoutModal/ConfirmLogoutModal';
 import useAuth from '../../hooks/useAuth';
+import useSubscription from '../../hooks/useSubscription';
+import { PLAN_LABELS } from '../../subscription/features';
 import { signOutCurrentAccount } from '../../api';
 import './Navbar.css';
 
@@ -21,6 +23,8 @@ const NAV_ITEMS = [
     hint: 'Wallet, supply chain & proofs',
     to: '/web3',
     tone: 'web3',
+    // Entitlement key for this entry (ULTIMATE). Read by the gate below.
+    feature: 'web3',
     icon: (
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <rect x="3" y="3" width="7" height="7" rx="1.5" />
@@ -36,6 +40,7 @@ const NAV_ITEMS = [
     hint: 'Buy & sell with WELL',
     to: '/marketplace',
     tone: 'market',
+    feature: 'market',
     icon: (
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <circle cx="9" cy="20" r="1.4" />
@@ -50,6 +55,7 @@ const NAV_ITEMS = [
     hint: 'Proposals, votes & treasury',
     to: '/governance',
     tone: 'dao',
+    feature: 'dao',
     icon: (
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="M3 21h18" />
@@ -80,6 +86,22 @@ function Navbar() {
     user?.name?.charAt(0) ||
     'A'
   ).toUpperCase();
+
+  // DELUXE gate for the blockchain layer. Read here, in the one place that
+  // already owns these routes, and passed down as `locked` — the menu stays a
+  // generic renderer and the routes stay declared in one place.
+  //
+  // This is presentation only. The real enforcement is requireFeature on the
+  // server (routes/web3/guards.js), which re-checks on every request, so a
+  // stale menu cannot grant access.
+  const { canAccess } = useSubscription();
+  const navItems = NAV_ITEMS.map((n) => {
+    if (!n.feature) return n;
+    const unlocked = canAccess(n.feature);
+    return unlocked
+      ? n
+      : { ...n, locked: true, lockedHint: `${PLAN_LABELS.monthly} plan` };
+  });
 
   // The account menu drives the profile page through the URL rather than
   // through shared component state. The Navbar and ProfilePage are siblings
@@ -151,7 +173,7 @@ function Navbar() {
               profilePicture={user.profilePicture || ''}
               initials={avatarInitial}
               showLabel
-              navItems={NAV_ITEMS}
+              navItems={navItems}
               onNavigate={(to) => navigate(to)}
               onEditProfile={() => goToProfile({ view: 'personal', edit: '1' })}
               onOpenView={(view) => goToProfile({ view })}

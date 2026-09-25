@@ -7,6 +7,7 @@ import ProfileSecurityControls from '../Components/ProfileSecurityControls/Profi
 import ProfileAvatarImage from '../Components/ProfileAvatar/ProfileAvatarImage';
 import { useSubscription, SUBSCRIPTION_EVENT } from '../hooks/useSubscription';
 import { PLAN_LABELS, planFromUser } from '../utils/plan';
+import { sanitizeNameInput, NAME_MAX, NAME_PATTERN_SOURCE, NAME_CHARS_HINT } from '../utils/nameValidation';
 import './ProfilePage.css';
 
 // Relative time for the security activity feed
@@ -415,7 +416,14 @@ function ProfilePage() {
   };
 
   const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    // Name fields are filtered rather than merely flagged: the Mongoose schema
+    // now rejects digits, so accepting one here would only produce a save
+    // error after the user had already filled in the form.
+    const next = name === 'firstName' || name === 'lastName'
+      ? sanitizeNameInput(value)
+      : value;
+    setFormData({ ...formData, [name]: next });
     setError('');
     setSuccess('');
   };
@@ -1012,6 +1020,9 @@ function ProfilePage() {
                     name="firstName"
                     value={formData.firstName}
                     onChange={handleChange}
+                    pattern={NAME_PATTERN_SOURCE}
+                    title={`Letters only — ${NAME_CHARS_HINT}`}
+                    maxLength={NAME_MAX}
                     disabled={!isEditing}
                     required
                   />
@@ -1025,6 +1036,9 @@ function ProfilePage() {
                     name="lastName"
                     value={formData.lastName}
                     onChange={handleChange}
+                    pattern={NAME_PATTERN_SOURCE}
+                    title={`Letters only — ${NAME_CHARS_HINT}`}
+                    maxLength={NAME_MAX}
                     disabled={!isEditing}
                     required
                   />

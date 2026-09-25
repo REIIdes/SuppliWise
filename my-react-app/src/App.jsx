@@ -23,6 +23,7 @@ const AssessmentManagement = lazy(() => import('./Pages/AssessmentManagement'));
 const Web3HubPage = lazy(() => import('./Pages/Web3HubPage'));
 const MarketplacePage = lazy(() => import('./Pages/MarketplacePage'));
 const GovernancePage = lazy(() => import('./Pages/GovernancePage'));
+const Web3PlanGate = lazy(() => import('./Components/Web3PlanGate/Web3PlanGate'));
 // Public routes — no session required (QR scan / share links)
 const VerifyPage = lazy(() => import('./Pages/VerifyPage'));
 const SharePage = lazy(() => import('./Pages/SharePage'));
@@ -333,10 +334,14 @@ function App() {
           <Route path="/history" element={<ProtectedRoute><HistoryPage /></ProtectedRoute>} />
           <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
 
-          {/* Web3 layer - user session required */}
-          <Route path="/web3" element={<ProtectedRoute><Web3HubPage /></ProtectedRoute>} />
-          <Route path="/marketplace" element={<ProtectedRoute><MarketplacePage /></ProtectedRoute>} />
-          <Route path="/governance" element={<ProtectedRoute><GovernancePage /></ProtectedRoute>} />
+          {/* Web3 layer - requires a user session AND the ULTIMATE plan.
+              The gate renders instead of the page (not over it), so a
+              sub-tier user never triggers the panels' mount-time fetches.
+              /verify and /share stay public below: a consumer scanning a
+              bottle has no account and no plan. */}
+          <Route path="/web3" element={<ProtectedRoute><Web3PlanGate area="web3"><Web3HubPage /></Web3PlanGate></ProtectedRoute>} />
+          <Route path="/marketplace" element={<ProtectedRoute><Web3PlanGate area="market"><MarketplacePage /></Web3PlanGate></ProtectedRoute>} />
+          <Route path="/governance" element={<ProtectedRoute><Web3PlanGate area="dao"><GovernancePage /></Web3PlanGate></ProtectedRoute>} />
 
           {/* Public verification & sharing - deliberately OUTSIDE ProtectedRoute:
               a consumer scanning a bottle QR or a clinician opening a share

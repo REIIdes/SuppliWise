@@ -1,5 +1,6 @@
 const express = require('express');
 const { protect } = require('../../middleware/auth');
+const { userOnly, web3PlanGate } = require('./guards');
 
 const chainRouter = require('./chain');
 const supplyRouter = require('./supply');
@@ -31,6 +32,23 @@ router.get('/share/:token', dataRouter.publicShare);
 
 // ── Authenticated ─────────────────────────────────────────────────────────
 router.use(protect);
+
+// ── DELUXE plan gate ──────────────────────────────────────────────────────
+// The whole blockchain layer is a DELUXE entitlement. It used to sit behind
+// `protect` only, so any signed-in FREE user could create a wallet, mint NFTs,
+// lock tokens in staking, escrow funds and vote in the DAO.
+//
+// ONE gate, applied here, keyed on the request path — see routes/web3/guards.js
+// for why it cannot live in the sub-routers: they are all mounted at '/', so a
+// guard inside any one of them runs for EVERY path, and the first mount's gate
+// would then report the wrong feature (/market/* answering "Web3 requires
+// DELUXE"). Attached as the second handler it does not run at all, because the
+// sub-router has already answered.
+//
+// Below `protect` and below the three public routes above: bottle
+// verification and share links are read by consumers with no account and no
+// plan, so they must stay reachable.
+router.use(userOnly, web3PlanGate);
 
 router.use('/', chainRouter);       // wallet/DID, chain explorer, tx lookup, config
 router.use('/', supplyRouter);      // supply batches, journey steps, certifications

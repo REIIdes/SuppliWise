@@ -7,6 +7,7 @@ const IntakeRecord = require('../models/IntakeRecord');
 const DashboardMetrics = require('../models/DashboardMetrics');
 const { notExpiredFilter, expiryFromCreatedAt } = require('../utils/assessments');
 const { can } = require('../utils/plan');
+const { selfHealOpenPriority } = require('../utils/priorityGate');
 
 // Coerce any JSON value to a plain string for DB equality filters.
 // Objects (e.g. {"$ne": "x"}) would otherwise become NoSQL operators and
@@ -215,13 +216,26 @@ router.get('/', protect, async (req, res) => {
     // view) but is no longer paused — the banner and the "Paused" card must not
     // be produced for them, or the dashboard keeps selling a premium lockout
     // the API no longer enforces.
-    const priorityDocs = can(req.user, 'priorityAssessment')
-      ? await Assessment.find({ user: req.user._id, priority: 'Priority' })
+    let priorityDocs = [];
+    if (can(req.user, 'priorityAssessment')) {
+      // Same repair as GET /api/assessment/priority-status. Without it the two
+      // endpoints could disagree: the assessment screen released a completed
+      // flag while the dashboard still counted it and showed "New Assessments
+      // Paused", so the user could not tell whether they were blocked at all.
+      try {
+        const healed = await selfHealOpenPriority(req.user._id);
+        if (healed.released.length > 0) {
+          console.warn(`[dashboard GET /] released ${healed.released.length} completed priority flag(s) for user ${req.user._id}`);
+        }
+      } catch (healError) {
+        console.error('[dashboard GET /] priority self-heal failed:', healError.message);
+      }
+      priorityDocs = await Assessment.find({ user: req.user._id, priority: 'Priority' })
         .sort({ createdAt: -1 })
         .limit(3)
         .select('createdAt flagReasons flaggedAt aiResults.recommendations')
-        .lean()
-      : [];
+        .lean();
+    }
     const priorityAssessments = (priorityDocs || []).map(doc => ({
       id: doc._id,
       createdAt: doc.createdAt,

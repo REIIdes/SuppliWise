@@ -10,6 +10,7 @@ const {
 const engine = require('../../blockchain/engine');
 const { hashPayload, dayKey, round2 } = require('../../blockchain/crypto');
 const { SEED_ORACLE_FEEDS, seededValue } = require('../../blockchain/seed');
+const { requireFeature } = require('../../utils/entitlements');
 
 const router = express.Router();
 
@@ -17,7 +18,8 @@ function userOnly(req, res, next) {
   if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
   next();
 }
-router.use(userOnly);
+// DELUXE plan gate for trials, oracles and the professional directory.
+router.use(userOnly, requireFeature('web3'));
 
 // ── Secure clinical trial participation (feature 18) ──────────────────────
 router.get('/trials', async (req, res) => {

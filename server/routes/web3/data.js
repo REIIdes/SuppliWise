@@ -22,6 +22,7 @@ const {
   sign,
   stableStringify,
 } = require('../../blockchain/crypto');
+const { requireFeature } = require('../../utils/entitlements');
 
 const router = express.Router();
 
@@ -31,7 +32,8 @@ function userOnly(req, res, next) {
   if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
   next();
 }
-router.use(userOnly);
+// DELUXE plan gate for the health ledger, storage, consent and AI proofs.
+router.use(userOnly, requireFeature('web3'));
 
 // Deep JSON-safe conversion (Dates → ISO, ObjectIds → strings) so hashing is
 // deterministic across reads.

@@ -17,6 +17,7 @@ const {
   ACHIEVEMENTS,
   eligibleAchievements,
 } = require('../../blockchain/rules');
+const { requireFeature } = require('../../utils/entitlements');
 
 const router = express.Router();
 const DAY = 86400000;
@@ -25,7 +26,8 @@ function userOnly(req, res, next) {
   if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
   next();
 }
-router.use(userOnly);
+// DELUXE plan gate for rewards, NFTs and staking.
+router.use(userOnly, requireFeature('web3'));
 
 // Stats snapshot that feeds both the reward dashboard and NFT eligibility.
 async function collectStats(userId, wallet) {

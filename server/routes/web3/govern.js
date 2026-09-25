@@ -5,6 +5,7 @@ const engine = require('../../blockchain/engine');
 const ledger = require('../../blockchain/ledger');
 const { round2 } = require('../../blockchain/crypto');
 const { tallyProposal } = require('../../blockchain/rules');
+const { requireFeature } = require('../../utils/entitlements');
 
 const router = express.Router();
 const DAY = 86400000;
@@ -13,7 +14,8 @@ function userOnly(req, res, next) {
   if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
   next();
 }
-router.use(userOnly);
+// DELUXE plan gate for the DAO (proposals, voting, treasury, knowledge base).
+router.use(userOnly, requireFeature('dao'));
 
 // Finalize every expired proposal (lazy execution — no cron needed): tally,
 // flip status, and if it passed, APPLY the parameter change on-chain. This is

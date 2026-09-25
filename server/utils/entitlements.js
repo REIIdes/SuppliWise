@@ -6,7 +6,8 @@
  * Structure (authoritative — enforced by the backend AND served to the frontend
  * so the UI can never disagree with the API):
  *   FREE     — Health Assessment, Supplement Recommendations, Daily Intake
- *   DELUXE   — all Free + Insights & Analytics, PDF Report Export
+ *   DELUXE   — all Free + Insights & Analytics, PDF Report Export,
+ *              and the blockchain layer (Web3 wallet/supply chain, Marketplace, DAO)
  *   PREMIUM  — all Free + Deluxe + Priority Assessment, 5-Year Record History
  *   ULTIMATE — unlocks all available features (incl. AI Chat Assistant)
  *
@@ -62,6 +63,13 @@ const FEATURES = {
   priorityAssessment: { minTier: 'annual',  label: 'Priority Assessment',        description: 'Severe cases flagged for priority review' },
   historyFull:        { minTier: 'annual',  label: '5-Year Record History',      description: 'Full assessment history with deeper pages' },
   chat:               { minTier: 'custom',  label: 'AI Chat Assistant',          description: 'Chat with SuppliWise AI' },
+  // ── Blockchain layer — DELUXE and above ─────────────────────────────────
+  // Split into three keys rather than one `blockchain` key so the UI can label
+  // the exact panel the user clicked, and so a future pricing change can move
+  // one of them without touching the others. All three are the same tier today.
+  web3:               { minTier: 'monthly', label: 'Web3 Wallet & Supply Chain', description: 'Wallet, decentralized ID and supply-chain provenance' },
+  market:             { minTier: 'monthly', label: 'Marketplace',                description: 'Buy and sell supplements with WELL tokens' },
+  dao:                { minTier: 'monthly', label: 'DAO Governance',             description: 'Proposals, voting and treasury' },
 };
 
 const rankOf = (plan) => (Object.prototype.hasOwnProperty.call(PLAN_RANK, plan) ? PLAN_RANK[plan] : 0);

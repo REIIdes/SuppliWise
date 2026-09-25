@@ -100,6 +100,26 @@ function LogIn() {
     return () => timers.forEach(clearTimeout);
   }, []);
 
+  // The alternate route to the admin login, now that the visible link is gone.
+  // Ctrl+Shift+A. Ignored while the user is typing so it can't fire mid-email,
+  // and it carries no session state — /admin/login is a public route, so this
+  // is convenience, not an authorisation decision.
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (!e.ctrlKey || !e.shiftKey) return;
+      if (e.key !== 'A' && e.key !== 'a') return;
+      const el = e.target;
+      if (el instanceof HTMLElement) {
+        const tag = el.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable) return;
+      }
+      e.preventDefault();
+      navigate('/admin/login');
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [navigate]);
+
   const validateField = (field, value) => {
     let msg = '';
     if (field === 'email') msg = validateEmail(value);
@@ -709,11 +729,14 @@ function LogIn() {
             Don't have an account?{' '}
             <NavLink to="/signup" state={location.state}>Create one</NavLink>
           </p>
-          {/* Admin entry point — the only admin shortcut on user-facing pages */}
-          <p className="auth-switch auth-switch--admin">
-            Are You an Admin?{' '}
-            <NavLink to="/admin/login">Administrator access</NavLink>
-          </p>
+          {/* No admin link here on purpose. "Are You an Admin? Administrator
+              access" was a standing, crawlable pointer at the privileged login
+              on the most-visited page in the app, inviting password spray and
+              lockout-farming against the 6 admin accounts for no benefit —
+              /admin/login is public regardless, so the link was pure
+              reconnaissance. Admins reach it by URL or with Ctrl+Shift+A (see
+              the shortcut in useEffect above). The real defences are the TOTP
+              second factor and rate limiting, not the absence of a link. */}
         </form>
       </div>
 

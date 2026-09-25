@@ -23,11 +23,18 @@ const ALL_FEATURES = Object.keys(E.FEATURES);
 // change to either the registry or this table has to be made deliberately.
 const EXPECTED_TIER_FEATURES = {
   free:    ['healthAssessment', 'recommendations', 'dailyIntake'],
-  monthly: ['healthAssessment', 'recommendations', 'dailyIntake', 'insights', 'pdfExport'],
+  monthly: ['healthAssessment', 'recommendations', 'dailyIntake', 'insights', 'pdfExport',
+            'web3', 'market', 'dao'],
   annual:  ['healthAssessment', 'recommendations', 'dailyIntake', 'insights', 'pdfExport',
-            'priorityAssessment', 'historyFull'],
+            'priorityAssessment', 'historyFull', 'web3', 'market', 'dao'],
   custom:  ALL_FEATURES,
 };
+
+// The blockchain layer is DELUXE-only: the first paid tier above FREE.
+// Spelled out rather than folded into EXPECTED_TIER_FEATURES so that granting
+// it to FREE by accident fails by name, and so the three areas are asserted
+// separately.
+const DELUXE_ONLY = ['web3', 'market', 'dao'];
 
 const SPEC_LABELS = { free: 'FREE', monthly: 'DELUXE', annual: 'PREMIUM', custom: 'ULTIMATE' };
 
@@ -78,6 +85,48 @@ function run(middleware, req) {
 
 // ── 1. Structure ─────────────────────────────────────────────────────────────
 
+test('the blockchain layer is registered as DELUXE-only', () => {
+  // The product rule: Web3, Market and DAO require DELUXE. FREE must be
+  // refused; every paid tier allowed. Asserted by name so a later edit that
+  // quietly widens or narrows it fails here.
+  for (const key of DELUXE_ONLY) {
+    assert.ok(E.hasFeature(key), `${key} must be registered`);
+    assert.equal(E.FEATURES[key].minTier, 'monthly', `${key} must require DELUXE`);
+    assert.ok(E.FEATURES[key].label, `${key} needs a label for the upgrade card`);
+  }
+  assert.equal(E.can(user('free'), 'web3'), false, 'FREE must not reach the blockchain layer');
+  for (const plan of ['monthly', 'annual', 'custom']) {
+    for (const key of DELUXE_ONLY) {
+      assert.equal(E.can(user(plan), key), true, `${plan} must reach ${key}`);
+    }
+  }
+  // Admins bypass every gate, at every tier.
+  for (const key of DELUXE_ONLY) {
+    assert.equal(E.can({ ...user('free'), role: 'admin' }, key), true, 'admins bypass');
+  }
+});
+
+test('an expired or cancelled DELUXE session loses the blockchain layer', () => {
+  // The plan id on the document is not the decision — a lapsed subscription
+  // must fail closed even when subscriptionPlan still says DELUXE.
+  const expired = user('monthly', { expiresAt: new Date(Date.now() - 1000).toISOString() });
+  const cancelled = user('monthly', { active: false });
+  for (const key of DELUXE_ONLY) {
+    assert.equal(E.can(expired, key), false, `expired DELUXE must lose ${key}`);
+    assert.equal(E.can(cancelled, key), false, `cancelled DELUXE must lose ${key}`);
+  }
+});
+
+test('the three blockchain features are separate keys, not one shared entry', () => {
+  // The navbar shows three cards; if they collapsed to a single key the UI
+  // would advertise one entitlement while the server gated another.
+  const defs = DELUXE_ONLY.map((k) => E.getFeature(k));
+  assert.equal(new Set(defs.map((d) => d.label)).size, 3, 'each area needs its own label');
+  for (const key of DELUXE_ONLY) {
+    assert.equal(E.getFeature(key), E.FEATURES[key], `${key} must resolve to itself`);
+  }
+});
+
 test('each plan exposes exactly the features specified for it', () => {
   for (const [plan, expected] of Object.entries(EXPECTED_TIER_FEATURES)) {
     assert.deepEqual(enabledSet(user(plan)).sort(), [...expected].sort(), `plan ${plan}`);
@@ -120,8 +169,10 @@ test('plan ranks order free < monthly < annual < custom', () => {
 
 // ── 2. Required transitions ──────────────────────────────────────────────────
 
-test('FREE -> DELUXE unlocks Insights and PDF, keeps Free features', () => {
-  assert.deepEqual(gained('free', 'monthly').sort(), ['insights', 'pdfExport']);
+test('FREE -> DELUXE unlocks Insights, PDF and the blockchain layer', () => {
+  // The blockchain layer is the headline of a DELUXE upgrade, so it is named
+  // explicitly here rather than left to fall out of the tier table.
+  assert.deepEqual(gained('free', 'monthly').sort(), ['dao', 'insights', 'market', 'pdfExport', 'web3']);
   for (const key of EXPECTED_TIER_FEATURES.free) {
     assert.ok(E.can(user('monthly'), key), `${key} must survive the upgrade`);
   }
@@ -141,18 +192,37 @@ test('PREMIUM -> ULTIMATE unlocks every available feature', () => {
 
 test('ULTIMATE -> FREE leaves only the Free features', () => {
   const lost = enabledSet(user('custom')).filter((k) => !enabledSet(user('free')).includes(k));
-  assert.deepEqual(lost.sort(), ['chat', 'historyFull', 'insights', 'pdfExport', 'priorityAssessment']);
+  assert.deepEqual(
+    lost.sort(),
+    ['chat', 'dao', 'historyFull', 'insights', 'market', 'pdfExport', 'priorityAssessment', 'web3'],
+  );
   assert.deepEqual(enabledSet(user('free')).sort(), [...EXPECTED_TIER_FEATURES.free].sort());
 });
 
 test('FREE -> PREMIUM grants everything Premium includes in one step', () => {
-  assert.deepEqual(gained('free', 'annual').sort(), ['historyFull', 'insights', 'pdfExport', 'priorityAssessment']);
+  assert.deepEqual(
+    gained('free', 'annual').sort(),
+    ['dao', 'historyFull', 'insights', 'market', 'pdfExport', 'priorityAssessment', 'web3'],
+  );
 });
 
 test('PREMIUM -> FREE removes every paid entitlement at once', () => {
   const lost = enabledSet(user('annual')).filter((k) => !enabledSet(user('free')).includes(k));
-  assert.deepEqual(lost.sort(), ['historyFull', 'insights', 'pdfExport', 'priorityAssessment']);
+  assert.deepEqual(
+    lost.sort(),
+    ['dao', 'historyFull', 'insights', 'market', 'pdfExport', 'priorityAssessment', 'web3'],
+  );
   assert.deepEqual(enabledSet(user('free')).sort(), [...EXPECTED_TIER_FEATURES.free].sort());
+});
+
+test('DELUXE -> FREE loses the blockchain layer but keeps nothing else', () => {
+  // Downgrade boundary: DELUXE is the lowest tier that grants the blockchain
+  // layer, so dropping to FREE must remove all three and nothing from FREE.
+  const lost = enabledSet(user('monthly')).filter((k) => !enabledSet(user('free')).includes(k));
+  assert.deepEqual(lost.sort(), ['dao', 'insights', 'market', 'pdfExport', 'web3']);
+  for (const key of EXPECTED_TIER_FEATURES.free) {
+    assert.ok(E.can(user('free'), key), `${key} must survive the downgrade`);
+  }
 });
 
 // ── 3. Expiry, cancellation, removal ─────────────────────────────────────────
@@ -322,7 +392,7 @@ test('version changes whenever entitlements change, and is otherwise stable', ()
 // ── 5. Backend authorization (403) ───────────────────────────────────────────
 
 test('requireFeature rejects every paid feature for a FREE user with 403', async () => {
-  const gated = ['insights', 'pdfExport', 'priorityAssessment', 'historyFull', 'chat'];
+  const gated = ['insights', 'pdfExport', 'priorityAssessment', 'historyFull', 'chat', ...DELUXE_ONLY];
   for (const key of gated) {
     const { status, body } = await run(E.requireFeature(key), { user: user('free') });
     assert.equal(status, 403, `${key} must be rejected, got ${status}`);
@@ -338,11 +408,12 @@ test('requireFeature rejects every paid feature for a FREE user with 403', async
 test('requireFeature allows exactly the features the tier grants', async () => {
   const expectations = {
     free:    { allow: ['healthAssessment', 'recommendations', 'dailyIntake'],
-               deny: ['insights', 'pdfExport', 'priorityAssessment', 'historyFull', 'chat'] },
-    monthly: { allow: ['healthAssessment', 'recommendations', 'dailyIntake', 'insights', 'pdfExport'],
+               deny: ['insights', 'pdfExport', 'priorityAssessment', 'historyFull', 'chat', ...DELUXE_ONLY] },
+    monthly: { allow: ['healthAssessment', 'recommendations', 'dailyIntake', 'insights', 'pdfExport',
+                       'web3', 'market', 'dao'],
                deny: ['priorityAssessment', 'historyFull', 'chat'] },
     annual:  { allow: ['healthAssessment', 'recommendations', 'dailyIntake', 'insights', 'pdfExport',
-                       'priorityAssessment', 'historyFull'],
+                       'priorityAssessment', 'historyFull', 'web3', 'market', 'dao'],
                deny: ['chat'] },
     custom:  { allow: ALL_FEATURES, deny: [] },
   };
@@ -363,7 +434,7 @@ test('requireFeature allows exactly the features the tier grants', async () => {
 
 test('an expired session loses its paid features at the API too', async () => {
   const expired = user('custom', { expiresAt: new Date(Date.now() - 1000).toISOString() });
-  for (const key of ['insights', 'pdfExport', 'priorityAssessment', 'historyFull', 'chat']) {
+  for (const key of ['insights', 'pdfExport', 'priorityAssessment', 'historyFull', 'chat', ...DELUXE_ONLY]) {
     const { status, body } = await run(E.requireFeature(key), { user: expired });
     assert.equal(status, 403, key);
     assert.equal(body.currentPlan, 'free');

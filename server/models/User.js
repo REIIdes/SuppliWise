@@ -1,5 +1,20 @@
 const mongoose = require('mongoose');
 const { hashPassword, verifyPassword, needsRehash } = require('../utils/password');
+const { NAME_PATTERN, NAME_MIN, NAME_MAX, NAME_CHARS_HINT } = require('../utils/nameValidation');
+
+// The browser filters these fields, but a client-side check is only a
+// suggestion — /api/auth/register and the profile update endpoint are
+// reachable directly. The pattern below is the actual boundary, and it
+// mirrors my-react-app/src/utils/nameValidation.js exactly. Keep the two in
+// step or the forms and the API will disagree about what a name is.
+const nameRule = (label) => ({
+  minlength: [NAME_MIN, `${label} must be at least ${NAME_MIN} characters`],
+  maxlength: [NAME_MAX, `${label} must be ${NAME_MAX} characters or fewer`],
+  match: [
+    NAME_PATTERN,
+    `${label} can only contain ${NAME_CHARS_HINT}`,
+  ],
+});
 
 const userSchema = new mongoose.Schema(
   {
@@ -7,15 +22,13 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: [true, 'First name is required'],
       trim: true,
-      minlength: [2, 'First name must be at least 2 characters'],
-      maxlength: [50, 'First name must be 50 characters or fewer'],
+      ...nameRule('First name'),
     },
     lastName: {
       type: String,
       required: [true, 'Last name is required'],
       trim: true,
-      minlength: [2, 'Last name must be at least 2 characters'],
-      maxlength: [50, 'Last name must be 50 characters or fewer'],
+      ...nameRule('Last name'),
     },
     name: {
       type: String,

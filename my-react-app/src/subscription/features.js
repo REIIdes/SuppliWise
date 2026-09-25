@@ -14,6 +14,10 @@
  *   DELUXE   (monthly) — all FREE + Insights & Analytics, PDF Report Export
  *   PREMIUM  (annual)  — all FREE/DELUXE + Priority Assessment, 5-Year Record History
  *   ULTIMATE (custom)  — unlocks all available features (incl. AI Chat Assistant)
+ *
+ * The blockchain layer (web3 / market / dao) is a DELUXE entitlement: it is the
+ * first paid tier above FREE, so the three "Explore" entries are the most
+ * visible thing a DELUXE upgrade unlocks.
  */
 
 export const PLAN_RANK = { free: 0, monthly: 1, annual: 2, custom: 3 };
@@ -51,6 +55,12 @@ export const FEATURES = {
   priorityAssessment: { minTier: 'annual',  label: 'Priority Assessment',        description: 'Severe cases flagged for priority review' },
   historyFull:        { minTier: 'annual',  label: '5-Year Record History',      description: 'Full assessment history with deeper pages' },
   chat:               { minTier: 'custom',  label: 'AI Chat Assistant',          description: 'Chat with SuppliWise AI' },
+  // ── Blockchain layer — DELUXE and above ─────────────────────────────────
+  // Three keys, not one, so each panel is labelled for what the user clicked.
+  // Mirrors server/utils/entitlements.js exactly (features.test.js enforces it).
+  web3:               { minTier: 'monthly', label: 'Web3 Wallet & Supply Chain', description: 'Wallet, decentralized ID and supply-chain provenance' },
+  market:             { minTier: 'monthly', label: 'Marketplace',                description: 'Buy and sell supplements with WELL tokens' },
+  dao:                { minTier: 'monthly', label: 'DAO Governance',             description: 'Proposals, voting and treasury' },
 };
 
 export const FEATURE_KEYS = Object.keys(FEATURES);
@@ -90,6 +100,24 @@ const FEATURE_ALIASES = {
   chat: 'chat',
   ai_chat: 'chat',
   ai_chat_assistant: 'chat',
+  // Blockchain layer. The nav labels are the discoverable spellings here.
+  web3: 'web3',
+  web_3: 'web3',
+  wallet: 'web3',
+  blockchain: 'web3',
+  supply_chain: 'web3',
+  provenance: 'web3',
+  market: 'market',
+  marketplace: 'market',
+  shop: 'market',
+  store: 'market',
+  trading: 'market',
+  escrow: 'market',
+  dao: 'dao',
+  governance: 'dao',
+  voting: 'dao',
+  treasury: 'dao',
+  proposals: 'dao',
 };
 
 const OWN_FEATURES = Object.assign(Object.create(null), FEATURES);

@@ -4,6 +4,7 @@ import Navbar from '../Components/Navbar/Navbar';
 import { registerUser, saveAssessment, getRecommendations, saveAssessmentResults, getCaptcha, startSession } from '../api';
 import { beginAuthTransition, endAuthTransition } from '../auth/authState';
 import { safeRedirectPath } from '../utils/safeUrl';
+import { validateName, sanitizeNameInput, NAME_MAX, NAME_PATTERN_SOURCE, NAME_CHARS_HINT } from '../utils/nameValidation';
 import './LogIn.css';
 import './SignIn.css';
 
@@ -148,13 +149,9 @@ function SignIn() {
   const validateField = (field, value) => {
     let msg = '';
     if (field === 'firstName') {
-      if (!value.trim()) msg = 'Please enter your first name.';
-      else if (value.trim().length < 2) msg = 'First name must be at least 2 characters.';
-      else if (value.trim().length > 50) msg = 'First name must be 50 characters or fewer.';
+      msg = validateName(value, 'First name');
     } else if (field === 'lastName') {
-      if (!value.trim()) msg = 'Please enter your last name.';
-      else if (value.trim().length < 2) msg = 'Last name must be at least 2 characters.';
-      else if (value.trim().length > 50) msg = 'Last name must be 50 characters or fewer.';
+      msg = validateName(value, 'Last name');
     } else if (field === 'gender') {
       if (!value) msg = 'Please select your gender.';
     } else if (field === 'dateOfBirth') {
@@ -185,12 +182,8 @@ function SignIn() {
     setError('');
 
     // Run all validations
-    const firstNameErr = !firstName.trim() ? 'Please enter your first name.'
-      : firstName.trim().length < 2 ? 'First name must be at least 2 characters.'
-      : firstName.trim().length > 50 ? 'First name must be 50 characters or fewer.' : '';
-    const lastNameErr = !lastName.trim() ? 'Please enter your last name.'
-      : lastName.trim().length < 2 ? 'Last name must be at least 2 characters.'
-      : lastName.trim().length > 50 ? 'Last name must be 50 characters or fewer.' : '';
+    const firstNameErr = validateName(firstName, 'First name');
+    const lastNameErr = validateName(lastName, 'Last name');
     const genderErr = !gender ? 'Please select your gender.' : '';
     const dateOfBirthErr = validateDob(birthMonth, birthDay, birthYear);
 
@@ -302,10 +295,20 @@ function SignIn() {
               <input
                 type="text"
                 value={firstName}
-                onChange={(e) => { setFirstName(e.target.value); revalidateOnChange('firstName', e.target.value); }}
+                // Filtered on the way in: a digit is dropped as it is typed or
+                // pasted rather than accepted and then complained about. The
+                // pattern is belt-and-braces for anything that bypasses this
+                // handler (autofill, devtools, a direct API call).
+                onChange={(e) => {
+                  const clean = sanitizeNameInput(e.target.value);
+                  setFirstName(clean);
+                  revalidateOnChange('firstName', clean);
+                }}
                 onBlur={(e) => validateField('firstName', e.target.value)}
                 placeholder="Enter your first name"
-                maxLength={50}
+                pattern={NAME_PATTERN_SOURCE}
+                title={`Letters only — ${NAME_CHARS_HINT}`}
+                maxLength={NAME_MAX}
                 autoComplete="given-name"
                 required
               />
@@ -317,10 +320,16 @@ function SignIn() {
               <input
                 type="text"
                 value={lastName}
-                onChange={(e) => { setLastName(e.target.value); revalidateOnChange('lastName', e.target.value); }}
+                onChange={(e) => {
+                  const clean = sanitizeNameInput(e.target.value);
+                  setLastName(clean);
+                  revalidateOnChange('lastName', clean);
+                }}
                 onBlur={(e) => validateField('lastName', e.target.value)}
                 placeholder="Enter your last name"
-                maxLength={50}
+                pattern={NAME_PATTERN_SOURCE}
+                title={`Letters only — ${NAME_CHARS_HINT}`}
+                maxLength={NAME_MAX}
                 autoComplete="family-name"
                 required
               />

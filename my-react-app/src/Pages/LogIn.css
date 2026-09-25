@@ -712,15 +712,6 @@
   outline-offset: 2px;
   border-radius: 4px;
 }
-.auth-switch--admin {
-  margin-top: 12px;
-}
-.auth-switch--admin a {
-  color: #7c3aed;
-}
-.auth-switch--admin a:hover {
-  color: #6d28d9;
-}
 .auth-forgot-password {
   margin-top: 14px;
 }

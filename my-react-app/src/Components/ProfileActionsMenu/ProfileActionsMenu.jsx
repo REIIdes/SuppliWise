@@ -102,9 +102,13 @@ export default function ProfileActionsMenu({
     ...navItems.map((n) => ({
       key: n.key,
       label: n.label,
-      hint: n.hint,
+      // A locked item keeps its real destination but advertises the plan it
+      // needs, so a sub-tier user can still see the feature exists and route
+      // into the upgrade card instead of finding the entry silently missing.
+      hint: n.locked ? (n.lockedHint || 'ULTIMATE plan') : n.hint,
       icon: n.icon,
       tone: n.tone,
+      locked: n.locked,
       group: n.group || 'Explore',
       onSelect: () => onNavigate?.(n.to),
     })),
@@ -301,6 +305,7 @@ export default function ProfileActionsMenu({
                     'pam-item',
                     item.danger ? 'pam-item--danger' : '',
                     item.accent ? 'pam-item--accent' : '',
+                    item.locked ? 'pam-item--locked' : '',
                     item.tone ? `pam-item--${item.tone}` : '',
                   ].filter(Boolean).join(' ')}
                   onClick={() => run(item, false)}
@@ -310,6 +315,14 @@ export default function ProfileActionsMenu({
                     <strong>{item.label}</strong>
                     <em>{item.hint}</em>
                   </span>
+                  {item.locked && (
+                    <span className="pam-item__lock" aria-label="Requires the DELUXE plan">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <rect x="4" y="10.5" width="16" height="10.5" rx="2" />
+                        <path d="M8 10.5V7a4 4 0 0 1 8 0v3.5" />
+                      </svg>
+                    </span>
+                  )}
                 </button>
               </div>
             );

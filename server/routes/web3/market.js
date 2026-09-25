@@ -10,6 +10,7 @@ const {
 const engine = require('../../blockchain/engine');
 const { round2, sha256Hex } = require('../../blockchain/crypto');
 const { escrowSplit, disputeOutcome } = require('../../blockchain/rules');
+const { requireFeature } = require('../../utils/entitlements');
 
 const router = express.Router();
 
@@ -17,7 +18,8 @@ function userOnly(req, res, next) {
   if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
   next();
 }
-router.use(userOnly);
+// DELUXE plan gate for the marketplace (escrow orders, listings, disputes).
+router.use(userOnly, requireFeature('market'));
 
 // Settle an escrowed order: pay the seller (net of the DAO-set protocol fee)
 // and route the fee to the treasury — exactly what the deployed smart

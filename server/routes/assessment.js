@@ -10,11 +10,35 @@ const { sanitizeTextField, sanitizeShortField, scrubKeys } = require('../utils/s
 const { historyLimitFor, tierOf, can, PLAN_LABELS, resolveSubscription } = require('../utils/plan');
 const { analyzeSeverity } = require('../utils/severity');
 const { expiryDateFromNow, expiryFromCreatedAt } = require('../utils/assessments');
+const { guardRaisePriority, selfHealOpenPriority } = require('../utils/priorityGate');
 
 // Flag an assessment as Priority + notify the user and admins (best-effort,
 // never fails the surrounding request). Idempotent per assessment.
+//
+// @returns {Promise<{flagged: boolean, reason?: string}>} `flagged: false` means
+//   the guard declined, so callers must NOT report a flag to the client. Both
+//   call sites used to mutate their own response object to `priority: 'Priority'`
+//   unconditionally, which showed "flagged" in the UI for a write the database
+//   never received.
 async function flagSevereAssessment(assessment, reasons, userEmail) {
   try {
+    // Same rule as the admin endpoint. Severity detection re-runs whenever
+    // results are saved, so without this a finished assessment could have its
+    // flag re-raised with no admin involved at all — the user had already
+    // completed the day's plan, yet found "New Assessments Paused" again.
+    const verdict = await guardRaisePriority(assessment.user, assessment._id);
+    if (!verdict.ok) {
+      await AdminEvent.create({
+        type: 'severe-flag',
+        title: 'Severe case detected (not flagged)',
+        detail: `${userEmail || 'A user'} — ${reasons.join('; ') || 'Severe case detected'}. ` +
+          `Not raised to Priority: ${verdict.message}`,
+        user: assessment.user,
+        assessmentId: assessment._id,
+        linkUserId: assessment.user,
+      }).catch(() => {});
+      return { flagged: false, reason: verdict.code };
+    }
     const label = reasons.length > 0 ? reasons.join('; ') : 'Severe case detected';
     await Assessment.findByIdAndUpdate(assessment._id, {
       // Priority assessments never expire while flagged (expiresAt: null)
@@ -35,8 +59,12 @@ async function flagSevereAssessment(assessment, reasons, userEmail) {
       assessmentId: assessment._id,
       linkUserId: assessment.user,
     }).catch(() => {});
+    return { flagged: true };
   } catch (err) {
     console.error('[severity-flag]', err.message);
+    // A genuine failure (DB/network), not a guard decision. Reported as not
+    // flagged so the response never claims a write that did not happen.
+    return { flagged: false, reason: 'error' };
   }
 }
 
@@ -152,13 +180,20 @@ router.post('/', protect, async (req, res) => {
     const severity = analyzeSeverity(req.body);
     let severityFlag = { flagged: false, reasons: [] };
     if (severity.flagged && can(req.user, 'priorityAssessment')) {
-      severityFlag = severity;
-      await flagSevereAssessment(assessment, severity.reasons, req.user.email);
-      // Reflect the flag in this response (the created doc predates the update)
-      assessment.priority = 'Priority';
-      assessment.flagReasons = severity.reasons.slice(0, 5);
-      assessment.flaggedAt = new Date();
-      assessment.expiresAt = null;
+      const outcome = await flagSevereAssessment(assessment, severity.reasons, req.user.email);
+      if (outcome.flagged) {
+        severityFlag = severity;
+        // Reflect the flag in this response (the created doc predates the update)
+        assessment.priority = 'Priority';
+        assessment.flagReasons = severity.reasons.slice(0, 5);
+        assessment.flaggedAt = new Date();
+        assessment.expiresAt = null;
+      } else {
+        // Declined (plan already complete, or another review already open) or the
+        // write failed. Report it as NOT flagged — announcing a Priority the
+        // database does not hold is what made the old behaviour feel broken.
+        severityFlag = { flagged: false, reasons: [], suppressed: outcome.reason };
+      }
     }
     
     // Deactivate all previous dashboard metrics
@@ -201,9 +236,29 @@ router.get('/priority-status', protect, async (req, res) => {
       .limit(3)
       .select('createdAt flagReasons flaggedAt')
       .lean();
+    // Repair on read. Flags raised before this guard existed — or by a code
+    // path that has not been audited — can still sit open on a plan the user
+    // has already finished, and nothing else would ever clear them. Releasing
+    // here means those users are unblocked on their next page load instead of
+    // being stuck permanently. Best-effort by construction: the write is
+    // wrapped, so a failure degrades to the previous behaviour.
+    let remaining = items;
+    try {
+      const healed = await selfHealOpenPriority(req.user._id);
+      if (healed.released.length > 0) {
+        console.warn(`[assessment GET /priority-status] released ${healed.released.length} completed flag(s) for user ${req.user._id}`);
+      }
+      remaining = await Assessment.find({ user: req.user._id, priority: 'Priority' })
+        .sort({ createdAt: -1 })
+        .limit(3)
+        .select('createdAt flagReasons flaggedAt')
+        .lean();
+    } catch (healError) {
+      console.error('[assessment GET /priority-status] self-heal failed:', healError.message);
+    }
     res.json({
-      blocked: items.length > 0,
-      assessments: items.map(a => ({
+      blocked: remaining.length > 0,
+      assessments: remaining.map(a => ({
         id: a._id,
         createdAt: a.createdAt,
         flaggedAt: a.flaggedAt,
@@ -374,8 +429,10 @@ router.patch('/:id/results', protect, async (req, res) => {
         req.body
       );
       if (severity.flagged) {
-        severityFlag = severity;
-        await flagSevereAssessment(assessment, severity.reasons, assessment.userEmail);
+        const outcome = await flagSevereAssessment(assessment, severity.reasons, assessment.userEmail);
+        severityFlag = outcome.flagged
+          ? severity
+          : { flagged: false, reasons: [], suppressed: outcome.reason };
       }
     }
     res.json({ message: 'Results saved', assessment, severityFlag });
@@ -401,8 +458,27 @@ router.patch('/:id/priority', protect, async (req, res) => {
     return res.status(400).json({ message: 'Invalid assessment.' });
   }
   try {
-    const existing = await Assessment.findById(req.params.id).select('createdAt').lean();
+    const existing = await Assessment.findById(req.params.id).select('createdAt user priority').lean();
     if (!existing) return res.status(404).json({ message: 'Assessment not found.' });
+
+    // Guard BEFORE writing. This endpoint used to set the flag unconditionally,
+    // so an admin could raise Priority on an assessment whose plan was already
+    // finished. The user then sat behind "New Assessments Paused" with no exit:
+    // the auto-lift in POST /api/dashboard/intake only fires on the next intake
+    // post, and someone who had already ticked everything off never posts
+    // again. See utils/priorityGate.js.
+    if (priority === 'Priority') {
+      const verdict = await guardRaisePriority(existing.user, existing._id);
+      if (!verdict.ok) {
+        return res.status(409).json({
+          message: verdict.message,
+          code: verdict.code,
+          intake: verdict.intake,
+          openAssessmentId: verdict.openId || null,
+        });
+      }
+    }
+
     // Priority suspends expiration; resolving restores the standard 5-year
     // window counted from CREATION — never "5 years from now", which used to
     // push an old record's expiry far into the future.

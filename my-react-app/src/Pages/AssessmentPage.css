@@ -394,6 +394,10 @@
   font-size: 14px;
   color: #374151;
   cursor: pointer;
+  /* Flex items default to min-width:auto, so the label text refuses to shrink
+     below its longest word and pushes the row wider than its grid track.
+     min-width:0 lets it wrap instead. */
+  min-width: 0;
 }
 
 .radio-label input,
@@ -625,7 +629,12 @@
 }
 
 .polish-wrap textarea {
-  padding: 10px 14px;
+  /* The extra bottom padding reserves the strip the .polish-indicator occupies
+     (approx 22px tall at bottom:10px). Without it the pill floated on top of the
+     last line of text while polishing. The value only has to clear the
+     indicator while it is showing, so it is cheap and never causes a scrollbar
+     in the common case. */
+  padding: 10px 14px 34px;
   border: none;
   border-radius: 8px;
   background: #f3f4f6;
@@ -643,7 +652,10 @@
   box-shadow: 0 0 0 2px #4ade80;
 }
 
-/* Spinner shown inside the textarea corner while polishing */
+/* Spinner shown inside the textarea corner while polishing.
+   Fully opaque: at 0.85 alpha the grey textarea showed through and the
+   underlying text stayed readable underneath the pill, which is the same
+   overlap artefact as the diet tooltip, just smaller. */
 .polish-indicator {
   position: absolute;
   bottom: 10px;
@@ -651,7 +663,7 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  background: rgba(255,255,255,0.85);
+  background: #ffffff;
   border-radius: 999px;
   padding: 3px 8px;
   font-size: 11px;
@@ -805,25 +817,41 @@
   position: relative;
   display: inline-flex;
   align-items: center;
+  z-index: 30;
 }
 
 .diet-tooltip-box {
   position: absolute;
   left: 26px;
   top: -6px;
-  z-index: 100;
+  z-index: 31;
   background: #f0fdf4;
   color: #166534;
   font-size: 13px;
   line-height: 1.65;
   padding: 12px 16px;
   border-radius: 12px;
-  width: 240px;
+  /* `min()` keeps the panel inside the viewport on a narrow window. Without it
+     the fixed 240px + the 26px offset ran off the right edge on small screens.
+     border-box is essential: as a content-box, `width` excluded the 32px of
+     horizontal padding and the panel rendered 34px WIDER than asked for. */
+  box-sizing: border-box;
+  width: min(260px, calc(100vw - 32px));
   box-shadow: 0 4px 20px rgba(34, 197, 94, 0.15), 0 1px 4px rgba(0,0,0,0.06);
   border: 1px solid #bbf7d0;
   display: flex;
   align-items: flex-start;
   gap: 8px;
+}
+
+/* The tooltip is a floating panel that deliberately covers the options beside
+   it, so the WHOLE open option is raised — not just the panel. A z-index on the
+   panel alone only competes inside its own stacking context, which is why the
+   neighbouring option labels could paint straight through it. `:has()` lifts
+   the ancestor, so the panel and its option win as one unit; browsers without
+   `:has()` simply keep the previous behaviour. */
+.diet-label:has(.diet-tooltip-box) {
+  z-index: 30;
 }
 
 .diet-tooltip-close {
@@ -844,9 +872,14 @@
 }
 
 /* ── 3-column grid for diet types ── */
+/* `minmax(0, 1fr)` rather than plain `1fr`: a bare `1fr` floors each track at
+   its min-content width, and "Mediterranean" + radio + "?" button is wider than
+   a third of a narrow column. That forced the whole grid ~40px past its
+   container and gave the assessment page a horizontal scrollbar. Allowing the
+   tracks to shrink lets the label wrap instead. */
 .checkbox-grid-3 {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px 24px;
 }
 
@@ -1550,4 +1583,69 @@
 @media (prefers-reduced-motion: reduce) {
   .step-body { animation: none; }
   .checkbox-label, .radio-label, .severity-btn, .btn-next { transition: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TOOLTIP ON SMALL SCREENS  (must stay LAST in this file)
+   ═══════════════════════════════════════════════════════════════════════
+   These rules live here, not in mobile-responsive.css, and the placement is
+   the whole point.
+
+   1. ORDER vs mobile-responsive.css: main.jsx imports that file up front,
+      but this stylesheet is injected later by the lazy AssessmentPage chunk.
+      On a specificity tie the later sheet wins, so any mobile-responsive
+      rule for a class defined here is silently dead. That is not a guess —
+      it is exactly what happened: an earlier version of this fix lived in
+      mobile-responsive.css and the panel stayed `position: absolute` at
+      every width, so the `?` triggers painted on top of the panel's own text.
+
+   2. ORDER within this file: the `@media (max-width: 600px)` block above
+      still sets `left/top/width` on .diet-tooltip-box, and it comes earlier
+      in the file. Sitting at the end means these declarations are the last
+      word for the panel's geometry.
+
+   On a phone the options stack in one full-width column, so a 240px bubble
+   anchored to a trigger at the end of a row runs off the right edge and
+   covers the rows below it. Here the panel joins normal flow under its own
+   option: it widens that row and pushes the following options down, so
+   overlap becomes impossible by construction rather than merely
+   out-z-indexed. */
+@media (max-width: 768px) {
+  /* Let the option wrap, so the panel can take a line of its own. */
+  .diet-label {
+    flex-wrap: wrap;
+  }
+
+  .diet-tooltip-wrap {
+    position: static;
+    /* Generates no box, so the trigger and the panel become direct children
+       of the option and the panel can span the full width beneath it. */
+    display: contents;
+  }
+
+  .diet-info-btn {
+    /* Square and never stretched. mobile-responsive.css gives grid options a
+       44px min-height; as a flex item the button was being pulled to 26x44,
+       a tall pill whose lower half sat on the panel's first text line. */
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+    flex: 0 0 auto;
+    align-self: center;
+  }
+
+  .diet-tooltip-box {
+    /* In flow, so the absolute offsets from the <=600px block are void. */
+    position: static;
+    left: auto;
+    top: auto;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    margin-top: 10px;
+    /* Places the panel on the wrapped line after the trigger. */
+    order: 3;
+    /* Nothing to out-z-index now that it no longer floats. */
+    z-index: auto;
+  }
 }
