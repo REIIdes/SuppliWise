@@ -5,6 +5,11 @@ import Toast from '../Components/Toast/Toast';
 import { getDashboard, updateIntake, getCalendarData, getWeeklyAdherence, getDayRecords, getToken } from '../api';
 import './TrackIntakePage.css';
 
+/* Priority → tone modifier. `low` is the floor so a row with no priority
+   is styled as the least-prominent thing rather than as high by accident. */
+const PRIORITY_TONES = { high: 'high', medium: 'medium', low: 'low' };
+const priorityTone = (priority) => PRIORITY_TONES[String(priority || '').toLowerCase()] || 'low';
+
 function TrackIntakePage() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
@@ -417,7 +422,7 @@ function TrackIntakePage() {
         <div className="track-intake-container">
           <div className="track-intake-error">
             <p>{error}</p>
-            <button onClick={() => navigate('/assessment')} className="btn-primary">
+            <button onClick={() => navigate('/assessment')} className="track-intake-error__btn">
               Retry
             </button>
           </div>
@@ -631,7 +636,7 @@ function TrackIntakePage() {
               ) : (
                 <div className="supplements-list">
                   {todaysSupplements.map((supplement) => (
-                    <div key={supplement.id} className={`supplement-card ${supplement.taken ? 'taken' : ''}`}>
+                    <div key={supplement.id} className={`supplement-card supplement-card--${priorityTone(supplement.priority)}${supplement.taken ? ' taken' : ''}`}>
                       <div className="supplement-info">
                         <div className="supplement-header">
                           {supplement.priority && (

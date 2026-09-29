@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const speakeasy = require('speakeasy');
@@ -17,6 +18,9 @@ const {
   ADMIN_IDLE_TIMEOUT_MS,
   ADMIN_TOKEN_LIFETIME,
   ADMIN_TOKEN_LIFETIME_SECONDS,
+  ADMIN_HEARTBEAT_INTERVAL_MS,
+  idleExceeded,
+  countsAsActivity,
 } = require('../utils/adminSession');
 const { protect, rejectSession } = require('../middleware/auth');
 const {
@@ -41,6 +45,18 @@ const { evaluatePassword } = require('../utils/passwordRules');
 const passwordResetService = require('../utils/passwordReset');
 const { normalizeIp, ipKind, resolveLoginLocation } = require('../utils/geo');
 const { verifyTotpOnce } = require('../utils/totp');
+// The TOTP seed is read and written through ONE module, which is what
+// guarantees it is always encrypted at rest and always migrated off the legacy
+// plaintext field on first use. No route touches `twoFactorSecret*` directly.
+const totpSecret = require('../utils/totpSecret');
+// The MFA transaction: the server-side MFA_REQUIRED state that replaces a bare
+// user id at the second factor. See utils/mfaTransaction.js.
+const mfaTransaction = require('../utils/mfaTransaction');
+const rateLimits = require('../utils/rateLimits');
+const Passkey = require('../models/Passkey');
+const BackupCode = require('../models/BackupCode');
+const MfaTransaction = require('../models/MfaTransaction');
+const { publicUser, completeSignIn, AUTH_METHODS } = require('../utils/authFlow');
 const { newChallenge, verifyCaptcha } = require('../utils/captcha');
 // Profile/banner images are stored on disk and referenced by URL, never held
 // inline on the document. `safePictureValue` is the guard that keeps a
@@ -87,10 +103,14 @@ function tripwireThrottle(res, ip) {
 // Stricter brute-force guard for the most sensitive auth steps (admin login,
 // 2FA and OTP verification). Layered on top of the global /api/auth limiter;
 // every 429 climbs the 15 min → 1 day lockout ladder.
+// The ceiling is configuration, not a literal — see utils/rateLimits.js for why,
+// including what happens when the value is missing or nonsense. The default is
+// unchanged from what it always was. Every 429 still climbs the
+// 15 min → 1 day lockout ladder below; this only decides when the first 429 is.
 const rateLimit = require('express-rate-limit');
 const sensitiveLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
-  max: 60,
+  max: rateLimits.limit('AUTH_SENSITIVE_RATE_LIMIT_MAX', 60),
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: 'Too many attempts. Please wait 10 minutes and try again.' },
@@ -554,7 +574,7 @@ router.post('/login', async (req, res) => {
     // no secret", which would be a challenge nobody can satisfy. See
     // usesAuthenticator below.
     const user = await User.findOne({ email: trimmedEmail })
-      .select('-profilePicture -bannerPicture +twoFactorSecret');
+      .select('-profilePicture -bannerPicture +twoFactorSecret +twoFactorSecretEnc');
 
     // Enumeration-safe rejection. An unknown address and a wrong password must
     // be indistinguishable in BOTH message and timing:
@@ -709,18 +729,82 @@ router.post('/login', async (req, res) => {
     // own second factor, with no recourse and no way for the holder to tell
     // that was why. A real account (one that HAS set up an authenticator) is
     // unaffected; only the impossible state falls through to the emailed code.
+    // Both secret fields are `select: false`, so the login read has to ask for
+    // them explicitly — the raw one is legacy, the sealed one is current. See
+    // utils/totpSecret.js.
+    const usableSecret = totpSecret.readSecret(user);
     const usesAuthenticator = user.twoFactorEnabled === true
       && twoFactorMethod === 'authenticator'
-      && Boolean(user.twoFactorSecret);
+      && Boolean(usableSecret);
 
-    if (user.twoFactorEnabled === true && twoFactorMethod === 'authenticator' && !user.twoFactorSecret) {
+    // Lazily re-seal a pre-encryption seed now that the password is proven and
+    // the secret is in hand. This is the moment we know the encryption key
+    // works, which is the only safe moment to migrate.
+    if (totpSecret.migrateInPlace(user)) await user.save().catch(() => {});
+
+    if (user.twoFactorEnabled === true && twoFactorMethod === 'authenticator' && !usableSecret) {
       // Data problem, not a credential problem: record it so it is diagnosable
       // rather than silently papering over it forever.
       console.error(
-        `[login] account ${maskEmail(user.email)} has twoFactorEnabled with no twoFactorSecret — `
+        `[login] account ${maskEmail(user.email)} has twoFactorEnabled with no readable two-factor secret — `
         + 'falling back to an emailed code so the account is not locked out. Re-run 2FA setup for it.'
       );
     }
+
+    // The second factor is a TRANSACTION now, not a bare user id.
+    //
+    // The response used to hand the client `userId` and let the next call spend
+    // a code against it, which made the second factor sufficient on its own: a
+    // valid TOTP or recovery code plus a guessable Mongo id bought a full
+    // session, with the password never involved at any point.
+    //
+    // What replaces it is a single-use, short-lived, server-side transaction
+    // that only the password step can open. The client gets an opaque token
+    // meaning "this account's password was verified here, minutes ago" and
+    // nothing more: no authority, no access to anything, no replay value.
+    //
+    // `userId` is STILL returned, and the second-factor routes still accept it,
+    // but only while a live transaction exists for that account. A stale PWA
+    // build still works, because it always comes through /login first; the
+    // bypass is closed either way.
+    // The counts below are only meaningful for an account that HAS a second
+    // factor, and they run on every password submission — so they are skipped
+    // entirely otherwise. An account with no 2FA cannot redeem a recovery code
+    // and has no passkey challenge in this flow, and the two extra round-trips
+    // on the hottest path in the application buy nothing.
+    let passkeyCount = 0;
+    let backupCount = 0;
+    if (user.twoFactorEnabled === true) {
+      [passkeyCount, backupCount] = await Promise.all([
+        Passkey.countDocuments({ user: user._id }),
+        BackupCode.countDocuments({ user: user._id, usedAt: null }),
+      ]);
+    }
+    const mfaMethods = mfaTransaction.methodsFor(
+      { twoFactorEnabled: user.twoFactorEnabled, twoFactorMethod },
+      { passkeys: passkeyCount, backupCodeCount: backupCount },
+    );
+    const mfaToken = await mfaTransaction.start({
+      user: user._id,
+      methods: mfaMethods,
+      ip: loginIp,
+      userAgent: user.lastLoginUserAgent,
+      location: user.lastLoginLocation,
+      primaryMethod: 'password',
+      // The emailed-code branch needs longer: the user has to go and read mail.
+      ttlMs: mfaMethods.includes('email-otp') ? 10 * 60 * 1000 : mfaTransaction.DEFAULT_TTL_MS,
+    });
+
+    await SecurityEvent.write({
+      user: user._id,
+      type: 'mfa-challenge-created',
+      success: true,
+      ip: loginIp,
+      userAgent: user.lastLoginUserAgent,
+      location: user.lastLoginLocation,
+      reason: usesAuthenticator ? 'Authenticator code required' : 'Verification code required',
+      meta: { factor: usesAuthenticator ? 'totp' : 'email-otp', authMethod: 'password' },
+    });
 
     if (usesAuthenticator) {
       // Kick off background geo-resolution (never blocks the response)
@@ -728,6 +812,8 @@ router.post('/login', async (req, res) => {
       return res.json({
         requiresTwoFactor: true,
         userId: user._id,
+        mfaTransaction: mfaToken,
+        mfaMethods,
         message: 'Google Authenticator verification required.',
       });
     }
@@ -748,6 +834,8 @@ router.post('/login', async (req, res) => {
       message: 'Verification code sent to your email successfully',
       requiresOtp: true,
       userId: user._id,
+      mfaTransaction: mfaToken,
+      mfaMethods,
       // Lets the client label the step honestly: "your second factor" when the
       // user chose email as their method, plain email verification otherwise.
       twoFactorMethod: user.twoFactorEnabled === true ? 'email' : null,
@@ -856,9 +944,22 @@ router.post('/verify-admin-2fa', async (req, res) => {
 });
 
 // @route   POST /api/auth/admin-refresh
-// @desc    Sliding admin session: verify the current token, touch activity,
-//          and issue a fresh 5-minute JWT. Called by "Stay Signed In" so the
-//          countdown visibly resets only after the backend confirms.
+// @desc    Extend the admin session. Two distinct jobs, distinguished by the
+//          `renew` flag — see countsAsActivity in utils/adminSession.js.
+//
+//          • renew NOT set  ("Stay signed in", or a background poll):
+//            genuine activity, so `lastActivityAt` is refreshed and the idle
+//            countdown restarts.
+//          • renew = true   (the client's automatic timer):
+//            a pure TOKEN renewal. The full validation still runs — signature,
+//            account exists, still enabled, and NOT idle-expired — so an idle
+//            admin is still signed out. It just does not count as activity, and
+//            does not touch the idle window.
+//
+//          Without the flag the client cannot keep a 15-minute token fresh
+//          without either (a) being logged out mid-task every 15 minutes, or
+//          (b) refreshing on a timer that also refreshes `lastActivityAt`, which
+//          would disable the ten-minute idle timeout entirely.
 router.post('/admin-refresh', async (req, res) => {
   try {
     const header = req.headers.authorization || '';
@@ -876,22 +977,42 @@ router.post('/admin-refresh', async (req, res) => {
     const AdminAccount = require('../models/AdminAccount');
     const admin = await AdminAccount.findById(adminId).select('alias enabled lastActivityAt');
     if (!admin || !admin.enabled) return res.status(401).json({ message: 'Admin account is unavailable.' });
-    if (admin.lastActivityAt && Date.now() - admin.lastActivityAt.getTime() > ADMIN_IDLE_TIMEOUT_MS) {
+    // The SAME function the middleware uses. Two copies of this check is how
+    // they drifted apart in the first place, and both copies skipped the test
+    // entirely when `lastActivityAt` was null.
+    if (idleExceeded(admin, decoded)) {
       return res.status(401).json({ message: 'Admin session expired after inactivity.' });
     }
-    await AdminAccount.updateOne({ _id: admin._id }, { $set: { lastActivityAt: new Date() } }).exec()
-      .catch(() => {});
+    // Only genuine activity slides the window. A token renewal leaves it alone,
+    // which is what keeps the idle timeout meaningful while the client's renewal
+    // timer runs forever.
+    const activity = countsAsActivity(req.body);
+    if (activity) {
+      await AdminAccount.updateOne(
+        { _id: admin._id, $or: [
+          { lastActivityAt: null },
+          { lastActivityAt: { $exists: false } },
+          { lastActivityAt: { $lt: new Date(Date.now() - ADMIN_HEARTBEAT_INTERVAL_MS) } },
+        ] },
+        { $set: { lastActivityAt: new Date() } },
+      ).exec().catch(() => {});
+    }
     return res.json({
       token: adminToken({ _id: String(admin._id), alias: admin.alias }),
       role: 'admin',
       alias: admin.alias,
       // Reported from the same constant the token was signed with. It used to be
       // a second literal ("5 * 60") beside the "5m" in adminToken(), which is two
-      // places to forget when the lifetime changes.
+      // places to forget when the lifetime changes. The client schedules its
+      // renewal from THIS number, so it must be the enforced one.
       expiresInSeconds: ADMIN_TOKEN_LIFETIME_SECONDS,
       // The idle window too, so a client can render the real countdown instead
       // of keeping its own copy of the number.
       idleLimitSeconds: ADMIN_IDLE_LIMIT_SECONDS,
+      // Whether this call counted as activity, so the client can tell the
+      // difference between "I extended your session" and "your token was renewed
+      // and the countdown did not move".
+      countedAsActivity: activity,
     });
   } catch (error) {
     console.error('[admin-refresh]', error.message);
@@ -904,17 +1025,51 @@ router.post('/admin-refresh', async (req, res) => {
 // @access  Public
 router.post('/verify-login-otp', async (req, res) => {
   const { userId, otp, remember } = req.body;
+  const mfaToken = str(req.body?.mfaTransaction);
 
   try {
     if (!userId || !otp) {
       return res.status(400).json({ message: 'User ID and OTP are required' });
     }
 
-    // Account lockout: repeated OTP failures escalate 15 min → 1 day
-    const otpLockKey = accountKey('otp-user', userId);
+    // A second factor is only honoured against a LIVE TRANSACTION opened by the
+    // password step. `userId` alone is accepted only while such a transaction
+    // exists for that account, which is what stops "a valid emailed code plus
+    // a known user id" from being a complete sign-in. See utils/mfaTransaction.js.
+    let transaction = null;
+    if (mfaToken) {
+      if (!mfaTransaction.isValidTokenFormat(mfaToken)) {
+        return res.status(401).json({ message: 'That sign-in attempt has expired. Please sign in again.' });
+      }
+      const peeked = await mfaTransaction.peek(mfaToken, { method: 'email-otp' });
+      if (!peeked) {
+        return res.status(401).json({ message: 'That sign-in attempt has expired. Please sign in again.' });
+      }
+      transaction = { _id: peeked._id, user: peeked.user, viaToken: true };
+    } else {
+      if (!mongoose.isValidObjectId(str(userId))) {
+        return res.status(401).json({ message: 'That sign-in attempt has expired. Please sign in again.' });
+      }
+      const found = await MfaTransaction.findOne({
+        user: str(userId),
+        consumedAt: null,
+        expiresAt: { $gt: new Date() },
+        methods: 'email-otp',
+      }).select('_id user').sort({ createdAt: -1 }).lean();
+      if (!found) {
+        return res.status(401).json({ message: 'That sign-in attempt has expired. Please sign in again.' });
+      }
+      transaction = { _id: found._id, user: found.user, viaToken: false };
+    }
+
+    // Account lockout: repeated OTP failures escalate 15 min → 1 day.
+    // Keyed on the RESOLVED account from the transaction, never on the
+    // client-supplied string: keying on that let anyone who knew a victim's id
+    // lock their own sign-in out.
+    const otpLockKey = accountKey('otp-user', transaction.user);
     const otpLockedMs = lockRemainingMs(otpLockKey);
     if (otpLockedMs > 0) {
-      reportAccountLockout({ userId, minutes: Math.ceil(otpLockedMs / 60000), lockKey: otpLockKey });
+      reportAccountLockout({ userId: String(transaction.user), minutes: Math.ceil(otpLockedMs / 60000), lockKey: otpLockKey });
       return res.status(429).json({
         message: `Too many incorrect attempts. Try again in ${Math.ceil(otpLockedMs / 60000)} minute(s).`,
         remainingSeconds: Math.ceil(otpLockedMs / 1000),
@@ -923,9 +1078,11 @@ router.post('/verify-login-otp', async (req, res) => {
       });
     }
 
-    const user = await User.findById(userId);
+    const user = await User.findById(transaction.user);
     if (!user) {
-      return res.status(401).json({ message: 'User not found' });
+      // Same answer as a wrong code. "User not found" here would turn this
+      // endpoint into an account-existence oracle for anyone holding a user id.
+      return res.status(401).json({ message: 'That verification code is not valid.' });
     }
     // Ban enforcement on the OTP completion step. The password step already
     // rejects non-active accounts; without the same check here a banned user
@@ -967,57 +1124,40 @@ router.post('/verify-login-otp', async (req, res) => {
 
     // OTP is valid, remove from store
     otpStore.delete(otpKey);
-    clearOffenses(accountKey('otp-user', userId));
+    clearOffenses(accountKey('otp-user', transaction.user));
 
-    // One active session per account: this atomically becomes the account's
-    // current session and revokes the previous one — in ANY other tab,
-    // browser or device (the "last session gets logged out" rule). Other
-    // accounts are untouched.
-    const token = await issueUserSession(user._id, describeDevice({
-      userAgent: req.get('user-agent'), ip: req.ip,
-      location: user.lastLoginLocation || '',
-    }));
-
-    // OPT-IN "save my login": attach a remember credential to THIS session so
-    // this browser can re-enter (and switch back) without retyping the
-    // password. Best-effort — a failed attach must never fail the sign-in.
-    let rememberToken = '';
-    if (remember === true || remember === 'true') {
-      try { rememberToken = await attachRememberToken(token); } catch { rememberToken = ''; }
-    }
-    if (rememberToken) {
-      // Marks the device as trusted in its own right so the security page can
-      // list it and the user can revoke it. The credential hash stays the
-      // trust anchor; trustedAt is only a timestamp for display.
-      await markSessionTrusted(token).catch(() => {});
+    // Spend the transaction, atomically, BEFORE the session exists. Two
+    // concurrent submissions of one valid code both pass the checks above, but
+    // only one can win this conditional update — and only the winner is handed
+    // a token.
+    const spent = transaction.viaToken
+      ? await mfaTransaction.spend(mfaToken, { method: 'email-otp' })
+      : await mfaTransaction.spendById(transaction._id, { method: 'email-otp' });
+    if (!spent.ok) {
+      return res.status(401).json({ message: 'That sign-in attempt has expired. Please sign in again.' });
     }
 
-    await SecurityEvent.write({
-      user: user._id,
-      type: user.twoFactorEnabled === true ? 'mfa-success' : 'login-success',
-      success: true,
-      ip: req.ip,
-      userAgent: req.get('user-agent'),
+    // One active session per account: issueUserSession atomically makes this
+    // the account's current session and revokes the one it displaced — in any
+    // other tab, browser or device. Scoped to this account, so every other
+    // account signed in elsewhere in the same browser is untouched.
+    const { token, rememberToken } = await completeSignIn({
+      user,
+      authMethod: AUTH_METHODS.EMAIL_OTP,
+      mfaVerified: user.twoFactorEnabled === true,
+      req,
       location: user.lastLoginLocation || '',
+      remember,
       reason: user.twoFactorEnabled === true ? 'Signed in with an emailed code' : 'Password accepted',
+      eventType: user.twoFactorEnabled === true ? 'mfa-success' : 'login-success',
     });
 
     // Return user data and token (no expiry — revocation is session-based)
     res.json({
-      _id: user._id,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      name: user.fullName,
-      email: user.email,
-      dateOfBirth: user.dateOfBirth,
-      age: user.age,
-      gender: user.gender,
-      profilePicture: safePictureValue(user.profilePicture),
-      bannerPicture: safePictureValue(user.bannerPicture),
-      subscriptionActive: user.subscriptionActive,
-      subscriptionPlan: user.subscriptionPlan,
-      subscription: describeSubscription(user),
+      ...publicUser(user),
       token,
+      authMethod: AUTH_METHODS.EMAIL_OTP,
+      mfaVerified: user.twoFactorEnabled === true,
       ...(rememberToken ? { rememberToken } : {}),
     });
   } catch (error) {
@@ -1089,7 +1229,9 @@ router.post('/setup-2fa', protect, async (req, res) => {
     }
 
     const secret = speakeasy.generateSecret({ name: `SuppliWise (${user.email})`, issuer: 'SuppliWise' });
-    user.twoFactorSecret = secret.base32;
+    // Encrypted immediately, activated only by /verify-2fa. The legacy
+    // plaintext field is cleared, so a new seed never lands in it.
+    totpSecret.writeSecret(user, secret.base32);
     await user.save();
     res.json({ qrCode: await QRCode.toDataURL(secret.otpauth_url), secret: secret.base32 });
   } catch (error) {
@@ -1100,15 +1242,29 @@ router.post('/setup-2fa', protect, async (req, res) => {
 router.post('/verify-2fa', protect, async (req, res) => {
   try {
     if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
-    const user = await User.findById(req.user._id).select('+twoFactorSecret');
-    if (!user || !user.twoFactorSecret) return res.status(400).json({ message: 'Two-factor setup was not started.' });
-    const verified = verifyTotpOnce(user.twoFactorSecret, req.body.otp, String(user._id));
-    if (!verified) return res.status(401).json({ message: 'Invalid verification code.' });
+    const user = await User.findById(req.user._id).select(totpSecret.SECRET_FIELDS);
+    const secret = totpSecret.readSecret(user);
+    if (!user || !secret) return res.status(400).json({ message: 'Two-factor setup was not started.' });
+    if (!verifyTotpOnce(secret, req.body.otp, String(user._id))) {
+      await SecurityEvent.write({
+        user: user._id, type: 'totp-failed', success: false,
+        ip: req.ip, userAgent: req.get('user-agent'),
+        reason: 'Authenticator code rejected during setup',
+        meta: { factor: 'totp', outcome: 'mismatch' },
+      });
+      return res.status(401).json({ message: 'Invalid verification code.' });
+    }
     user.twoFactorEnabled = true;
     // Verifying a TOTP IS choosing the authenticator method — record it, so
     // the UI and the login branch agree on which factor this account uses.
     user.twoFactorMethod = 'authenticator';
     await user.save();
+    await SecurityEvent.write({
+      user: user._id, type: 'totp-enabled', success: true,
+      ip: req.ip, userAgent: req.get('user-agent'),
+      reason: 'Authenticator app enabled',
+      meta: { factor: 'totp', mfaVerified: true },
+    });
     // Security trail: enabling 2FA shows up in Recent security activity
     try {
       const UserNotification = require('../models/UserNotification');
@@ -1126,9 +1282,43 @@ router.post('/verify-2fa', protect, async (req, res) => {
 });
 
 router.post('/login-2fa', async (req, res) => {
+  const mfaToken = str(req.body?.mfaTransaction);
   try {
-    const user = await User.findById(req.body.userId).select('+twoFactorSecret');
-    if (!user || !user.twoFactorEnabled || !user.twoFactorSecret) return res.status(401).json({ message: 'Two-factor authentication is not enabled.' });
+    // The transaction is the whole point of this route now. A bare `userId` is
+    // honoured only while a live transaction exists for that account, which
+    // means the password step really did succeed here moments ago.
+    let transaction = null;
+    if (mfaToken) {
+      if (!mfaTransaction.isValidTokenFormat(mfaToken)) {
+        return res.status(401).json({ message: 'That sign-in attempt has expired. Please sign in again.' });
+      }
+      const peeked = await mfaTransaction.peek(mfaToken, { method: 'totp' });
+      if (!peeked) {
+        return res.status(401).json({ message: 'That sign-in attempt has expired. Please sign in again.' });
+      }
+      transaction = { _id: peeked._id, user: peeked.user, viaToken: true };
+    } else {
+      const userId = str(req.body?.userId);
+      if (!mongoose.isValidObjectId(userId)) {
+        return res.status(401).json({ message: 'That sign-in attempt has expired. Please sign in again.' });
+      }
+      const found = await MfaTransaction.findOne({
+        user: userId,
+        consumedAt: null,
+        expiresAt: { $gt: new Date() },
+        methods: 'totp',
+      }).select('_id user').sort({ createdAt: -1 }).lean();
+      if (!found) {
+        return res.status(401).json({ message: 'That sign-in attempt has expired. Please sign in again.' });
+      }
+      transaction = { _id: found._id, user: found.user, viaToken: false };
+    }
+
+    const user = await User.findById(transaction.user).select(totpSecret.SECRET_FIELDS);
+    const secret = totpSecret.readSecret(user);
+    if (!user || !user.twoFactorEnabled || !secret) {
+      return res.status(401).json({ message: 'That verification code is not valid.' });
+    }
     // A banned/deleted account must not be able to complete the SECOND factor.
     // The ban was only enforced on the password step, so a banned user could
     // still clear TOTP, be handed a session token, wipe their own lockout state
@@ -1136,11 +1326,14 @@ router.post('/login-2fa', async (req, res) => {
     if (user.accountStatus && user.accountStatus !== 'active') {
       return res.status(403).json({ message: 'This account is not active.' });
     }
+    // Lazily migrate a pre-encryption seed: this is the moment we know the key
+    // works, which is the only safe moment to re-seal it.
+    if (totpSecret.migrateInPlace(user)) await user.save().catch(() => {});
     // Account lockout check + failure recording (ladder 15 min → 1 day)
-    const tfaLockKey = accountKey('otp-user', req.body.userId);
+    const tfaLockKey = accountKey('otp-user', transaction.user);
     if (lockRemainingMs(tfaLockKey) > 0) {
       const left = lockRemainingMs(tfaLockKey);
-      reportAccountLockout({ userId: req.body.userId, minutes: Math.ceil(left / 60000), lockKey: tfaLockKey });
+      reportAccountLockout({ userId: String(transaction.user), minutes: Math.ceil(left / 60000), lockKey: tfaLockKey });
       return res.status(429).json({
         message: `Too many incorrect attempts. Try again in ${Math.ceil(left / 60000)} minute(s).`,
         remainingSeconds: Math.ceil(left / 1000),
@@ -1148,7 +1341,7 @@ router.post('/login-2fa', async (req, res) => {
         lockedBy: 'account',
       });
     }
-    const verified = verifyTotpOnce(user.twoFactorSecret, req.body.otp, String(user._id));
+    const verified = verifyTotpOnce(secret, req.body.otp, String(user._id));
     if (!verified) {
       recordAccountFailure(tfaLockKey, lockMeta(req, req.ip));
       await SecurityEvent.write({
@@ -1156,31 +1349,40 @@ router.post('/login-2fa', async (req, res) => {
         ip: req.ip, userAgent: req.get('user-agent'),
         location: user.lastLoginLocation || '',
         reason: 'Authenticator code rejected at sign-in',
+        meta: { factor: 'totp', outcome: 'mismatch' },
       });
-      return res.status(401).json({ message: 'Invalid Google Authenticator code.' });
+      return res.status(401).json({ message: 'That verification code is not valid.' });
     }
     clearAccountState(tfaLockKey);
-    // One active session per account (same atomic rotation as /verify-login-otp):
-    // this sign-in displaces the account's previous session only — other
-    // accounts' sessions are never affected.
-    const token = await issueUserSession(user._id, describeDevice({
-      userAgent: req.get('user-agent'), ip: req.ip,
-      location: user.lastLoginLocation || '',
-    }));
-    // OPT-IN "save my login" (same contract as /verify-login-otp): best-effort
-    // attach — a failed attach never fails the sign-in itself.
-    let rememberToken = '';
-    if (req.body.remember === true || req.body.remember === 'true') {
-      try { rememberToken = await attachRememberToken(token); } catch { rememberToken = ''; }
+    // Spend the transaction atomically before any session exists.
+    const spent = transaction.viaToken
+      ? await mfaTransaction.spend(mfaToken, { method: 'totp' })
+      : await mfaTransaction.spendById(transaction._id, { method: 'totp' });
+    if (!spent.ok) {
+      return res.status(401).json({ message: 'That sign-in attempt has expired. Please sign in again.' });
     }
-    if (rememberToken) await markSessionTrusted(token).catch(() => {});
-    await SecurityEvent.write({
-      user: user._id, type: 'mfa-success', success: true,
-      ip: req.ip, userAgent: req.get('user-agent'),
+
+    // One active session per account (same atomic rotation as /verify-login-otp):
+    // this sign-in displaces THIS ACCOUNT's previous session only — other
+    // accounts' sessions are never affected, which is what lets two accounts
+    // stay signed in in two tabs of the same browser.
+    const { token, rememberToken } = await completeSignIn({
+      user,
+      authMethod: AUTH_METHODS.TOTP,
+      mfaVerified: true,
+      req,
       location: user.lastLoginLocation || '',
+      remember: req.body.remember === true || req.body.remember === 'true',
       reason: 'Signed in with your authenticator app',
+      eventType: 'mfa-success',
     });
-    res.json({ _id: user._id, firstName: user.firstName, lastName: user.lastName, name: user.fullName, email: user.email, dateOfBirth: user.dateOfBirth, age: user.age, gender: user.gender, profilePicture: safePictureValue(user.profilePicture), bannerPicture: safePictureValue(user.bannerPicture), twoFactorEnabled: true, subscriptionActive: user.subscriptionActive, subscriptionPlan: user.subscriptionPlan, subscription: describeSubscription(user), token, ...(rememberToken ? { rememberToken } : {}) });
+    res.json({
+      ...publicUser(user),
+      token,
+      authMethod: AUTH_METHODS.TOTP,
+      mfaVerified: true,
+      ...(rememberToken ? { rememberToken } : {}),
+    });
   } catch (error) {
     res.status(401).json({ message: 'Unable to verify the 2FA code.' });
   }
@@ -1189,7 +1391,7 @@ router.post('/login-2fa', async (req, res) => {
 router.post('/disable-2fa', protect, async (req, res) => {
   try {
     if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
-    const user = await User.findById(req.user._id).select('+twoFactorSecret');
+    const user = await User.findById(req.user._id).select(totpSecret.SECRET_FIELDS);
     if (!user || !user.twoFactorEnabled) {
       return res.status(400).json({ message: 'Two-factor authentication is not currently enabled.' });
     }
@@ -1202,17 +1404,39 @@ router.post('/disable-2fa', protect, async (req, res) => {
     //                   would be enough to silently drop the second factor.
     const method = user.twoFactorMethod || 'authenticator';
     if (method === 'authenticator') {
-      const verified = verifyTotpOnce(user.twoFactorSecret, req.body.otp, String(user._id));
-      if (!verified) return res.status(401).json({ message: 'Invalid Google Authenticator code.' });
+      const secret = totpSecret.readSecret(user);
+      if (!secret) {
+        return res.status(401).json({ message: 'Enter a code from your authenticator app, or contact support.' });
+      }
+      if (totpSecret.migrateInPlace(user)) await user.save().catch(() => {});
+      const verified = verifyTotpOnce(secret, req.body.otp, String(user._id));
+      if (!verified) {
+        await SecurityEvent.write({
+          user: user._id, type: 'totp-failed', success: false,
+          ip: req.ip, userAgent: req.get('user-agent'),
+          reason: 'Authenticator code rejected while disabling',
+          meta: { factor: 'totp', outcome: 'mismatch' },
+        });
+        return res.status(401).json({ message: 'That verification code is not valid.' });
+      }
     } else {
       const ok = await user.matchPassword(str(req.body.currentPassword));
       if (!ok) return res.status(401).json({ message: 'Enter your current password to turn off two-factor authentication.' });
     }
 
     user.twoFactorEnabled = false;
-    user.twoFactorSecret = '';
+    // The seed is FORGOTTEN, not just deactivated. Leaving it stored would mean
+    // a database read could still mint codes for an account that believes it
+    // has no authenticator. See utils/secretBox.js.
+    totpSecret.clearSecret(user);
     user.twoFactorMethod = 'authenticator'; // reset so a later re-enable defaults to the strong factor
     await user.save();
+    await SecurityEvent.write({
+      user: user._id, type: 'totp-disabled', success: true,
+      ip: req.ip, userAgent: req.get('user-agent'),
+      reason: method === 'email' ? 'Email sign-in codes turned off' : 'Authenticator app turned off',
+      meta: { factor: method === 'email' ? 'email-otp' : 'totp' },
+    });
     // Security trail: disabling 2FA shows up in Recent security activity
     try {
       const UserNotification = require('../models/UserNotification');
@@ -1418,7 +1642,7 @@ router.get('/me', protect, async (req, res) => {
   try {
     if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
     const user = await User.findById(req.user._id)
-      .select('-password -profilePicture -bannerPicture -twoFactorSecret -lastLoginIp -lastLoginUserAgent')
+      .select('-password -profilePicture -bannerPicture -twoFactorSecret -twoFactorSecretEnc -webauthnUserId -lastLoginIp -lastLoginUserAgent')
       .lean();
     if (!user) return res.status(404).json({ message: 'User not found.' });
     res.json({
@@ -1479,7 +1703,7 @@ router.post('/logout', protect, async (req, res) => {
 router.post('/change-password', protect, async (req, res) => {
   try {
     if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
-    const user = await User.findById(req.user._id).select('+twoFactorSecret');
+    const user = await User.findById(req.user._id).select(totpSecret.SECRET_FIELDS);
     if (!user) return res.status(401).json({ message: 'Your session is no longer valid. Please sign in again.' });
 
     const currentPassword = str(req.body?.currentPassword);
@@ -1500,6 +1724,12 @@ router.post('/change-password', protect, async (req, res) => {
 
     const ok = await user.matchPassword(currentPassword);
     if (!ok) {
+      await SecurityEvent.write({
+        user: user._id, type: 'password-change-failed', success: false,
+        ip: req.ip, userAgent: req.get('user-agent'),
+        reason: 'Current password was incorrect',
+        meta: { authMethod: 'password' },
+      });
       // Deliberately the same wording a wrong username gets, and no detail:
       // this endpoint must not confirm that the account exists.
       return res.status(401).json({ message: 'Your current password is incorrect.' });
@@ -1513,6 +1743,15 @@ router.post('/change-password', protect, async (req, res) => {
 
     // Kill every other session (see route note). req.sessionId is the caller's.
     const killed = await revokeOtherUserSessions(user._id, req.sessionId);
+
+    await SecurityEvent.write({
+      user: user._id, type: 'password-changed', success: true,
+      ip: req.ip, userAgent: req.get('user-agent'),
+      reason: killed > 0
+        ? `Password changed, ${killed} other ${killed === 1 ? 'session' : 'sessions'} signed out`
+        : 'Password changed',
+      meta: { authMethod: 'password' },
+    });
 
     try {
       const UserNotification = require('../models/UserNotification');
@@ -1593,17 +1832,19 @@ router.post('/two-factor-method', protect, async (req, res) => {
       return res.status(400).json({ message: 'Choose either the authenticator app or email codes.' });
     }
 
-    // twoFactorSecret is `select: false`, so it has to be asked for explicitly —
-    // and it is the ONLY thing that proves an authenticator was actually set up.
-    const user = await User.findById(req.user._id).select('+twoFactorSecret');
+    // Both secret fields are `select: false`, so they have to be asked for
+    // explicitly — and a readable seed is the ONLY thing that proves an
+    // authenticator was actually set up.
+    const user = await User.findById(req.user._id).select(totpSecret.SECRET_FIELDS);
     if (!user) return res.status(401).json({ message: 'Your session is no longer valid. Please sign in again.' });
+    const hasAuthenticator = Boolean(totpSecret.readSecret(user));
 
     // Switching TO the authenticator requires a real, already-verified
     // authenticator. Checking `twoFactorEnabled` here is NOT enough: an account
     // on email 2FA has that flag set, so the old guard let them "choose" an
     // authenticator they never configured — and then login demanded a TOTP
     // they had no way to produce, locking them out of their own account.
-    if (method === 'authenticator' && !user.twoFactorSecret) {
+    if (method === 'authenticator' && !hasAuthenticator) {
       return res.status(409).json({ message: 'Set up an authenticator app first, then choose it here.' });
     }
     if (user.twoFactorEnabled && method === 'email') {
@@ -1616,10 +1857,18 @@ router.post('/two-factor-method', protect, async (req, res) => {
     user.twoFactorMethod = method;
     user.twoFactorEnabled = true;
     // Leaving the authenticator method for email must not leave a live TOTP
-    // secret behind: it is dead weight that a future switch back would silently
-    // re-enable. Disabled accounts already clear it below.
-    if (method === 'email') user.twoFactorSecret = '';
+    // seed behind: it is dead weight that a future switch back would silently
+    // re-enable, and a stored seed is a stored credential. Encrypted or not,
+    // it goes.
+    if (method === 'email') totpSecret.clearSecret(user);
     await user.save();
+
+    await SecurityEvent.write({
+      user: user._id, type: 'mfa-enabled', success: true,
+      ip: req.ip, userAgent: req.get('user-agent'),
+      reason: method === 'email' ? 'Switched to emailed sign-in codes' : 'Switched to the authenticator app',
+      meta: { factor: method === 'email' ? 'email-otp' : 'totp' },
+    });
 
     try {
       const UserNotification = require('../models/UserNotification');
@@ -2060,6 +2309,47 @@ router.put('/profile', async (req, res) => {
     }
     res.status(500).json({ message: 'Something went wrong. Please try again later.' });
   }
+});
+
+// @route   POST /api/auth/admin-activity
+// @desc    "I am still here" — the admin dashboard's activity beacon.
+//
+// WHY THIS EXISTS
+//
+// The admin dashboard polls its data every 10 seconds, and those polls are
+// marked `X-Admin-Background`, so the server deliberately does NOT count them
+// as activity: an unattended tab left open overnight must not hold a session
+// alive all night. That is right, and it creates a mismatch. The client
+// countdown resets on real user input (key, mouse, scroll), while the server
+// only ever learns of activity from a NON-background request. So an
+// administrator could sit reading the dashboard, moving the mouse, never
+// clicking anything — and watch a badge count down from ten minutes that never
+// runs out, while the server signs them out underneath it. A countdown that
+// lies about when you will be logged out is worse than no countdown.
+//
+// This is the missing signal: proof of a person at the keyboard, sent at most
+// once a minute, and only while there is one. It is a real request, so the
+// middleware's existing conditional heartbeat stamps `lastActivityAt` and the
+// idle window genuinely slides — exactly as it does for any other activity.
+//
+// It mints NO token (unlike /auth/admin-refresh) and returns no data, so it is
+// not on the token-keepalike path and cannot be used to extend anything. It is
+// excluded from the sensitive auth budget in index.js, because spending a
+// login attempt on a background ping would lock working admins out of signing
+// in at all.
+router.post('/admin-activity', protect, async (req, res) => {
+  // `protect` has already run the full gauntlet for this request and stamped
+  // the activity. There is nothing left to do but confirm it, and to report
+  // what the server now believes, so the client can correct its own countdown
+  // instead of continuing to display a number that was never enforced.
+  return res.json({
+    ok: true,
+    idleLimitSeconds: ADMIN_IDLE_LIMIT_SECONDS,
+    // Echoed so the client can tell "the server slid the window" from "the
+    // request never arrived" and re-anchor on the server's clock rather than
+    // assuming its own local one is right.
+    serverTime: Date.now(),
+  });
 });
 
 module.exports = router;

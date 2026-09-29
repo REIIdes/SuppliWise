@@ -14,6 +14,45 @@ import {
 // authState.js imports nothing itself, so this one specifier is the whole chain.
 } from './auth/authState.js';
 
+// Self-heal from a stale dynamic-import failure.
+//
+// `@simplewebauthn/browser` is imported lazily below. If Vite's dependency
+// optimizer re-runs mid-session (a dependency was added or edited while the dev
+// server was up), the module URL the loaded page holds stops resolving and the
+// browser reports "Failed to fetch dynamically imported module: …/deps/
+// @simplewebauthn_browser.js?v=<old hash>". One reload always fixes it,
+// because the fresh document asks for the new hash.
+//
+// The config now pre-bundles this package so the re-optimize should not happen
+// (see optimizeDeps.include in vite.config.js, and the test that enforces its
+// completeness). This is the backstop for the case where a future dependency
+// gets added without one, because a dead passkey button with an unreachable
+// module behind it is otherwise unrecoverable without a manual browser reload.
+import { isStaleChunkError, reloadOnceForStaleChunk } from './utils/chunkReload.js';
+
+/**
+ * Load the WebAuthn browser SDK, self-healing a stale optimizer hash.
+ *
+ * The SDK is imported lazily so its ~30 KB is not in the initial bundle for the
+ * majority of people who never touch a passkey.
+ *
+ * Throws a plain Error on genuine load failure, but on a stale-chunk error it
+ * schedules a reload and returns null instead — the page is about to be
+ * replaced, so surfacing a failure the user is navigating away from would flash
+ * an error over a working screen.
+ *
+ * @returns {Promise<typeof import('@simplewebauthn/browser')|null>} null when a
+ *   reload was scheduled.
+ */
+const loadWebAuthn = async () => {
+  try {
+    return await import('@simplewebauthn/browser');
+  } catch (loadError) {
+    if (isStaleChunkError(loadError) && reloadOnceForStaleChunk(loadError)) return null;
+    throw loadError;
+  }
+};
+
 // Resolve the backend URL: explicit env override wins; otherwise derive it
 // from the page host so phones/tablets on the LAN (e.g. 192.168.x.x) reach
 // the backend instead of a dead localhost:5000 ("Failed to fetch").
@@ -66,15 +105,6 @@ const AUTH_NOTICE_KEY = 'sw_auth_notice';
 // Fallback copy for a session the server rejected (also used by the
 // cross-tab dead-session handlers below).
 const SESSION_ENDED_MESSAGE = 'Your session has ended. Please sign in again.';
-
-// A session that aged out for inactivity is reported with its own code so the
-// member is told WHY they were signed out. Without it, coming back after a month
-// away produces the same "Your session has ended" as being signed out by an
-// administrator or a second login — and a member whose password works fine
-// concludes the app is broken. The server sends its own wording, so this is only
-// the fallback for a response that arrived without a body.
-const SESSION_IDLE_CODE = 'SESSION_IDLE_EXPIRED';
-const SESSION_IDLE_FALLBACK = 'You were signed out after a period of inactivity. Sign in again to continue.';
 
 // One-shot message shown by the login screen after a forced sign-out
 // ("session expired / signed out elsewhere" state).
@@ -726,14 +756,20 @@ const isTokenExpired = () => {
 // every session code means the same thing for this tab — you're signed out —
 // so the server's human message wins when present, and NO_SESSION (no
 // credential was even presented) falls back to the plain sign-in copy.
+//
+// There used to be a third branch here, keyed on SESSION_IDLE_EXPIRED, because
+// a member signed out after a month away needed to be told that was why.
+// User sessions no longer expire on a timer, so the server can never send that
+// code and the branch was unreachable. It is removed rather than left as dead
+// code, so nobody reintroduces a user-side time bound on the strength of a
+// fallback string that is still sitting in this file.
 const handleAuthError = (serverMessage, code) => {
   const token = getToken();
   if (token && isAdminToken(token)) {
     return serverMessage || 'Something went wrong. Please try again.';
   }
   const message = serverMessage
-    || (code === 'NO_SESSION' ? 'Please sign in to continue.'
-      : (code === SESSION_IDLE_CODE ? SESSION_IDLE_FALLBACK : SESSION_ENDED_MESSAGE));
+    || (code === 'NO_SESSION' ? 'Please sign in to continue.' : SESSION_ENDED_MESSAGE);
   if (token) {
     // THIS copy is provably dead: fingerprint it (never the token itself) and
     // tell the other tabs, so no bootstrap can hand it back — that re-adoption
@@ -1738,6 +1774,366 @@ export const getWeeklyAdherence = async () => {
   const res = await apiFetch('/dashboard/weekly-adherence', {
     headers: { ...authHeader() },
   });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PASSKEYS  (/api/auth/passkeys)
+   ═══════════════════════════════════════════════════════════════════════════
+   The WebAuthn ceremony itself is two calls with a browser gesture in between:
+   the server issues options, the AUTHENTICATOR (not this code, not the
+   server) produces a signed response, and the server verifies it.
+
+   Three rules this file exists to enforce:
+
+   1. NOTHING IS PERSISTED. The challenge, the credential and the response all
+      live in component state for the duration of one call and are then dropped.
+      A challenge in localStorage would survive the ceremony that consumed it
+      and a replayed attestation is exactly what the server refuses.
+
+   2. THE SERVER DECIDES THE ACCOUNT. There is no userId anywhere in the
+      sign-in calls. The assertion names a credential; the server looks it up.
+      Adding a userId parameter here would reintroduce the ability to claim to
+      be someone else.
+
+   3. THE PRIVATE KEY NEVER COMES NEAR THIS CODE. `navigator.credentials.*`
+      returns a public credential and a signature. The private key stays inside
+      the authenticator — the phone's secure enclave, Windows Hello, a hardware
+      token — and there is no API that could retrieve it even if we asked.
+*/
+
+/** True when this browser can do WebAuthn at all. Presentation only. */
+export const isPasskeySupported = () => {
+  try {
+    return typeof window !== 'undefined'
+      && typeof window.PublicKeyCredential === 'function'
+      && typeof navigator.credentials?.create === 'function'
+      && typeof navigator.credentials?.get === 'function';
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * True when the browser can offer a passkey inline on a form
+ * (`mediation: 'conditional'`), which is the autofill experience.
+ */
+export const isConditionalMediationAvailable = async () => {
+  try {
+    if (!isPasskeySupported() || !window.PublicKeyCredential.isConditionalMediationAvailable) return false;
+    return await window.PublicKeyCredential.isConditionalMediationAvailable();
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Add a passkey to the CURRENTLY SIGNED IN account.
+ *
+ * @param {(opts: {name: string}) => Promise<void>} [onNamePrompt] optional hook
+ *   to collect a label before the ceremony; the browser dialog covers the rest.
+ * @returns {Promise<{passkey: object, message: string}>}
+ */
+export const addPasskey = async (name = 'Passkey', stepUp = '') => {
+  if (!isPasskeySupported()) {
+    throw new Error('This browser cannot create passkeys. Try Chrome, Edge, Safari or Firefox on this device.');
+  }
+  const webauthn = await loadWebAuthn();
+  if (!webauthn) return null; // a reload was scheduled; the page is going away
+  const { startRegistration } = webauthn;
+
+  // The options carry a fresh, single-use, server-stored challenge. They are
+  // held only until the ceremony below returns.
+  const options = await apiFetch('/auth/passkeys/register/options', {
+    method: 'POST',
+    headers: { ...authHeader(), ...(stepUp ? { 'X-Step-Up': stepUp } : {}) },
+  });
+  const optionsJSON = await parseJSON(options);
+  if (!options.ok) throw new Error(friendlyError(options.status, optionsJSON?.message));
+
+  // `startRegistration` invokes navigator.credentials.create(), which shows the
+  // platform's own "Save a passkey?" sheet. The private key is created inside
+  // the authenticator during this call and never leaves it.
+  const response = await startRegistration({ optionsJSON });
+
+  const verified = await apiFetch('/auth/passkeys/register/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader(), ...(stepUp ? { 'X-Step-Up': stepUp } : {}) },
+    body: JSON.stringify({ response, name }),
+  });
+  const data = await parseJSON(verified);
+  if (!verified.ok) throw new Error(friendlyError(verified.status, data?.message));
+
+  return data;
+};
+
+/** This account's passkeys, for the management list. */
+export const getPasskeys = async () => {
+  const res = await apiFetch('/auth/passkeys', { headers: { ...authHeader() } });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+/** Rename a passkey. Owner-scoped server-side; a foreign id is a 404. */
+export const renamePasskey = async (id, name) => {
+  const res = await apiFetch(`/auth/passkeys/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify({ name }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+/**
+ * Remove a passkey. Requires a step-up token.
+ *
+ * The server may answer 409 LAST_STRONG_METHOD — refusing to strip an account
+ * down to a password and nothing else. That refusal is the point, and the
+ * caller should surface the message rather than retrying.
+ */
+export const removePasskey = async (id, stepUp) => {
+  const res = await apiFetch(`/auth/passkeys/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: { ...authHeader(), ...(stepUp ? { 'X-Step-Up': stepUp } : {}) },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) {
+    const error = new Error(friendlyError(res.status, data?.message));
+    error.code = data?.code;
+    throw error;
+  }
+  return data;
+};
+
+/**
+ * Sign in with a passkey. No password, no second prompt, no account selector.
+ *
+ * Rejects with `NotAllowedError`-flavoured messages when the user dismisses the
+ * prompt, so the caller can stay silent rather than showing a failure for
+ * something the person chose to cancel.
+ */
+export const signInWithPasskey = async (remember = false) => {
+  if (!isPasskeySupported()) {
+    throw new Error('This browser cannot use passkeys. Try Chrome, Edge, Safari or Firefox on this device.');
+  }
+  const webauthn = await loadWebAuthn();
+  if (!webauthn) return null; // a reload was scheduled; the page is going away
+  const { startAuthentication } = webauthn;
+
+  const res = await apiFetch('/auth/passkeys/login/options', { method: 'POST' });
+  const optionsJSON = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, optionsJSON?.message));
+
+  // A discoverable credential: the authenticator offers the passkeys it holds
+  // for this site, and the assertion comes back naming itself.
+  const response = await startAuthentication({ optionsJSON });
+
+  const verified = await apiFetch('/auth/passkeys/login/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ response, remember }),
+  });
+  const data = await parseJSON(verified);
+  if (!verified.ok) throw new Error(friendlyError(verified.status, data?.message));
+  return data;
+};
+
+/**
+ * Keep a conditional-mediation request alive so the browser can autofill a
+ * passkey into the sign-in form.
+ *
+ * Returns a cancel function. The caller MUST call it on unmount: leaving it
+ * running keeps a credential request open on a page the person has left, which
+ * is both a battery cost and, in a shared-browser setting, an unwanted prompt
+ * on the next page.
+ */
+export const watchForPasskeyAutofill = async (onResult) => {
+  if (!(await isConditionalMediationAvailable())) return () => {};
+  // Deliberately NOT self-healing here. A reload from inside a background
+  // watcher would discard the sign-in form the user is in the middle of typing
+  // into, to fix a problem the passkey BUTTON does not have — it loads the same
+  // module and does reload. So the watcher simply stands down; the button still
+  // works, and if the user is on a page that has no button, the one reload the
+  // button would have triggered happens on their next interaction with it.
+  const webauthn = await loadWebAuthn();
+  if (!webauthn) return () => {};
+  const { startAuthentication } = webauthn;
+  let cancelled = false;
+  let controller = null;
+
+  (async () => {
+    while (!cancelled) {
+      try {
+        const res = await apiFetch('/auth/passkeys/login/options', { method: 'POST' });
+        if (!res.ok) return;
+        const optionsJSON = await parseJSON(res);
+        if (cancelled || !optionsJSON) return;
+        const response = await startAuthentication({ optionsJSON, useBrowserAutofill: true });
+        if (cancelled || !response) return;
+        const verified = await apiFetch('/auth/passkeys/login/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ response }),
+        });
+        const data = await parseJSON(verified);
+        if (verified.ok) onResult(data);
+      } catch {
+        // AbortError on cancel, and any other failure simply means this pass
+        // is over. The loop restarts, which is what makes the autofill survive
+        // a dismissed prompt.
+        if (cancelled) return;
+      }
+      controller = new Promise((resolve) => { setTimeout(resolve, 900); });
+      await controller;
+    }
+  })();
+
+  return () => { cancelled = true; };
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TOTP  (/api/auth/totp)
+   ═══════════════════════════════════════════════════════════════════════════
+   Enrolment and removal both require a step-up token. The seed is returned by
+   /setup exactly ONCE, is held in component state while the user scans it, and
+   is never written to storage: no localStorage, no sessionStorage, no state
+   that survives a reload. Reloading mid-setup means starting again, which is
+   the correct trade for a secret that is shown once by design.
+*/
+
+/** Begin authenticator enrolment. Returns the QR code and manual-entry key. */
+export const startTotpSetup = async (stepUp) => {
+  const res = await apiFetch('/auth/totp/setup', {
+    method: 'POST',
+    headers: { ...authHeader(), ...(stepUp ? { 'X-Step-Up': stepUp } : {}) },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+/** Confirm a code from the authenticator, which activates 2FA. */
+export const confirmTotpSetup = async (otp, stepUp) => {
+  const res = await apiFetch('/auth/totp/verify-setup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader(), ...(stepUp ? { 'X-Step-Up': stepUp } : {}) },
+    body: JSON.stringify({ otp }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+/**
+ * Turn the authenticator off. Requires a step-up AND a live code from the
+ * authenticator being removed — or a recovery code, for an account whose
+ * authenticator is already unusable.
+ */
+export const disableTotp = async ({ otp = '', currentPassword = '', stepUp }) => {
+  const res = await apiFetch('/auth/totp/disable', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader(), ...(stepUp ? { 'X-Step-Up': stepUp } : {}) },
+    body: JSON.stringify({ otp, currentPassword }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RECOVERY CODES  (/api/auth/recovery-codes)
+   ═══════════════════════════════════════════════════════════════════════════
+   `generate` and `regenerate` return the ONLY plaintext copy, exactly once.
+   There is deliberately no endpoint that can return them again, so the UI has
+   nothing to refetch and no cache to invalidate — the codes exist in component
+   state until the person leaves the page, and after that they are gone.
+*/
+
+export const generateRecoveryCodes = async (stepUp) => {
+  const res = await apiFetch('/auth/recovery-codes/generate', {
+    method: 'POST',
+    headers: { ...authHeader(), ...(stepUp ? { 'X-Step-Up': stepUp } : {}) },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+export const regenerateRecoveryCodes = async (stepUp) => {
+  const res = await apiFetch('/auth/recovery-codes/regenerate', {
+    method: 'POST',
+    headers: { ...authHeader(), ...(stepUp ? { 'X-Step-Up': stepUp } : {}) },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+/**
+ * Sign in with a recovery code, mid-flow, before there is a session.
+ *
+ * Unauthenticated on purpose, so it bypasses `friendlyError`'s 401 handling —
+ * that path exists to clear a broken session, and here a 401 means "that code is
+ * not valid", which is an ordinary answer to an ordinary mistake.
+ */
+export const redeemRecoveryCode = async ({ mfaTransaction, userId, code, remember = false }) => {
+  const res = await apiFetch('/auth/recovery-codes/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mfaTransaction, userId, code, remember }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) {
+    throw new Error(data?.message
+      || (res.status === 429
+        ? 'Too many incorrect codes. Please wait a few minutes and try again.'
+        : 'That recovery code is not valid.'));
+  }
+  return data;
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SESSIONS  (/api/auth/sessions)
+   ═══════════════════════════════════════════════════════════════════════════
+   Nothing here returns a token, a token hash or a session cookie. The ids in
+   the list are session document ids, and they are safe to hold because they are
+   meaningless without the signed JWT carrying the matching `sid` claim.
+*/
+
+export const getAuthSessions = async () => {
+  const res = await apiFetch('/auth/sessions', { headers: { ...authHeader() } });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+export const revokeAuthSession = async (sessionId) => {
+  const res = await apiFetch(`/auth/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'DELETE',
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+export const revokeOtherAuthSessions = async () => {
+  const res = await apiFetch('/auth/sessions/revoke-others', {
+    method: 'POST',
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+export const logoutAllSessions = async () => {
+  const res = await apiFetch('/auth/sessions/logout-all', { method: 'POST', headers: { ...authHeader() } });
   const data = await parseJSON(res);
   if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
   return data;

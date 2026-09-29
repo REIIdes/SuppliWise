@@ -73,25 +73,43 @@ function setCachedSession(sid, user) {
 }
 
 function invalidateSessionCache(sid) {
-  sessionCache.delete(sid);
+  if (!sid) return;
+  sessionCache.delete(String(sid));
+  lastTouched.delete(String(sid));
+}
+
+// Revoked sessions must stop working on the very next request, not at the end
+// of the 30-second cache TTL. utils/sessions.js cannot require this module (we
+// require it), so it publishes revocations through a listener list instead and
+// we subscribe here.
+//
+// Without this, `POST /auth/logout` revoked the session record but a token
+// already cached under the same `sid` kept authenticating for up to 30 seconds
+// — a real window in which "signed out" was not yet true. Displacement by a
+// newer sign-in was never affected (a new sign-in mints a NEW sid, so the stale
+// entry was unreachable); in-place revocation was.
+{
+  const { onSessionRevoked } = require('../utils/sessions');
+  onSessionRevoked((sids) => {
+    for (const sid of sids) invalidateSessionCache(sid);
+  });
 }
 
 // The admin session policy lives in utils/adminSession.js — the idle window, the
-// token lifetime and the heartbeat interval are defined once and their ordering
-// is asserted there. They used to be literals in this file and in routes/auth.js
-// with a comment claiming they were kept in step.
+// token lifetime, the heartbeat interval, AND the idle check itself are defined
+// once there. They used to be literals in this file and in routes/auth.js with
+// a comment claiming they were kept in step, and the two copies of the check
+// both carried the same null-`lastActivityAt` hole. Import the decision, not
+// just the numbers.
 const {
-  ADMIN_IDLE_TIMEOUT_MS,
   ADMIN_HEARTBEAT_INTERVAL_MS,
+  idleExceeded,
 } = require('../utils/adminSession');
 
-// Throttled lastActivityAt writes (informational only — activity never
-// expires a session; users are never logged out for being idle).
+// Throttled `lastActivityAt` writes for USER sessions.
 //
-// MUST be shorter than ADMIN_IDLE_TIMEOUT_MS, or a continuously active admin is
-// signed out: the write is throttled and stops happening while the idle check
-// keeps reading the value it would have written. The invariant is asserted in
-// adminSession.js; the value is derived there rather than typed here.
+// Purely informational: a user session does not expire by time, so nothing here
+// decides anything. It feeds the "signed-in devices" list.
 const TOUCH_INTERVAL_MS = ADMIN_HEARTBEAT_INTERVAL_MS;
 const lastTouched = new Map(); // sid → epoch ms
 function touchSession(sid) {
@@ -111,6 +129,46 @@ function touchSession(sid) {
   Session.updateOne({ _id: sid }, { $set: { lastActivityAt: new Date() } })
     .exec()
     .catch(() => {});
+}
+
+/**
+ * Stamp admin activity — THROTTLED IN THE DATABASE, not in process memory.
+ *
+ * This used to be an unconditional write on every single admin request. The
+ * dashboard polls every 10 seconds and every interaction fetches, so an
+ * actively-working administrator generated a database write several times a
+ * minute for a value nothing reads more often than the idle check does.
+ *
+ * The throttle is the `$lt` in the FILTER rather than a `Map` here, and that is
+ * the whole point of this function's shape:
+ *   - it is correct across processes, where a per-process map is not (two app
+ *     instances behind a load balancer would each keep their own counter, so
+ *     the stamp would be written roughly twice as often as configured);
+ *   - it needs no state, so there is no map to grow and evict;
+ *   - when the write is skipped, Mongo matches zero documents and does no
+ *     update at all — the saving is in the database, not in the round trip.
+ *
+ * `lastActivityAt: null` is included so a session that has never been stamped
+ * gets one immediately rather than waiting out the interval.
+ *
+ * Fire-and-forget: a failed activity stamp must never fail the request it was
+ * made for. Worst case the session ends a little early, which is the safe
+ * direction.
+ */
+function heartbeatAdmin(adminId, at = Date.now()) {
+  const AdminAccount = require('../models/AdminAccount');
+  const fresh = new Date(at);
+  return AdminAccount.updateOne(
+    {
+      _id: adminId,
+      $or: [
+        { lastActivityAt: null },
+        { lastActivityAt: { $exists: false } },
+        { lastActivityAt: { $lt: new Date(at - ADMIN_HEARTBEAT_INTERVAL_MS) } },
+      ],
+    },
+    { $set: { lastActivityAt: fresh } },
+  ).exec().catch(() => {});
 }
 
 // Reject a request with a machine-readable session error code so the
@@ -145,7 +203,9 @@ const protect = async (req, res, next) => {
     decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
   } catch (error) {
     if (error.name === 'TokenExpiredError') {
-      // Only admin tokens carry `exp`; user sessions never expire by time.
+      // Only admin tokens carry `exp`. A user session does not expire by time —
+      // see utils/userSession.js — so reaching this branch means an admin token
+      // aged out, which the client's automatic renewal exists to prevent.
       return res.status(401).json({ message: 'Your session has expired. Please sign in again.', code: TOKEN_EXPIRED });
     }
     if (error.name === 'NotBeforeError') {
@@ -154,7 +214,10 @@ const protect = async (req, res, next) => {
     return res.status(401).json({ message: 'Not authorized, token failed', code: INVALID_TOKEN });
   }
 
-  // Admin sessions: short sliding TTL + idle kill (unchanged behaviour).
+  // ── Admin sessions ──────────────────────────────────────────────────────
+  // A ten-minute idle window (utils/adminSession.js) plus a short-lived token
+  // that the client renews automatically. Unlike user sessions, an admin
+  // session DOES end on a timer — it is the higher-privilege account.
   if (decoded.role === 'admin') {
     const adminId = decoded.adminId || decoded.id;
     if (!adminId || adminId === 'admin') return res.status(401).json({ message: 'Please sign in again.' });
@@ -166,7 +229,12 @@ const protect = async (req, res, next) => {
       return res.status(503).json({ message: 'The service is temporarily unavailable. Please try again.' });
     }
     if (!admin || !admin.enabled) return res.status(401).json({ message: 'Admin account is unavailable.' });
-    if (admin.lastActivityAt && Date.now() - admin.lastActivityAt.getTime() > ADMIN_IDLE_TIMEOUT_MS) {
+    // The single shared implementation. This used to read
+    // `admin.lastActivityAt && ...`, which SKIPPED the check entirely whenever
+    // the stamp was null — so an account that had never been stamped was never
+    // idle-expired, and only the token's `exp` bounded it. `idleExceeded` falls
+    // back to the token's own issue time and fails closed.
+    if (idleExceeded(admin, decoded)) {
       return res.status(401).json({ message: 'Admin session expired after inactivity.' });
     }
     // ── Forced password change ────────────────────────────────────────────
@@ -187,10 +255,13 @@ const protect = async (req, res, next) => {
         mustChangePassword: true,
       });
     }
+    // Background polls (the dashboard's own refresh loop) are not evidence that
+    // a human is at the keyboard, so they must not hold a session open — hence
+    // the opt-out header the client sets on them.
     if (req.get('x-admin-background') !== 'true') {
-      // Fire-and-forget heartbeat (no per-request document validation/save race)
-      AdminAccount.updateOne({ _id: admin._id }, { $set: { lastActivityAt: new Date() } }).exec()
-        .catch(() => {});
+      // Throttled in the database. See heartbeatAdmin: this was one write per
+      // request and is now at most one per ADMIN_HEARTBEAT_INTERVAL_MS.
+      heartbeatAdmin(admin._id);
     }
     req.user = { _id: admin._id, role: 'admin', alias: admin.alias, mustChangePassword: !!admin.mustChangePassword };
     req.authDecoded = decoded;

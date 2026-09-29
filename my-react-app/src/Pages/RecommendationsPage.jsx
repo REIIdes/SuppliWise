@@ -5,6 +5,34 @@ import Toast from '../Components/Toast/Toast';
 import { getHistory, addSupplementToPlan, removeSupplementFromPlan, getMyPlan, getToken } from '../api';
 import './RecommendationsPage.css';
 
+/* The "nothing to show" panel. This was two ~40-line blocks of inline styles
+   that were byte-for-byte identical except for the paragraph, and neither
+   offered a way out — a member whose assessment had not been analysed yet
+   was told to go and complete one, with no link to do it. One component, one
+   set of classes, and the action is part of the contract so it cannot be
+   forgotten again. */
+function RecommendationEmpty({ title, text, action, onAction }) {
+  return (
+    <div className="rec-empty">
+      <div className="rec-empty__icon" aria-hidden="true">
+        <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+          <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+          <line x1="9" y1="12" x2="15" y2="12" />
+          <line x1="9" y1="16" x2="13" y2="16" />
+        </svg>
+      </div>
+      <p className="rec-empty__title">{title}</p>
+      <p className="rec-empty__text">{text}</p>
+      {action && (
+        <button type="button" className="sw-btn" onClick={onAction}>
+          {action}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function RecommendationsPage() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
@@ -86,43 +114,61 @@ function RecommendationsPage() {
 
   const getFilteredRecommendations = () => {
     if (!recommendations) return [];
-    
-    // Sort by: added status (not added first, added last), then priority (High → Medium → Low), then confidence score
-    const PRIORITY_ORDER = { High: 0, Medium: 1, Low: 2 };
+
+    // Sort by: added status (not added first, added last), then priority
+    // (High → Medium → Low), then confidence score.
+    //
+    // The order table used to be keyed `High`/`Medium`/`Low` while the API
+    // returns 'high'/'medium'/'low'. Every lookup missed, every item fell
+    // through to the `?? 3` default, and since they were ALL 3 the priority
+    // clause was always 0 — so the list silently sorted by confidence only
+    // and a "low" recommendation could appear above a "high" one. The keys
+    // are matched case-insensitively now, via priorityOf above.
+    const PRIORITY_ORDER = { high: 0, medium: 1, low: 2 };
     const sorted = [...recommendations].sort((a, b) => {
       const aName = a.name || a.supplement;
       const bName = b.name || b.supplement;
       const aAdded = addedSupplements.has(aName);
       const bAdded = addedSupplements.has(bName);
-      
+
       // First: added status (not added first, added last)
       if (aAdded !== bAdded) return aAdded ? 1 : -1;
-      
+
       // Then: priority (High → Medium → Low)
-      const pa = PRIORITY_ORDER[a.priority] ?? 3;
-      const pb = PRIORITY_ORDER[b.priority] ?? 3;
+      const pa = PRIORITY_ORDER[priorityOf(a.priority)];
+      const pb = PRIORITY_ORDER[priorityOf(b.priority)];
       if (pa !== pb) return pa - pb;
-      
+
       // Finally: confidence score descending
       return (b.confidenceScore || 0) - (a.confidenceScore || 0);
     });
-    
+
     if (activeTab === 'all') return sorted;
-    
+
     return sorted.filter(rec => {
       const priority = rec.priority?.toLowerCase();
       return priority === activeTab;
     });
   };
 
-  const getPriorityBadgeClass = (priority) => {
-    switch (priority?.toLowerCase()) {
-      case 'high': return 'priority-badge-high';
-      case 'medium': return 'priority-badge-medium';
-      case 'low': return 'priority-badge-low';
-      default: return 'priority-badge-medium';
-    }
+  /* One source for "what priority is this?", used by the badge, the card's
+     accent rail and the list sort. It used to be a switch that returned
+     'medium' for anything unrecognised — including an absent priority — which
+     is why a card with no priority at all rendered a "medium priority" badge
+     rather than admitting it had none. `low` is the safe floor: it is the
+     least-prominent tone, so a card is never styled as important by accident. */
+  const priorityOf = (priority) => {
+    const key = String(priority || '').toLowerCase();
+    return key === 'high' || key === 'medium' || key === 'low' ? key : 'low';
   };
+
+  const getPriorityBadgeClass = (priority) => `priority-badge-${priorityOf(priority)}`;
+
+  /* Returns the bare tone (`high`), not `card--high` — the call site already
+     writes `recommendation-card--${…}`, and doing it in both places produced
+     `recommendation-card--card--high`, which matched no rule and silently left
+     every card's accent rail and priority dot on the neutral fallback. */
+  const cardTone = (priority) => priorityOf(priority);
 
   const showToast = (message) => {
     // Clear any existing timer
@@ -259,76 +305,22 @@ function RecommendationsPage() {
         {/* Recommendations List */}
         <div className="recommendations-list">
           {recommendations === null || (recommendations.length === 0 && activeTab === 'all') ? (
-            <div style={{ 
-              maxWidth: '600px', 
-              margin: '40px auto',
-              background: 'white',
-              borderRadius: '16px',
-              border: '1px solid #e5e7eb',
-              boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)',
-              padding: '60px 40px'
-            }}>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ 
-                  width: '120px', 
-                  height: '120px', 
-                  margin: '0 auto 32px', 
-                  background: 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)', 
-                  borderRadius: '50%', 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  justifyContent: 'center',
-                  boxShadow: '0 10px 25px rgba(16, 185, 129, 0.15)'
-                }}>
-                  <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
-                    <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
-                    <line x1="9" y1="11" x2="15" y2="11"/>
-                    <line x1="9" y1="15" x2="15" y2="15"/>
-                  </svg>
-                </div>
-                <p style={{ color: '#6b7280', fontSize: '16px', lineHeight: '1.6', marginBottom: '0', maxWidth: '500px', margin: '0 auto' }}>
-                  Complete a health assessment to receive personalized AI-powered supplement recommendations tailored to your needs.
-                </p>
-              </div>
-            </div>
+            <RecommendationEmpty
+              title="No recommendations yet"
+              text="Complete a health assessment and we'll generate personalized AI-powered supplement recommendations tailored to your needs."
+              action="Take the assessment"
+              onAction={() => navigate('/assessment')}
+            />
           ) : filteredRecommendations.length === 0 ? (
-            <div style={{ 
-              maxWidth: '600px', 
-              margin: '40px auto',
-              background: 'white',
-              borderRadius: '16px',
-              border: '1px solid #e5e7eb',
-              boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)',
-              padding: '60px 40px'
-            }}>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ 
-                  width: '120px', 
-                  height: '120px', 
-                  margin: '0 auto 32px', 
-                  background: 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)', 
-                  borderRadius: '50%', 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  justifyContent: 'center',
-                  boxShadow: '0 10px 25px rgba(16, 185, 129, 0.15)'
-                }}>
-                  <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
-                    <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
-                    <line x1="9" y1="11" x2="15" y2="11"/>
-                    <line x1="9" y1="15" x2="15" y2="15"/>
-                  </svg>
-                </div>
-                <p style={{ color: '#6b7280', fontSize: '16px', lineHeight: '1.6', marginBottom: '0', maxWidth: '500px', margin: '0 auto' }}>
-                  Complete a health assessment to receive personalized AI-powered supplement recommendations tailored to your needs.
-                </p>
-              </div>
-            </div>
+            <RecommendationEmpty
+              title={`Nothing at ${activeTab} priority`}
+              text="No recommendations match this filter. Try another priority to see everything we suggested for you."
+              action="Show all recommendations"
+              onAction={() => setActiveTab('all')}
+            />
           ) : (
             filteredRecommendations.map((rec, index) => (
-              <div key={index} className="recommendation-card">
+              <div key={index} className={`recommendation-card recommendation-card--${cardTone(rec.priority)}`}>
                 <div className="recommendation-header">
                   <div className="recommendation-title-row">
                     <h3 className="recommendation-name">{rec.name || 'Supplement'}</h3>

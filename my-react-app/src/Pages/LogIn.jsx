@@ -3,6 +3,9 @@ import { NavLink, Link, useNavigate, useLocation } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import { BASE_URL, saveAssessment, getRecommendations, saveAssessmentResults, parseJSON, startSession, takeAuthNotice, getToken, redeemBackupCode } from '../api';
 import { beginAuthTransition, endAuthTransition } from '../auth/authState';
+// Passkey sign-in: two server calls with a browser gesture between them.
+// The client never names the account - the assertion does.
+import { isPasskeySupported, signInWithPasskey } from '../api';
 import { safeRedirectPath } from '../utils/safeUrl';
 import './LogIn.css';
 import './ProfilePage.css'; // Import for OTP modal styles
@@ -53,6 +56,11 @@ function LogIn() {
   const [otp, setOtp] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
   const [pendingUserId, setPendingUserId] = useState('');
+  // The server-side MFA_REQUIRED state, minted by the password step. Held in
+  // component state for the life of the prompt and never persisted: it is a
+  // one-shot capability for finishing THIS sign-in, not a credential.
+  const [mfaTransaction, setMfaTransaction] = useState('');
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
   const [resendTimer, setResendTimer] = useState(null);
   const [success, setSuccess] = useState('');
@@ -65,6 +73,13 @@ function LogIn() {
   // letters and digits — not just the digits a TOTP is made of.
   const [useRecoveryCode, setUseRecoveryCode] = useState(false);
   
+  // Whether to offer the passkey button at all. Resolved once, in the state
+  // initialiser rather than an effect: it is a static property of the browser,
+  // not something that changes, and a setState in an effect body causes a
+  // cascading render to learn something already knowable at mount.
+  // Presentation only - the server decides everything that matters.
+  const [passkeyAvailable] = useState(isPasskeySupported);
+
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -250,6 +265,7 @@ function LogIn() {
       if (data?.requiresTwoFactor) {
         setRequiresTwoFactor(true);
         setPendingUserId(data.userId);
+        setMfaTransaction(data.mfaTransaction || '');
         setOtp('');
         // Never carry the choice across attempts: the next sign-in may be for
         // an account whose second factor is an emailed code, which has no
@@ -266,6 +282,7 @@ function LogIn() {
         setError('');
         setSuccess('');
         setPendingUserId(data.userId);
+        setMfaTransaction(data.mfaTransaction || '');
         setShowOtpModal(true);
         startResendCooldown(30);
         startOtpExpiryTimer(); // Start OTP expiry countdown
@@ -316,7 +333,14 @@ function LogIn() {
         const response = await fetch(`${BASE_URL}/auth/${requiresTwoFactor ? 'login-2fa' : 'verify-login-otp'}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: pendingUserId, otp: otp.trim(), remember }),
+          body: JSON.stringify({
+            userId: pendingUserId,
+            // Preferred: the opaque, single-use transaction. `userId` is still
+            // sent so an older server build keeps working.
+            mfaTransaction,
+            otp: otp.trim(),
+            remember,
+          }),
         });
 
         data = await parseJSON(response);
@@ -339,6 +363,35 @@ function LogIn() {
       setError(message);
     } finally {
       setOtpLoading(false);
+    }
+  };
+
+  /**
+   * Sign in with a passkey: no password, no emailed code, no account picker.
+   *
+   * The account is decided by the credential the authenticator returns, never by
+   * anything on this page — which is why there is no email field involved and no
+   * way to ask "which account?".
+   */
+  const handlePasskeySignIn = async () => {
+    if (passkeyBusy) return;
+    setPasskeyBusy(true);
+    setError('');
+    setSuccess('');
+    try {
+      const data = await signInWithPasskey(remember);
+      // null means a stale-chunk self-heal scheduled a reload, so the WebAuthn
+      // SDK never loaded. The page is being replaced; do NOT call completeLogin
+      // with nothing, and do not show a banner over a working screen.
+      if (!data) return;
+      await completeLogin(data);
+    } catch (err) {
+      // A dismissed prompt is a choice, not a failure, so it gets no banner.
+      if (err?.name !== 'NotAllowedError' && err?.name !== 'AbortError') {
+        setError(err?.message || 'Could not sign in with a passkey.');
+      }
+    } finally {
+      setPasskeyBusy(false);
     }
   };
 
@@ -423,6 +476,9 @@ function LogIn() {
   const handleCancelOtp = () => {
     setShowOtpModal(false);
     setRequiresTwoFactor(false);
+    // The transaction is single-use and short-lived; there is nothing worth
+    // keeping, and holding it would invite a stale retry.
+    setMfaTransaction('');
     setUseRecoveryCode(false);
     setOtp('');
     setPendingUserId('');
@@ -539,6 +595,39 @@ function LogIn() {
           <button type="submit" className="auth-btn" disabled={loading}>
             {loading ? 'Signing in...' : 'Sign In'}
           </button>
+
+          {/* Passkeys. Offered ABOVE the email field in the visual order on
+              wide screens (see .auth-passkey in the stylesheet) because it is
+              the shortest and strongest path in. Rendered here, after the
+              submit button in source order, so a screen reader meets the form
+              fields before the alternative.
+
+              Deliberately labelled as a separate method rather than folded into
+              the password box: it uses neither the email nor the password, and
+              the server decides which account it belongs to from the credential
+              the authenticator returns. There is no "which account?" question
+              to ask, because there is nothing here to ask it with. */}
+          {passkeyAvailable && (
+            <div className="auth-passkey">
+              <div className="auth-passkey__divider"><span>or</span></div>
+              <button
+                type="button"
+                className="auth-btn auth-btn--passkey"
+                onClick={handlePasskeySignIn}
+                disabled={passkeyBusy || loading}
+              >
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                  <path d="m9 12 2 2 4-4" />
+                </svg>
+                {passkeyBusy ? 'Waiting for your device…' : 'Sign in with a passkey'}
+              </button>
+              <p className="auth-passkey__hint">
+                Use your fingerprint, face or screen lock. A passkey is tied to this
+                website, so it cannot be used on a fake sign-in page.
+              </p>
+            </div>
+          )}
 
           {/* Password recovery lives on its own page now — /forgot-password,
               reached from the link in the email. It used to be a three-step

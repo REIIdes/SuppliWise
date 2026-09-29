@@ -797,23 +797,26 @@ function ResultsPage() {
     <div className="results-wrapper">
       <Navbar />
       <div className="results-container">
+        {/* `priorityNotice` is never set to anything but null on this page, so
+            this branch is currently unreachable. It is kept — and kept on the
+            shared banner component — rather than left styled by the dashboard. */}
         {priorityNotice && (
           <div
-            className={`priority-banner priority-banner--${priorityNotice.kind}`}
+            className="sw-banner"
             role="status"
             aria-live="polite"
             style={{ marginBottom: '16px' }}
           >
-            <div className="priority-banner__icon" aria-hidden="true">
+            <div className="sw-banner__icon" aria-hidden="true">
               {priorityNotice.kind === 'flagged' ? '⚑' : 'ℹ️'}
             </div>
-            <div className="priority-banner__body">
+            <div className="sw-banner__body">
               <strong>{priorityNotice.title}</strong>
-              <span className="priority-banner__hint">{priorityNotice.body}</span>
+              <span className="sw-banner__hint">{priorityNotice.body}</span>
             </div>
             <button
               type="button"
-              className="priority-banner__btn"
+              className="sw-banner__btn"
               onClick={() => setPriorityNotice(null)}
             >
               Dismiss

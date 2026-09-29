@@ -1,6 +1,12 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
+// Shared design tokens + primitives. Imported here (not per page) because a
+// page stylesheet is injected when its route chunk loads, which on a deep link
+// can be the only CSS that ever arrives — the tokens have to be present for
+// every route, and `:root` custom properties are inert until something reads
+// them, so a page that never uses them pays nothing.
+import './theme.css'
 import './mobile-responsive.css'
 import App from './App.jsx'
 import { registerSW } from 'virtual:pwa-register'

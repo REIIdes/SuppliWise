@@ -164,11 +164,44 @@ test('recovery codes — full lifecycle over real HTTP', { skip: preflight.skip 
 
   const generate = (ctx) => ctx.client.call('/api/security/backup-codes/generate', { method: 'POST', useStepUp: true });
 
-  /** The pre-session redemption route, with the body parsed. */
-  const redeem = (body) => fetch(`${base}/api/security/backup-codes/redeem`, {
+  /**
+   * A REAL second-factor window, opened the way a real client opens one: by
+   * posting the password to /auth/login.
+   *
+   * A recovery code is a complete second factor, so the route no longer honours
+   * one on its own — it is spent against the transaction the PASSWORD step
+   * minted. A synthetic value cannot stand in here: the gate refuses anything
+   * that is not a live transaction, so a fabricated token turns every call into
+   * a 401 and the suite goes green while proving nothing. This helper is what
+   * makes the assertions below mean anything.
+   */
+  const secondFactor = async (ctx) => {
+    const r = await fetch(`${base}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: ctx.email, password: PASSWORD }),
+    });
+    const data = await r.json();
+    assert.equal(data.requiresTwoFactor, true, `login should demand a second factor: ${data.message}`);
+    assert.ok(data.mfaTransaction, 'login must mint a second-factor transaction');
+    assert.ok(
+      (data.mfaMethods || []).includes('backup-code'),
+      'a recovery code must be offered alongside the authenticator',
+    );
+    return data.mfaTransaction;
+  };
+
+  /**
+   * The pre-session redemption route, with the body parsed.
+   *
+   * `transaction` is the value `secondFactor(ctx)` returned. Omit it and the
+   * request is answered as the attack it is — which is exactly what the
+   * malformed-input and account-enumeration cases below are asserting.
+   */
+  const redeem = (body, transaction) => fetch(`${base}/api/security/backup-codes/redeem`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...body, ...(transaction ? { mfaTransaction: transaction } : {}) }),
   }).then(async (res) => ({ status: res.status, data: await res.json() }));
 
   // ══ 1. THE GATE ═════════════════════════════════════════════════════════
@@ -298,7 +331,7 @@ test('recovery codes — full lifecycle over real HTTP', { skip: preflight.skip 
     await stepUp(ctx, secret);
     const { codes } = (await generate(ctx)).data;
 
-    const r = await redeem({ userId: String(ctx.user._id), code: codes[0] });
+    const r = await redeem({ userId: String(ctx.user._id), code: codes[0] }, await secondFactor(ctx));
     assert.equal(r.status, 200, `redeem failed: ${r.data.message}`);
     assert.ok(r.data.token, 'redeem must return a session token');
     assert.equal(String(r.data._id), String(ctx.user._id), 'the session must belong to the redeeming account');
@@ -316,8 +349,28 @@ test('recovery codes — full lifecycle over real HTTP', { skip: preflight.skip 
 
     // People retype these from paper; lowercase and a missing dash must work.
     const messy = codes[0].toLowerCase().replace('-', '');
-    const r = await redeem({ userId: String(ctx.user._id), code: messy });
+    const r = await redeem({ userId: String(ctx.user._id), code: messy }, await secondFactor(ctx));
     assert.equal(r.status, 200, 'case and the dash must not decide whether a code is valid');
+  });
+
+  await t.test('the second factor alone cannot open a session', async () => {
+    const ctx = await seed();
+    const secret = await turnOnAuthenticator(ctx);
+    await stepUp(ctx, secret);
+    const { codes } = (await generate(ctx)).data;
+
+    // The exact shape of the attack this route used to be vulnerable to: a
+    // perfectly valid recovery code, sent with a user id and NO password, before
+    // this account has ever been through the password step. It is refused
+    // because there is no live second-factor window — not because the code was
+    // wrong, which is what makes this worth stating separately.
+    const noWindow = await redeem({ userId: String(ctx.user._id), code: codes[0] });
+    assert.equal(noWindow.status, 401, 'a code without a password-verified window must not sign anyone in');
+    assert.match(noWindow.data.message, /not valid/i);
+
+    // And the code survived that attempt, so a legitimate sign-in still works.
+    const r = await redeem({ userId: String(ctx.user._id), code: codes[0] }, await secondFactor(ctx));
+    assert.equal(r.status, 200, 'a refused attempt must not have burned the code');
   });
 
   // ══ 7. SINGLE USE ═══════════════════════════════════════════════════════
@@ -327,10 +380,17 @@ test('recovery codes — full lifecycle over real HTTP', { skip: preflight.skip 
     const secret = await turnOnAuthenticator(ctx);
     await stepUp(ctx, secret);
     const { codes } = (await generate(ctx)).data;
+    const window = await secondFactor(ctx);
 
-    assert.equal((await redeem({ userId: String(ctx.user._id), code: codes[0] })).status, 200);
-    assert.equal((await redeem({ userId: String(ctx.user._id), code: codes[0] })).status, 401,
+    assert.equal((await redeem({ userId: String(ctx.user._id), code: codes[0] }, window)).status, 200);
+    // The SAME window, replayed. It has already been spent, so the second call
+    // is refused twice over — the code is dead and so is the transaction.
+    assert.equal((await redeem({ userId: String(ctx.user._id), code: codes[0] }, window)).status, 401,
       'the second use of a code must be refused');
+    // And a FRESH window does not resurrect it either: the code, not the
+    // window, is what makes single use true.
+    assert.equal((await redeem({ userId: String(ctx.user._id), code: codes[0] }, await secondFactor(ctx))).status, 401,
+      'a new second-factor window must not revive a spent code');
   });
 
   await t.test('concurrent redemptions of one code yield exactly one session', async () => {
@@ -338,11 +398,12 @@ test('recovery codes — full lifecycle over real HTTP', { skip: preflight.skip 
     const secret = await turnOnAuthenticator(ctx);
     await stepUp(ctx, secret);
     const { codes } = (await generate(ctx)).data;
+    const window = await secondFactor(ctx);
 
     // The classic race: a conditional update is the only thing standing between
     // "single use" and "usable N times in the same instant".
     const attempts = await Promise.all(Array.from({ length: 6 }, () =>
-      redeem({ userId: String(ctx.user._id), code: codes[0] })));
+      redeem({ userId: String(ctx.user._id), code: codes[0] }, window)));
     const wins = attempts.filter((r) => r.status === 200);
     assert.equal(wins.length, 1, `expected exactly 1 winner, got ${wins.length}`);
 
@@ -361,6 +422,10 @@ test('recovery codes — full lifecycle over real HTTP', { skip: preflight.skip 
     const secret = await turnOnAuthenticator(ctx);
     await stepUp(ctx, secret);
     const { codes } = (await generate(ctx)).data;
+    // Opened BEFORE the codes are destroyed, so the refusal below is caused by
+    // the code being dead — not by the absence of a second-factor window, which
+    // is a different 401 and would let this test pass for the wrong reason.
+    const window = await secondFactor(ctx);
 
     const del = await ctx.client.call('/api/security/backup-codes', { method: 'DELETE', useStepUp: true });
     assert.equal(del.status, 200, `invalidate failed: ${del.data.message}`);
@@ -369,7 +434,7 @@ test('recovery codes — full lifecycle over real HTTP', { skip: preflight.skip 
     const summary = await ctx.client.call('/api/security/summary');
     assert.equal(summary.data.backupCodes.remaining, 0, 'the count must drop to zero');
 
-    const r = await redeem({ userId: String(ctx.user._id), code: codes[0] });
+    const r = await redeem({ userId: String(ctx.user._id), code: codes[0] }, window);
     assert.equal(r.status, 401, 'an invalidated code must be dead');
   });
 
@@ -391,6 +456,10 @@ test('recovery codes — full lifecycle over real HTTP', { skip: preflight.skip 
     const secret = await turnOnAuthenticator(ctx);
     await stepUp(ctx, secret);
     const { codes } = (await generate(ctx)).data;
+    // Opened while the authenticator is still the factor, because that is the
+    // only moment a recovery code is offered at all. Opened afterwards, login
+    // would only ever advertise `email-otp` and this case would be untestable.
+    const window = await secondFactor(ctx);
 
     await stepUp(ctx, secret);
     const downgrade = await ctx.client.call('/api/auth/two-factor-method', {
@@ -399,7 +468,9 @@ test('recovery codes — full lifecycle over real HTTP', { skip: preflight.skip 
     });
     assert.equal(downgrade.status, 200, `switching method failed: ${downgrade.data.message}`);
 
-    const r = await redeem({ userId: String(ctx.user._id), code: codes[0] });
+    // A live, valid transaction — so the 400 below is the method rule firing,
+    // not the second-factor gate refusing to engage.
+    const r = await redeem({ userId: String(ctx.user._id), code: codes[0] }, window);
     assert.equal(r.status, 400, 'the emailed code is already the second factor');
   });
 
@@ -432,11 +503,30 @@ test('recovery codes — full lifecycle over real HTTP', { skip: preflight.skip 
 
   await t.test('a wrong code never reveals whether the account exists', async () => {
     const known = await seed();
+    const secret = await turnOnAuthenticator(known);
+    await stepUp(known, secret);
+    const { codes } = (await generate(known)).data;
+    const window = await secondFactor(known);
     const unknownId = new mongoose.Types.ObjectId().toString();
-    const a = await redeem({ userId: String(known.user._id), code: 'ZZZZZ-99999' });
+
+    // The real account gets a genuine window and fails on the CODE. The unknown
+    // one has no window at all and fails at the gate. Both must be indistinguishable,
+    // or the endpoint can be used to enumerate which ids are real.
+    const a = await redeem({ userId: String(known.user._id), code: 'ZZZZZ-99999' }, window);
     const b = await redeem({ userId: unknownId, code: 'ZZZZZ-99999' });
     assert.equal(a.status, b.status, 'status must match so the endpoint cannot enumerate accounts');
     assert.equal(a.status, 401);
     assert.deepEqual(a.data, b.data, 'the response body must be identical too');
+    // Awaited deliberately: handing `assert.equal` a query promise makes its
+    // failure path try to serialise a live Mongo operation, which is both a
+    // meaningless diff and enough work to exhaust the heap.
+    const stillUnused = await BackupCode.countDocuments({
+      user: known.user._id,
+      codeHash: BackupCode.hashCode(codes[0]),
+      usedAt: null,
+    });
+    assert.equal(stillUnused, 1, 'the code that was probed with must still be unused');
+    const remaining = await BackupCode.countDocuments({ user: known.user._id, usedAt: null });
+    assert.equal(remaining, CODE_COUNT, 'a refused attempt must not consume any code');
   });
 });

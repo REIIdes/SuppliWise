@@ -1,0 +1,62 @@
+/* Passkey panel — reuses the ProfileSecurityControls card vocabulary, so this
+   file only adds what is genuinely new: the inline rename row and the paired
+   action buttons. Everything else (.psc-card, .psc-device, .psc-btn, .psc-chip)
+   is defined in ProfileSecurityControls.css and deliberately not duplicated. */
+
+.psc-device__actions {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  flex-shrink: 0;
+}
+
+.psc-rename {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.psc-input--inline {
+  /* The inline rename must not grow the row on a long device name. */
+  max-width: 220px;
+  min-width: 140px;
+  padding: 6px 10px;
+  font-size: 0.9rem;
+}
+
+.psc-btn--sm {
+  padding: 5px 12px;
+  font-size: 0.8rem;
+}
+
+.psc-device__label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* A device that can only ever be used on the machine it was created on is a
+   meaningfully weaker choice than a synced passkey, so the chip that says so is
+   deliberately visible rather than tucked into a tooltip. */
+.psc-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  background: rgba(16, 185, 129, 0.12);
+  color: #0f766e;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+@media (max-width: 640px) {
+  .psc-device__actions {
+    width: 100%;
+    margin-top: 8px;
+  }
+}

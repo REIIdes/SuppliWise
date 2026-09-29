@@ -10,15 +10,51 @@ export default defineConfig(({ command }) => ({
   // deps/ tree that stopped matching the committed metadata). Giving each
   // command its own cache keeps them independent.
   cacheDir: command === 'build' ? 'node_modules/.vite-build' : 'node_modules/.vite',
+  // ── If a dependency fails to load in dev ("Failed to fetch dynamically
+  // imported module: …/node_modules/.vite/deps/<pkg>.js?v=<hash>"), the fix is:
+  //
+  //     stop the dev server,  rm -rf node_modules/.vite,  start it again
+  //
+  // The cause is almost always a package INSTALLED WHILE THE SERVER WAS ALREADY
+  // RUNNING. The running optimizer has never pre-bundled it, so the first use
+  // forces a re-optimize mid-session; that changes the browser hash, and every
+  // `?v=` URL the already-open page holds immediately stops resolving (504).
+  // Repeated interrupted runs leave orphaned `node_modules/.vite/deps_temp_*`
+  // folders and can end with no committed `deps/` tree at all — which is the
+  // state where the server 504s every dependency and nothing renders.
+  //
+  // Editing a package in node_modules, or `npm install` anything, has the same
+  // effect. Restarting is the fix; there is nothing to repair in the config.
   optimizeDeps: {
-    // jspdf is pulled in by a DYNAMIC import when the user clicks Export, so
-    // Vite's startup scan never discovers it. The first click then triggers a
-    // mid-session re-optimize, which bumps `browserHash`; the page that is
-    // already loaded keeps requesting the previous `?v=<hash>`, and the server
-    // answers 504 "Outdated Optimize Dep" - surfacing in the browser as
-    // "Failed to fetch dynamically imported module: .../deps/jspdf.js?v=...".
-    // Pre-bundling them up front keeps one hash for the whole session.
-    include: ['jspdf', 'jspdf-autotable'],
+    // EVERY package that is reached through a DYNAMIC `import()` must be listed
+    // here. The startup scan only sees static imports, so a dep first reached at
+    // click-time is discovered mid-session, which forces Vite to re-optimize.
+    // Re-optimizing changes `browserHash`, and every module URL the loaded page
+    // already holds (`...?v=<old hash>`) stops resolving — the server answers
+    // 504 "Outdated Optimize Dep", and the browser reports:
+    //
+    //   Failed to fetch dynamically imported module:
+    //   http://localhost:5173/node_modules/.vite/deps/<name>.js?v=<old hash>
+    //
+    // The page is then stuck: the module it wants is gone, and the fix is a
+    // reload nobody thinks to do. (Repeated interrupted re-optimizes also leave
+    // orphaned `deps_temp_*` folders behind, which is how a cache ends up
+    // without a committed `deps/` tree at all.)
+    //
+    // Pre-bundling them up front keeps ONE hash for the whole session. Relative
+    // imports are unaffected — they are app source, not deps, and need no entry.
+    //
+    // `optimizeDeps.include` completeness is enforced by
+    // src/utils/optimizeDepsInclude.test.js, because this has now bitten twice
+    // (jspdf, then @simplewebauthn/browser) and the failure looks like an
+    // unrelated browser error rather than a missing config line.
+    include: [
+      'jspdf',
+      'jspdf-autotable',
+      // WebAuthn. Imported lazily in api.js so the ~30 KB browser SDK is not in
+      // the initial bundle for the majority of people who never touch a passkey.
+      '@simplewebauthn/browser',
+    ],
   },
   plugins: [
     react(),

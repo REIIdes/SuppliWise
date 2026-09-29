@@ -66,23 +66,26 @@
     position: sticky !important;
     top: 0 !important;
     z-index: 1000 !important;
-    background: white !important;
+    /* The same opaque brand-tinted surface as Navbar.css, not plain white: a
+       phone showing white while the desktop bar was tinted made the two look
+       like different products. Still a single fully opaque layer — see the
+       note at the top of Navbar.css. */
+    background: linear-gradient(100deg, #ffffff 0%, #f4fdf9 42%, #f2fbff 72%, #f7f5ff 100%) !important;
   }
 
   /* The scrolled state has to be re-asserted HERE, not only in Navbar.css.
-     The `background: white !important` above is a shorthand carrying the
-     important flag, and an important declaration beats an ordinary one
-     regardless of source order — so without this rule the bar would keep the
-     unscrolled shadow on a phone forever and the "lifted once scrolled"
-     affordance would be desktop-only.
+     The `background: … !important` above carries the important flag, and an
+     important declaration beats an ordinary one regardless of source order —
+     so without this rule the bar would keep the unscrolled shadow on a phone
+     forever and the "lifted once scrolled" affordance would be desktop-only.
 
-     Same `!important` convention as the rest of this block. The surface stays
-     solid `white`, exactly as at the top of the page: it was `transparent`
-     here, and on a sticky bar that lets the page scroll through the wordmark
-     and the icons. A translucent veil was tried and rejected — see the long
-     note at the top of Navbar.css. Only the divider and the lift change. */
+     Same `!important` convention as the rest of this block, and byte-for-byte
+     the same surface as at rest: it was `transparent` here, and on a sticky
+     bar that lets the page scroll through the wordmark and the icons. A
+     translucent veil was tried and rejected — see the long note at the top of
+     Navbar.css. Only the divider and the lift change. */
   .navbar.navbar--scrolled {
-    background: white !important;
+    background: linear-gradient(100deg, #ffffff 0%, #f4fdf9 42%, #f2fbff 72%, #f7f5ff 100%) !important;
     box-shadow:
       0 1px 0 rgba(16, 185, 129, 0.22),
       0 10px 30px -18px rgba(6, 95, 70, 0.55) !important;
@@ -99,8 +102,8 @@
   }
 
   .navbar-logo-box {
-    width: 44px !important;
-    height: 44px !important;
+    width: 40px !important;
+    height: 40px !important;
     flex-shrink: 0 !important;
   }
 
@@ -110,7 +113,7 @@
   }
 
   .navbar-brand {
-    font-size: 20px !important;
+    font-size: 19px !important;
     white-space: nowrap !important;
     /* Truncates instead of pushing the right-hand cluster off the bar. */
     min-width: 0 !important;
@@ -118,8 +121,17 @@
     text-overflow: ellipsis !important;
   }
 
+  .navbar-left {
+    gap: 8px !important;
+  }
+
+  /* The right-hand cluster measures ~222px against ~358px of usable width on a
+     390px phone, and the wordmark is the only thing left to give — so it was
+     being ellipsised to "Suppli…". These three rules buy back the ~50px it
+     needs (tighter icon buttons, a tighter gap, a slightly smaller wordmark)
+     without dropping any control. */
   .navbar-right {
-    gap: 12px !important;
+    gap: 9px !important;
     flex-shrink: 0 !important;
   }
 
@@ -127,7 +139,7 @@
      dropped and only the avatar shows — the same intent as the old
      `.navbar-username { display: none }`, retargeted at the new markup. */
   .pam--pill .pam-trigger {
-    padding: 3px !important;
+    padding: 2px !important;
     gap: 0 !important;
   }
 
@@ -137,12 +149,12 @@
   }
 
   .pam--pill .pam-trigger__avatar {
-    width: 40px !important;
-    height: 40px !important;
+    width: 38px !important;
+    height: 38px !important;
   }
 
   .navbar-nav-link {
-    padding: 8px !important;
+    padding: 6px 7px !important;
   }
 
   .navbar-signin-btn {
@@ -159,7 +171,9 @@
     position: sticky !important;
     top: 0 !important;
     z-index: 1000 !important;
-    background: white !important;
+    /* Same opaque brand-tinted surface as the 768px block above — see the note
+       at the top of Navbar.css for why it has to be a single opaque layer. */
+    background: linear-gradient(100deg, #ffffff 0%, #f4fdf9 42%, #f2fbff 72%, #f7f5ff 100%) !important;
   }
 
   .navbar-left {
@@ -180,17 +194,20 @@
     font-size: 18px !important;
   }
 
+  /* Tighter than the 768px block on purpose. On a 390px phone the wordmark was
+     still losing ~10px here and ellipsising to "Suppli…"; these three rules are
+     what buy it back. */
   .navbar-right {
-    gap: 10px !important;
+    gap: 8px !important;
   }
 
   .navbar-nav-link {
-    padding: 7px !important;
+    padding: 6px !important;
   }
 
   .navbar-nav-link svg {
-    width: 20px !important;
-    height: 20px !important;
+    width: 18px !important;
+    height: 18px !important;
   }
 
   .navbar-signin-btn {
@@ -322,19 +339,17 @@
     display: none !important;
   }
 
+  /* The segmented pill carries its own responsive behaviour — the track
+     scrolls and the active chip keeps the brand gradient — so the only thing
+     a phone needs to add is a slightly tighter padding and size. The
+     `background`/`color`/`border-bottom` trio that used to be here forced
+     every tab flat grey and the active one white-with-an-underline, which is
+     how the old control survived the redesign on mobile only. */
   .insights-tab {
     flex-shrink: 0 !important;
     white-space: nowrap !important;
-    padding: 10px 16px !important;
-    font-size: 14px !important;
-    background: #e5e7eb !important; /* Darker grey for unselected */
-    color: #4b5563 !important; /* Darker text */
-  }
-
-  .insights-tab.active {
-    background: white !important;
-    color: #22c55e !important;
-    border-bottom: 3px solid #22c55e !important;
+    padding: 9px 16px !important;
+    font-size: 13.5px !important;
   }
 
   /* Fix adherence pattern count format - show "/" instead of "of" */
@@ -1511,15 +1526,18 @@
     line-height: 1.5 !important;
   }
 
-  /* Card Grids - Force Single Column on Mobile */
+  /* Card Grids — two up on a phone.
+     The cards are compact (icon, label, one hint line) and each is a real
+     target, so a single column turned the row of four into a full screen of
+     scrolling before any of today's plan was visible. */
   .dashboard-cards {
-    grid-template-columns: 1fr !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     gap: 12px !important;
   }
 
   .dashboard-card {
-    padding: 20px 16px !important;
-    min-height: 100px !important;
+    padding: 18px 16px !important;
+    min-height: 118px !important;
   }
 
   /* Bottom Section - Stack Vertically */
@@ -1533,29 +1551,33 @@
     position: static !important;
   }
 
-  /* Stats Grid - Single Column */
+  /* Stats Grid — two up.
+     The stat tiles are compact (icon + one number), and a single column of
+     them pushed Quick Stats to roughly the height of the whole plan list
+     above it. Two across keeps the panel to a readable block on a phone. */
   .stats-grid {
-    grid-template-columns: 1fr !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     gap: 10px !important;
   }
 
   .stat-item {
-    padding: 12px !important;
+    padding: 12px 12px 14px !important;
     gap: 10px !important;
   }
 
   .stat-icon-box {
-    width: 50px !important;
-    height: 50px !important;
+    width: 40px !important;
+    height: 40px !important;
+    border-radius: 12px !important;
   }
 
   .stat-icon-box svg {
-    width: 20px !important;
-    height: 20px !important;
+    width: 19px !important;
+    height: 19px !important;
   }
 
   .stat-label {
-    font-size: 11px !important;
+    font-size: 10px !important;
   }
 
   .stat-value {
@@ -1563,21 +1585,28 @@
   }
 
   /* Supplements List */
+  /* A capped, scrolling list needs a visible scrollbar affordance on touch;
+     a full-height list does not, and the inline end padding that reserved room
+     for one became a ragged gap against the panel edge. */
   .supplements-list {
     max-height: none !important;
+    overflow: visible !important;
+    padding-right: 0 !important;
+    margin-right: 0 !important;
   }
 
+  /* The row keeps its side-by-side shape: the action is a short pill, and
+     stacking it below the dose description left a tall column of text with a
+     lonely button under it. Only the narrowest phones go single-file. */
   .supplement-item {
-    flex-direction: column !important;
-    align-items: flex-start !important;
     gap: 12px !important;
-    padding: 14px !important;
+    padding: 14px 14px 14px 17px !important;
   }
 
   .supplement-btn,
   .btn-mark-taken,
-  .btn-undo {
-    width: 100% !important;
+  .btn-undo,
+  .supplement-taken-pill {
     justify-content: center !important;
   }
 
@@ -1767,12 +1796,26 @@
   }
 
   .dashboard-card .card-icon {
-    width: 48px !important;
-    height: 48px !important;
+    width: 44px !important;
+    height: 44px !important;
+    border-radius: 14px !important;
   }
 
   .dashboard-card .card-title {
     font-size: 15px !important;
+  }
+
+  /* Two-up is right down to here; below it the cards are wider than they are
+     tall and the hint line starts truncating mid-word. */
+  .dashboard-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  /* A 288px explainer cannot centre on a 24px trigger near a screen edge. */
+  .wellness-info-tooltip {
+    left: 0 !important;
+    margin-left: -10px !important;
+    width: min(276px, calc(100vw - 44px)) !important;
   }
 
   /* Buttons */
@@ -1788,6 +1831,35 @@
 
   /* Section Padding */
   .dashboard-section,
+  /* Two "At a Glance" tiles per row. At `auto-fit minmax(190px, 1fr)` a 390px
+     phone got one per row, so four simple number+label tiles filled the
+     entire first screen and pushed the current phase — the thing the page is
+     for — well below the fold. */
+  .overview-stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+  }
+
+  .overview-stat-card {
+    padding: 11px !important;
+    gap: 10px !important;
+  }
+
+  .overview-stat-icon {
+    width: 38px !important;
+    height: 38px !important;
+    border-radius: 12px !important;
+  }
+
+  .overview-stat-value {
+    font-size: 16px !important;
+  }
+
+  .overview-stat-label {
+    font-size: 9.5px !important;
+    letter-spacing: 0.02em !important;
+  }
+
   .insights-section,
   .recommendation-card {
     padding: 14px !important;
@@ -1989,6 +2061,33 @@
   .btn-find-products {
     min-height: 44px !important;
     touch-action: manipulation !important;
+  }
+
+  /* …except the small inline "?" affordances, which are 17-26px circles
+     sitting next to a field label rather than standalone controls. The blanket
+     min-height above beat their `height`, and they rendered as 26x44 ovals.
+     The tap target is kept by an invisible ::after instead, so the control
+     looks the same on every screen while still being comfortable to hit. */
+  .diet-info-btn,
+  .help-icon-btn,
+  .info-btn,
+  .info-icon-btn,
+  button[title*="Why"],
+  button[title*="important"] {
+    min-height: 0 !important;
+    position: relative;
+  }
+
+  .diet-info-btn::after,
+  .help-icon-btn::after,
+  .info-btn::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 44px;
+    height: 44px;
+    transform: translate(-50%, -50%);
   }
 
   /* Comfortable spacing for touch */

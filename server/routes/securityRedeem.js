@@ -21,9 +21,9 @@ const mongoose = require('mongoose');
 const User = require('../models/User');
 const BackupCode = require('../models/BackupCode');
 const SecurityEvent = require('../models/SecurityEvent');
-const { verifyTotpOnce } = require('../utils/totp');
-const { issueUserSession, attachRememberToken, markSessionTrusted } = require('../utils/sessions');
-const { describeDevice } = require('../utils/device');
+const MfaTransaction = require('../models/MfaTransaction');
+const mfa = require('../utils/mfaTransaction');
+const { AUTH_METHODS, completeSignIn } = require('../utils/authFlow');
 const { describeSubscription } = require('../utils/entitlements');
 const { sendStatusEmail } = require('../utils/email');
 // Keeps a not-yet-migrated inline picture from being shipped in this response.
@@ -42,19 +42,56 @@ module.exports = function registerSecurityRedeem(router, { sensitiveLimiter }) {
   // @access  Public (pre-session, mid sign-in)
   router.post('/backup-codes/redeem', sensitiveLimiter, async (req, res) => {
     try {
+      const token = str(req.body?.mfaTransaction);
       const userId = str(req.body?.userId);
       const code = str(req.body?.code);
-      if (!mongoose.isValidObjectId(userId) || !code) {
+
+      // A recovery code is a complete second factor, so this route used to take
+      // a bare `userId` plus the code and issue a full session — which made the
+      // second factor sufficient on its own, with the password never involved.
+      //
+      // `mfaTransaction` is now preferred, and `userId` is honoured only while
+      // a live transaction exists for that account. A stale client still works
+      // because it always comes through /auth/login first; the bypass is closed.
+      let transaction = null;
+      if (token) {
+        if (!mfa.isValidTokenFormat(token)) {
+          return res.status(400).json({ message: 'Enter one of your recovery codes.' });
+        }
+        const peeked = await mfa.peek(token, { method: 'backup-code' });
+        if (!peeked) {
+          return res.status(401).json({ message: 'That recovery code is not valid.' });
+        }
+        transaction = { _id: peeked._id, user: peeked.user, viaToken: true };
+      } else {
+        if (!mongoose.isValidObjectId(userId) || !code) {
+          return res.status(400).json({ message: 'Enter one of your recovery codes.' });
+        }
+        const found = await MfaTransaction.findOne({
+          user: userId,
+          consumedAt: null,
+          expiresAt: { $gt: new Date() },
+          methods: 'backup-code',
+        }).select('_id user').sort({ createdAt: -1 }).lean();
+        if (!found) {
+          // Same answer as a wrong code. Do not confirm the account exists, and
+          // do not confirm that a sign-in is in progress.
+          return res.status(401).json({ message: 'That recovery code is not valid.' });
+        }
+        transaction = { _id: found._id, user: found.user, viaToken: false };
+      }
+
+      if (!code) {
         return res.status(400).json({ message: 'Enter one of your recovery codes.' });
       }
 
-      const user = await User.findById(userId);
+      const user = await User.findById(transaction.user);
       if (!user || !user.twoFactorEnabled) {
         // Same answer as a wrong code — do not confirm the account exists.
         return res.status(401).json({ message: 'That recovery code is not valid.' });
       }
 
-      const emailKey = accountKey('otp-user', userId);
+      const emailKey = accountKey('otp-user', user._id);
       const locked = lockRemainingMs(emailKey);
       if (locked > 0) {
         return res.status(429).json({ message: 'Too many incorrect attempts. Please try again later.' });
@@ -81,28 +118,28 @@ module.exports = function registerSecurityRedeem(router, { sensitiveLimiter }) {
       }
 
       clearOffenses(emailKey);
-      const token = await issueUserSession(user._id, describeDevice({
-        userAgent: req.get('user-agent'), ip: req.ip,
-        location: user.lastLoginLocation || '',
-      }));
 
-      let rememberToken = '';
-      if (req.body?.remember === true || req.body?.remember === 'true') {
-        try { rememberToken = await attachRememberToken(token); } catch { rememberToken = ''; }
+      // Spend the transaction before any session exists, so a second
+      // redemption attempt with another code cannot ride the same window.
+      const spent = transaction.viaToken
+        ? await mfa.spend(token, { method: 'backup-code' })
+        : await mfa.spendById(transaction._id, { method: 'backup-code' });
+      if (!spent.ok) {
+        return res.status(401).json({ message: 'That recovery code is not valid.' });
       }
-      if (rememberToken) await markSessionTrusted(token).catch(() => {});
 
-      await SecurityEvent.write({
-        user: user._id, type: 'backup-code-used', success: true,
-        ip: req.ip, userAgent: req.get('user-agent'),
+      // One active session per ACCOUNT: this displaces the account's previous
+      // session and touches nothing belonging to any other account.
+      const { token: sessionToken, rememberToken } = await completeSignIn({
+        user,
+        authMethod: AUTH_METHODS.BACKUP_CODE,
+        mfaVerified: true,
+        req,
         location: user.lastLoginLocation || '',
+        remember: req.body?.remember === true || req.body?.remember === 'true',
         reason: 'Signed in with a recovery code',
-      });
-      await SecurityEvent.write({
-        user: user._id, type: 'login-success', success: true,
-        ip: req.ip, userAgent: req.get('user-agent'),
-        location: user.lastLoginLocation || '',
-        reason: 'Recovery code sign-in',
+        eventType: 'backup-code-used',
+        extraEvent: { type: 'login-success', reason: 'Recovery code sign-in' },
       });
 
       // A recovery-code sign-in is worth telling the user about: it usually
@@ -133,7 +170,9 @@ module.exports = function registerSecurityRedeem(router, { sensitiveLimiter }) {
         subscriptionActive: user.subscriptionActive,
         subscriptionPlan: user.subscriptionPlan,
         subscription: describeSubscription(user),
-        token,
+        token: sessionToken,
+        authMethod: AUTH_METHODS.BACKUP_CODE,
+        mfaVerified: true,
         ...(rememberToken ? { rememberToken } : {}),
       });
     } catch (error) {

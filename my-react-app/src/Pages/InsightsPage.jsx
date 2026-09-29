@@ -145,6 +145,23 @@ function InsightsPage() {
     return () => window.removeEventListener(SUBSCRIPTION_EVENT, onPlan);
   }, [navigate]);
 
+  /* Maps the `color` field the page already stores on each overview stat to a
+     tone modifier. The field existed and was rendered nowhere — the CSS
+     hard-coded every icon to #10b981, so four identical green squares were the
+     only thing distinguishing "longest streak" from "adherence rate". */
+  const STAT_TONES = {
+    green: 'emerald',
+    blue: 'cyan',
+    teal: 'teal',
+    purple: 'violet',
+    violet: 'violet',
+    indigo: 'indigo',
+    pink: 'rose',
+    amber: 'amber',
+  };
+
+  const statTone = (color) => STAT_TONES[String(color || '').toLowerCase()] || 'emerald';
+
   const getIconSvg = (iconType) => {
     switch (iconType) {
       case 'trend':
@@ -229,7 +246,7 @@ function InsightsPage() {
           <h3 className="insights-section-title">At a Glance</h3>
           <div className="overview-stats-grid">
             {overviewStats.map((stat) => (
-              <div key={stat.label} className={`overview-stat-card stat-${stat.color}`}>
+              <div key={stat.label} className={`overview-stat-card stat-${stat.color} stat-tone--${statTone(stat.color)}`}>
                 <div className="overview-stat-icon">{getIconSvg(stat.icon)}</div>
                 <div className="overview-stat-body">
                   <span className="overview-stat-value">{stat.value}</span>

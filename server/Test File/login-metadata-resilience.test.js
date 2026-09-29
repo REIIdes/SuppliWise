@@ -51,6 +51,11 @@ const User = require('../models/User');
 const emailUtils = require('../utils/email');
 const sessionUtils = require('../utils/sessions');
 const { stubQuery } = require('./stubQuery');
+// /login now mints an MFA transaction and, for accounts with a second factor,
+// counts passkeys and unused recovery codes. Each is a real round-trip, so a
+// suite that stubs only User leaves them buffering against a connection that
+// does not exist and the route answers 500 after a 10s timeout.
+const { stubMfaModels } = require('./stubMfaModels');
 
 const USER_ID = '507f1f77bcf86cd799439011';
 const EMAIL = 'demo@example.com';
@@ -89,6 +94,13 @@ async function withAuthRouter({ deliver = () => true, user }, fn) {
   // stubQuery, not a bare object: /login projects the fields it needs with
   // `.select(...)`, and a plain object is not chainable. See stubQuery.js.
   User.findOne = () => stubQuery(() => (typeof user === 'function' ? user() : user));
+  // The second step of sign-in touches three more models; see stubMfaModels.js.
+  // A live transaction double is configured because /verify-login-otp accepts a
+  // bare userId only while one exists for the account.
+  const MFA_TRANSACTION = 'test-only-transaction-aaaaaaaaaaaaaaaaaaaaaaaa';
+  const restoreMfaModels = stubMfaModels({
+    transaction: { _id: 'tx1', user: USER_ID, methods: ['email-otp', 'totp', 'backup-code'] },
+  });
   emailUtils.sendOtpEmail = async (to, otp, type) => {
     sentCodes.push({ to, otp, type });
     return deliver(to, otp, type);
@@ -114,7 +126,7 @@ async function withAuthRouter({ deliver = () => true, user }, fn) {
   };
 
   try {
-    return await fn({ call, sentCodes });
+    return await fn({ call, sentCodes, mfaTransaction: MFA_TRANSACTION });
   } finally {
     await new Promise((resolve) => server.close(resolve));
     User.findOne = originals.findOne;
@@ -145,7 +157,7 @@ const healthyUser = () => unsaveableUser() && ({
 // ── 1. The permanent lockout ──────────────────────────────────────────────
 
 test('an account whose metadata cannot be saved can still sign in', async () => {
-  await withAuthRouter({ user: unsaveableUser }, async ({ call, sentCodes }) => {
+  await withAuthRouter({ user: unsaveableUser }, async ({ call, sentCodes , mfaTransaction }) => {
     const res = await call('/login', { email: EMAIL, password: PASSWORD });
 
     // The password was correct. The sign-in must complete.
@@ -179,7 +191,7 @@ test('an account whose metadata cannot be saved reaches the authenticator step t
     twoFactorMethod: 'authenticator',
     twoFactorSecret: 'JBSWY3DPEHPK3PXP',
   };
-  await withAuthRouter({ user: twoFa }, async ({ call }) => {
+  await withAuthRouter({ user: twoFa }, async ({ call , mfaTransaction }) => {
     const res = await call('/login', { email: EMAIL, password: PASSWORD });
     assert.equal(res.status, 200, `got ${res.status} ${JSON.stringify(res.body)}`);
     assert.equal(res.body.requiresTwoFactor, true, 'the authenticator prompt must still be shown');
@@ -187,11 +199,11 @@ test('an account whose metadata cannot be saved reaches the authenticator step t
 });
 
 test('the unsaveable document does not poison the rest of the session', async () => {
-  await withAuthRouter({ user: unsaveableUser, deliver: () => true }, async ({ call, sentCodes }) => {
+  await withAuthRouter({ user: unsaveableUser, deliver: () => true }, async ({ call, sentCodes , mfaTransaction }) => {
     const login = await call('/login', { email: EMAIL, password: PASSWORD });
     assert.equal(login.status, 200);
     const code = sentCodes[sentCodes.length - 1].otp;
-    const verify = await call('/verify-login-otp', { userId: USER_ID, otp: code });
+    const verify = await call('/verify-login-otp', { userId: USER_ID, mfaTransaction, otp: code });
     assert.equal(verify.status, 200, `the code must still verify, got ${JSON.stringify(verify.body)}`);
     assert.ok(verify.body.token, 'and a session must still be issued');
   });
@@ -200,7 +212,7 @@ test('the unsaveable document does not poison the rest of the session', async ()
 // ── 2. Infrastructure blips ───────────────────────────────────────────────
 
 test('a dropped database connection is a retryable 503, not an opaque 500', async () => {
-  await withAuthRouter({ user: () => { throw mongoNetworkTimeout(); } }, async ({ call }) => {
+  await withAuthRouter({ user: () => { throw mongoNetworkTimeout(); } }, async ({ call , mfaTransaction }) => {
     const res = await call('/login', { email: EMAIL, password: PASSWORD });
 
     assert.equal(res.status, 503, `expected 503, got ${res.status} ${JSON.stringify(res.body)}`);
@@ -213,7 +225,7 @@ test('a dropped database connection is a retryable 503, not an opaque 500', asyn
 });
 
 test('a server-selection timeout is also reported as retryable', async () => {
-  await withAuthRouter({ user: () => { throw mongoServerSelectionTimeout(); } }, async ({ call }) => {
+  await withAuthRouter({ user: () => { throw mongoServerSelectionTimeout(); } }, async ({ call , mfaTransaction }) => {
     const res = await call('/login', { email: EMAIL, password: PASSWORD });
     assert.equal(res.status, 503, `expected 503, got ${res.status} ${JSON.stringify(res.body)}`);
     assert.equal(res.retryAfter, '5');
@@ -221,14 +233,14 @@ test('a server-selection timeout is also reported as retryable', async () => {
 });
 
 test('the same applies while verifying the code', async () => {
-  await withAuthRouter({ user: healthyUser }, async ({ call }) => {
+  await withAuthRouter({ user: healthyUser }, async ({ call , mfaTransaction }) => {
     // The OTP lookup is the first thing /verify-login-otp does.
     const origFindById = User.findById;
     // Rejects when awaited, which is how the driver behaves. Wrapped in a query
     // so a route that chains `.select()` onto it still fails the same way.
     User.findById = () => stubQuery(() => { throw mongoNetworkTimeout(); });
     try {
-      const res = await call('/verify-login-otp', { userId: USER_ID, otp: '123456' });
+      const res = await call('/verify-login-otp', { userId: USER_ID, mfaTransaction, otp: '123456' });
       assert.equal(res.status, 503, `expected 503, got ${res.status} ${JSON.stringify(res.body)}`);
       assert.equal(res.retryAfter, '5');
     } finally {
@@ -240,7 +252,7 @@ test('the same applies while verifying the code', async () => {
 test('a genuine application fault still answers 500 and leaks nothing', async () => {
   // Not infrastructure: this must NOT be dressed up as a transient blip, or the
   // user retries forever against a bug that will never clear.
-  await withAuthRouter({ user: () => { throw new Error('some internal invariant broke'); } }, async ({ call }) => {
+  await withAuthRouter({ user: () => { throw new Error('some internal invariant broke'); } }, async ({ call , mfaTransaction }) => {
     const res = await call('/login', { email: EMAIL, password: PASSWORD });
     assert.equal(res.status, 500, `expected 500, got ${res.status}`);
     assert.equal(res.retryAfter, null, 'a real fault is not retryable');
@@ -251,7 +263,7 @@ test('a genuine application fault still answers 500 and leaks nothing', async ()
 test('a caller-supplied bad id is still a 500-free 4xx path, not a 503', async () => {
   // Guards the classifier against over-reaching: a CastError is the caller's
   // input, not our database being unavailable.
-  await withAuthRouter({ user: healthyUser }, async ({ call }) => {
+  await withAuthRouter({ user: healthyUser }, async ({ call , mfaTransaction }) => {
     const origFindById = User.findById;
     const err = new Error('Cast to ObjectId failed for value "not-an-id"');
     err.name = 'CastError';

@@ -44,6 +44,11 @@ const User = require('../models/User');
 const emailUtils = require('../utils/email');
 const sessionUtils = require('../utils/sessions');
 const { stubQuery } = require('./stubQuery');
+// /login now mints an MFA transaction and, for accounts with a second factor,
+// counts passkeys and unused recovery codes. Each is a real round-trip, so a
+// suite that stubs only User leaves them buffering against a connection that
+// does not exist and the route answers 500 after a 10s timeout.
+const { stubMfaModels } = require('./stubMfaModels');
 
 // A real 1x1 PNG — a valid image, not just plausible base64.
 const PNG_1PX =
@@ -53,6 +58,8 @@ const PNG_1PX =
 
 test('POST /api/auth/login projects the inline pictures out of its read', async () => {
   const originalFindOne = User.findOne;
+  // The second step of sign-in touches three more models; see stubMfaModels.js.
+  const restoreMfaModels = stubMfaModels();
   /** @type {string|null} the projection the route actually asked for */
   let seenSelect = null;
 
@@ -119,6 +126,7 @@ test('POST /api/auth/login projects the inline pictures out of its read', async 
   } finally {
     server.close();
     User.findOne = originalFindOne;
+    restoreMfaModels();
     delete require.cache[require.resolve('../routes/auth')];
     process.env.NODE_ENV = prevEnv;
   }
@@ -166,6 +174,8 @@ test('safePictureValue drops an oversized inline blob but keeps small ones', () 
  */
 async function loginWithTwoFactorState(overrides) {
   const originalFindOne = User.findOne;
+  // The second step of sign-in touches three more models; see stubMfaModels.js.
+  const restoreMfaModels = stubMfaModels();
   const originalSend = emailUtils.sendOtpEmail;
   const originalSession = sessionUtils.issueUserSession;
 
@@ -204,6 +214,7 @@ async function loginWithTwoFactorState(overrides) {
     User.findOne = originalFindOne;
     emailUtils.sendOtpEmail = originalSend;
     sessionUtils.issueUserSession = originalSession;
+    restoreMfaModels();
     delete require.cache[require.resolve('../routes/auth')];
     process.env.NODE_ENV = prevEnv;
   }

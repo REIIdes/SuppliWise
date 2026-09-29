@@ -4,8 +4,6 @@ const mongoose = require('mongoose');
 const User = require('../models/User');
 const Session = require('../models/Session');
 const {
-  USER_IDLE_LIMIT_MS,
-  USER_IDLE_DAYS,
   REMEMBER_TOKEN_LIFETIME,
   USER_ACTIVITY_TOUCH_INTERVAL_MS,
   USER_ACTIVITY_MAX_AGE_MS,
@@ -19,34 +17,38 @@ const {
 //   revokes ONLY the session it displaced. Concurrent sign-ins serialize on
 //   that single-document update, so the last one to commit wins
 //   deterministically.
-// • A session ends when it is replaced by a newer sign-in, when it is revoked
-//   at sign-out, or after 30 DAYS WITHOUT ACTIVITY (see utils/userSession.js).
-//   Validity is revocation-based, not token-based: a user JWT carries no `exp`,
-//   so the session record is the single authority on whether a token still acts.
-//   The idle window exists because a token with no expiry is valid forever, and
-//   a token thief controls neither sign-in nor sign-out.
+// • A session ends when it is REPLACED by a newer sign-in, when it is REVOKED
+//   at sign-out or by a password reset, or when the account is disabled — and
+//   on no other basis. It does NOT end because of the clock: a user JWT carries
+//   no `exp` and no idle window is applied (see utils/userSession.js for why,
+//   and for what still does bound a session). Validity is revocation-based, not
+//   token-based, so the session record is the single authority on whether a
+//   token still acts.
 // • The server is authoritative: a JWT is necessary but never sufficient.
 
-// In-memory throttle for the activity stamp, keyed by session id. A write
-// amplification guard only — it is NOT what expires anything, so unlike the
-// admin heartbeat it is not required to be shorter than the window (30 days vs
-// minutes). Two processes each keep their own map, so the stamp may be written
-// more often than this suggests; that is harmless, it only ever pushes the
-// deadline further out.
+// In-memory throttle for the activity stamp, keyed by session id. Nothing is
+// expired by this — it is a write-amplification guard on a DISPLAY value (the
+// "signed-in devices" list), so unlike the admin heartbeat it is not bound to
+// any security window. Two processes each keep their own map, so the stamp may
+// be written more often than this suggests; that is harmless.
 const activityTouches = new Map();
 
 /**
- * Record that this session is still in use, sliding its idle deadline.
+ * Record that this session is still in use, for display.
  *
- * Two guards keep this honest:
+ * This expires nothing. It exists so the security page can say "last active
+ * 2 minutes ago" and sort the device list, and it is deliberately cheap: a
+ * member who is not looking at that page should not be paying a write per API
+ * call to keep a label accurate.
+ *
+ * Two guards keep it honest:
  *   - throttled, so a busy member is not one write per API call;
- *   - only a RECENT request counts, so replaying a captured request cannot
- *     slide the deadline out forever. Without the age check the timeout would be
- *     decorative — an attacker holding a stolen token could keep a session
- *     alive indefinitely by resending one old request.
+ *   - only a RECENT request counts, so replaying one captured request cannot
+ *     keep sliding the displayed value forward and make an abandoned session
+ *     look live.
  *
  * Fire-and-forget: a failed activity stamp must never fail the request it was
- * made for. Worst case the window is not extended and the member signs in again.
+ * made for. Nothing depends on it.
  */
 function touchActivity(sid, at = Date.now()) {
   if (!sid) return;
@@ -66,22 +68,38 @@ function touchActivity(sid, at = Date.now()) {
 const SESSION_ENDED_MESSAGE = 'Your session has ended. Please sign in again.';
 const SESSION_INVALID = 'SESSION_INVALID'; // token malformed / no sid / unknown user
 const SESSION_REVOKED = 'SESSION_REVOKED'; // session replaced, revoked or missing
-// Distinct from SESSION_REVOKED so the client can TELL the member why. Without
-// it, being signed out after a month away looks identical to being signed out by
-// an administrator or by a second login — and a member whose own password works
-// concludes the app is broken.
-const SESSION_IDLE_EXPIRED = 'SESSION_IDLE_EXPIRED';
-const SESSION_IDLE_MESSAGE =
-  `You were signed out after ${USER_IDLE_DAYS} days of inactivity. Sign in again to pick up where you left off.`;
 const NO_SESSION = 'NO_SESSION'; // no credential presented
 const INVALID_TOKEN = 'INVALID_TOKEN'; // signature/verification failed
-const TOKEN_EXPIRED = 'TOKEN_EXPIRED'; // admin-only TTL (users never expire)
+const TOKEN_EXPIRED = 'TOKEN_EXPIRED'; // admin-only TTL
 const ACCOUNT_DISABLED = 'ACCOUNT_DISABLED';
 
 // Revoked session records older than this are pruned opportunistically on
 // the account's next sign-in. The CURRENT session is never pruned, so an
 // account that stays signed in for years is unaffected.
 const REVOKED_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+// Revocation listeners. middleware/auth.js subscribes its 30-second
+// validation cache here, so a revoked session stops working immediately
+// instead of at the end of the cache TTL.
+const revocationListeners = new Set();
+
+/** Subscribe to revocations. Returns an unsubscribe function. */
+function onSessionRevoked(listener) {
+  if (typeof listener !== 'function') return () => {};
+  revocationListeners.add(listener);
+  return () => revocationListeners.delete(listener);
+}
+
+function announceRevocation(ids) {
+  const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean).map(asId);
+  if (!list.length) return;
+  for (const listener of revocationListeners) {
+    // A listener must never be able to fail a sign-out: the client clears its
+    // own copy regardless, and a throwing cache hook would turn a successful
+    // revocation into a 500.
+    try { listener(list); } catch { /* keep serving */ }
+  }
+}
 
 const asId = (value) => String(value || '');
 
@@ -96,16 +114,19 @@ function toObjectId(value) {
   }
 }
 
-// User tokens: normally no `exp` — validity is decided by the session record,
-// not by the token's own clock, so a session that was displaced or revoked stops
-// working on the very next request even though the token still looks fine.
+// User tokens: no `exp`. Validity is decided by the session record, not by the
+// token's own clock, so a session that was displaced or revoked stops working on
+// the very next request even though the token still looks fine. This is also
+// what makes "user sessions do not expire" true end to end rather than just
+// unenforced: a token that outlives its session is inert, and a session that is
+// still live keeps its own token usable for as long as it is unrevoked.
 //
 // The ONE exception is a token minted from a saved-login credential
-// (mintFromRememberToken). That token is long-lived by design — it is what saves
-// someone re-typing a password — so it carries a real expiry, deliberately set
-// LONGER than the idle window. Without it a returning member could land in a gap
-// where the credential still worked and the session was still alive but the
-// token it produced had already died.
+// (mintFromRememberToken). That one is long-lived by design — it is what saves
+// someone re-typing a password — so it carries a real expiry, from
+// REMEMBER_TOKEN_LIFETIME. It does not expire the SESSION: if it dies the
+// member is asked to sign in again, and the session they already had is
+// untouched.
 function signUserToken(userId, sessionId, options = {}) {
   const payload = { sub: asId(userId), id: asId(userId), sid: asId(sessionId) };
   return options.expiresIn
@@ -140,6 +161,10 @@ async function issueUserSession(userId, deviceMeta = {}) {
     tokenHash: crypto.createHash('sha256').update(token).digest('hex'),
     createdAt: new Date(),
     lastActivityAt: new Date(),
+    // An ABSOLUTE cap, not an idle window. Nothing sets this today, so a user
+    // session has no time-based expiry at all; it is here so an operator has a
+    // lever that does not require shipping code, and so "no expiry" is a value
+    // someone chose rather than the absence of a field. See utils/userSession.js.
     expiresAt: null,
     revokedAt: null,
     // Display-only attribution so "Signed-in devices" can name a session.
@@ -167,6 +192,7 @@ async function issueUserSession(userId, deviceMeta = {}) {
       { _id: displaced, user: uid, revokedAt: null },
       { $set: { revokedAt: new Date() } }
     );
+    announceRevocation([displaced]);
   }
 
   // Hygiene only — deletes REVOKED records of this account, never the live one.
@@ -226,9 +252,20 @@ async function verifyUserSession(decoded) {
   }
 
   // ── Expiry ──────────────────────────────────────────────────────────────
-  // Two mechanisms, and the stored field is checked FIRST so a future policy
-  // that sets a hard cap on some session type overrides the sliding window
-  // rather than being ignored by it.
+  //
+  // A user session has NO time-based expiry. What used to sit here was a
+  // 30-day sliding idle window, derived from `lastActivityAt` on every request.
+  // It is gone, deliberately: a member who opens the app monthly was signed out
+  // monthly with no way to opt out, and the threats it addressed (a token
+  // lifted from disk, a log, or an XSS payload) are not meaningfully reduced by
+  // 30 days rather than 31. Revocation is the authority — see the note at the
+  // top of this file, and utils/userSession.js for the full argument.
+  //
+  // `Session.expiresAt` IS still honoured, and it is the one thing that can end
+  // a user session on a timer. Nothing in the application sets it, so it grants
+  // no expiry by default; it exists so an operator has a lever that does not
+  // require shipping code, and so "no expiry" is a configuration someone
+  // chose rather than the absence of a mechanism.
   const now = Date.now();
   if (session.expiresAt && new Date(session.expiresAt).getTime() <= now) {
     // An absolute cap elapsed. This is final, so it is stamped revoked exactly
@@ -239,22 +276,6 @@ async function verifyUserSession(decoded) {
       { $set: { revokedAt: new Date() } }
     ).exec().catch(() => {});
     return deny(401, SESSION_REVOKED, SESSION_ENDED_MESSAGE);
-  }
-  if (!session.expiresAt) {
-    // Sliding idle window, computed from the last ACTIVITY stamp rather than
-    // from a stored moving deadline. Deriving it means the deadline cannot drift
-    // out of step with the value it is derived from — there is no second copy to
-    // fall behind, and no window to extend on a write-heavy path.
-    const lastActivity = session.lastActivityAt
-      ? new Date(session.lastActivityAt).getTime()
-      : new Date(session.createdAt || 0).getTime();
-    if (now - lastActivity > USER_IDLE_LIMIT_MS) {
-      Session.updateOne(
-        { _id: sid, user: uid, revokedAt: null },
-        { $set: { revokedAt: new Date() } }
-      ).exec().catch(() => {});
-      return deny(401, SESSION_IDLE_EXPIRED, SESSION_IDLE_MESSAGE);
-    }
   }
 
   if (user.accountStatus && user.accountStatus !== 'active') {
@@ -267,8 +288,9 @@ async function verifyUserSession(decoded) {
     );
   }
 
-  // Genuine, recent activity slides the window. Uses the TOKEN's issue time, not
-  // the clock: a replayed old request cannot hold a session open indefinitely.
+  // Genuine, recent activity refreshes the display stamp. Uses the TOKEN's issue
+  // time, not the clock: a replayed old request cannot keep the "last active"
+  // label sliding forward and make an abandoned session look live.
   if (decoded.iat && now - decoded.iat * 1000 <= USER_ACTIVITY_MAX_AGE_MS) {
     touchActivity(sid, now);
   }
@@ -387,6 +409,10 @@ async function revokeUserSession(userId, sid) {
     { _id: uid, currentSessionId: objectId },
     { $set: { currentSessionId: null } }
   ).catch(() => {});
+  // Sign-out is the case the validation cache cannot absorb: the session id
+  // stays the same, so any cached entry for it would keep authenticating for
+  // up to SESSION_CACHE_TTL_MS after the user asked to be signed out.
+  if (revoked.modifiedCount > 0) announceRevocation([objectId]);
   return revoked.modifiedCount > 0;
 }
 
@@ -403,6 +429,9 @@ async function revokeAllUserSessions(userId) {
   const uid = asId(userId);
   if (!uid) return false;
 
+  // Collect the ids first: the update below matches on `revokedAt: null`, so a
+  // second read after it would find nothing to invalidate.
+  const live = await Session.find({ user: uid, revokedAt: null }).select('_id').lean().catch(() => []);
   const revoked = await Session.updateMany(
     { user: uid, revokedAt: null },
     { $set: { revokedAt: new Date() } }
@@ -410,6 +439,7 @@ async function revokeAllUserSessions(userId) {
   // Clear the pointer even when no Session rows matched (a legacy token with
   // no row must also stop validating against "current session").
   await User.updateOne({ _id: uid }, { $set: { currentSessionId: null } }).catch(() => {});
+  announceRevocation(live.map((s) => s._id));
   return revoked.modifiedCount > 0;
 }
 
@@ -444,6 +474,10 @@ async function revokeOtherUserSessions(userId, keepSid) {
   const filter = { user: uid, revokedAt: null };
   if (keep) filter._id = { $ne: keep };
 
+  // Same reason as revokeAllUserSessions: read the ids while they are still
+  // live, so the validation cache can be purged of exactly what was revoked.
+  const live = await Session.find(filter).select('_id').lean().catch(() => []);
+
   const now = new Date();
   const ended = await Session.updateMany(
     filter,
@@ -462,10 +496,12 @@ async function revokeOtherUserSessions(userId, keepSid) {
 
   const revoked = ended ? ended.modifiedCount : 0;
   const alsoCleared = cleared ? cleared.modifiedCount : 0;
+  announceRevocation(live.map((s) => s._id));
   return Math.max(revoked, alsoCleared);
 }
 
 module.exports = {
+  onSessionRevoked,
   issueUserSession,
   verifyUserSession,
   attachRememberToken,
@@ -477,15 +513,8 @@ module.exports = {
   SESSION_ENDED_MESSAGE,
   SESSION_INVALID,
   SESSION_REVOKED,
-  SESSION_IDLE_EXPIRED,
-  SESSION_IDLE_MESSAGE,
   NO_SESSION,
   INVALID_TOKEN,
   TOKEN_EXPIRED,
   ACCOUNT_DISABLED,
-  // Re-exported so a caller (or a test) can reason about the window without
-  // importing a second module — and so there is exactly one import path to the
-  // policy in utils/userSession.js.
-  USER_IDLE_LIMIT_MS,
-  USER_IDLE_DAYS,
 };

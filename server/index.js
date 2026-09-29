@@ -14,6 +14,15 @@ const authRoutes = require('./routes/auth');
 // Emailed-link password reset. A separate file rather than more of
 // routes/auth.js, mounted under the same /api/auth prefix (see STAGE 3).
 const passwordResetRoutes = require('./routes/passwordReset');
+// The 2026 authentication-security surface. Each is its own router so the
+// credential logic stays readable, and all four hang off the SAME /api/auth
+// prefix, so they inherit the flood guard, lockout check and auth limiter
+// registered in STAGE 1 below — the strictest rate limiting in the app is
+// exactly where these endpoints must live.
+const passkeyRoutes = require('./routes/passkeys');
+const totpRoutes = require('./routes/totp');
+const recoveryCodeRoutes = require('./routes/recoveryCodes');
+const sessionRoutes = require('./routes/sessions');
 const assessmentRoutes = require('./routes/assessment');
 const recommendRoutes = require('./routes/recommend');
 const chatRoutes = require('./routes/chat');
@@ -30,6 +39,13 @@ const subscriptionRoutes = require('./routes/subscription');
 const web3Routes = require('./routes/web3');
 const { PICTURE_DIR } = require('./utils/pictures');
 const AdminAccount = require('./models/AdminAccount');
+// The one trusted-origin list, and the CSRF guard built on it. See the CORS
+// block below for why these two used to be separate concerns.
+const { isAllowed: isTrustedOrigin, verifyOrigin, assertProductionConfigured, list: trustedOriginList } = require('./utils/origins');
+// WebAuthn / passkey relying-party configuration. Loading it here is what makes
+// the production boot check below possible.
+const webauthn = require('./utils/webauthn');
+const secretBox = require('./utils/secretBox');
 
 const app = express();
 
@@ -69,6 +85,42 @@ if (process.env.NODE_ENV === 'production' && !String(process.env.PUBLIC_WEB_URL 
   throw new Error('PUBLIC_WEB_URL must be set in production — it is the origin password reset links point at.');
 }
 
+// ── Authentication-security boot checks ────────────────────────────────────
+// Each of these refuses to start a production server that would be quietly,
+// silently weaker than it looks. All three fail at BOOT rather than at first
+// use, because the failure mode they prevent — a fallback to localhost, a key
+// derived from another secret, an empty origin allowlist — is invisible from
+// the outside until a real user is the one affected.
+
+// 1. Trusted origins. `Allow-Credentials: true` with no configured allowlist is
+//    a configuration that looks locked down and is not.
+assertProductionConfigured();
+
+// 2. The TOTP encryption key. Without it the seed key is derived from
+//    JWT_SECRET, which means anyone who can forge tokens can also decrypt every
+//    authenticator seed in the database.
+const secretKey = secretBox.describe();
+if (process.env.NODE_ENV === 'production' && !secretKey.available) {
+  throw new Error('No TOTP encryption key is available. Set TOTP_ENCRYPTION_KEY to a base64/hex 32-byte value in production.');
+}
+if (process.env.NODE_ENV === 'production' && secretKey.source !== 'TOTP_ENCRYPTION_KEY') {
+  throw new Error(
+    'TOTP_ENCRYPTION_KEY must be set explicitly in production. Falling back to a key derived from JWT_SECRET '
+    + 'ties token forgery to authenticator-seed decryption, which is not a separation anyone relying on 2FA expects.',
+  );
+}
+
+// 3. WebAuthn. A passkey ceremony needs a real RP ID and real https origins.
+//    A localhost fallback here produces credentials that work on one developer's
+//    machine and nowhere else, and the only symptom is real users failing to
+//    use the feature meant to save them. Outside production the module falls
+//    back to loopback dev origins so a fresh clone works, and the warning at
+//    the bottom of this file says so.
+const passkeyConfig = webauthn.describe();
+if (process.env.NODE_ENV === 'production' && !passkeyConfig.configured) {
+  throw new Error(`WebAuthn is not configured for production: ${passkeyConfig.error}`);
+}
+
 // ── Security headers ──────────────────────────────────────────────────────
 // Helmet sets X-Frame-Options, X-Content-Type-Options, HSTS, etc.
 // Strict CSP: this origin serves JSON only (no HTML/JS ever rendered), so
@@ -99,27 +151,47 @@ app.use(compression({
 }));
 
 // Middleware
-// Allow CORS from web dev servers and mobile app (Capacitor uses capacitor:// or http://localhost on device)
-app.use(cors({ 
-  origin: [
-    'http://localhost:5173', 
-    'http://localhost:5174',
-    'http://localhost:5175',
-    'http://127.0.0.1:5173',
-    'http://127.0.0.1:5174',
-    'http://127.0.0.1:5175',
-    'https://localhost:5173',
-    'https://localhost:5174', 
-    'https://localhost:5175',
-    'https://127.0.0.1:5173',
-    'capacitor://localhost',
-    'http://localhost', // Mobile app
-    'http://127.0.0.1', // Mobile app (numeric loopback)
-    /^http:\/\/192\.168\.\d+\.\d+:\d+$/, // Allow any local network IP
-    /^https:\/\/192\.168\.\d+\.\d+:\d+$/ // HTTPS version
-  ], 
-  credentials: true 
+// CORS, from ONE trusted-origin list shared with the CSRF guard below.
+//
+// This used to be a hard-coded array that only the `cors` package ever saw.
+// Two problems with that shape, both now fixed:
+//
+//  1. An allowlist that exists only in CORS is not a CSRF defence. CORS stops
+//     a foreign page from READING a response; it does not stop one from causing
+//     a state change, because a "simple" cross-origin POST is sent and only the
+//     reply is withheld. `verifyOrigin` below is the server-side rule.
+//
+//  2. `http://192.168.x.x` origins were trusted unconditionally, which is a
+//     development affordance presented as a default. utils/origins.js confines
+//     it to non-production (or an explicit opt-in that warns), and production
+//     refuses to boot without a configured allowlist — because
+//     `Allow-Credentials: true` with an empty or wildcard origin is a
+//     configuration that looks secure and is not.
+//
+// The list NEVER contains a wildcard. `Access-Control-Allow-Origin: *` is
+// incompatible with credentials anyway, and the dangerous variant — reflecting
+// whatever Origin arrives — is exactly what this replaces.
+app.use(cors({
+  origin(origin, callback) {
+    // No Origin header at all: a same-origin request, curl, a native client or
+    // a server-to-server call. Nothing to decide, so it is allowed — refusing
+    // it would break the Capacitor build and every integration test.
+    if (!origin) return callback(null, true);
+    return callback(null, isTrustedOrigin(origin));
+  },
+  credentials: true,
 }));
+
+// CSRF / origin guard for every state-changing request, mounted globally.
+//
+// This API is Bearer-authenticated, so classic CSRF is already structurally
+// impossible: a browser will not attach an `Authorization` header to a
+// cross-site request, and a third-party page cannot read a token out of another
+// origin's storage. This middleware is defence in depth for the day that
+// changes — it makes adding a cookie fail CLOSED instead of quietly — and it is
+// the control the authentication endpoints specifically are meant to have.
+// See utils/origins.js for the exact rule and what it deliberately allows.
+app.use(verifyOrigin);
 // express.json() is deliberately NOT mounted here. It used to sit above every
 // rate limiter, so each request body was fully read into memory before any
 // limiter could see the request: a flood of 10 MB bodies was buffered and only
@@ -168,6 +240,7 @@ app.use('/pictures', express.static(PICTURE_DIR, {
 // via lockoutCheck (hard stop) + limitReachedHandler (escalation on each hit).
 const { lockoutCheck, limitReachedHandler } = require('./utils/lockout');
 const { floodGuard, bodyBudget, rejectOversized, logClientError, isLocalDevRequest } = require('./utils/floodGuard');
+const rateLimits = require('./utils/rateLimits');
 
 // Coarse outer meter over every path. /api/health and the JSON 404 below had
 // no limiter at all, so they were an unbounded source of cheap requests; this
@@ -176,16 +249,38 @@ const { floodGuard, bodyBudget, rejectOversized, logClientError, isLocalDevReque
 // by the tight per-family rule — this only ever catches what those cannot see.
 const requestFloodGuard = floodGuard();
 
-// GET /api/auth/me is read-only session/plan traffic: the reactive plan store
-// refreshes it on focus and on a slow interval. It must NEVER consume the
-// sensitive auth budget or escalate the brute-force ladder (a client refresh
-// storm once locked users out of their own accounts), so it is skipped here
-// and served by its own generous bucket below.
-const isSessionRead = (req) => req.method === 'GET' && (req.path === '/me' || req.path === '/me/');
+// Traffic under /api/auth that is NOT a credential attempt, and so must never
+// consume the sensitive auth budget or escalate the brute-force ladder.
+//
+//   GET  /me            read-only session/plan traffic; the reactive plan store
+//                       refreshes it on focus and on a slow interval. A client
+//                       refresh storm once locked users out of their own
+//                       accounts.
+//   POST /admin-activity  the admin dashboard's "I am still here" beacon, sent
+//                       at most once a minute while an administrator is actually
+//                       working. It carries no credential and guesses nothing, so
+//                       counting it would spend 15 of the 20 requests a
+//                       non-loopback deployment gets per 15 minutes on a
+//                       background ping — leaving a legitimate admin unable to
+//                       sign in. It is authenticated (see `protect`) and it
+//                       mints nothing, so it cannot be used to attack anything;
+//                       the broad flood guard above still applies.
+//
+// Both are served by generous buckets below rather than being unlimited.
+const isSessionRead = (req) => (
+  (req.method === 'GET' && (req.path === '/me' || req.path === '/me/'))
+  || (req.method === 'POST' && req.path === '/admin-activity')
+);
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: (req) => isLocalDevRequest(req) ? 200 : 20,
+  // Two ceilings, not one: a loopback developer (or the e2e suites, which talk
+  // to 127.0.0.1) and a real deployment need wildly different numbers for the
+  // same policy, and one compromise value serves neither. Both are
+  // configuration — see utils/rateLimits.js. Defaults are unchanged.
+  max: (req) => (isLocalDevRequest(req)
+    ? rateLimits.limit('AUTH_RATE_LIMIT_MAX_LOCAL', 200)
+    : rateLimits.limit('AUTH_RATE_LIMIT_MAX', 20)),
   standardHeaders: true,
   legacyHeaders: false,
   skip: isSessionRead,
@@ -332,7 +427,21 @@ app.use(express.json({ limit: JSON_LIMIT_BYTES }));
 // lockout check and global auth limiter registered in STAGE 1 — a narrower
 // mount of a wider middleware is normal Express, and the per-flow rate limits
 // inside the router stack on top of those.
+// Password reset (emailed link) is mounted BEFORE routes/auth.js so it owns
+// /api/auth/password-reset/*. It still inherits the /api/auth flood guard,
+// lockout check and global auth limiter registered in STAGE 1 — a narrower
+// mount of a wider middleware is normal Express, and the per-flow rate limits
+// inside the router stack on top of those.
+//
+// The four credential routers below are mounted here too, BEFORE routes/auth.js
+// so their more specific paths win, and AFTER it would be a silent 404
+// otherwise. Each of them applies its own Origin check and its own per-family
+// rate limiter on top of the shared /api/auth ones.
 app.use('/api/auth/password-reset', passwordResetRoutes);
+app.use('/api/auth/passkeys', passkeyRoutes);
+app.use('/api/auth/totp', totpRoutes);
+app.use('/api/auth/recovery-codes', recoveryCodeRoutes);
+app.use('/api/auth/sessions', sessionRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/assessment', assessmentRoutes);
 app.use('/api/subscription', subscriptionRoutes);
@@ -548,6 +657,33 @@ mongoose
             '[subscription] SELF-SERVE PURCHASE IS ENABLED — no payment is taken. ' +
             'Any authenticated user can grant themselves a paid plan for free. ' +
             'Set SUBSCRIPTION_SELF_SERVE_PURCHASE=false to close this.'
+          );
+        }
+      })
+      .then(() => {
+        // A one-line, SECRET-FREE summary of how authentication is actually
+        // configured, printed once at boot.
+        //
+        // This exists because every one of these values is a silent default
+        // somewhere. An operator who cannot see "passkeys are off because
+        // WEBAUTHN_RP_ID is unset" has no way to know the strongest
+        // authentication the product offers is not running, and nothing in the
+        // UI would ever tell them. Key IDs and key SOURCES only, never key
+        // material, and origins are just the deployment's own hostnames.
+        const passkeys = webauthn.describe();
+        const key = secretBox.describe();
+        console.log(
+          '[auth-security] '
+          + `passkeys=${passkeys.configured ? `on (rpId=${passkeys.rpID}, origins=${passkeys.origins.length})` : `OFF (${passkeys.error})`} `
+          + `| totp-encryption=${key.source} keyIds=${key.keyIds.join(',')} `
+          + `| trusted-origins=${trustedOriginList().length}`,
+        );
+        if (!passkeys.configured) {
+          // Not fatal outside production, but it is not fine either: the
+          // security page would still offer a passkey button that cannot work.
+          console.warn(
+            '[auth-security] Passkey sign-in and registration are UNAVAILABLE. '
+            + 'Set WEBAUTHN_RP_ID and WEBAUTHN_ORIGIN to enable them.',
           );
         }
       });

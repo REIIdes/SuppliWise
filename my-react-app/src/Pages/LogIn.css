@@ -244,8 +244,65 @@
   cursor: not-allowed;
 }
 
-.auth-switch {
+/* ── Passkey sign-in ──────────────────────────────────────────────────────
+   A separate method from the password form, not a variation of it: it uses
+   neither the email nor the password, and the account is decided by the
+   credential the authenticator returns. Labelling it as its own button is what
+   stops people assuming it is "sign in, but faster with a PIN".
+
+   The outlined treatment is intentional: it must not compete visually with the
+   primary Sign In button, or a person with a password who wanted the obvious
+   thing now has to read the screen twice. */
+
+.auth-passkey {
+  margin-top: 18px;
+}
+
+.auth-passkey__divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  color: #9ca3af;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.auth-passkey__divider::before,
+.auth-passkey__divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #e5e7eb;
+}
+
+.auth-btn--passkey {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  /* Outlined, not filled: a second solid green button on the same screen reads
+     as two equally primary actions, which they are not. */
+  background: transparent;
+  color: #15803d;
+  border: 1.5px solid #86efac;
+}
+
+.auth-btn--passkey:hover:not(:disabled) {
+  background: #f0fdf4;
+  border-color: #22c55e;
+}
+
+.auth-passkey__hint {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #6b7280;
   text-align: center;
+}
+
+.auth-switch {
   font-size: 14px;
   color: #6b7280;
   margin-top: 16px;

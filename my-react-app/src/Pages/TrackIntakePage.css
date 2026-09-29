@@ -1,32 +1,102 @@
-/* Track Intake Wrapper */
+/* ── Shell ─────────────────────────────────────────────────────────────
+   The shared mesh backdrop, fixed and clipped so it reads as light across the
+   page rather than as content, and cannot open a horizontal scrollbar. */
 .track-intake-wrapper {
   min-height: 100vh;
-  background: linear-gradient(135deg, #f0faf0 0%, #e8f5e9 100%);
+  position: relative;
+  overflow-x: hidden;
+  color: var(--sw-ink, #0d2b23);
+  background: var(--sw-mesh, linear-gradient(168deg, #eefcf5, #f5f0ff));
+  background-attachment: fixed;
 }
 
-/* Container */
 .track-intake-container {
+  position: relative;
+  z-index: 1;
   max-width: 1200px;
   margin: 0 auto;
-  padding: 32px 24px;
+  padding: 36px 24px 64px;
 }
 
-/* Header */
+/* ── Error state ──────────────────────────────────────────────────────────
+   This block was unstyled in every stylesheet, and its Retry button borrowed
+   `.btn-primary` — a name declared with four different looks by HomePage,
+   HistoryPage, ResultsPage and RecommendationsPage. Whichever of those was
+   injected last decided how the error screen looked, so the button changed
+   appearance depending on the route the member had visited first. It now has
+   its own class, styled here. */
+.track-intake-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  max-width: 520px;
+  margin: 48px auto;
+  padding: 36px 28px;
+  border: 1px solid #fecaca;
+  border-radius: var(--sw-radius-lg, 24px);
+  background: var(--sw-surface, #fff);
+  box-shadow: var(--sw-shadow-md, 0 10px 28px -14px rgba(9, 78, 58, 0.28));
+  text-align: center;
+}
+
+.track-intake-error p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.55;
+  color: #7f1d1d;
+}
+
+.track-intake-error__btn {
+  padding: 11px 24px;
+  border: 0;
+  border-radius: var(--sw-radius-pill, 999px);
+  background: var(--sw-grad-brand, linear-gradient(135deg, #10b981, #0d9488));
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform var(--sw-dur, 0.24s) ease, box-shadow var(--sw-dur, 0.24s) ease;
+}
+
+.track-intake-error__btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px -12px rgba(13, 148, 136, 1);
+}
+
+.track-intake-error__btn:focus-visible {
+  outline: 3px solid var(--sw-teal, #0d9488);
+  outline-offset: 2px;
+}
+
 .track-intake-header {
-  margin-bottom: 32px;
+  margin-bottom: 26px;
+  animation: sw-rise 0.5s var(--sw-ease, cubic-bezier(0.16, 1, 0.3, 1)) both;
 }
 
 .track-intake-title {
-  font-size: 32px;
-  font-weight: 700;
-  color: #1f2937;
-  margin: 0 0 8px 0;
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.14;
+  color: var(--sw-emerald-deep, #059669);
+  margin: 0 0 8px;
+  background: var(--sw-grad-spectrum, linear-gradient(92deg, #059669, #06b6d4 45%, #6366f1));
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .track-intake-title { color: transparent; }
 }
 
 .track-intake-subtitle {
-  font-size: 16px;
-  color: #6b7280;
+  font-size: 15.5px;
+  line-height: 1.55;
+  color: var(--sw-ink-soft, #58736a);
   margin: 0;
+  max-width: 64ch;
 }
 
 /* Content Layout */
@@ -46,19 +116,26 @@
   align-self: start;
 }
 
-/* Track Sections */
+/* ── Panel ─────────────────────────────────────────────────────────────
+   A 1px hairline plus a lift, in place of the 2px #86efac outline. At 2px
+   that lime reads as a debug outline; four of them stacked down this page
+   left no hierarchy at all. */
 .track-section {
-  background: white;
-  border: 2px solid #86efac;
-  border-radius: 16px;
+  position: relative;
+  background: var(--sw-surface, #fff);
+  border: 1px solid var(--sw-line, #e2f1ea);
+  border-radius: var(--sw-radius-xl, 26px);
   padding: 24px;
+  box-shadow: var(--sw-shadow-md, 0 10px 28px -14px rgba(9, 78, 58, 0.26));
+  animation: sw-rise 0.5s var(--sw-ease, cubic-bezier(0.16, 1, 0.3, 1)) both;
 }
 
 .section-title {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 700;
-  color: #1f2937;
-  margin: 0 0 20px 0;
+  letter-spacing: -0.015em;
+  color: var(--sw-ink, #0d2b23);
+  margin: 0 0 18px;
 }
 
 .section-header-with-legend {
@@ -128,22 +205,53 @@
   background: #6ee7b7;
 }
 
+/* Rows carry their priority on a coloured edge rather than in a border of the
+   same colour all the way round. The legend above this list explains what the
+   colours mean; before this, nothing on the list itself showed it. */
 .supplement-card {
+  position: relative;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px;
-  background: white;
-  border: 2px solid #86efac;
-  border-radius: 12px;
-  transition: all 0.3s ease;
   gap: 16px;
+  padding: 15px 16px 15px 19px;
+  border: 1px solid var(--sw-line, #e2f1ea);
+  border-radius: var(--sw-radius-md, 14px);
+  background: var(--sw-surface-sunk, #f4fbf7);
+  box-shadow: var(--sw-shadow-sm, 0 1px 2px rgba(9, 78, 58, 0.06));
+  transition: transform var(--sw-dur, 0.24s) var(--sw-ease, ease),
+    box-shadow var(--sw-dur, 0.24s) ease, border-color var(--sw-dur, 0.24s) ease;
 }
 
-.supplement-card.taken {
-  background: #d1fae5;
-  border-color: #6ee7b7;
+.supplement-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 11px;
+  bottom: 11px;
+  width: 4px;
+  border-radius: 0 4px 4px 0;
+  background: var(--row-accent, #cbd5e1);
 }
+
+.supplement-card--high   { --row-accent: linear-gradient(180deg, #34d399, #059669); }
+.supplement-card--medium { --row-accent: linear-gradient(180deg, #fbbf24, #f59e0b); }
+.supplement-card--low    { --row-accent: linear-gradient(180deg, #cbd5e1, #94a3b8); }
+
+.supplement-card:hover {
+  transform: translateX(3px);
+  border-color: var(--sw-line-strong, #cbe7da);
+  box-shadow: var(--sw-shadow-md, 0 10px 28px -14px rgba(9, 78, 58, 0.26));
+}
+
+/* A taken row recedes rather than disappearing: the record of what was taken
+   is the point, so it stays legible at a lower contrast. */
+.supplement-card.taken {
+  background: linear-gradient(180deg, #f2fdf8, #e7f8f0);
+  border-color: #b6ecd3;
+}
+
+.supplement-card.taken .supplement-name { color: #3f6357; }
 
 .supplement-info {
   flex: 1;
@@ -255,6 +363,10 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
+  padding: 16px;
+  border-radius: var(--sw-radius-lg, 20px);
+  border: 1px solid #e0e7ff;
+  background: linear-gradient(180deg, #f8fafc, #eef2ff);
 }
 
 .adherence-message {
@@ -529,10 +641,37 @@
   white-space: nowrap;
 }
 
-/* Streak Section */
+/* ── Streak hero ───────────────────────────────────────────────────────
+   The one genuinely celebratory panel on the page, so it keeps a saturated
+   gradient — but a deep amber→orange rather than the previous #f59e0b→#ea580c
+   at full strength across the whole card, which read as a fire alarm next to
+   three white panels. The text shadow is gone too: it was there to keep white
+   text legible on a light orange, and at this depth it is not needed.
+
+   The continuous 2.2s scale-and-rotate "flicker" on the icon is reduced to a
+   slow, small breath. A permanent wobble on a number people read every day
+   is the kind of motion that becomes an irritant and is then ignored. */
+/* The two streak cards are the loudest blocks on this page and were pure
+   #f97316→#ea580c at full strength, pulling the eye away from the plan above
+   them. Deepened to a warmer amber-orange so they still read as a reward
+   without competing with the primary action. */
 .streak-section {
-  background: white;
-  border: 2px solid #86efac;
+  /* Pale amber with dark brown ink: ~5:1 or better at every point on the
+     ramp, so the subtitle is actually readable. The saturated orange this
+     replaced measured ~3.9:1 against its own mid-tone. */
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 44%, #fcd34d 100%);
+  border: 1px solid #fcd34d;
+  box-shadow: 0 12px 28px -20px rgba(217, 119, 6, 0.55);
+  color: #78350f;
+}
+
+.streak-section .streak-text {
+  color: #78350f;
+}
+
+.streak-section .section-title,
+.streak-section .streak-number {
+  color: #78350f;
 }
 
 .streak-content {
@@ -542,25 +681,34 @@
 }
 
 .streak-icon {
-  width: 56px;
-  height: 56px;
-  background: #f0fdf4;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #10b981;
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
   flex-shrink: 0;
+  border-radius: 16px;
+  /* Solid amber rather than translucent white: on a pale amber card a
+     24%-white tile left the white glyph with almost nothing to sit on. */
+  background: linear-gradient(140deg, #fbbf24, #ea580c);
+  color: #fff;
+  box-shadow: 0 6px 14px -8px rgba(217, 119, 6, 0.9);
+  animation: streak-breathe 4.5s ease-in-out infinite;
+}
+
+@keyframes streak-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
 }
 
 .streak-text {
   flex: 1;
+  min-width: 0;
 }
 
 .streak-number {
   font-size: 24px;
-  font-weight: 700;
-  color: #1f2937;
+  font-weight: 800;
+  letter-spacing: -0.02em;
 }
 
 /* Responsive Design */
@@ -799,21 +947,9 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
-.supplement-card {
-  border-radius: 16px;
-  border: 1.5px solid #d1fae5;
-  box-shadow: 0 3px 10px rgba(6, 95, 70, 0.06);
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
-}
-.supplement-card:hover {
-  transform: translateX(4px);
-  box-shadow: 0 10px 22px rgba(6, 95, 70, 0.12);
-}
-.supplement-card.taken {
-  background: linear-gradient(180deg, #ecfdf4, #d1fae5);
-  border-color: #34d399;
-  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.18);
-}
+/* Removed. This restated .supplement-card and .supplement-card.taken to
+   override the originals above, which is where the row's 1.5px green outline
+   came from. The single set of rules above is now the only one. */
 
 .btn-mark-taken {
   background: linear-gradient(135deg, #34d399, #059669) !important;
@@ -852,50 +988,6 @@
 }
 .supplement-taken-pill svg { flex-shrink: 0; }
 
-/* Streak hero */
-.streak-section {
-  background: linear-gradient(135deg, #f59e0b 0%, #f97316 55%, #ea580c 100%) !important;
-  border: none !important;
-  box-shadow: 0 12px 30px rgba(249, 115, 22, 0.30) !important;
-}
-.streak-section .section-title,
-.streak-section .streak-text,
-.streak-section .streak-number {
-  color: #fff !important;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-}
-.streak-icon {
-  background: rgba(255, 255, 255, 0.25) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
-  animation: streak-flicker 2.2s ease-in-out infinite;
-}
-@keyframes streak-flicker {
-  0%, 100% { transform: scale(1) rotate(0deg); }
-  50% { transform: scale(1.1) rotate(-4deg); }
-}
-
-/* Adherence bar shimmer */
-.adherence-box {
-  border-radius: 14px;
-  background: linear-gradient(180deg, #f8fafc, #eef2ff);
-  border: 1px solid #e0e7ff;
-}
-
-/* Calendar days pop */
-.calendar-day:not(.empty):not(:disabled):hover {
-  transform: scale(1.12);
-  box-shadow: 0 6px 14px rgba(16, 185, 129, 0.25);
-  z-index: 1;
-}
-.calendar-day.completed {
-  background: linear-gradient(180deg, #a7f3d0, #6ee7b7) !important;
-  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.30);
-}
-.calendar-day.today {
-  background: linear-gradient(135deg, #34d399, #059669) !important;
-  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.40), 0 0 0 3px rgba(16, 185, 129, 0.25) !important;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .track-section,
   .streak-icon {
@@ -907,4 +999,22 @@
   .calendar-day {
     transition: none;
   }
+}
+
+/* ── Calendar day fills ───────────────────────────────────────────────────
+   Re-declared here rather than with `!important` in an appended block, so
+   there is a single declaration for each state. */
+.calendar-day.completed {
+  background: linear-gradient(180deg, #a7f3d0, #6ee7b7);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.28);
+}
+.calendar-day.today {
+  background: linear-gradient(135deg, #34d399, #059669);
+  color: #fff;
+  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.4), 0 0 0 3px rgba(16, 185, 129, 0.22);
+}
+.calendar-day:not(.empty):not(:disabled):hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 14px rgba(16, 185, 129, 0.25);
+  z-index: 1;
 }

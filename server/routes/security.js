@@ -17,7 +17,6 @@
  */
 const express = require('express');
 const mongoose = require('mongoose');
-const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 
 const { protect } = require('../middleware/auth');
@@ -26,10 +25,10 @@ const Session = require('../models/Session');
 const SecurityEvent = require('../models/SecurityEvent');
 const BackupCode = require('../models/BackupCode');
 const { verifyTotpOnce } = require('../utils/totp');
-const { revokeUserSession, revokeOtherUserSessions } = require('../utils/sessions');
-const { describeDevice } = require('../utils/device');
+const { revokeOtherUserSessions } = require('../utils/sessions');
 const { sendOtpEmail, sendStatusEmail } = require('../utils/email');
 const { isValidEmail } = require('../utils/emailValidation');
+const rateLimits = require('../utils/rateLimits');
 const {
   accountKey, recordOffense, lockRemainingMs, recordAccountFailure, clearOffenses, lockMeta,
 } = require('../utils/lockout');
@@ -49,9 +48,12 @@ const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v));
  * reviewing your own security page must never be throttled into looking like an
  * attack on your account.
  */
+// The ceiling is configuration, not a literal — see utils/rateLimits.js for why,
+// including what happens when the value is missing or nonsense. The default is
+// unchanged from what it always was.
 const sensitiveLimiter = require('express-rate-limit')({
   windowMs: 10 * 60 * 1000,
-  max: 60,
+  max: rateLimits.limit('SECURITY_RATE_LIMIT_MAX', 60),
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: 'Too many security requests. Please wait a few minutes and try again.' },
@@ -76,48 +78,18 @@ router.use((req, res, next) => {
 });
 
 // ── Step-up ────────────────────────────────────────────────────────────────
-
-const STEP_UP_TTL_MS = 5 * 60 * 1000;
-const STEP_UP_PURPOSE = 'step-up';
-
-function issueStepUpToken(userId, sid) {
-  return jwt.sign(
-    { sub: String(userId), id: String(userId), sid: String(sid), purpose: STEP_UP_PURPOSE },
-    process.env.JWT_SECRET,
-    { expiresIn: '5m' }
-  );
-}
-
-/**
- * Gate for the mutating security routes.
- *
- * Requires `X-Step-Up` carrying a token minted by POST /security/step-up in
- * the last 5 minutes, for THIS user and THIS session. A step-up earned on one
- * device does not authorise a change from another, and a fresh sign-in
- * invalidates it because the token is bound to the session id.
- */
-function requireStepUp(req, res, next) {
-  const raw = str(req.get('x-step-up') || req.body?.stepUp);
-  if (!raw) {
-    return res.status(401).json({
-      code: 'STEP_UP_REQUIRED',
-      message: 'Please confirm your identity again to change this setting.',
-    });
-  }
-  let claims;
-  try {
-    claims = jwt.verify(raw, process.env.JWT_SECRET, { algorithms: ['HS256'] });
-  } catch {
-    return res.status(401).json({ code: 'STEP_UP_REQUIRED', message: 'Your confirmation expired. Please try again.' });
-  }
-  if (claims.purpose !== STEP_UP_PURPOSE) {
-    return res.status(401).json({ code: 'STEP_UP_REQUIRED', message: 'Your confirmation expired. Please try again.' });
-  }
-  if (String(claims.id) !== String(req.user._id) || String(claims.sid || '') !== String(req.sessionId || '')) {
-    return res.status(401).json({ code: 'STEP_UP_REQUIRED', message: 'Your confirmation expired. Please try again.' });
-  }
-  return next();
-}
+// The gate itself moved to middleware/stepUp.js, shared with the passkey, TOTP
+// and recovery-code routers. Behaviour and response bodies are unchanged: this
+// file used to define it inline, and four copies of a security gate is four
+// places to keep in step. The comment that used to live here now documents the
+// requirements it encodes (session-bound, purpose-pinned, algorithm-pinned,
+// 5-minute life) at the one place they are implemented.
+const { requireStepUp, issue: issueStepUpToken, STEP_UP_TTL_MS } = require('../middleware/stepUp');
+// The TOTP seed is read and written through ONE module, which is what
+// guarantees it is always encrypted at rest. No route touches the raw field.
+const totpSecret = require('../utils/totpSecret');
+const Passkey = require('../models/Passkey');
+const webauthnConfig = require('../utils/webauthn');
 
 // @route   POST /api/security/step-up
 // @desc    Trade the current password (plus a live TOTP when the account uses
@@ -127,7 +99,7 @@ function requireStepUp(req, res, next) {
 // @access  Private
 router.post('/step-up', sensitiveLimiter, async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select('+twoFactorSecret');
+    const user = await User.findById(req.user._id).select(totpSecret.SECRET_FIELDS);
     if (!user) return res.status(401).json({ message: 'Your session is no longer valid. Please sign in again.' });
 
     const emailKey = accountKey('email', user.email);
@@ -146,6 +118,7 @@ router.post('/step-up', sensitiveLimiter, async (req, res) => {
         user: user._id, type: 'password-change-failed', success: false,
         ip: req.ip, userAgent: req.get('user-agent'),
         reason: 'Incorrect password while confirming identity',
+        meta: { authMethod: 'password' },
       });
       return res.status(401).json({ message: 'That password is not correct.' });
     }
@@ -157,12 +130,18 @@ router.post('/step-up', sensitiveLimiter, async (req, res) => {
       if (!otp) {
         return res.status(400).json({ message: 'Enter the 6-digit code from your authenticator app.' });
       }
-      if (!verifyTotpOnce(user.twoFactorSecret, otp, String(user._id))) {
+      // Read through the encryption layer, and migrate a pre-encryption seed
+      // in place: this is the first time an existing account's secret is
+      // touched on a code path that is guaranteed to have the right key.
+      const secret = totpSecret.readSecret(user);
+      if (totpSecret.migrateInPlace(user)) await user.save().catch(() => {});
+      if (!secret || !verifyTotpOnce(secret, otp, String(user._id))) {
         recordOffense(emailKey, lockMeta(req, req.ip));
         await SecurityEvent.write({
           user: user._id, type: 'mfa-failure', success: false,
           ip: req.ip, userAgent: req.get('user-agent'),
           reason: 'Code rejected while confirming identity',
+          meta: { factor: 'totp', outcome: 'mismatch' },
         });
         return res.status(401).json({ message: 'That verification code is not valid.' });
       }
@@ -170,8 +149,16 @@ router.post('/step-up', sensitiveLimiter, async (req, res) => {
         user: user._id, type: 'mfa-success', success: true,
         ip: req.ip, userAgent: req.get('user-agent'),
         reason: 'Identity confirmed with authenticator',
+        meta: { factor: 'totp', mfaVerified: true },
       });
     }
+
+    await SecurityEvent.write({
+      user: user._id, type: 'reauth-succeeded', success: true,
+      ip: req.ip, userAgent: req.get('user-agent'),
+      reason: 'Identity re-confirmed for a security change',
+      meta: { factor: method === 'authenticator' ? 'totp' : 'password', mfaVerified: method === 'authenticator' },
+    });
 
     return res.json({
       stepUp: issueStepUpToken(user._id, req.sessionId),
@@ -189,21 +176,52 @@ router.post('/step-up', sensitiveLimiter, async (req, res) => {
 router.get('/summary', async (req, res) => {
   try {
     const user = await User.findById(req.user._id)
-      .select('twoFactorEnabled twoFactorMethod passwordChangedAt recoveryEmail recoveryEmailVerifiedAt')
+      .select('twoFactorEnabled twoFactorMethod twoFactorSecretEnc passwordChangedAt recoveryEmail recoveryEmailVerifiedAt')
       .lean();
     if (!user) return res.status(404).json({ message: 'Account not found.' });
 
-    const [backupRemaining, trustedCount, activeCount] = await Promise.all([
+    const [backupRemaining, trustedCount, activeCount, passkeys] = await Promise.all([
       BackupCode.countDocuments({ user: user._id, usedAt: null }),
       Session.countDocuments({ user: user._id, rememberHash: { $nin: ['', null] } }),
       Session.countDocuments({ user: user._id, revokedAt: null }),
+      Passkey.find({ user: user._id }).select('name createdAt lastUsedAt deviceLabel deviceType').sort({ createdAt: -1 }).lean(),
     ]);
 
+    // Every number here is READ FROM THE DATABASE, never from a flag the client
+    // sent or a value the browser cached. A security panel that reports a
+    // confident status it did not verify is worse than one that says nothing:
+    // it teaches people to trust a list that can be wrong.
     res.json({
       twoFactor: {
         enabled: user.twoFactorEnabled === true,
-        // Never send the secret. The method is a label, not a credential.
+        // Never send the secret, and never send the envelope either. The method
+        // is a label, not a credential.
         method: user.twoFactorEnabled ? (user.twoFactorMethod || 'authenticator') : null,
+        // Whether a seed exists at all, which is not the same as "enabled": a
+        // half-finished setup has a seed and no active factor.
+        authenticatorPaired: Boolean(user.twoFactorSecretEnc),
+      },
+      passkeys: {
+        count: passkeys.length,
+        // The strongest factor the account actually has. Computed server-side
+        // from real state, so the badge cannot disagree with the list below it.
+        strongestMethod: passkeys.length > 0
+          ? 'passkey'
+          : (user.twoFactorEnabled ? (user.twoFactorMethod || 'authenticator') : 'password'),
+        items: passkeys.map((p) => ({
+          id: String(p._id),
+          name: p.name || 'Passkey',
+          createdAt: p.createdAt,
+          lastUsedAt: p.lastUsedAt || null,
+          device: p.deviceLabel || 'Unknown device',
+          deviceType: p.deviceType,
+        })),
+      },
+      passkeySignIn: {
+        // Whether the deployment is configured for WebAuthn at all. The UI uses
+        // this to avoid offering a button that cannot work; it is a capability
+        // report, never an authorisation input.
+        available: webauthnConfig.isConfigured(),
       },
       passwordChangedAt: user.passwordChangedAt || null,
       recoveryEmail: {
@@ -235,7 +253,7 @@ router.get('/summary', async (req, res) => {
 router.get('/devices', async (req, res) => {
   try {
     const sessions = await Session.find({ user: req.user._id, revokedAt: null })
-      .select('_id deviceLabel platform ip location createdAt lastActivityAt rememberHash trustedAt')
+      .select('_id deviceLabel platform ip location createdAt lastActivityAt rememberHash trustedAt authMethod mfaVerified')
       .sort({ lastActivityAt: -1 })
       .lean();
 
@@ -251,6 +269,11 @@ router.get('/devices', async (req, res) => {
       // "Trusted" only because it holds a saved-login credential.
       isTrusted: !!s.rememberHash,
       trustedAt: s.trustedAt || null,
+      // How this session was actually opened. A reviewer looking at "is this
+      // me?" needs it: a session opened with a recovery code is a very
+      // different thing from one opened with a passkey.
+      authMethod: s.authMethod || 'password',
+      mfaVerified: s.mfaVerified === true,
     }));
 
     res.json({
@@ -373,6 +396,7 @@ router.post('/backup-codes/generate', sensitiveLimiter, requireStepUp, async (re
       user: user._id, type: 'backup-codes-generated', success: true,
       ip: req.ip, userAgent: req.get('user-agent'),
       reason: `${codes.length} recovery codes issued`,
+      meta: { factor: 'backup-code', outcome: `issued-${codes.length}` },
     });
     try {
       const UserNotification = require('../models/UserNotification');
@@ -384,6 +408,7 @@ router.post('/backup-codes/generate', sensitiveLimiter, requireStepUp, async (re
 
     res.json({
       codes,
+      count: codes.length,
       message: 'Save these codes somewhere safe. They are shown once and cannot be retrieved later.',
     });
   } catch (error) {

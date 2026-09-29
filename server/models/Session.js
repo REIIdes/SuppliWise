@@ -11,14 +11,18 @@ const mongoose = require('mongoose');
 // record must exist, belong to the authenticated account, be the account's
 // current active session, and not be revoked.
 //
-// EXPIRY. A session ends when it is replaced by a newer sign-in, when it is
-// revoked at sign-out, or after 30 days WITHOUT ACTIVITY (the sliding window in
-// utils/userSession.js). That last one exists because a user JWT carries no
-// `exp`, so without it a leaked token would be valid forever — and a token
-// thief controls neither sign-in nor sign-out.
+// EXPIRY. A session ends when it is REPLACED by a newer sign-in, when it is
+// revoked (sign-out, password reset, "sign out of all other devices"), or when
+// the account is disabled — and on no other basis. It does not expire because
+// of the clock: a user JWT carries no `exp` and no idle window is applied.
 //
-// The window is DERIVED from `lastActivityAt` at verification time rather than
-// stored as a moving deadline, so there is no second copy to fall out of step.
+// A 30-day sliding idle window used to sit here. It is deliberately gone — a
+// member who opened the app monthly was signed out monthly with no way to opt
+// out, and the token-leak exposure it addressed is barely narrower at 30 days
+// than at 31. Revocation is the authority, it is immediate, and it is published
+// to the validation cache so it takes effect on the next request rather than
+// the next cache expiry. See utils/userSession.js for the full argument and for
+// the things that still bound a session.
 const sessionSchema = new mongoose.Schema(
   {
     // The session id embedded in the JWT as the `sid` claim.
@@ -51,12 +55,15 @@ const sessionSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
-    // When this session was last genuinely used. The sliding idle window is
-    // derived from this at verification time — see the header note.
+    // When this session was last genuinely used. NOTHING reads this to make an
+    // authorisation decision — a user session has no time-based expiry. It is
+    // display data: it is what the "Signed-in devices" list sorts by and what
+    // a member reads as "last active", and it is the input to a stale-session
+    // sweep that an operator can run if they want one.
     //
     // Only RECENT activity counts (a request's own age is checked, so a
-    // replayed old request cannot hold the session open), and the write is
-    // throttled, so a busy member is not one update per API call.
+    // replayed old request cannot keep the label sliding forward), and the write
+    // is throttled, so a busy member is not one update per API call.
     lastActivityAt: {
       type: Date,
       default: Date.now,
@@ -92,9 +99,44 @@ const sessionSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
-    // An OPTIONAL hard cap, consulted BEFORE the sliding window so a future
-    // policy can bound a particular session type without the window overriding
-    // it. null = no hard cap, and the sliding idle window applies.
+    // Which credential actually opened this session, recorded at sign-in:
+    // 'password' | 'passkey' | 'totp' | 'backup-code' | 'email-otp' |
+    // 'remember'.
+    //
+    // Display and forensics, never authorisation. Its value is that "signed in
+    // 4 hours ago with a passkey" and "...with a recovery code" are very
+    // different events, and before this existed the security page could only
+    // report that a session existed.
+    authMethod: {
+      type: String,
+      default: '',
+      maxlength: 32,
+    },
+    // Whether a second factor was verified for THIS session. A passkey
+    // assertion with user verification counts as two factors (something you
+    // have plus something you are), and is recorded as such, so a reviewer can
+    // tell a 2FA session from a bare-password one.
+    mfaVerified: {
+      type: Boolean,
+      default: false,
+    },
+    // The passkey this session was opened with, for the audit trail. Deleting
+    // the passkey does NOT retroactively end the session: revocation happens
+    // through the ordinary session paths, and a passkey is a proof of
+    // possession rather than a lease on the session it opened.
+    passkeyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Passkey',
+      default: null,
+    },
+    // An OPTIONAL ABSOLUTE cap, honoured by verifyUserSession before anything
+    // else. null (the default, and what the application always writes) means the
+    // session has no time-based expiry and ends only through revocation.
+    //
+    // It is kept as a field rather than deleted so that "no expiry" is a
+    // configuration someone chose, not merely the absence of a mechanism — an
+    // operator can set a hard deadline for one account or one cohort without a
+    // code change, and `lastActivityAt` gives them the age to compute it from.
     expiresAt: {
       type: Date,
       default: null,
@@ -112,5 +154,11 @@ const sessionSchema = new mongoose.Schema(
 
 // "Sessions for this account, newest first" (admin/security views, revocation).
 sessionSchema.index({ user: 1, createdAt: -1 });
+// "Live sessions for this account" — every device list and the revoke-other-
+// devices sweep filter on { user, revokedAt }, and there is no index for that
+// without it. On an account with a long history of sign-ins this is the
+// difference between a collection scan and a bounded read on a route the user
+// hits every time they open their security page.
+sessionSchema.index({ user: 1, revokedAt: 1 });
 
 module.exports = mongoose.model('Session', sessionSchema);

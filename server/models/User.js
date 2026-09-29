@@ -123,10 +123,43 @@ const userSchema = new mongoose.Schema(
       enum: ['authenticator', 'email'],
       default: 'authenticator',
     },
+    // ── TOTP seed: encrypted, with a legacy plaintext field ───────────────
+    // A TOTP seed cannot be hashed (the server must run HMAC over it to verify
+    // a code), so it is ENCRYPTED at rest with AES-256-GCM under a key held
+    // outside the database — see utils/secretBox.js. Read and write go through
+    // utils/totpSecret.js and nowhere else.
+    //
+    // `twoFactorSecret` below is the pre-encryption field. It is still READ
+    // (and upgraded in place on first use) so no account loses its second
+    // factor during the transition, but nothing writes a new seed there and it
+    // is cleared the moment an account touches its authenticator.
+    twoFactorSecretEnc: {
+      type: String,
+      default: '',
+      select: false,
+    },
+    // LEGACY: a raw base32 seed written before encryption existed. Empty on
+    // every account that has been migrated. Never repopulated.
     twoFactorSecret: {
       type: String,
       default: '',
       select: false,
+    },
+    // ── WebAuthn / passkey user handle ─────────────────────────────────────
+    // The opaque, stable `user.id` sent to the authenticator at registration.
+    //
+    // It is a random 32-byte value, NOT the account id and NOT the email.
+    // WebAuthn requires the handle to be a stable, unguessable byte string that
+    // never changes for an account; using the email would both leak the
+    // address to every authenticator and platform involved, and give anyone
+    // holding a passkey a ready-made account-enumeration oracle. Generated
+    // lazily on first passkey registration and immutable afterwards — changing
+    // it would orphan every passkey already on the account.
+    webauthnUserId: {
+      type: String,
+      default: '',
+      select: false,
+      maxlength: 128,
     },
     subscriptionActive: {
       type: Boolean,

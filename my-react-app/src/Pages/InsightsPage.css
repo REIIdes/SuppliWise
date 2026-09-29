@@ -1,65 +1,109 @@
-/* Insights Wrapper */
+/* ── Shell ─────────────────────────────────────────────────────────────
+   The shared mesh backdrop. `fixed` + `overflow-x: hidden` so the colour
+   blobs read as light falling across the page rather than as scrollable
+   content, and so they can never themselves open a horizontal scrollbar. */
 .insights-wrapper {
   min-height: 100vh;
-  background: linear-gradient(135deg, #f0faf0 0%, #e8f5e9 100%);
+  position: relative;
+  overflow-x: hidden;
+  color: var(--sw-ink, #0d2b23);
+  background: var(--sw-mesh, linear-gradient(168deg, #eefcf5, #f5f0ff));
+  background-attachment: fixed;
 }
 
-/* Container */
 .insights-container {
+  position: relative;
+  z-index: 1;
   max-width: 1200px;
   margin: 0 auto;
-  padding: 32px 24px;
+  padding: 36px 24px 64px;
 }
 
-/* Header */
+/* ── Header ──────────────────────────────────────────────────────────── */
+
 .insights-header {
-  margin-bottom: 32px;
+  margin-bottom: 26px;
+  animation: sw-rise 0.5s var(--sw-ease, cubic-bezier(0.16, 1, 0.3, 1)) both;
 }
 
 .insights-title {
-  font-size: 32px;
-  font-weight: 700;
-  color: #1f2937;
-  margin: 0 0 8px 0;
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.14;
+  color: var(--sw-emerald-deep, #059669);
+  margin: 0 0 8px;
+  background: var(--sw-grad-spectrum, linear-gradient(92deg, #059669, #06b6d4 45%, #6366f1));
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .insights-title { color: transparent; }
 }
 
 .insights-subtitle {
-  font-size: 16px;
-  color: #6b7280;
+  font-size: 15.5px;
+  line-height: 1.55;
+  color: var(--sw-ink-soft, #58736a);
   margin: 0;
+  max-width: 64ch;
 }
 
-/* Tabs */
+/* ── Tabs ──────────────────────────────────────────────────────────────
+   The shared segmented pill. These were four labels on a flat #e5e7eb strip
+   where the selected tab was distinguished only by a white fill and a 2px
+   shadow — two greys plus a shadow is a very quiet difference to carry "you
+   are looking at this one".
+
+   The track is `width: fit-content` and scrolls rather than wrapping. It used
+   to stretch the full page width, so a row of four short labels read as a
+   page section rather than as a control. */
 .insights-tabs {
   display: flex;
-  gap: 12px;
-  margin-bottom: 32px;
-  background: #e5e7eb;
-  padding: 6px;
-  border-radius: 12px;
-  flex-wrap: wrap;
+  gap: 4px;
+  padding: 5px;
+  margin-bottom: 26px;
+  width: fit-content;
+  max-width: 100%;
+  border-radius: var(--sw-radius-pill, 999px);
+  background: rgba(255, 255, 255, 0.76);
+  border: 1px solid var(--sw-line, #e2f1ea);
+  box-shadow: var(--sw-shadow-sm, 0 1px 2px rgba(9, 78, 58, 0.06));
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+.insights-tabs::-webkit-scrollbar { display: none; }
 
 .insights-tab {
-  padding: 12px 24px;
+  flex: 0 0 auto;
+  padding: 9px 20px;
   background: transparent;
   border: none;
-  border-radius: 8px;
-  font-size: 15px;
+  border-radius: var(--sw-radius-pill, 999px);
+  font: inherit;
+  font-size: 14px;
   font-weight: 600;
-  color: #6b7280;
+  color: var(--sw-ink-soft, #58736a);
+  white-space: nowrap;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: color 0.22s ease, background 0.22s ease, box-shadow 0.22s ease;
 }
 
-.insights-tab:hover {
-  color: #374151;
+.insights-tab:hover:not(.active) {
+  color: var(--sw-emerald-deep, #059669);
+  background: rgba(16, 185, 129, 0.10);
 }
 
 .insights-tab.active {
-  background: white;
-  color: #1f2937;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  background: var(--sw-grad-brand, linear-gradient(135deg, #10b981, #0891b2));
+  color: #fff;
+  box-shadow: 0 8px 18px -10px rgba(13, 148, 136, 0.9);
+}
+
+.insights-tab:focus-visible {
+  outline: 3px solid var(--sw-teal, #0d9488);
+  outline-offset: 2px;
 }
 
 /* Content */
@@ -149,7 +193,7 @@
   gap: 16px;
   padding: 24px;
   background: white;
-  border: 2px solid #86efac;
+  border: 1px solid var(--sw-line, #e2f1ea);
   border-radius: 16px;
   transition: all 0.3s ease;
 }
@@ -189,19 +233,27 @@
   margin: 0;
 }
 
-/* Insights Section */
+/* ── Panel ─────────────────────────────────────────────────────────────
+   The 2px #86efac outline became a 1px hairline plus a lift. At 2px that
+   lime reads as a debug outline, and a page built entirely from them has no
+   hierarchy left — the section and the content inside it carried the same
+   visual weight. */
 .insights-section {
-  background: white;
-  border: 2px solid #86efac;
-  border-radius: 16px;
+  position: relative;
+  background: var(--sw-surface, #fff);
+  border: 1px solid var(--sw-line, #e2f1ea);
+  border-radius: var(--sw-radius-xl, 26px);
   padding: 24px;
+  box-shadow: var(--sw-shadow-md, 0 10px 28px -14px rgba(9, 78, 58, 0.26));
+  animation: sw-rise 0.5s var(--sw-ease, cubic-bezier(0.16, 1, 0.3, 1)) both;
 }
 
 .insights-section-title {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 700;
-  color: #1f2937;
-  margin: 0 0 20px 0;
+  letter-spacing: -0.015em;
+  color: var(--sw-ink, #0d2b23);
+  margin: 0 0 18px;
 }
 
 /* Trends Chart */
@@ -323,7 +375,7 @@
   gap: 16px;
   padding: 20px;
   background: white;
-  border: 2px solid #86efac;
+  border: 1px solid var(--sw-line, #e2f1ea);
   border-radius: 16px;
   transition: all 0.3s ease;
 }
@@ -472,7 +524,7 @@
   gap: 20px;
   padding: 24px;
   background: linear-gradient(135deg, #f0fdf4 0%, #d1fae5 100%);
-  border: 2px solid #86efac;
+  border: 1px solid var(--sw-line, #e2f1ea);
   border-radius: 16px;
   transition: all 0.3s ease;
 }
@@ -518,12 +570,23 @@
 
 /* Current Phase Card */
 /* Current Phase Card */
+/* The current phase is the one panel on this page about NOW, so it gets the
+   strongest surface: a violet wash that separates it from the neutral panels
+   around it. Previously it was the same green as everything else, with a
+   2px lime outline — so the thing the member most wants to see had the
+   weakest claim on attention. */
 .current-phase-card {
-  padding: 28px;
-  background: linear-gradient(135deg, #f0fdf4 0%, #d1fae5 100%);
-  border: 2px solid #86efac;
-  border-radius: 16px;
-  transition: all 0.3s ease;
+  padding: 26px;
+  border-radius: var(--sw-radius-lg, 20px);
+  border: 1px solid #ddd6fe;
+  background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 55%, #e0f2fe 100%);
+  box-shadow: 0 10px 30px -18px rgba(124, 58, 237, 0.45);
+  transition: box-shadow var(--sw-dur, 0.24s) ease, transform var(--sw-dur, 0.24s) ease;
+}
+
+.current-phase-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 38px -20px rgba(124, 58, 237, 0.5);
 }
 
 .current-phase-card:hover {
@@ -563,9 +626,12 @@
 }
 
 .phase-title {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
-  color: #065f46;
+  letter-spacing: -0.015em;
+  /* Violet to match the card it sits on. This was #065f46 — dark emerald on a
+     violet wash, which read as a colour error rather than as a heading. */
+  color: #4c1d95;
   margin: 0 0 12px 0;
 }
 
@@ -574,8 +640,8 @@
 }
 
 .phase-focus {
-  font-size: 15px;
-  color: #047857;
+  font-size: 14.5px;
+  color: #5b21b6;
   line-height: 1.6;
   margin: 0 0 20px 0;
 }
@@ -591,12 +657,12 @@
 
 .phase-steps h5,
 .phase-changes h5 {
-  font-size: 14px;
-  font-weight: 700;
-  color: #065f46;
+  font-size: 11.5px;
+  font-weight: 800;
+  color: #7c3aed;
   margin: 0 0 12px 0;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.08em;
 }
 
 .current-phase-card.ai-enhanced .phase-steps h5,
@@ -619,7 +685,7 @@
   padding-left: 28px;
   position: relative;
   font-size: 14px;
-  color: #047857;
+  color: #4c1d95;
   line-height: 1.6;
 }
 
@@ -633,11 +699,17 @@
   content: '✓';
   position: absolute;
   left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 20px;
   height: 20px;
-  background: #10b981;
+  /* The tick badge follows the card: violet here, where it was emerald. */
+  background: #7c3aed;
   color: white;
   border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1173,60 +1245,92 @@
 }
 
 /* Overview stat cards + error banner (wired to fetched stats) */
-.overview-stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
-.overview-stat-card{display:flex;align-items:center;gap:12px;padding:14px;border-radius:12px;background:#f8fafc;border:1px solid #e2e8f0}
-.overview-stat-icon{display:flex;align-items:center;justify-content:center;width:48px;height:48px;border-radius:12px;background:#10b981;flex-shrink:0}
-.overview-stat-body{display:flex;flex-direction:column}
-.overview-stat-value{font-weight:700;font-size:1.1rem;color:#111827}
-.overview-stat-label{font-size:.8rem;color:#6b7280}
+/* ── At a Glance tiles ──────────────────────────────────────────────────
+   Four identical green squares in a row carried the only distinction between
+   "longest streak" and "adherence rate": the `color` field the page already
+   computes per stat was never read by the CSS at all, because the icon
+   background was hard-coded to #10b981. Each tile now brings its own tone
+   (see statTone() in the JSX), so the four are separable at a glance. */
+.overview-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+}
+
+.overview-stat-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border-radius: var(--sw-radius-lg, 20px);
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border: 1px solid var(--sw-line, #e2f1ea);
+  box-shadow: var(--sw-shadow-sm, 0 1px 2px rgba(9, 78, 58, 0.06));
+  transition: transform var(--sw-dur, 0.24s) var(--sw-ease, ease),
+    box-shadow var(--sw-dur, 0.24s) ease, border-color var(--sw-dur, 0.24s) ease;
+  animation: sw-rise 0.45s var(--sw-ease, ease) both;
+}
+
+.overview-stat-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--sw-line-strong, #cbe7da);
+  box-shadow: var(--sw-shadow-md, 0 10px 28px -14px rgba(9, 78, 58, 0.26));
+}
+
+.overview-stat-icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  border-radius: 14px;
+  color: #fff;
+  background: var(--stat-accent, var(--sw-grad-brand, linear-gradient(135deg, #10b981, #0891b2)));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    0 8px 16px -10px rgba(9, 78, 58, 0.6);
+}
+
+.overview-stat-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.overview-stat-value {
+  font-weight: 800;
+  font-size: 19px;
+  letter-spacing: -0.02em;
+  color: var(--sw-ink, #0d2b23);
+  line-height: 1.15;
+}
+
+.overview-stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--sw-ink-faint, #8aa39a);
+}
+
+/* Staggered so the four land in sequence instead of as one block. */
+.overview-stat-card:nth-child(1) { animation-delay: 0.04s; }
+.overview-stat-card:nth-child(2) { animation-delay: 0.10s; }
+.overview-stat-card:nth-child(3) { animation-delay: 0.16s; }
+.overview-stat-card:nth-child(4) { animation-delay: 0.22s; }
 .insights-error{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:10px;padding:10px 14px;margin-bottom:14px}
 .insights-error button{background:#b91c1c;color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer}
 
-/* ════════════════════════════════════════════════════════════════════
-   VIBRANT THEME REFRESH
-   ════════════════════════════════════════════════════════════════════ */
-.insights-wrapper {
-  background:
-    radial-gradient(850px 320px at 6% -70px, rgba(16, 185, 129, 0.15), transparent 60%),
-    radial-gradient(720px 300px at 96% 0%, rgba(168, 85, 247, 0.12), transparent 60%) !important;
-}
-.insights-title {
-  font-weight: 800 !important;
-  letter-spacing: -0.02em !important;
-  background: linear-gradient(92deg, #065f46 10%, #059669 45%, #7c3aed 90%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent !important;
-}
-.insights-tab {
-  border-radius: 999px !important;
-  transition: all 0.2s ease !important;
-}
-.insights-tab:hover { transform: translateY(-2px); }
-.insights-tab.active {
-  background: linear-gradient(135deg, #10b981, #059669) !important;
-  box-shadow: 0 8px 20px rgba(16, 185, 129, 0.32) !important;
-  transform: translateY(-1px);
-}
-.overview-stat-card {
-  border-radius: 16px !important;
-  box-shadow: 0 4px 14px rgba(6, 95, 70, 0.07);
-  transition: transform 0.2s ease, box-shadow 0.2s ease !important;
-  animation: insights-rise 0.4s ease both;
-}
-.overview-stat-card:hover {
-  transform: translateY(-4px) !important;
-  box-shadow: 0 12px 26px rgba(6, 95, 70, 0.13) !important;
-}
-@keyframes insights-rise {
-  from { opacity: 0; transform: translateY(14px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-.current-phase-card {
-  border-radius: 18px !important;
-  box-shadow: 0 8px 24px rgba(124, 58, 237, 0.10);
-}
-@media (prefers-reduced-motion: reduce) {
-  .overview-stat-card { animation: none; }
-  .insights-tab, .overview-stat-card { transition: none; }
-}
+/* ── At a Glance tones ────────────────────────────────────────────────────
+   The page already stored a `color` per stat; these are the modifiers
+   statTone() in the JSX maps it onto. Declared here rather than in theme.css
+   because they exist only for this one component, and the gradient itself is
+   handed to .overview-stat-icon through --stat-accent so the icon box and
+   anything else that reads the tone stay in step. */
+.stat-tone--emerald { --stat-accent: linear-gradient(140deg, #34d399, #059669); }
+.stat-tone--cyan    { --stat-accent: linear-gradient(140deg, #38bdf8, #0891b2); }
+.stat-tone--teal    { --stat-accent: linear-gradient(140deg, #2dd4bf, #0d9488); }
+.stat-tone--violet  { --stat-accent: linear-gradient(140deg, #c084fc, #7c3aed); }
+.stat-tone--indigo  { --stat-accent: linear-gradient(140deg, #818cf8, #4f46e5); }
+.stat-tone--rose    { --stat-accent: linear-gradient(140deg, #fb7185, #e11d48); }
+.stat-tone--amber   { --stat-accent: linear-gradient(140deg, #fbbf24, #f97316); }

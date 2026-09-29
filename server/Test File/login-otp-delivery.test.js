@@ -42,6 +42,11 @@ const User = require('../models/User');
 const emailUtils = require('../utils/email');
 const sessionUtils = require('../utils/sessions');
 const { stubQuery } = require('./stubQuery');
+// /login now mints an MFA transaction and, for accounts with a second factor,
+// counts passkeys and unused recovery codes. Each is a real round-trip, so a
+// suite that stubs only User leaves them buffering against a connection that
+// does not exist and the route answers 500 after a 10s timeout.
+const { stubMfaModels } = require('./stubMfaModels');
 // The password-reset flow moved to an emailed link with its own router and
 // harness; the two legacy aliases on this router are still covered below.
 const { withResetRouter } = require('./withResetRouter');
@@ -98,6 +103,21 @@ async function withAuthRouter({ deliver, findOne }, fn) {
   // stubQuery, not a bare object: /login projects the fields it needs with
   // `.select(...)`, and a plain object is not chainable. See stubQuery.js.
   User.findOne = () => stubQuery(() => (findOne ? findOne() : stubUser()));
+  // The second step of sign-in touches three more models; see stubMfaModels.js.
+  //
+  // A live transaction is configured because `/verify-login-otp` accepts a bare
+  // `userId` only while one exists for that account — which is the entire point
+  // of the transaction: a second factor on its own must not be a sign-in. The
+  // token below is what a test hands the route in place of the one a real
+  // /login response carries. mfa-transaction.test.js covers the transaction
+  // itself properly, against a real database.
+  // A valid-format token: the route checks the shape before it looks anything
+  // up, and a short string fails that check with the same "expired" answer a
+  // real expired token gets.
+  const MFA_TRANSACTION = 'test-only-transaction-aaaaaaaaaaaaaaaaaaaaaaaa';
+  const restoreMfaModels = stubMfaModels({
+    transaction: { _id: 'tx1', user: USER_ID, methods: ['email-otp', 'totp', 'backup-code'] },
+  });
   emailUtils.sendOtpEmail = async (to, otp, type) => {
     sentCodes.push({ to, otp, type });
     return deliver ? deliver(to, otp, type) : true;
@@ -139,7 +159,7 @@ async function withAuthRouter({ deliver, findOne }, fn) {
   };
 
   try {
-    return await fn({ call, sentCodes, skipCooldown });
+    return await fn({ call, sentCodes, skipCooldown, mfaTransaction: MFA_TRANSACTION });
   } finally {
     await new Promise((resolve) => server.close(resolve));
     User.findOne = originals.findOne;
@@ -226,7 +246,7 @@ test('an address-change code that cannot be delivered is reported too', async ()
 // ── 2. The happy path is untouched ─────────────────────────────────────────
 
 test('a delivered code still produces a normal sign-in', async () => {
-  await withAuthRouter({ deliver: () => true }, async ({ call, sentCodes }) => {
+  await withAuthRouter({ deliver: () => true }, async ({ call, sentCodes, mfaTransaction }) => {
     const login = await call('/login', { email: EMAIL, password: PASSWORD });
 
     assert.equal(login.status, 200);
@@ -237,7 +257,7 @@ test('a delivered code still produces a normal sign-in', async () => {
 
     // The user reads the code out of their inbox and submits it.
     const code = sentCodes[sentCodes.length - 1].otp;
-    const verify = await call('/verify-login-otp', { userId: USER_ID, otp: code });
+    const verify = await call('/verify-login-otp', { userId: USER_ID, mfaTransaction, otp: code });
 
     assert.equal(verify.status, 200, `the delivered code must verify: ${JSON.stringify(verify.body)}`);
     assert.ok(verify.body.token, 'a delivered code must produce a session token');
@@ -248,7 +268,7 @@ test('a delivered code still produces a normal sign-in', async () => {
 // ── 3. A failed delivery leaves nothing behind ─────────────────────────────
 
 test('a failed delivery leaves no code behind that a wrong guess could strike', async () => {
-  await withAuthRouter({ deliver: () => false }, async ({ call, sentCodes }) => {
+  await withAuthRouter({ deliver: () => false }, async ({ call, sentCodes, mfaTransaction }) => {
     await call('/login', { email: EMAIL, password: PASSWORD });
     const code = sentCodes[sentCodes.length - 1].otp;
 
@@ -257,7 +277,7 @@ test('a failed delivery leaves no code behind that a wrong guess could strike', 
     // was never actually given.
     for (let i = 0; i < 6; i += 1) {
       // eslint-disable-next-line no-await-in-loop
-      const attempt = await call('/verify-login-otp', { userId: USER_ID, otp: '000000' });
+      const attempt = await call('/verify-login-otp', { userId: USER_ID, mfaTransaction, otp: '000000' });
       assert.notEqual(attempt.status, 429, `strike ${i + 1} escalated the lockout ladder for a code that was never issued`);
     }
 
@@ -285,7 +305,7 @@ test('a failed delivery releases the cooldown, so the user can retry immediately
 
 test('a failed "send again" keeps the code the user is already working from', async () => {
   let deliver = true;
-  await withAuthRouter({ deliver: () => deliver }, async ({ call, sentCodes, skipCooldown }) => {
+  await withAuthRouter({ deliver: () => deliver }, async ({ call, sentCodes, skipCooldown, mfaTransaction }) => {
     const login = await call('/login', { email: EMAIL, password: PASSWORD });
     assert.equal(login.status, 200);
     const originalCode = sentCodes[sentCodes.length - 1].otp;
@@ -300,7 +320,7 @@ test('a failed "send again" keeps the code the user is already working from', as
     // This is the bug. The first code was still valid and is the one the user
     // has in front of them; deleting it on a failed resend stranded them with
     // a code box and no way forward.
-    const verify = await call('/verify-login-otp', { userId: USER_ID, otp: originalCode });
+    const verify = await call('/verify-login-otp', { userId: USER_ID, mfaTransaction, otp: originalCode });
     assert.equal(
       verify.status, 200,
       `the original code must survive a failed resend, got ${verify.status} ${JSON.stringify(verify.body)}`

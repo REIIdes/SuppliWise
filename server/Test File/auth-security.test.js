@@ -5,6 +5,9 @@ const express = require('express');
 const User = require('../models/User');
 const emailUtils = require('../utils/email');
 const { stubQuery } = require('./stubQuery');
+// /login mints an MFA transaction, so this double is not optional: without it
+// the route buffers against a connection that does not exist and answers 503.
+const { stubMfaModels } = require('./stubMfaModels');
 
 function buildApp() {
   delete require.cache[require.resolve('../routes/auth')];
@@ -38,6 +41,8 @@ test('login route does not leak OTPs in the JSON response', async () => {
   });
   emailUtils.sendOtpEmail = async () => true;
 
+  // /login mints an MFA transaction; see stubMfaModels.js.
+  const restoreMfaModels = stubMfaModels();
   const app = buildApp();
   const server = app.listen(0);
 
@@ -59,5 +64,6 @@ test('login route does not leak OTPs in the JSON response', async () => {
     User.findOne = originalFindOne;
     emailUtils.sendOtpEmail = originalSendOtpEmail;
     process.env.NODE_ENV = originalNodeEnv;
+    restoreMfaModels();
   }
 });

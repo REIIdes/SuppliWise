@@ -321,7 +321,16 @@ router.get('/history', protect, async (req, res) => {
     // Lightweight mode for the recommendations page — only the fields it reads,
     // instead of the full ~500 KB aiResults blob per assessment.
     const light = req.query.fields === 'recommendations';
-    const projection = light ? 'aiResults.recommendations createdAt' : null;
+    // An OBJECT, and it has to be one. An aggregation `$project` takes a
+    // specification document; a space-delimited string is a *find()* projection
+    // and Mongo rejects it outright with "$project specification must be an
+    // object". That 500 is what made the Recommendations page show "complete a
+    // health assessment" to members who already had one — the lightweight fetch
+    // it uses to avoid pulling the ~500 KB aiResults blob per assessment was
+    // failing, the client swallowed it and rendered its empty state.
+    const projection = light
+      ? { createdAt: 1, 'aiResults.recommendations': 1 }
+      : null;
 
     // Single aggregation pipeline: fetch paginated results + total count in
     // one round-trip instead of two separate queries (was a bottleneck for

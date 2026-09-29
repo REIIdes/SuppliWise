@@ -45,6 +45,41 @@ const ADMIN_IDLE_LIMIT_SECONDS = 10 * 60;
 const ADMIN_WARNING_SECONDS = 60;
 const ADMIN_REFRESH_INTERVAL_MS = 10 * 1000;
 
+// The TOKEN's lifetime, which is a different thing from the idle window, and is
+// used for a different purpose.
+//
+// The admin JWT is deliberately short-lived (server/utils/adminSession.js,
+// ADMIN_TOKEN_LIFETIME) so a token left on a shared machine dies on its own.
+// But it was never re-issued except on mount and from the "Stay signed in"
+// button — and that button only appears once the IDLE countdown runs out. An
+// administrator working continuously never saw it, so nothing renewed the
+// token and at its 15-minute `exp` they were signed out mid-task, with no
+// warning at all. That was not an edge case, it was what every admin who
+// worked for a quarter of an hour experienced.
+//
+// Like the idle window above, the server is authoritative: it reports
+// `expiresInSeconds` on every /auth/admin-refresh reply and this is only the
+// value used until the first one arrives. A test asserts the two agree.
+const ADMIN_TOKEN_LIFETIME_SECONDS = 15 * 60;
+
+// Renew once this much of the token's life has elapsed, not at the end. Two
+// attempts before expiry means a single failed request — a dropped connection, a
+// sleeping laptop, a deploy — costs a retry rather than a logout.
+const ADMIN_TOKEN_RENEWAL_RATIO = 0.6;
+
+// How often the keepalive re-checks. A poll rather than one long setTimeout,
+// deliberately: browsers throttle timers in background tabs to roughly once a
+// minute, so a 15-minute setTimeout can fire long after it was due. A short
+// poll cannot be throttled into a stale token — when the tab wakes, the first
+// tick sees the real clock and renews if it is behind.
+const ADMIN_TOKEN_CHECK_INTERVAL_MS = 15 * 1000;
+
+// How often real user input is reported to the server, so its idle clock and
+// the countdown on screen cannot drift apart. Once a minute is often enough to
+// keep a ten-minute window honest and rare enough to be free — see the beacon in
+// the activity effect for why it exists at all.
+const ADMIN_ACTIVITY_BEACON_MS = 60 * 1000;
+
 // ── Subscription status (mirrors server resolveSubscription) ──────────────
 // The admin grid used to read the RAW subscriptionActive flag, so a user whose
 // subscriptionExpiresAt had already passed still showed "Subscribed ✓" while
@@ -506,6 +541,15 @@ function AdminDashboard() {
     idleDeadlineRef.current = Date.now() + seconds * 1000;
   }, []);
 
+  // When the current token dies, and how long it lives. Seeded to 0 rather than
+  // `Date.now() + …` because calling the clock during render is impure, and this
+  // component is deliberately strict about that (the idle deadline above is
+  // initialised in an effect for the same reason). 0 means "unknown", which the
+  // keepalive reads as "renew now" — the right default when the expiry of the
+  // token in hand is genuinely not known.
+  const tokenExpiresAtRef = useRef(0);
+  const tokenLifetimeRef = useRef(ADMIN_TOKEN_LIFETIME_SECONDS);
+
   const request = useCallback(async (path, options = {}) => {
     const { background = false, ...fetchOptions } = options;
     const response = await fetch(`${BASE_URL}/admin${path}`, { ...fetchOptions, headers: { Authorization: `Bearer ${localStorage.getItem('adminToken')}`, ...(background ? { 'X-Admin-Background': 'true' } : {}), ...fetchOptions.headers } });
@@ -928,21 +972,63 @@ function AdminDashboard() {
     signOutRef.current();
   }, []);
 
+  /**
+   * The one call to /auth/admin-refresh, shared by all three of its callers:
+   * arriving on the dashboard, pressing "Stay signed in", and the automatic
+   * keepalive. They previously each had their own `fetch`, which is how the
+   * first two learned the server's policy while the third did not exist — so a
+   * token could be minted and then thrown away unread.
+   *
+   * @param {boolean} asActivity  true when the call itself IS the evidence of
+   *   activity (arriving, or pressing "Stay signed in"). false for the automatic
+   *   keepalive, which must renew the TOKEN without sliding the IDLE window —
+   *   otherwise the timer below would hold every admin session open forever and
+   *   the ten-minute timeout would stop existing.
+   * @returns {Promise<{ok: boolean, data?: object}>} the reply, so the caller
+   *   can adopt the server's idle window from it
+   */
+  const syncAdminSession = useCallback(async (asActivity) => {
+    const response = await fetch(`${BASE_URL}/auth/admin-refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('adminToken')}` },
+      ...(asActivity ? {} : { body: JSON.stringify({ renew: true }) }),
+    });
+    const data = await parseJSON(response);
+    if (!response.ok) {
+      // A 401 is the server saying the session is gone — idle-expired, replaced,
+      // or the account disabled. That is a real sign-out and is handled here so
+      // the keepalive cannot sit in a loop against a dead session. Anything else
+      // (a network blip, a 5xx during a deploy) is deliberately NOT a sign-out:
+      // throwing away a working token because one request failed is exactly how
+      // an admin ends up logged out during a restart.
+      if (response.status === 401) {
+        signOutRef.current();
+        return { ok: false };
+      }
+      throw new Error(data?.message || 'Session refresh failed.');
+    }
+    if (data?.token) {
+      localStorage.setItem('adminToken', data.token);
+      // Schedule the next renewal off the server's own number, not the
+      // compile-time fallback, so a change to the lifetime does not silently
+      // leave the client renewing on the old schedule.
+      if (Number.isFinite(data.expiresInSeconds) && data.expiresInSeconds > 0) {
+        tokenLifetimeRef.current = data.expiresInSeconds;
+      }
+      tokenExpiresAtRef.current = Date.now() + tokenLifetimeRef.current * 1000;
+    }
+    return { ok: true, data };
+  }, []);
+
   // "Stay signed in" hits the server first so the expiry is a visible refresh,
   // not silent magic: the countdown resets only after the backend confirms.
   const handleStayActive = useCallback(async () => {
-    const response = await fetch(`${BASE_URL}/auth/admin-refresh`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${localStorage.getItem('adminToken')}` },
-    });
-    const data = await parseJSON(response);
-    if (!response.ok) throw new Error(data?.message || 'Session refresh failed.');
-    if (data?.token) localStorage.setItem('adminToken', data.token);
+    const { ok, data } = await syncAdminSession(true);
     // Adopt the server's window before re-anchoring, so the countdown is set
     // from the number the API actually enforces.
-    applyIdleLimit(data?.idleLimitSeconds);
+    if (ok) applyIdleLimit(data?.idleLimitSeconds);
     idleDeadlineRef.current = Date.now() + idlingRef.current * 1000;
-  }, [applyIdleLimit]);
+  }, [syncAdminSession, applyIdleLimit]);
 
   useEffect(() => {
     if (!localStorage.getItem('admin') || !localStorage.getItem('adminToken')) {
@@ -952,16 +1038,14 @@ function AdminDashboard() {
 
     // Learn the enforced window on arrival rather than waiting for the admin to
     // press "stay signed in". The badge is on screen from the first second, so
-    // it has to be counting the server's number and not a guess. A failure here
-    // is not worth surfacing: the compile-time fallback is asserted equal to the
-    // server constant, so the countdown is still correct.
-    fetch(`${BASE_URL}/auth/admin-refresh`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${localStorage.getItem('adminToken')}` },
-    })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data) => { if (data?.idleLimitSeconds) applyIdleLimit(data.idleLimitSeconds); })
-      .catch(() => { /* keep the fallback */ });
+    // it has to be counting the server's number and not a guess. This is also
+    // the first call that tells the keepalive when the current token dies.
+    // A failure here is not worth surfacing: the compile-time fallbacks are
+    // asserted equal to the server constants, so both the countdown and the
+    // renewal schedule are still correct.
+    syncAdminSession(true)
+      .then(({ ok, data }) => { if (ok) applyIdleLimit(data?.idleLimitSeconds); })
+      .catch(() => { /* keep the fallbacks */ });
 
     // Activity only pushes the shared deadline — the memoized badge
     // re-renders on its own ticker, not the whole dashboard. The window comes
@@ -970,15 +1054,102 @@ function AdminDashboard() {
     const resetIdleTimer = () => {
       idleDeadlineRef.current = Date.now() + idlingRef.current * 1000;
     };
+
+    // ── Tell the SERVER, not just the badge ────────────────────────────────
+    // Resetting the local deadline is not enough, and the gap between the two
+    // was a real bug: the dashboard polls every 10s, and those polls are marked
+    // `X-Admin-Background` so an unattended tab cannot hold a session open. That
+    // is correct, and it means the server only ever learns of activity from a
+    // NON-background request. So an admin who read the dashboard, moved the
+    // mouse, and clicked nothing would watch a badge count down from ten
+    // minutes that never ran out — while the server signed them out at ten.
+    //
+    // This beacon is the missing signal, and it is driven by exactly the same
+    // events, so the two clocks can no longer disagree:
+    //
+    //   • at most once per ADMIN_ACTIVITY_BEACON_MS, so a person working
+    //     continuously costs one request a minute, not one per keystroke;
+    //   • only while there is genuine input, so it is silent when idle and
+    //     cannot be what keeps a session alive;
+    //   • it mints no token and fetches no data, so it is not on the
+    //     token-keepalive path and cannot extend anything on its own.
+    let lastBeacon = 0;
+    let beaconInFlight = false;
+    const sendActivityBeacon = () => {
+      const now = Date.now();
+      if (beaconInFlight || now - lastBeacon < ADMIN_ACTIVITY_BEACON_MS) return;
+      lastBeacon = now;
+      beaconInFlight = true;
+      fetch(`${BASE_URL}/auth/admin-activity`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('adminToken')}` },
+      })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((data) => {
+          // Adopt the server's number if it differs, so a client whose clock has
+          // drifted cannot show a countdown the API is not enforcing.
+          if (data?.idleLimitSeconds) applyIdleLimit(data.idleLimitSeconds);
+        })
+        .catch(() => { /* the next event retries */ })
+        .finally(() => { beaconInFlight = false; });
+    };
+
     const activityEvents = ['keydown', 'mousedown', 'mousemove', 'scroll', 'touchstart', 'pointerdown', 'focus'];
-    const handleActivity = () => resetIdleTimer();
+    const handleActivity = () => { resetIdleTimer(); sendActivityBeacon(); };
     resetIdleTimer();
 
     activityEvents.forEach(eventName => window.addEventListener(eventName, handleActivity, { passive: true }));
     return () => {
       activityEvents.forEach(eventName => window.removeEventListener(eventName, handleActivity));
     };
-  }, [navigate, applyIdleLimit]);
+  }, [navigate, applyIdleLimit, syncAdminSession]);
+
+  // ── Token keepalive ────────────────────────────────────────────────────
+  // Renews the JWT before it expires, so an administrator who is actually
+  // working is never signed out by `exp`. It is the direct fix for the bug
+  // described at ADMIN_TOKEN_LIFETIME_SECONDS above.
+  //
+  // The critical detail is `renew: true`. The request is fully validated on the
+  // server — signature, account still enabled, and still inside the idle
+  // window — so this cannot be used to keep an IDLE admin alive. It just does
+  // not count as activity, which is what stops the timer from silently
+  // disabling the ten-minute timeout for everyone.
+  useEffect(() => {
+    if (!localStorage.getItem('admin') || !localStorage.getItem('adminToken')) return undefined;
+
+    // Seed from the compile-time fallback so the very first tick schedules off a
+    // real deadline rather than firing immediately. The mount-time
+    // /auth/admin-refresh replaces it with the server's own number a moment
+    // later; this only covers the case where that call fails.
+    tokenExpiresAtRef.current = Date.now() + tokenLifetimeRef.current * 1000;
+
+    let inFlight = false;
+    const renewIfDue = () => {
+      // A second tick while a request is outstanding would race two renewals
+      // and could store the older token last, shortening the window again.
+      if (inFlight) return;
+      const renewAt = tokenExpiresAtRef.current - tokenLifetimeRef.current * (1 - ADMIN_TOKEN_RENEWAL_RATIO) * 1000;
+      if (Date.now() < renewAt) return;
+      inFlight = true;
+      syncAdminSession(false)
+        .catch(() => { /* a failed attempt just leaves the next tick to retry */ })
+        .finally(() => { inFlight = false; });
+    };
+
+    const tick = window.setInterval(renewIfDue, ADMIN_TOKEN_CHECK_INTERVAL_MS);
+    // Coming back to a tab that was suspended can find the token already dead —
+    // a backgrounded laptop that slept past `exp`. Renew immediately on return
+    // rather than waiting for the next tick, and before any request is made.
+    const onWake = () => { if (document.visibilityState === 'visible') renewIfDue(); };
+    window.addEventListener('focus', onWake);
+    document.addEventListener('visibilitychange', onWake);
+
+    return () => {
+      window.clearInterval(tick);
+      window.removeEventListener('focus', onWake);
+      document.removeEventListener('visibilitychange', onWake);
+    };
+  }, [syncAdminSession]);
 
   useEffect(() => {
     const refreshTimer = window.setInterval(() => { loadRef.current(true); }, ADMIN_REFRESH_INTERVAL_MS);

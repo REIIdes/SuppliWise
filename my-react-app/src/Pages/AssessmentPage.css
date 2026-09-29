@@ -1,10 +1,16 @@
 /* ── Assessment Page ── */
+/* The shared mesh backdrop. Fixed so the colour reads as light across the
+   page, and clipped so it can never open a horizontal scrollbar. */
 .assessment-wrapper {
   min-height: 100vh;
-  background: #f0faf0;
+  position: relative;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   font-family: sans-serif;
+  color: var(--sw-ink, #0d2b23);
+  background: var(--sw-mesh, linear-gradient(168deg, #eefcf5, #f5f0ff));
+  background-attachment: fixed;
 }
 
 /* ── Card-based layout for Step 1 ── */
@@ -14,42 +20,53 @@
   margin-bottom: 20px;
 }
 
+/* The two side-by-side cards get a hairline, a lift and their own tinted
+   top edge, matching every other surface in the product. The 1.5px #e5e7eb /
+   #bbf7d0 / #bfdbfe borders were three unrelated greys-and-tints for what is
+   one repeated component. */
 .info-card {
+  position: relative;
   flex: 1;
-  background: #fff;
-  border: 1.5px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 20px;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  transition: all 0.2s ease;
+  padding: 20px;
+  border: 1px solid var(--sw-line, #e2f1ea);
+  border-radius: var(--sw-radius-lg, 20px);
+  background: var(--sw-surface, #fff);
+  box-shadow: var(--sw-shadow-sm, 0 1px 2px rgba(9, 78, 58, 0.06));
+  overflow: hidden;
+  transition: transform var(--sw-dur, 0.24s) var(--sw-ease, ease),
+    box-shadow var(--sw-dur, 0.24s) ease, border-color var(--sw-dur, 0.24s) ease;
+}
+
+/* The accent is what tells the two cards apart — emerald and azure, matching
+   the icon each one already carries. */
+.info-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 20px;
+  right: 20px;
+  height: 3px;
+  border-radius: 0 0 4px 4px;
+  background: var(--card-accent, linear-gradient(90deg, #34d399, #22d3ee));
 }
 
 .info-card:hover {
-  border-color: #d1d5db;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  transform: translateY(-2px);
+  border-color: var(--sw-line-strong, #cbe7da);
+  box-shadow: var(--sw-shadow-md, 0 10px 28px -14px rgba(9, 78, 58, 0.26));
 }
 
 .demographics-card {
-  border-color: #bbf7d0;
-  background: linear-gradient(to bottom, #ffffff 0%, #f9fef9 100%);
-}
-
-.demographics-card:hover {
-  border-color: #86efac;
-  box-shadow: 0 2px 8px rgba(34, 197, 94, 0.08);
+  --card-accent: linear-gradient(90deg, #34d399, #10b981);
+  background: linear-gradient(to bottom, #ffffff 0%, #f6fdf9 100%);
 }
 
 .measurements-card {
-  border-color: #bfdbfe;
-  background: linear-gradient(to bottom, #ffffff 0%, #f9fafe 100%);
-}
-
-.measurements-card:hover {
-  border-color: #93c5fd;
-  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.08);
+  --card-accent: linear-gradient(90deg, #38bdf8, #4f46e5);
+  background: linear-gradient(to bottom, #ffffff 0%, #f5f9ff 100%);
 }
 
 .card-header {
@@ -146,42 +163,66 @@
 }
 
 .assessment-title {
-  font-size: 26px;
-  font-weight: 700;
-  color: #111827;
-  margin: 0 0 10px 0;
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.16;
+  color: var(--sw-emerald-deep, #059669);
+  margin: 0 0 10px;
+  background: var(--sw-grad-spectrum, linear-gradient(92deg, #059669, #06b6d4 45%, #6366f1));
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .assessment-title { color: transparent; }
 }
 
 .step-counter {
-  font-size: 14px;
-  color: #6b7280;
+  padding: 5px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--sw-line-strong, #cbe7da);
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
   white-space: nowrap;
-  padding-top: 4px;
+  color: var(--sw-teal, #0d9488);
 }
 
 /* Progress bar */
+/* Thicker than the 6px it was: on a four-step assessment the bar is the only
+   thing telling someone how much is left, and 6px of grey reads as a rule. */
 .progress-bar-track {
   width: 100%;
-  height: 6px;
-  background: #d1d5db;
+  height: 9px;
+  background: #e6efe9;
   border-radius: 999px;
   overflow: hidden;
 }
 
 .progress-bar-fill {
   height: 100%;
-  background: #22c55e;
   border-radius: 999px;
-  transition: width 0.3s ease;
+  background: var(--sw-grad-brand, linear-gradient(135deg, #10b981, #0891b2));
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
+  transition: width 0.45s var(--sw-ease, cubic-bezier(0.16, 1, 0.3, 1));
 }
 
 /* Card */
 .assessment-card {
-  background: #fff;
-  border: 1px solid #d1fae5;
-  border-radius: 16px;
   padding: 32px 36px;
-  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--sw-line, #e2f1ea);
+  border-radius: var(--sw-radius-xl, 26px);
+  background: var(--sw-surface, #fff);
+  box-shadow: var(--sw-shadow-md, 0 10px 28px -14px rgba(9, 78, 58, 0.26));
+}
+
+/* The step fades in as it changes. Kept from the removed override block. */
+.step-body { animation: step-fade 0.35s ease both; }
+@keyframes step-fade {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* Step body */
@@ -1157,21 +1198,26 @@
 }
 
 .section-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: #111827;
   margin: 0;
   font-family: sans-serif;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--sw-ink, #0d2b23);
 }
 
+/* A short accent rule rather than a full-width 3px bar. At full width the
+   divider was the heaviest thing on a page made of form fields, and it read
+   as a heading underline rather than as a separator between sections. */
 .section-divider {
-  height: 3px;
-  border-radius: 2px;
-  margin-bottom: 20px;
+  width: 64px;
+  height: 4px;
+  margin-bottom: 22px;
+  border-radius: 999px;
 }
 
 .section-divider-green {
-  background: linear-gradient(to right, #22c55e 0%, #bbf7d0 100%);
+  background: linear-gradient(to right, #10b981, #86efac);
 }
 
 .section-divider-purple {
@@ -1588,66 +1634,6 @@
 .priority-gate__btn--secondary{background:#eef2f0;color:#374151}
 .priority-gate__btn--secondary:hover{background:#e2e8e5}
 @media (max-width:480px){.priority-gate{margin:24px 12px;padding:28px 18px}.priority-gate__btn{width:100%}}
-
-/* ════════════════════════════════════════════════════════════════════
-   VIBRANT THEME REFRESH
-   ════════════════════════════════════════════════════════════════════ */
-.assessment-wrapper {
-  background:
-    radial-gradient(900px 320px at 8% -70px, rgba(16, 185, 129, 0.15), transparent 60%),
-    radial-gradient(720px 300px at 95% 0%, rgba(59, 130, 246, 0.11), transparent 60%) !important;
-}
-.assessment-title {
-  font-weight: 800 !important;
-  letter-spacing: -0.02em !important;
-  background: linear-gradient(92deg, #065f46 10%, #059669 45%, #2563eb 90%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent !important;
-}
-.assessment-container {
-  border-radius: 22px !important;
-  box-shadow: 0 16px 40px rgba(6, 95, 70, 0.10) !important;
-}
-.progress-bar-fill {
-  background: linear-gradient(90deg, #34d399, #10b981 50%, #0d9488) !important;
-  box-shadow: 0 0 12px rgba(16, 185, 129, 0.55);
-}
-.checkbox-label, .radio-label {
-  border-radius: 12px !important;
-  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease, background 0.15s ease !important;
-}
-.checkbox-label:hover, .radio-label:hover {
-  transform: translateX(3px);
-  box-shadow: 0 6px 16px rgba(6, 95, 70, 0.10);
-}
-.severity-btn {
-  border-radius: 12px !important;
-  transition: transform 0.15s ease, box-shadow 0.15s ease !important;
-}
-.severity-btn:hover { transform: translateY(-2px); }
-.severity-btn.severity-active.severity-mild { box-shadow: 0 6px 14px rgba(34, 197, 94, 0.30) !important; }
-.severity-btn.severity-active.severity-moderate { box-shadow: 0 6px 14px rgba(234, 179, 8, 0.30) !important; }
-.severity-btn.severity-active.severity-severe { box-shadow: 0 6px 14px rgba(239, 68, 68, 0.30) !important; }
-.btn-next {
-  background: linear-gradient(135deg, #34d399, #059669) !important;
-  border-radius: 999px !important;
-  box-shadow: 0 8px 20px rgba(16, 185, 129, 0.30) !important;
-  transition: transform 0.15s ease, box-shadow 0.2s ease !important;
-}
-.btn-next:hover:not(:disabled) {
-  transform: translateY(-2px) !important;
-  box-shadow: 0 12px 26px rgba(16, 185, 129, 0.38) !important;
-}
-.step-body { animation: step-fade 0.35s ease both; }
-@keyframes step-fade {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .step-body { animation: none; }
-  .checkbox-label, .radio-label, .severity-btn, .btn-next { transition: none; }
-}
 
 /* ═══════════════════════════════════════════════════════════════════════
    TOOLTIP ON SMALL SCREENS  (must stay LAST in this file)

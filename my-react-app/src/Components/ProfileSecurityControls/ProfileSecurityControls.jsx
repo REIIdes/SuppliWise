@@ -24,6 +24,7 @@ import { changePassword, getSecuritySummary, setTwoFactorMethod } from '../../ap
 import StepUpDialog from './StepUpDialog';
 import { BackupCodesCard, RecoveryEmailCard } from './RecoveryPanel';
 import SessionActivity from './SessionActivity';
+import PasskeyPanel from './PasskeyPanel';
 import './ProfileSecurityControls.css';
 
 const METHODS = [
@@ -211,6 +212,11 @@ export default function ProfileSecurityControls({
 
   return (
     <div className="psc-stack">
+      {/* Passkeys first, and deliberately so: a passkey is the strongest
+          thing this page offers and the only one that is phishing-resistant.
+          A 6-digit code typed into a fake sign-in page is just a code. */}
+      <PasskeyPanel onRequireStepUp={requireStepUp} onChanged={refreshSummary} />
+
       {/* ── Second factor ────────────────────────────────────────────── */}
       <section className="psc-card" aria-labelledby="psc-2fa-title">
         <header className="psc-card__head">
