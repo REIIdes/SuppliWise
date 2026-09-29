@@ -7,13 +7,23 @@ import {
   markUserSignedOut,
   clearUserSignedOut,
   SUBSCRIPTION_REVALIDATE_EVENT,
-} from './auth/authState';
+// The extension is required, not stylistic. Vite resolves extensionless
+// specifiers, but `node --test` loads this file as ESM and will not — and
+// utils/pictureUrl.test.js imports this module to read BASE_URL, so an
+// extensionless specifier here failed that test with ERR_MODULE_NOT_FOUND.
+// authState.js imports nothing itself, so this one specifier is the whole chain.
+} from './auth/authState.js';
 
 // Resolve the backend URL: explicit env override wins; otherwise derive it
 // from the page host so phones/tablets on the LAN (e.g. 192.168.x.x) reach
 // the backend instead of a dead localhost:5000 ("Failed to fetch").
 const getBaseUrl = () => {
-  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
+  // `import.meta.env` only exists under Vite. Under `node --test` it is
+  // undefined, and an unguarded read here made utils/pictureUrl.test.js throw
+  // before it could assert a single thing. Optional chaining keeps the browser
+  // behaviour identical and lets the module load anywhere.
+  const override = import.meta.env?.VITE_API_URL;
+  if (override) return override;
   if (typeof window !== 'undefined') {
     const { hostname, protocol } = window.location;
     if (hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
@@ -57,6 +67,15 @@ const AUTH_NOTICE_KEY = 'sw_auth_notice';
 // cross-tab dead-session handlers below).
 const SESSION_ENDED_MESSAGE = 'Your session has ended. Please sign in again.';
 
+// A session that aged out for inactivity is reported with its own code so the
+// member is told WHY they were signed out. Without it, coming back after a month
+// away produces the same "Your session has ended" as being signed out by an
+// administrator or a second login — and a member whose password works fine
+// concludes the app is broken. The server sends its own wording, so this is only
+// the fallback for a response that arrived without a body.
+const SESSION_IDLE_CODE = 'SESSION_IDLE_EXPIRED';
+const SESSION_IDLE_FALLBACK = 'You were signed out after a period of inactivity. Sign in again to continue.';
+
 // One-shot message shown by the login screen after a forced sign-out
 // ("session expired / signed out elsewhere" state).
 export const setAuthNotice = (message) => {
@@ -80,6 +99,12 @@ const AUTH_CHANNEL_NAME = 'suppliwise:auth';
 let authChannel = null;
 try {
   authChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(AUTH_CHANNEL_NAME) : null;
+  // A BroadcastChannel is a ref'd handle: in a browser that is what we want (it
+  // is how a sign-out in one tab reaches the others), but in Node it keeps the
+  // event loop alive forever and `node --test` never exits. Node's
+  // implementation exposes unref(); the browser's does not, hence the optional
+  // call, which is a no-op there and changes nothing about tab-to-tab sync.
+  authChannel?.unref?.();
 } catch { authChannel = null; }
 
 const postToTabs = (message) => {
@@ -707,7 +732,8 @@ const handleAuthError = (serverMessage, code) => {
     return serverMessage || 'Something went wrong. Please try again.';
   }
   const message = serverMessage
-    || (code === 'NO_SESSION' ? 'Please sign in to continue.' : SESSION_ENDED_MESSAGE);
+    || (code === 'NO_SESSION' ? 'Please sign in to continue.'
+      : (code === SESSION_IDLE_CODE ? SESSION_IDLE_FALLBACK : SESSION_ENDED_MESSAGE));
   if (token) {
     // THIS copy is provably dead: fingerprint it (never the token itself) and
     // tell the other tabs, so no bootstrap can hand it back — that re-adoption
@@ -1027,6 +1053,84 @@ export const setTwoFactorMethod = async (method, currentPassword = '') => {
   return data; // { message, twoFactorMethod, twoFactorEnabled }
 };
 
+// ── Password reset (emailed link) ──────────────────────────────────────────
+// A dedicated pair of screens rather than a modal on the sign-in form: the link
+// has to survive being opened from an email client in a new tab, which a modal
+// cannot. The API mirrors that — nothing here is authed, and nothing here
+// hands the caller a credential to hold across a redirect. The token arrives in
+// the link, is redeemed once, and is gone.
+
+/**
+ * The server's password policy, so the live checklist on the reset screen is
+ * generated from the same object the server validates against. A failure here
+ * is cosmetic and the caller falls back to bundled constants — it must never
+ * block someone from resetting their password.
+ */
+export const getPasswordRules = async () => {
+  const res = await apiFetch('/auth/password-reset/rules', { method: 'GET' }, 10000);
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+/**
+ * Ask for a reset link. Always resolves, and always says the same thing
+ * whether or not the address has an account — the response is deliberately
+ * anonymous, so there is nothing here to branch on and no way to use it to
+ * discover who has an account.
+ */
+export const requestPasswordReset = async (email) => {
+  const res = await apiFetch('/auth/password-reset/request', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data; // { message }
+};
+
+/**
+ * Is the link in the URL still usable? Called on mount so a dead link is
+ * reported as dead before the user types a password into a doomed form.
+ * A 400 here is an ANSWER, not a failure, so it is returned rather than thrown.
+ */
+export const validatePasswordResetToken = async (token) => {
+  const res = await apiFetch(`/auth/password-reset/validate?token=${encodeURIComponent(token)}`, { method: 'GET' }, 15000);
+  const data = await parseJSON(res);
+  if (res.ok) return data; // { valid: true, expiresAt }
+  // 400 is an ANSWER — this link is spent, expired or unknown. 429 is a
+  // different answer entirely: the link may be perfectly good, but the shared
+  // /api/auth lockout is throttling this address. Collapsing the two would tell
+  // someone to request a new link they did not need, and hide a real outage.
+  if (res.status === 400) return { valid: false, reason: data?.reason || 'invalid', message: data?.message };
+  if (res.status === 429) {
+    const err = new Error(data?.message || 'Too many attempts. Please wait a moment and try again.');
+    err.rateLimited = true;
+    err.retryAfterSeconds = Number(data?.remainingSeconds) || Number(res.headers.get('retry-after')) || 60;
+    throw err;
+  }
+  throw new Error(friendlyError(res.status, data?.message));
+};
+
+/** Redeem the link. 400 means the link is spent or the password was refused. */
+export const completePasswordReset = async (token, newPassword) => {
+  const res = await apiFetch('/auth/password-reset/complete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, newPassword }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) {
+    const err = new Error(friendlyError(res.status, data?.message));
+    err.status = res.status;
+    // A spent or expired link needs a different screen, not a retry.
+    err.linkInvalid = res.status === 400;
+    throw err;
+  }
+  return data; // { message, success }
+};
+
 // ── Account security dashboard (/api/security) ─────────────────────────────
 // Step-up is passed as the X-Step-Up header. The token is short-lived and
 // bound to the session that earned it, so it is held in component state only —
@@ -1104,6 +1208,35 @@ export const generateBackupCodes = async (stepUp) => {
   return data; // { codes: [...], message }
 };
 
+/**
+ * Sign in with a single-use recovery code instead of an authenticator code.
+ *
+ * This one is reached MID-SIGN-IN, before there is a session: the caller holds
+ * a password and a userId, nothing else. So it is unauthenticated on purpose,
+ * and it must not go through `friendlyError`'s 401 handling — that path exists
+ * to clear a broken session, and here a 401 means "that code is not valid",
+ * which is an ordinary answer to an ordinary mistake. Treated as a session
+ * failure it would sign the user out of the login form they are still using.
+ */
+export const redeemBackupCode = async (userId, code, remember = false) => {
+  const res = await apiFetch('/security/backup-codes/redeem', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, code, remember }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) {
+    // 429 (too many attempts) still reads as a real message; everything else
+    // falls back to the copy below.
+    const message = data?.message
+      || (res.status === 429
+        ? 'Too many incorrect codes. Please wait a few minutes and try again.'
+        : 'That recovery code is not valid.');
+    throw new Error(message);
+  }
+  return data; // the same payload /auth/login-2fa returns, including `token`
+};
+
 /** Destroy every unused recovery code. */
 export const invalidateBackupCodes = async (stepUp) => {
   const res = await apiFetch('/security/backup-codes', {
@@ -1163,6 +1296,193 @@ export const checkFeature = async (featureKey) => {
   return data; // { allowed: true, feature, currentPlan }
 };
 
+// ── Subscription: catalogue, purchase, live state ──────────────────────
+// The plan CATALOGUE (prices + which features each plan unlocks) is fetched from
+// the backend so the numbers rendered on the pricing page are the numbers the
+// purchase endpoint actually charges. Prices are converted to the visitor's
+// currency SERVER-side, so this function never does arithmetic on money.
+//
+// `currency` is the visitor's own choice. Sent as a query parameter, which the
+// server treats as an explicit override that outranks location detection.
+export const getPlanCatalogue = async (currency = null) => {
+  const query = currency ? `?currency=${encodeURIComponent(currency)}` : '';
+  const res = await apiFetch(`/subscription/plans${query}`);
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data; // { currency, plans[], team, standardPeriodDays, selfServe, ... }
+};
+
+// The signed-in user's authoritative entitlement + duration snapshot.
+export const getMySubscription = async () => {
+  const res = await apiFetch('/subscription', { headers: { ...authHeader() } });
+  const data = await parseJSON(res);
+  if (!res.ok) throwFriendly(res.status, data);
+  return data; // { serverTime, subscription }
+};
+
+/**
+ * Buy or renew a plan. Writes the account's PAID subscription layer and
+ * returns the fresh authoritative state, so the caller can commit it to the
+ * shared store immediately — entitlements unlock without a refresh.
+ *
+ * A renewal extends from the end of the window already paid for, so a user who
+ * renews early never loses the days they already paid for.
+ */
+/**
+ * Price one specific order WITHOUT buying it.
+ *
+ * The checkout's seat stepper can reach any seat count, so the catalogue's
+ * pre-computed totals (2, 3, 5, 10, 20, 50) only cover the presets. This asks
+ * the server for the exact figure, because the alternative is the browser
+ * multiplying money — and a total the visitor confirms must be the total the
+ * purchase endpoint charges. Returns null if the quote cannot be fetched, so the
+ * caller shows a placeholder rather than a wrong number.
+ */
+export const quotePlan = async (plan, { months = 1, seats = null, currency = null } = {}) => {
+  const query = new URLSearchParams({ plan: String(plan), months: String(months) });
+  if (seats) query.set('seats', String(seats));
+  if (currency) query.set('currency', currency);
+  try {
+    const res = await apiFetch(`/subscription/quote?${query.toString()}`);
+    if (!res.ok) return null;
+    const data = await parseJSON(res);
+    return data || null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Buy or renew a plan. Writes the account's PAID subscription layer and returns
+ * the fresh authoritative state, so the caller can commit it to the shared store
+ * immediately — entitlements unlock without a refresh.
+ *
+ * A renewal extends from the end of the window already paid for, so a user who
+ * renews early never loses the days they already paid for.
+ *
+ * `seats` only applies to the Team plan (Premium entitlements shared across N
+ * people). The SERVER computes the total from its own price list, so the value
+ * here selects the quantity — it cannot set a price.
+ */
+export const purchasePlan = async (plan, months = 1, { currency = null, seats = null } = {}) => {
+  const res = await apiFetch('/subscription/purchase', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    // `currency` is a DISPLAY preference only: the server prices from its own
+    // catalogue and returns the receipt, so a tampered value can never change
+    // what is actually charged — it only picks how the receipt is shown.
+    body: JSON.stringify({ plan, months, ...(currency ? { currency } : {}), ...(seats ? { seats } : {}) }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throwFriendly(res.status, data);
+  return data; // { message, plan, months, receipt, subscription }
+};
+
+// ── Plan requests with proof of payment ─────────────────────────────────
+// The manual path a user takes from the pricing page: pick a plan, attach a
+// screenshot of the transfer, and an administrator reviews and activates it.
+// Distinct from purchasePlan(), which activates immediately — this one only
+// queues work for the admin.
+//
+// `proof` is a base64 data URL produced by FileReader. It is deliberately large
+// (~2.7 MB for a 2 MB image), which is why the server mounts a wider body
+// limit for exactly this path; do not route it through anything with a 1 MB
+// guard.
+export const submitPlanRequest = async ({
+  plan, months = 1, seats = null, currency = null, reference = '', note = '', proof,
+}) => {
+  const res = await apiFetch('/subscription/requests', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    // `currency` only decides which currency the request is RECORDED in - the
+    // server prices it from its own catalogue, so it can never change the
+    // amount actually owed. `seats` only applies to the Team plan.
+    body: JSON.stringify({
+      plan, months, reference, note, proof,
+      ...(currency ? { currency } : {}),
+      ...(seats ? { seats } : {}),
+    }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throwFriendly(res.status, data);
+  return data; // { message, request }
+};
+
+// My requests and where each one stands (pending / approved / rejected).
+// The proof image is NOT included here — see getMyPlanRequest.
+export const getMyPlanRequests = async (limit = 10) => {
+  const res = await apiFetch(`/subscription/requests?limit=${limit}`, {
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throwFriendly(res.status, data);
+  return data; // { requests[], pendingCount }
+};
+
+// One of my requests, including the image, so the user can check what they sent.
+export const getMyPlanRequest = async (requestId) => {
+  const res = await apiFetch(`/subscription/requests/${encodeURIComponent(requestId)}`, {
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throwFriendly(res.status, data);
+  return data; // { request }
+};
+
+// ══════════════════════════════════════════════════════════════════════════
+// CANCELLATIONS — the mirror of the request calls above.
+//
+// Two doors, and they are NOT interchangeable:
+//   downgradeToFree   end it NOW. One call, no admin.
+//   requestCancellation  ask an administrator; nothing changes until they do.
+//
+// Both are sends against the account, so they go through the same helper the
+// purchase does and surface the server's message rather than a generic failure —
+// "you are already on the Free plan" is something the member needs to read, not
+// a stack of retry.
+// ══════════════════════════════════════════════════════════════════════════
+
+/**
+ * End the paid subscription immediately and return to Free.
+ * @returns the fresh authoritative subscription state.
+ */
+export const downgradeToFree = async (reason = '') => {
+  const res = await apiFetch('/subscription/downgrade', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify({ reason }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throwFriendly(res.status, data);
+  return data; // { message, subscription }
+};
+
+/**
+ * Ask an administrator to end the subscription. `mode` may be 'immediate' or
+ * 'review'; the server validates it and defaults an absent value to 'review',
+ * so omitting it always takes the human-in-the-loop path.
+ */
+export const requestCancellation = async ({ mode = 'review', reason = '' } = {}) => {
+  const res = await apiFetch('/subscription/cancel-requests', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify({ mode, reason }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throwFriendly(res.status, data);
+  return data; // { message, request, subscription? }
+};
+
+/** My cancellations, newest first, with where each one stands. */
+export const getMyCancelRequests = async (limit = 10) => {
+  const res = await apiFetch(`/subscription/cancel-requests?limit=${limit}`, {
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throwFriendly(res.status, data);
+  return data; // { requests[], pendingCount }
+};
+
 // ── User notifications ────────────────────────────────────────────────
 export const getNotifications = async (limit = 20) => {
   const res = await apiFetch(`/notifications?limit=${limit}`, {
@@ -1196,6 +1516,17 @@ export const markAllNotificationsRead = async () => {
 export const deleteNotification = async (notificationId) => {
   const res = await apiFetch(`/notifications/${notificationId}`, {
     method: 'DELETE',
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// Clears everything already read; unread notices stay in the bell.
+export const deleteAllReadNotifications = async () => {
+  const res = await apiFetch('/notifications/delete-read', {
+    method: 'POST',
     headers: { ...authHeader() },
   });
   const data = await parseJSON(res);
@@ -1320,6 +1651,77 @@ export const removeSupplementFromPlan = async (supplementName) => {
   if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
   return data;
 };
+
+// ══════════════════════════════════════════════════════════════════════════
+// SUPPORT CHAT — the human channel to the admin team ("where did I pay",
+// "my plan did not activate", "I can't sign in").
+//
+// NOT the AI assistant: that is sendChatMessage() above, stateless, and it
+// answers from the product documentation. This is a stored conversation with a
+// real person on the other end, which is why every call here is CRUD rather
+// than a single request/response.
+//
+// These go through throwFriendly, not the bare friendlyError used by the older
+// notification helpers, so a 401/403 tears the session down through the same
+// path as the rest of the app instead of leaving a dead page on screen.
+// ══════════════════════════════════════════════════════════════════════════
+
+/** My conversations, most recently active first, plus the unread badge count. */
+export const getMySupportThreads = async (limit = 20) => {
+  const res = await apiFetch(`/support-chat?limit=${limit}`, {
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throwFriendly(res.status, data);
+  return data; // { threads[], unreadCount }
+};
+
+/** Start a conversation. `body` is the opening message and is required. */
+export const startSupportThread = async ({ subject = '', category = 'other', body = '' } = {}) => {
+  const res = await apiFetch('/support-chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify({ subject, category, body }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throwFriendly(res.status, data);
+  return data; // { message, thread }
+};
+
+/** One conversation with its transcript. Opening it marks it read. */
+export const getSupportThread = async (threadId) => {
+  const res = await apiFetch(`/support-chat/${encodeURIComponent(threadId)}`, {
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throwFriendly(res.status, data);
+  return data; // { thread, messages[] }
+};
+
+/**
+ * Reply.
+ *
+ * Fails with 409 on a resolved conversation — it does NOT revive it. Resolving
+ * is an administrator's decision and reopening one too, so there is no member
+ * endpoint that can change a thread's resolved state; SupportInbox shows a
+ * read-only panel in that case instead of a composer.
+ */
+export const replyToSupportThread = async (threadId, body) => {
+  const res = await apiFetch(`/support-chat/${encodeURIComponent(threadId)}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify({ body }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throwFriendly(res.status, data);
+  return data; // { message, message_record }
+};
+
+// There are deliberately no `resolveSupportThread` / `reopenSupportThread` client
+// helpers. Those transitions live on the admin router only — see
+// server/utils/supportChat.js for why a member must not be able to reach them —
+// so a member bundle that could call them would be calling endpoints that do not
+// exist. Keep this list and the server's member router in step.
 
 // Get user's personalized supplement plan
 export const getMyPlan = async () => {

@@ -53,7 +53,9 @@
   right: 16px;
   left: auto;
   width: min(360px, calc(100vw - 32px));
-  max-height: 420px;
+  /* Never taller than the viewport minus the bell area, so the list can
+     always scroll and the rounded bottom edge stays on screen. */
+  max-height: min(420px, calc(100vh - 100px));
   display: flex;
   flex-direction: column;
   background: #fff;
@@ -63,6 +65,9 @@
   z-index: 200;
   overflow: visible;
   animation: user-notif-pop 0.18s ease;
+  /* Long unbroken strings (ids, URLs, plan names) used to widen the row and
+     force a horizontal scrollbar over the text. */
+  overflow-wrap: break-word;
 }
 
 /* Arrow pointing up at the bell; --arrow-x (bell centre, set in JS) keeps
@@ -118,10 +123,32 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 10px;
   padding: 13px 16px;
   border-bottom: 1px solid #f0f0f0;
   font-size: 15px;
   color: #111827;
+}
+
+/* The title gives up width first (ellipsis) so the two action labels keep
+   their full text instead of overlapping each other. */
+.user-notif__heading {
+  min-width: 0;
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-notif__actions {
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 2px;
+  min-width: 0;
 }
 
 .user-notif__action {
@@ -130,13 +157,24 @@
   color: #16a34a;
   font-size: 13px;
   font-weight: 700;
+  line-height: 1.3;
   cursor: pointer;
   padding: 4px 6px;
   border-radius: 6px;
+  white-space: nowrap;
+}
+
+.user-notif__action--danger {
+  color: #dc2626;
 }
 
 .user-notif__action:hover:not(:disabled) {
   background: #f0fdf4;
+}
+
+.user-notif__action--danger:hover:not(:disabled) {
+  background: #fef2f2;
+  color: #b91c1c;
 }
 
 .user-notif__action:disabled {
@@ -145,12 +183,33 @@
 }
 
 .user-notif__list {
+  /* flex:1 + min-height:0 are what let max-height on the panel actually cap
+     this scroll area — without min-height:0 the flex item refuses to shrink
+     below its content and spills past the panel's rounded bottom edge. */
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 6px;
   overscroll-behavior: contain;
   /* Panel is overflow:visible now (for the arrow) — clip the rounded bottom
      corners here so scrolled items never square off the panel's edge. */
   border-radius: 0 0 15px 15px;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.user-notif__list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.user-notif__list::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+
+.user-notif__list::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .user-notif__empty {
@@ -166,11 +225,14 @@
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 11px 12px;
+  padding: 11px 8px 11px 12px;
   border-radius: 12px;
   cursor: pointer;
   transition: background 0.15s;
   animation: user-notif-item-in 0.28s ease both;
+  /* Belt-and-braces with .user-notif__body's min-width:0 — a single very long
+     word must wrap, not push the delete button off the row. */
+  overflow-wrap: anywhere;
 }
 
 .user-notif__item:nth-child(1) { animation-delay: 0.04s; }
@@ -219,12 +281,14 @@
   font-weight: 700;
   color: #111827;
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .user-notif__detail {
   font-size: 12.5px;
   color: #4b5563;
   line-height: 1.45;
+  overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
@@ -234,6 +298,7 @@
 .user-notif__time {
   font-size: 11.5px;
   color: #9ca3af;
+  line-height: 1.3;
 }
 
 .user-notif__dot {
@@ -245,15 +310,22 @@
   background: #22c55e;
 }
 
+/* Fixed square hit area + top alignment: the × used to shift sideways as the
+   title wrapped, which made it look like it was sitting on top of the text. */
 .user-notif__delete {
-  flex-shrink: 0;
+  flex: 0 0 24px;
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
   background: none;
   border: none;
   color: #c4c9d1;
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
-  padding: 2px 6px;
+  padding: 0;
   border-radius: 6px;
 }
 

@@ -9,10 +9,19 @@ const {
 } = require('../../models/Web3');
 const engine = require('../../blockchain/engine');
 const { hashPayload, dayKey, round2 } = require('../../blockchain/crypto');
-const { SEED_ORACLE_FEEDS, seededValue } = require('../../blockchain/seed');
+const {
+  SEED_ORACLE_FEEDS,
+  seededValue,
+  refreshOracleFeeds,
+  ensureOracleFeedsFresh,
+} = require('../../blockchain/seed');
 const { requireFeature } = require('../../utils/entitlements');
 
 const router = express.Router();
+
+// Minimum gap between two *forced* oracle refreshes. See POST /oracle/refresh.
+const ORACLE_REFRESH_LATCH_MS = 60 * 1000;
+let lastManualRefreshAt = 0;
 
 function userOnly(req, res, next) {
   if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
@@ -64,13 +73,22 @@ router.post('/trials/:id/optin', async (req, res) => {
     const termsHash = hashPayload(terms);
     const wallet = await engine.getWalletDoc(req.user._id);
 
-    let consent;
-    try {
-      consent = await TrialConsent.create({ user: req.user._id, trial: trial._id, status: 'opted-in', termsHash });
-    } catch (err) {
-      if (err && err.code === 11000) return res.status(400).json({ message: 'You already have a consent record for this trial.' });
-      throw err;
+    // Upsert, not insert. A plain create made the unique (user, trial) index
+    // turn a withdrawal into a PERMANENT dead end: after withdrawing, the user
+    // could never re-consent and could never re-earn the reward, even though
+    // withdrawal is documented as revocable consent rather than a ban.
+    const existing = await TrialConsent.findOne({ user: req.user._id, trial: trial._id });
+    if (existing && existing.status === 'opted-in') {
+      return res.status(400).json({ message: 'You already have an active consent record for this trial.' });
     }
+    const consent =
+      existing ||
+      new TrialConsent({ user: req.user._id, trial: trial._id });
+    consent.status = 'opted-in';
+    consent.termsHash = termsHash;
+    consent.withdrawnAt = 0;
+    await consent.save();
+
     const tx = await engine.anchor('trial:consent', wallet.address, {
       public: { trial: String(trial._id), termsHash, sponsor: trial.sponsor },
     });
@@ -84,6 +102,12 @@ router.post('/trials/:id/optin', async (req, res) => {
       amount: trial.rewardWell,
       public: { trial: String(trial._id) },
     });
+    // Persist what was actually paid. The schema field was never written, so
+    // GET /trials reported consent.reward = 0 for every participant even though
+    // the WELL had been credited.
+    consent.reward = reward.amount;
+    consent.rewardTx = reward.txHash || '';
+    await consent.save();
     res.status(201).json({ consent, reward: reward.amount });
   } catch (error) {
     console.error('[web3 POST /trials/:id/optin]', error.message);
@@ -113,8 +137,15 @@ router.post('/trials/:id/withdraw', async (req, res) => {
 });
 
 // ── Decentralized oracles (feature 19) ────────────────────────────────────
+// `refreshOracleFeeds` is the single source of truth for re-deriving feed
+// values; it is the same routine the boot sweep and the background sweeper run,
+// so a manual refresh can never produce a different result than the automatic
+// ones.
 router.get('/oracle/feeds', async (req, res) => {
   try {
+    // Read-through freshness: never hand a client a stale value just because
+    // the background sweep has not fired yet. Throttled internally.
+    await ensureOracleFeedsFresh();
     const feeds = await OracleFeed.find({}).sort({ category: 1, key: 1 }).lean();
     res.json({ feeds, refreshedAt: feeds.length ? feeds[0].updatedAt : null });
   } catch (error) {
@@ -124,50 +155,44 @@ router.get('/oracle/feeds', async (req, res) => {
 });
 
 // Re-derive today's values (deterministic per day — auditable) and push each
-// change on-chain. The same routine runs at boot, so feeds are never empty.
+// change on-chain. The same routine runs at boot and on a timer, so feeds are
+// never empty and never stale.
 router.post('/oracle/refresh', async (req, res) => {
+  // Each *changed* feed costs one mined block, and `anchor` is serialised
+  // through a single CPU-bound mining queue. A manual refresh therefore used to
+  // be a free way to queue six blocks per request. Latch it to one run per
+  // sweep window: a legitimate user pressing the button twice gets the same
+  // (already current) answer instead of six more blocks.
+  //
+  // The response SHAPE is identical either way — `feeds`, `day` and `updated`
+  // are always present. Returning a different shape on the throttled path
+  // pushed the "is this an error?" decision onto every client.
+  const day = dayKey();
+  const throttled = Date.now() - lastManualRefreshAt < ORACLE_REFRESH_LATCH_MS;
   try {
-    const day = dayKey();
-    const updated = [];
-    for (const feed of SEED_ORACLE_FEEDS) {
-      const value = seededValue(feed, day);
-      const existing = await OracleFeed.findOne({ key: feed.key });
-      if (existing && existing.value === value && existing.txHash) {
-        updated.push({ key: feed.key, value, changed: false });
-        continue;
-      }
-      const tx = await engine.anchor('oracle:update', 'sw:oracle', {
-        public: { key: feed.key, value, unit: feed.unit, day },
+    if (throttled) {
+      const feeds = await OracleFeed.find({}).sort({ category: 1, key: 1 }).lean();
+      const byKey = new Map(feeds.map((f) => [f.key, f]));
+      return res.json({
+        feeds,
+        day,
+        throttled: true,
+        message: 'Oracle feeds were refreshed moments ago. Values are re-derived once per day, so a repeat refresh returns the same figures.',
+        updated: SEED_ORACLE_FEEDS.map((feed) => ({
+          key: feed.key,
+          value: byKey.has(feed.key) ? byKey.get(feed.key).value : seededValue(feed, day),
+          changed: false,
+        })),
       });
-      if (existing) {
-        existing.value = value;
-        existing.txHash = tx.txs[0] || '';
-        existing.updatedAt = Date.now();
-        await existing.save();
-      } else {
-        try {
-          await OracleFeed.create({
-            key: feed.key,
-            label: feed.label,
-            value,
-            unit: feed.unit,
-            category: feed.category,
-            source: 'SuppliWise Oracle Network',
-            txHash: tx.txs[0] || '',
-          });
-        } catch (err) {
-          // Another request refreshed this feed first — apply the
-          // value to the winner instead of crashing the sweep.
-          if (err && err.code === 11000) {
-            await OracleFeed.updateOne({ key: feed.key }, { $set: { value, txHash: tx.txs[0] || '', updatedAt: Date.now() } });
-          } else {
-            throw err;
-          }
-        }
-      }
-      updated.push({ key: feed.key, value, changed: true });
     }
-    res.json({ feeds: await OracleFeed.find({}).sort({ category: 1, key: 1 }).lean(), day, updated });
+    lastManualRefreshAt = Date.now();
+    const { day: publishedDay, updated } = await refreshOracleFeeds({ force: true });
+    res.json({
+      feeds: await OracleFeed.find({}).sort({ category: 1, key: 1 }).lean(),
+      day: publishedDay,
+      throttled: false,
+      updated,
+    });
   } catch (error) {
     console.error('[web3 POST /oracle/refresh]', error.message);
     res.status(500).json({ message: 'Could not refresh oracle feeds.' });
@@ -196,21 +221,39 @@ router.post('/experts/:id/book', async (req, res) => {
     }
     const cost = round2(expert.rateWell * hours);
     const wallet = await engine.getWalletDoc(req.user._id);
-    const payment = await engine.transfer({
-      from: wallet.address,
-      to: 'sw_system_expert_pool',
-      amount: cost,
-      type: 'consult:book',
-      public: { expert: expert.name, hours, cost },
-    });
+
+    // Create the booking FIRST, then take payment. Paying first meant a
+    // Booking.create failure left the WELL in the expert pool with no booking
+    // row and no txHash to reconcile against — the cancellation path was
+    // rollback-guarded, this one was not.
     const booking = await Booking.create({
       expert: expert._id,
       user: req.user._id,
       userAddress: wallet.address,
       hours,
       cost,
-      txHash: payment.txHash,
+      status: 'pending',
     });
+
+    let payment;
+    try {
+      payment = await engine.transfer({
+        from: wallet.address,
+        to: 'sw_system_expert_pool',
+        amount: cost,
+        type: 'consult:book',
+        public: { expert: expert.name, hours, cost },
+      });
+    } catch (err) {
+      // Payment failed — drop the un-paid booking rather than leaving a
+      // 'pending' row no one can ever settle or cancel.
+      await Booking.deleteOne({ _id: booking._id, status: 'pending' }).catch(() => {});
+      throw err;
+    }
+
+    booking.status = 'confirmed';
+    booking.txHash = payment.txHash;
+    await booking.save();
     res.status(201).json({ booking, txHash: payment.txHash, balance: payment.fromBalance });
   } catch (error) {
     if (error.code && typeof error.code === 'string') {

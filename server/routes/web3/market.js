@@ -38,6 +38,7 @@ async function releaseEscrow(order, reason) {
   const cfg = await engine.getConfig();
   const { fee, proceeds } = escrowSplit(order.total, cfg.params.marketplaceFeePct);
   let releaseTx = '';
+  let paidSeller = 0;
   try {
     if (proceeds > 0) {
       const toSeller = await engine.transfer({
@@ -48,6 +49,7 @@ async function releaseEscrow(order, reason) {
         public: { order: String(order._id), reason },
       });
       releaseTx = toSeller.txHash;
+      paidSeller = proceeds;
     }
     if (fee > 0) {
       await engine.transfer({
@@ -59,8 +61,32 @@ async function releaseEscrow(order, reason) {
       });
     }
   } catch (err) {
-    // Payment failed — release the claim so the order isn't stuck 'released'
-    // without the seller being paid, then rethrow for a 4xx mapping.
+    // Payment failed part-way. If the SELLER leg already succeeded, the money
+    // has left the shared escrow pool — putting the order back to 'escrow'
+    // without giving it back would let the next confirm/dispute trigger pay
+    // the seller a SECOND time out of other buyers' deposits. Compensate
+    // first, and only then release the claim.
+    if (paidSeller > 0) {
+      try {
+        await engine.transfer({
+          from: order.sellerAddress,
+          to: 'sw_system_escrow',
+          amount: paidSeller,
+          type: 'escrow:release-reversal',
+          public: { order: String(order._id), reason: `release reverted: ${err.code || 'transfer failed'}` },
+        });
+      } catch (revErr) {
+        // Could not reverse it. Leaving the order 'released' is the safe
+        // failure: it will not pay out again, and the anomaly is visible for
+        // reconciliation. Silently reverting to 'escrow' here is what allowed
+        // a double payout in the first place.
+        console.error('[web3 escrow reversal failed]', order.sellerAddress, revErr.message);
+        throw new engine.EngineError(
+          'SETTLE_STUCK',
+          'Settlement was paid but could not be reversed. The order is marked released and needs manual reconciliation.'
+        );
+      }
+    }
     await Order.updateOne(
       { _id: order._id, status: 'released' },
       { $set: { status: 'escrow', settledAt: 0 } }
@@ -138,7 +164,12 @@ async function tryResolve(dispute, order) {
   if (dispute.status !== 'open') return null;
   const verdict = disputeOutcome(dispute.votes, dispute.jurors);
   if (!verdict.complete) return null;
-  const outcome = verdict.outcome || 'tie';
+  // A dead-even panel is NOT a resolution. Claiming it 'resolved' ran neither
+  // payout branch, left the buyer's escrowed WELL locked in the pool forever,
+  // and still paid every juror their bounty. A tie is returned un-resolved so
+  // the dispute stays open for the next round of jurors.
+  if (!verdict.outcome) return null;
+  const outcome = verdict.outcome;
 
   // Atomic open→resolved claim: concurrent triggers (the vote POST plus lazy
   // dispute-list GETs) can never both execute the payout.
@@ -326,6 +357,7 @@ router.post('/market/orders', async (req, res) => {
     }
 
     let order;
+    let escrowed = 0;
     try {
       // Buyer → escrow wallet: funds are locked until delivery confirmation.
       // A fully-discounted order escrows zero (engine.transfer rejects 0).
@@ -339,6 +371,7 @@ router.post('/market/orders', async (req, res) => {
           public: { listing: String(listing._id), qty },
         });
         escrowTxHash = escrowTx.txHash;
+        escrowed = total;
       }
       order = await Order.create({
         listing: listing._id,
@@ -355,18 +388,40 @@ router.post('/market/orders', async (req, res) => {
         escrowTx: escrowTxHash,
         status: 'escrow',
       });
-      if (loyaltyDoc) {
-        await LoyaltyCode.updateOne(
-          { _id: loyaltyDoc._id, status: 'redeemed' },
-          { $set: { redeemedOrder: order._id } }
-        );
-      }
     } catch (err) {
-      // Roll the reservation (and the loyalty claim) back if the
-      // payment/order step failed.
+      // Roll the reservation back. The escrow deposit MUST be reversed too:
+      // without it a failure after the transfer left the buyer's WELL in the
+      // shared pool with no Order row, no settleTx and nothing to reconcile
+      // against — permanently stranded funds. (The loyalty claim is only
+      // released once the order exists, since a code may only be consumed by a
+      // real order.)
       await Listing.updateOne({ _id: listing._id }, { $inc: { stock: qty } }).catch(() => {});
+      if (escrowed > 0) {
+        try {
+          await engine.transfer({
+            from: 'sw_system_escrow',
+            to: wallet.address,
+            amount: escrowed,
+            type: 'escrow:rollback',
+            public: { listing: String(listing._id), reason: 'order creation failed' },
+          });
+        } catch (revErr) {
+          console.error('[web3 escrow rollback failed]', revErr.message);
+        }
+      }
       if (loyaltyDoc) await releaseLoyaltyClaim(loyaltyDoc._id);
       throw err;
+    }
+
+    // The order exists, so the loyalty code is genuinely consumed. Outside the
+    // try: a failure here must not roll back a committed order + payment.
+    if (loyaltyDoc) {
+      await LoyaltyCode.updateOne(
+        { _id: loyaltyDoc._id, status: 'redeemed' },
+        { $set: { redeemedOrder: order._id } }
+      ).catch((err) => {
+        console.error('[web3 loyalty link]', err.message);
+      });
     }
 
     res.status(201).json({ order, escrowTx: order.escrowTx });
@@ -401,7 +456,11 @@ router.post('/market/orders/:id/confirm', async (req, res) => {
     if (order.status !== 'escrow') return res.status(400).json({ message: 'This order is already settled.' });
     // An open dispute freezes the escrow: releasing here would let the buyer
     // "confirm" away a contested order (and race the refund payout).
-    if (await Dispute.exists({ order: order._id })) {
+    // Scoped to status:'open' — an unfiltered `exists` also matched disputes
+    // that had already resolved, so once any dispute had ever been filed for an
+    // order the buyer could never confirm it again, contradicting both the error
+    // message and the 'already settled' guard above.
+    if (await Dispute.exists({ order: order._id, status: 'open' })) {
       return res.status(400).json({ message: 'A dispute is open for this order — confirm after it resolves.' });
     }
     const settled = await releaseEscrow(order, 'buyer-confirmed');
@@ -464,7 +523,11 @@ router.get('/market/disputes', async (req, res) => {
       .lean();
 
     const orderIds = disputes.map((d) => d.order);
-    const orders = await Order.find({ _id: { $in: orderIds } }).lean();
+    // Full documents, NOT .lean(): refundEscrow/releaseEscrow call order.save()
+    // after paying out, and a lean object has no save() — so the payout landed,
+    // then the TypeError was swallowed by tryResolve's catch, leaving
+    // settleTx/fee unwritten and the listing stock permanently decremented.
+    const orders = await Order.find({ _id: { $in: orderIds } });
     const orderMap = new Map(orders.map((o) => [String(o._id), o]));
 
     const enriched = [];
@@ -474,14 +537,23 @@ router.get('/market/disputes', async (req, res) => {
       // Attempts lazy finalization: if all votes are in, settle now.
       if (d.status === 'open') {
         const live = await Dispute.findById(d._id);
-        const resolved = await tryResolve(live, order);
+        // Re-read the order as a document: `order` is the snapshot taken before
+        // the loop, and settlement must act on the current row.
+        const liveOrder = await Order.findById(order._id);
+        const resolved = liveOrder ? await tryResolve(live, liveOrder) : null;
         if (resolved !== null) {
-          const reloaded = await Dispute.findById(d._id).lean();
-          enriched.push(shape(reloaded, order, wallet.address));
+          // Re-read both sides: the snapshot `order` still shows the pre-settle
+          // status, so the response would claim 'escrow' for an order that was
+          // just refunded.
+          const [reloaded, settledOrder] = await Promise.all([
+            Dispute.findById(d._id).lean(),
+            Order.findById(order._id).lean(),
+          ]);
+          enriched.push(shape(reloaded, settledOrder, wallet.address, wallet.staked));
           continue;
         }
       }
-      enriched.push(shape(d, order, wallet.address));
+      enriched.push(shape(d, order, wallet.address, wallet.staked));
     }
     res.json({ disputes: enriched, jurorReward: (await engine.getConfig()).params.jurorReward });
   } catch (error) {
@@ -490,12 +562,15 @@ router.get('/market/disputes', async (req, res) => {
   }
 });
 
-function shape(dispute, order, myAddress) {
+function shape(dispute, order, myAddress, myStaked = 0) {
   const isJuror = dispute.jurors.length
     ? dispute.jurors.includes(myAddress)
     : !dispute.votes.some((v) => v.juror === myAddress); // open jury: anyone unvoted
   const hasVoted = dispute.votes.some((v) => v.juror === myAddress);
   const verdict = disputeOutcome(dispute.votes, dispute.jurors);
+  // Open-jury service requires stake (mirrors the POST /vote guard) — surface it
+  // so the UI can prompt for a stake instead of offering a vote that 403s.
+  const needsStake = !dispute.jurors.length && !(myStaked > 0);
   return {
     _id: dispute._id,
     order: {
@@ -511,9 +586,10 @@ function shape(dispute, order, myAddress) {
     outcome: dispute.outcome,
     jurors: dispute.jurors,
     votes: dispute.votes,
-    canVote: dispute.status === 'open' && isJuror && !hasVoted,
+    canVote: dispute.status === 'open' && isJuror && !hasVoted && !needsStake,
+    needsStake,
     hasVoted,
-    progress: { cast: verdict.cast, needed: dispute.jurors.length || 1 },
+    progress: { cast: verdict.cast, needed: verdict.needed },
     createdAt: dispute.createdAt,
     resolvedAt: dispute.resolvedAt,
   };
@@ -539,6 +615,16 @@ router.post('/market/disputes/:id/vote', async (req, res) => {
       ? dispute.jurors.includes(wallet.address)
       : !dispute.votes.some((v) => v.juror === wallet.address);
     if (!jurorEligible) return res.status(403).json({ message: 'You are not a juror on this dispute.' });
+    // Open-jury service must be stake-backed. Without this, the sole condition
+    // for voting was "any account that exists" — and since getWalletDoc mints a
+    // welcome bonus on demand, a brand-new throwaway account was a valid juror.
+    // Stake is what makes a vote cost something, and it is exactly the
+    // criterion selectJurors uses to build a closed panel.
+    if (!dispute.jurors.length && !(wallet.staked > 0)) {
+      return res.status(403).json({
+        message: 'Stake WELL to serve on an open jury. Open-jury votes require staked WELL, and you also earn the juror reward.',
+      });
+    }
     if (dispute.votes.some((v) => v.juror === wallet.address)) {
       return res.status(400).json({ message: 'You have already voted on this dispute.' });
     }
@@ -563,7 +649,7 @@ router.post('/market/disputes/:id/vote', async (req, res) => {
     const fresh = await Dispute.findById(dispute._id).lean();
     const freshOrder = await Order.findById(dispute.order).lean();
     res.json({
-      dispute: shape(fresh, freshOrder, wallet.address),
+      dispute: shape(fresh, freshOrder, wallet.address, wallet.staked),
       resolved: outcome !== null,
       outcome: outcome || null,
       weight,

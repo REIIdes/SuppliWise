@@ -157,7 +157,7 @@ router.post('/step-up', sensitiveLimiter, async (req, res) => {
       if (!otp) {
         return res.status(400).json({ message: 'Enter the 6-digit code from your authenticator app.' });
       }
-      if (!verifyTotpOnce(user.twoFactorSecret, otp)) {
+      if (!verifyTotpOnce(user.twoFactorSecret, otp, String(user._id))) {
         recordOffense(emailKey, lockMeta(req, req.ip));
         await SecurityEvent.write({
           user: user._id, type: 'mfa-failure', success: false,
@@ -399,7 +399,10 @@ router.delete('/backup-codes', sensitiveLimiter, requireStepUp, async (req, res)
   try {
     const removed = await BackupCode.invalidateAll(req.user._id);
     await SecurityEvent.write({
-      user: user._id, type: 'backup-codes-invalidated', success: true,
+      // `req.user._id` — the bare `user` identifier does not exist in this
+      // scope, so the audit write threw a ReferenceError AFTER the codes were
+      // already destroyed and the route answered 500 for a successful action.
+      user: req.user._id, type: 'backup-codes-invalidated', success: true,
       ip: req.ip, userAgent: req.get('user-agent'),
       reason: `${removed} recovery codes invalidated`,
     });
@@ -452,16 +455,27 @@ router.post('/recovery-email/request', sensitiveLimiter, requireStepUp, async (r
       return res.status(400).json({ message: 'That address cannot be used as a recovery email.' });
     }
 
+    // Deliver BEFORE answering, for the same reason /api/auth/login does: a code
+    // the user never receives must not be announced as sent, and must not be
+    // left in the store as a "pending" proof nothing can complete.
+    //
+    // The previous version stored the proof, answered "We sent a confirmation
+    // code", and fired the send from a setTimeout with a `.catch()` intended to
+    // drop the proof on failure. That cleanup could never run: `sendOtpEmail`
+    // catches its own errors and RESOLVES false, so it never rejects. The
+    // comment claimed a failure would drop the proof; in practice a failed send
+    // left the proof sitting there and told the user to go and read a code that
+    // was never delivered.
     const otp = crypto.randomInt(100000, 999999).toString();
+    const delivered = await sendOtpEmail(email, otp, 'recovery');
+    if (!delivered) {
+      // Nothing is stored, so the address can never be "verified" by someone who
+      // never proved they receive mail there — which is what the cleanup above
+      // was trying to guarantee.
+      console.error(`[security/recovery-email] delivery failed for ${str(user._id).slice(0, 8)}…`);
+      return res.status(503).json({ message: 'Could not send the confirmation code. Please try again in a moment.' });
+    }
     recoveryEmailProofs.set(String(user._id), { email, otp, expiresAt: Date.now() + RECOVERY_PROOF_TTL_MS });
-
-    // Background delivery; a failure drops the proof so the address can never
-    // be "verified" by someone who never proved they receive mail there.
-    setTimeout(() => {
-      sendOtpEmail(email, otp, 'recovery').catch(() => {
-        recoveryEmailProofs.delete(String(user._id));
-      });
-    }, 0);
 
     res.json({ message: `We sent a confirmation code to ${email}.` });
   } catch (error) {

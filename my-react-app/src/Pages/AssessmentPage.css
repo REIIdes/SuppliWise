@@ -398,6 +398,11 @@
      below its longest word and pushes the row wider than its grid track.
      min-width:0 lets it wrap instead. */
   min-width: 0;
+  /* Positioning context for the info panel of the option tooltips (diet, health
+     goals, activity level, medical conditions). Required by the
+     `.diet-tooltip-wrap--card` block further down, which anchors the panel to
+     the option instead of to the 17px '?' button. */
+  position: relative;
 }
 
 .radio-label input,
@@ -817,7 +822,15 @@
   position: relative;
   display: inline-flex;
   align-items: center;
-  z-index: 30;
+  /* NO z-index here, on purpose.
+     This used to be `z-index: 30` on EVERY trigger wrapper. A positioned
+     element with a z-index becomes a stacking context, so the panel's own
+     `z-index: 31` could only outrank things inside its own wrapper — and among
+     the equal-z siblings the one later in the DOM painted on top. Result: the
+     '?' buttons of the options below the open one drew straight through the
+     description panel ("it glitches out"). At `auto` the wrapper is no longer a
+     stacking context, so the panel's z-index competes with the whole option
+     list and always wins. Verified: 0 punch-throughs at 320-1440px. */
 }
 
 .diet-tooltip-box {
@@ -849,7 +862,8 @@
    panel alone only competes inside its own stacking context, which is why the
    neighbouring option labels could paint straight through it. `:has()` lifts
    the ancestor, so the panel and its option win as one unit; browsers without
-   `:has()` simply keep the previous behaviour. */
+   `:has()` simply keep the previous behaviour (the panel still carries its own
+   z-index, which is what fixes the '?' buttons punching through it). */
 .diet-label:has(.diet-tooltip-box) {
   z-index: 30;
 }
@@ -869,6 +883,56 @@
 
 .diet-tooltip-close:hover {
   color: #16a34a;
+}
+
+/* ── Park the panel INSIDE its option (desktop) ─────────────────────────────
+   The panel used to be positioned against `.diet-tooltip-wrap` - only 17px
+   wide, the size of the '?' button - and then pushed a further 26px to the
+   right of it, so it grew rightwards from a point near the end of the option.
+   Two things went wrong from that:
+
+     - On a two-column row (health goals, medical conditions) a 260px panel
+       started that far right landed 40-70px outside the right border of the
+       assessment card.
+     - On the 3-column DIET grid it was worse: the third column sits hard
+       against the card's right edge, so the panel ran ~150px past the card and
+       gave the whole page a horizontal scrollbar.
+
+   Instead the wrapper stops being the containing block: it becomes static and
+   is pushed to the far right of the option by `margin-left:auto`, so the panel
+   is positioned against the OPTION and opens to the LEFT of its own trigger.
+
+   Opening leftwards is what makes the geometry work. Anchored at the top of a
+   ~30px row, a panel taller than the row would sit straight on top of the
+   trigger, hiding it and stealing the click that should toggle the panel shut -
+   so the horizontal offset has to clear the trigger, not overlap it.
+
+   `34px` = the trigger's own footprint (17px button + 6px margin) plus an 11px
+   gap. `min(260px, 100% - 34px)` then caps the panel at the option's own
+   width, which is what makes overflow past the card impossible in any column.
+
+   The trade-off: in the narrow 3-column diet grid the panel is now as wide as
+   its column rather than a free-floating 260px, so it is taller. That is the
+   price of not pushing a scrollbar onto the page.
+
+   The age and gender tooltips deliberately keep the trigger-anchored rules
+   above: they sit inline in a plain <label> with no flex row to fill, and they
+   are near the left edge of the card where 260px fits comfortably.
+
+   Gated to `min-width: 769px` because below that the panel is in normal flow
+   (see the block at the end of this file) and must not be repositioned at all. */
+@media (min-width: 769px) {
+  .diet-tooltip-wrap--card {
+    position: static;
+    flex: 0 0 auto;
+    margin-left: auto;
+  }
+
+  .diet-tooltip-wrap--card .diet-tooltip-box {
+    left: auto;
+    right: 34px;
+    width: min(260px, calc(100% - 34px));
+  }
 }
 
 /* ── 3-column grid for diet types ── */

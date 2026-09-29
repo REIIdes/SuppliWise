@@ -419,7 +419,189 @@
   font-style: italic;
 }
 
+/* ── Plans teaser ───────────────────────────────────────────────────────
+   Mirrors the pricing page's light-mint surface rather than its dark one: this
+   is a marketing section, and a dark block in the middle of the light home page
+   would read as a different website. It names the plans and sends people to
+   /pricing, where the real prices live (server-owned, currency-converted). */
+.plans-section {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 72px 24px 40px;
+  text-align: center;
+}
+
+.plans-section-header { margin-bottom: 34px; }
+
+.plans-teaser {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 30px;
+}
+
+.plans-teaser-card {
+  position: relative;
+  padding: 22px 18px;
+  border-radius: 16px;
+  border: 1px solid #dbeee2;
+  background: #ffffff;
+  text-align: left;
+  box-shadow: 0 10px 30px -24px rgba(6, 95, 70, 0.6);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.plans-teaser-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 18px 40px -26px rgba(6, 95, 70, 0.8);
+}
+
+.plans-teaser-card--highlight {
+  border-color: rgba(16, 185, 129, 0.5);
+  background: linear-gradient(180deg, rgba(16, 185, 129, 0.07), rgba(34, 211, 238, 0.03));
+}
+
+.plans-teaser-badge {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #ffffff;
+  background: linear-gradient(135deg, #10b981, #0d9488);
+}
+
+.plans-teaser-name {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: #14301f;
+}
+
+.plans-teaser-tagline {
+  margin: 5px 0 14px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #6b7c6b;
+  min-height: 2.9em;
+}
+
+.plans-teaser-list {
+  list-style: none;
+  margin: 0;
+  padding: 14px 0 0;
+  border-top: 1px solid #eaf3ed;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.plans-teaser-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: #35543f;
+}
+
+.plans-teaser-list svg { flex: 0 0 auto; margin-top: 2px; color: #10b981; }
+
+/* One sentence of positioning per tier, under the tagline. It replaced a
+   three-bullet feature list that could never be rendered here: the real
+   bullets are derived server-side from the entitlement gates, and a guest
+   teaser must not duplicate (or drift from) them. */
+.plans-teaser-blurb {
+  margin: 0;
+  padding: 13px 0 0;
+  border-top: 1px solid #eaf3ed;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #35543f;
+}
+
+.plans-cta { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+
+.plans-cta-note {
+  margin: 0;
+  max-width: 480px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #6b7c6b;
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────── */
+.home-footer {
+  max-width: 1100px;
+  margin: 40px auto 0;
+  padding: 28px 24px 40px;
+  border-top: 1px solid #dbeee2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.home-footer__brand { display: flex; flex-direction: column; gap: 2px; }
+
+.home-footer__name {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  background: linear-gradient(92deg, #059669 0%, #0d9488 55%, #0891b2 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.home-footer__tag { font-size: 12px; color: #6b7c6b; }
+
+.home-footer__links { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.home-footer__link {
+  border: 1px solid #dbeee2;
+  background: #ffffff;
+  color: #35543f;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, transform 0.12s ease;
+}
+
+.home-footer__link:hover {
+  background: #f0fdf4;
+  border-color: #a7f3d0;
+  transform: translateY(-1px);
+  color: #047857;
+}
+
+.home-footer__link:focus-visible {
+  outline: 2px solid #10b981;
+  outline-offset: 2px;
+}
+
+.home-footer__legal {
+  width: 100%;
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: #7a8a7a;
+}
+
 /* ── Mobile ── */
+@media (max-width: 900px) {
+  .plans-teaser { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 @media (max-width: 640px) {
   .hero-section { padding: 64px 18px 52px; }
   .hero-title { font-size: 32px; }
@@ -440,4 +622,8 @@
   .hero-actions .btn-primary,
   .hero-actions .btn-secondary,
   .hero-actions .btn-primary svg { transition: none !important; }
+  .plans-teaser-card,
+  .home-footer__link { transition: none !important; }
+  .plans-teaser-card:hover,
+  .home-footer__link:hover { transform: none; }
 }

@@ -3,6 +3,28 @@
 server/.env
 **/.env
 
+# Plaintext credential hand-off files. `*.local.*` is where a rotation writes
+# the generated TOTP setup keys and passwords once, for the operator to copy
+# into an authenticator app / password manager. They are untracked scratch by
+# definition - the whole point is that they hold live secrets in the clear, and
+# this repo has already had live secrets committed and published once.
+*.local.txt
+*.local.*
+*secrets*.txt
+*credentials*.txt
+
+# Backups/copies of the above. A timestamped `.env.bak-*` holds every live
+# admin password hash and TOTP seed, and the patterns above only match the
+# exact name `.env` - so a backup taken before an edit showed up as an
+# untracked, committable file. Since this repo has already had live secrets
+# committed and published once, the copy is treated as the secret it is.
+.env.*.bak*
+**/.env.*.bak*
+*.env.bak*
+*.env.old
+*.env.orig
+*.env.save
+
 # Example env files may only ever contain placeholders (an earlier revision
 # of server/.env.example shipped real secrets). Keep them tracked but never
 # secret-bearing.
@@ -30,6 +52,13 @@ server/node_modules
 dist
 my-react-app/dist
 my-react-app/dev-dist
+
+# User-uploaded profile/banner images. These are served from disk at runtime
+# (server/utils/pictures.js) rather than stored inside the user document — a
+# multi-megabyte base64 string on the account made every sign-in read and
+# rewrite ~3 MB, which is what broke the login button. They are user content,
+# not source: never committed.
+server/uploads/
 
 # Editor / tooling state
 .qodo/

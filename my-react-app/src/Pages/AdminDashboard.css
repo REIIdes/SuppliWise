@@ -124,7 +124,12 @@
   align-items: center;
   gap: 11px;
   transition: background 0.18s, color 0.18s, transform 0.18s, box-shadow 0.18s, padding 0.25s;
-  white-space: nowrap;
+  /* NOT nowrap: the rail is a fixed 240px, which leaves ~147px for the label,
+     and "Subscription management" needs ~197px at this size. With nowrap the
+     label was silently cut off mid-word ("Subscription manag") by the overflow
+     rule below — a nav item you cannot read the end of. The label wraps to two
+     lines instead, so the name is always complete. The icon stays on one line
+     via the flex row. */
   overflow: hidden;
   position: relative;
 }
@@ -134,6 +139,10 @@
   justify-content: center;
   padding: 11px 0;
   color: #eef5f0;
+  /* The label is 0px wide but still a flex item, so the inherited 11px gap
+     kept being applied and pushed the icon ~5px left of centre in the 64px
+     rail. With no visible label there is nothing to separate. */
+  gap: 0;
 }
 .admin-sidebar--collapsed nav button.active,
 .admin-sidebar--collapsed nav button:hover {
@@ -272,7 +281,14 @@
 .sidebar-nav-label {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
+  /* Wraps instead of clipping — see the note on `.admin-sidebar nav button`.
+     `hyphens: auto` gives the browser permission to break a long word at the
+     box edge if an even narrower viewport ever leaves it too little room, so a
+     label can never be cut off mid-word again. */
+  white-space: normal;
+  overflow-wrap: break-word;
+  hyphens: auto;
+  line-height: 1.25;
   opacity: 1;
   transition: opacity 0.15s ease;
 }
@@ -281,6 +297,13 @@
   opacity: 0;
   flex: 0;
   pointer-events: none;
+  /* MUST stay nowrap while hidden. The label box is 0px wide here, so the
+     wrapping rule above would break the text one character per line and the
+     button would grow to ~167px tall — a vertical streak down the icon rail
+     instead of a 50px row. A hidden label is never seen, so there is nothing
+     to wrap for. */
+  white-space: nowrap;
+  line-height: 0;
 }
 
 /* ── Sign-out button at the bottom ───────────────── */
@@ -347,6 +370,45 @@
   position: relative;
 }
 
+/* Right-hand header actions. Wrapped in a flex row so the button can align to
+   the title baseline without the header needing extra positioning. */
+.admin-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  padding-bottom: 4px;
+}
+/* Manual reload. Spins while a poll is in flight (refreshing), so the button
+   can never be read as "my click did nothing". */
+.admin-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.admin-refresh svg { flex-shrink: 0; transition: transform .5s cubic-bezier(.4, 0, .2, 1); }
+.admin-refresh:not(:disabled):hover svg { transform: translateY(-1px) scale(1.08); }
+.admin-refresh:disabled { cursor: progress; }
+.admin-refresh:disabled svg { animation: admin-spin 1s linear infinite; }
+@keyframes admin-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.admin-refresh:focus-visible { outline: 2px solid var(--admin-indigo); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-refresh:disabled svg { animation: none; }
+  .admin-refresh svg { transition: none; }
+}
+
+@media (max-width: 720px) {
+  /* Stack the title and the reload control instead of squeezing the
+     clamp(28px, 4vw, 45px) headline into whatever is left. */
+  .admin-header { flex-wrap: wrap; align-items: flex-start; gap: 14px; }
+  .admin-header__actions { padding-bottom: 0; }
+}
+
 /* Notification panel — fixed + JS-anchored to the bell: left/top/width are
    written before paint by a layout effect in AdminDashboard, so the panel
    stays pinned under the bell while the page scrolls (the values below are
@@ -360,7 +422,9 @@
   right: 24px;
   left: auto;
   width: min(360px, calc(100vw - 36px));
-  max-height: 420px;
+  /* Never taller than the viewport minus the topbar, so the list always has
+     something to scroll and the panel never runs off the bottom edge. */
+  max-height: min(420px, calc(100vh - var(--admin-topbar-h, 60px) - 28px));
   display: flex;
   flex-direction: column;
   padding: 18px;
@@ -369,6 +433,9 @@
   box-shadow: 0 22px 48px -22px rgba(23,35,31,.55);
   border-radius: 16px;
   overflow: visible;
+  /* Long unbroken strings (ids, URLs, plan names) used to widen the row and
+     force a horizontal scrollbar across the text. */
+  overflow-wrap: break-word;
 }
 /* Colour rail across the top */
 .admin-notif-panel h3 {
@@ -376,12 +443,19 @@
   font-size: 16px;
   font-weight: 800;
   letter-spacing: -0.01em;
+  /* Gives up width first (ellipsis) so the header actions keep full labels. */
+  flex: 0 1 auto;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .admin-notif-panel h3::before {
   content: '';
+  flex-shrink: 0;
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -389,12 +463,26 @@
   box-shadow: 0 0 0 4px rgba(225,29,72,.16);
 }
 
-/* Scroll area for the items — header stays pinned above it. min-height:0
-   lets this flex child shrink so the panel's max-height actually caps it. */
+/* Scroll area for the items — header stays pinned above it. flex:1 + min-height:0
+   let this flex child shrink so the panel's max-height actually caps it. */
 .admin-notif-panel__list {
+  flex: 1 1 auto;
   overflow-y: auto;
+  overflow-x: hidden;
   min-height: 0;
   overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #d1d5db transparent;
+}
+.admin-notif-panel__list::-webkit-scrollbar {
+  width: 6px;
+}
+.admin-notif-panel__list::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 999px;
+}
+.admin-notif-panel__list::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 /* Arrow pointing up at the bell; --arrow-x (bell centre, set in JS) keeps
@@ -442,8 +530,20 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 6px 12px;
   margin-bottom: 10px;
+}
+/* One wrapping group for both actions — the h3 above ellipsises first so the
+   two labels can never overlap each other on a narrow panel. */
+.admin-notif-panel__actions {
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
 }
 .admin-notif-panel__action {
   background: none;
@@ -460,25 +560,74 @@
   background: linear-gradient(120deg, #ecfdf5, #d1fae5);
   color: #065f46;
 }
+.admin-notif-panel__action--danger {
+  color: #b91c1c;
+}
+.admin-notif-panel__action--danger:hover {
+  background: #fef2f2;
+  color: #991b1b;
+}
+/* Already read: keep the row for context but drop it back from the eye. */
+.notification--read {
+  border-left-color: #c8cfd3 !important;
+  background: #f8faf9;
+  opacity: .72;
+}
+.notification--read strong {
+  font-weight: 600;
+}
 .notification--flag {
   border-left-color: #e11d48 !important;
   background: linear-gradient(100deg, #fff1f2, #ffe4e6);
   border-radius: 0 10px 10px 0;
 }
+
+/* A paid upgrade request. Amber rather than red: it is money waiting to be
+   released, not a health concern, and it must not read as an emergency. */
+.notification--request {
+  border-left-color: #d97706 !important;
+  background: linear-gradient(100deg, #fffbeb, #fef3c7);
+  border-radius: 0 10px 10px 0;
+}
+/* Stand-in for the delete button on rows that cannot be deleted (live config
+   warnings): tells the admin these are fixable, not dismissable. Scoped under
+   .notification-panel to outrank the global `.notification span` rule, which
+   otherwise repaints it muted grey. */
+.notification-panel .notification__live {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  font: 700 10px Arial, sans-serif;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: #b91c1c;
+  background: #fee2e2;
+  border-radius: 999px;
+  padding: 3px 8px;
+  margin-top: 0;
+  white-space: nowrap;
+}
+/* Fixed square box, top-aligned: as a float the × drifted into the middle of
+   the detail text and sat on top of it. */
 .notification__delete {
-  float: right;
+  flex: 0 0 24px;
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
   background: none;
   border: none;
   color: #9aa0a6;
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
-  padding: 0 0 0 8px;
+  padding: 0;
   border-radius: 6px;
-  transition: color .15s ease, background .15s ease, transform .15s ease;
+  transition: color .15s ease, background .15s ease;
 }
 .notification__delete:hover {
   color: #b91c1c;
+  background: #fee2e2;
 }
 
 /* ── User list ───────────────────────────────────────────────────────── */
@@ -604,7 +753,11 @@
 }
 .user-details__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  /* `min()` on the track floor: the 200px minimum is a preference, not a hard
+     floor. On a narrow viewport an unbreakable value could otherwise push the
+     track — and the whole panel — past the viewport, opening a horizontal
+     scrollbar for the entire admin page. */
+  grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));
   gap: 16px 24px;
   margin-bottom: 16px;
 }
@@ -612,6 +765,12 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  /* A flex/grid child defaults to `min-width: auto`, which refuses to shrink
+     below its content. A long unbroken value — an email like
+     `sess-win.1790561880588.u20t4r3lji@example.com` has no spaces to break at
+     — therefore widened the card past its grid track and spilled out of the
+     panel. `min-width: 0` lets the item actually shrink. */
+  min-width: 0;
 }
 .user-detail-item strong {
   font: 700 11px Arial, sans-serif;
@@ -619,7 +778,21 @@
   letter-spacing: 0.05em;
   color: var(--admin-muted);
 }
-.user-detail-item span { font: 13px Arial, sans-serif; color: var(--admin-ink); }
+/* `anywhere` and not `break-word`: only `anywhere` also lowers the element's
+   min-content width, which is what stops the grid track being forced wider by
+   an unbreakable string. `break-word` still overflows the track. */
+.user-detail-item span {
+  font: 13px Arial, sans-serif;
+  color: var(--admin-ink);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.user-detail-item small {
+  font-size: 11px;
+  color: var(--admin-muted);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .user-detail-item small { font-size: 11px; color: var(--admin-muted); }
 .user-detail-item select {
   padding: 6px 8px;
@@ -637,287 +810,625 @@
   border-top: 1px solid var(--admin-line);
 }
 
-/* ════════════════════════════════════════════════════════════════════
-   VIBRANT USER CARD REFRESH
-   ════════════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════════════════
+   USERS PANEL
+
+   One place for the whole queue, because the previous version of this file
+   spread it across two blocks and one of them lost a closing brace — which
+   silently swallowed the 150 rules after it. Every rule here is closed, and the
+   classes are namespaced `usr-` so nothing here can collide with the rest of
+   the dashboard.
+
+   THE FOUR TONES match the other three queues:
+     indigo → everything        emerald → can sign in
+     rose   → locked out        slate   → administratively off
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.usr-stats {
+  --usr-all: #4f6bed;
+  --usr-all-deep: #3730a3;
+  --usr-all-wash: #eef1fe;
+  --usr-ok: #10b981;
+  --usr-ok-deep: #047857;
+  --usr-ok-wash: #e7f8f1;
+  --usr-down: #f43f5e;
+  --usr-down-deep: #be123c;
+  --usr-down-wash: #fdeaee;
+  --usr-idle: #64748b;
+  --usr-idle-deep: #475569;
+  --usr-idle-wash: #eef1f5;
+
+  display: grid;
+  /* auto-fit, not a fixed 4: the panel is a sidebar-width column on a laptop,
+     and four fixed columns there squeezed each card to ~145px, wrapping the
+     hint to four lines and inflating the strip to 154px tall. The cards now
+     take the room there is and wrap only when a card would be unreadable. */
+  grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
+  gap: 12px;
+  margin: 18px 0 0;
+}
+
+/* ── Stat cards (they are the filter) ───────────────────────────────────── */
+.usr-stat {
+  --t: var(--usr-all);
+  --t-deep: var(--usr-all-deep);
+  --t-wash: var(--usr-all-wash);
+
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px 14px 18px;
+  border: 1px solid var(--admin-line);
+  border-radius: 14px;
+  background: var(--t-wash);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(20, 33, 27, .04);
+  transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+}
+/* The rail that makes each card's tone readable before the eye reaches the
+   number — the card's whole job is to be classified at a glance. */
+.usr-stat::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: linear-gradient(180deg, var(--t), var(--t-deep));
+  opacity: .55;
+  transition: opacity .16s ease;
+}
+.usr-stat:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--t) 42%, var(--admin-line));
+  box-shadow: 0 12px 24px -18px rgba(20, 33, 27, .5);
+}
+.usr-stat:hover::before { opacity: 1; }
+.usr-stat:focus-visible {
+  outline: 2px solid var(--t);
+  outline-offset: 2px;
+}
+
+.usr-stat--ok   { --t: var(--usr-ok);   --t-deep: var(--usr-ok-deep);   --t-wash: var(--usr-ok-wash); }
+.usr-stat--down { --t: var(--usr-down); --t-deep: var(--usr-down-deep); --t-wash: var(--usr-down-wash); }
+.usr-stat--idle { --t: var(--usr-idle); --t-deep: var(--usr-idle-deep); --t-wash: var(--usr-idle-wash); }
+
+/* The selected card inverts to its own tone. Without this the pressed state is
+   only a 2px outline, which is too quiet to answer "what am I looking at?" */
+.usr-stat--on {
+  background: linear-gradient(135deg, var(--t) 0%, var(--t-deep) 100%);
+  border-color: transparent;
+  box-shadow: 0 12px 26px -16px color-mix(in srgb, var(--t) 90%, transparent);
+}
+.usr-stat--on::before { opacity: 0; }
+.usr-stat--on:hover { transform: translateY(-2px); }
+.usr-stat--on .usr-stat__icon {
+  background: rgba(255, 255, 255, .22);
+  color: #fff;
+}
+.usr-stat--on .usr-stat__value { color: #fff; }
+.usr-stat--on .usr-stat__label { color: rgba(255, 255, 255, .97); }
+.usr-stat--on .usr-stat__hint  { color: rgba(255, 255, 255, .76); }
+
+.usr-stat__icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, .7);
+  color: var(--t-deep);
+  transition: background .16s ease, color .16s ease;
+}
+.usr-stat__icon svg { width: 19px; height: 19px; }
+
+.usr-stat__body { display: flex; flex-direction: column; min-width: 0; }
+.usr-stat__value {
+  font: 800 26px/1 Arial, sans-serif;
+  color: var(--t-deep);
+  letter-spacing: -.02em;
+  transition: color .16s ease;
+}
+.usr-stat__label {
+  font: 700 12.5px/1.3 Arial, sans-serif;
+  color: var(--admin-ink);
+  margin-top: 3px;
+  transition: color .16s ease;
+}
+.usr-stat__hint {
+  font: 11.5px/1.35 Arial, sans-serif;
+  color: var(--admin-muted);
+  margin-top: 1px;
+  transition: color .16s ease;
+  /* Two lines, then ellipsis. The hint is a gloss on the label, and a fourth
+     wrapped line makes the strip taller than the queue it is meant to
+     summarise. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── Result count / reset ──────────────────────────────────────────────── */
+.usr-listbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 16px 0 2px;
+}
+.usr-listbar__count {
+  margin: 0;
+  font: 700 11px/1 Arial, sans-serif;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--admin-muted);
+}
+.usr-listbar__reset {
+  border: 0;
+  border-radius: 999px;
+  padding: 5px 12px;
+  background: #eef1fe;
+  color: var(--usr-all-deep, #3730a3);
+  font: 700 11.5px Arial, sans-serif;
+  cursor: pointer;
+  transition: background .15s ease, transform .15s ease;
+}
+.usr-listbar__reset:hover { background: #e0e5fd; transform: translateX(2px); }
+.usr-listbar__reset:focus-visible { outline: 2px solid var(--usr-all, #4f6bed); outline-offset: 2px; }
+
+/* ── Search ────────────────────────────────────────────────────────────── */
+.usr-searchbar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  /* `flex-basis` as a PREFERENCE with `min-width: 0`, not a hard 260px floor.
+     A hard floor was what made this bar 14px wider than a 400px panel: the
+     console's narrowest real layout is a 375px phone with the sidebar
+     collapsed, which leaves the panel about 285px. */
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.usr-searchbar__icon {
+  position: absolute;
+  left: 12px;
+  display: grid;
+  place-items: center;
+  color: #9aa8a1;
+  pointer-events: none;
+}
+/* Room for the leading icon and the trailing clear button, so neither overlaps
+   the text the admin is typing.
+   The selector carries `.search-row` on purpose: the generic `.search-row
+   input` rule sits LATER in this file at equal specificity, so `.usr-searchbar
+   input` alone lost and the icon landed on top of the placeholder. Adding the
+   class raises specificity instead of reaching for `!important`.
+   `min-width: 0` likewise has to be restated: the generic rule sets a 190px
+   floor that only the <=820px media query lifts, and that query watches the
+   VIEWPORT — which says nothing about how wide this sidebar column ended up. */
+.search-row.usr-searchbar input,
+.search-row.usr-searchbar input:focus {
+  width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
+  padding-left: 34px;
+  padding-right: 34px;
+}
+.usr-searchbar__clear {
+  position: absolute;
+  right: 7px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 50%;
+  background: #e4eae6;
+  color: #5c6b64;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+.usr-searchbar__clear:hover { background: #fdeaee; color: #be123c; }
+.usr-searchbar__clear:focus-visible { outline: 2px solid var(--admin-indigo); outline-offset: 1px; }
+
+/* ── Cards ─────────────────────────────────────────────────────────────── */
 .user-item {
+  position: relative;
+  overflow: hidden;
   border-radius: 14px;
   border: 1px solid #dcebe1;
   background: linear-gradient(180deg, #ffffff 0%, #fbfefc 100%);
-  box-shadow: 0 2px 8px rgba(22, 101, 52, 0.05);
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  box-shadow: 0 2px 8px rgba(22, 101, 52, .05);
+  transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
 }
 .user-item:hover {
   transform: translateY(-2px);
-  box-shadow: 0 10px 24px rgba(22, 101, 52, 0.12);
+  box-shadow: 0 10px 24px rgba(22, 101, 52, .12);
   border-color: #a7f3d0;
 }
 .user-item--open {
   border-color: #6ee7b7;
-  box-shadow: 0 12px 30px rgba(22, 101, 52, 0.14);
+  box-shadow: 0 12px 30px rgba(22, 101, 52, .14);
 }
 
+/* A locked or banned account gets a rose/slate rail down its left edge, so a
+   problem is visible on the collapsed card — before the row is opened. The
+   previous version only badged NON-active accounts, which meant a locked-out
+   user looked exactly like a healthy one until you expanded them.
+
+   Drawn as an ::before rail rather than `border-left`, matching .asc-stat and
+   .ov-metric: a `border-left` shorthand here would race the base .user-item
+   `border` shorthand for the colour, and it also rounds away at the card's
+   14px radius, which is exactly where a left edge needs to look solid. */
+.user-item--down::before,
+.user-item--idle::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  border-radius: 14px 0 0 14px;
+}
+.user-item--down::before { background: linear-gradient(180deg, #f43f5e, #be123c); }
+.user-item--idle::before { background: linear-gradient(180deg, #94a3b8, #64748b); }
+
+/* ── Collapsed row ─────────────────────────────────────────────────────── */
 .user-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  /* Wraps rather than overflows. The row carries five things — avatar, name,
+     plan/dates, a status flag and the chevron — and the flag and chevron are
+     `flex-shrink: 0` by design, so on a narrow panel the only graceful
+     outcome is for the meta column to drop onto its own line. A viewport media
+     query cannot see this: the panel is a fixed-width sidebar column, so its
+     available width is not the window's. */
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 13px 18px;
+  background: none;
+  border: 0;
   border-radius: 14px 14px 0 0;
-  transition: background 0.15s ease;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: background .15s ease;
 }
-.user-row:hover { background: rgba(34, 197, 94, 0.05); }
+.user-row:hover { background: rgba(34, 197, 94, .05); }
+.user-row:focus-visible { outline: 2px solid var(--admin-accent); outline-offset: -2px; }
 
+/* Avatar. The initials sit UNDERNEATH the photo at all times, so a missing or
+   broken image needs no onError handler and cannot leave a blank hole. */
+.usr-avatar {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: block;
+  background: #eef2ef;
+  border: 2px solid transparent;
+  background-image: linear-gradient(#fff, #fff), linear-gradient(135deg, #22c55e, #4f6bed);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  box-shadow: 0 3px 10px rgba(34, 197, 94, .25);
+  overflow: hidden;
+}
+.usr-avatar__initials {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 700 15px/1 Arial, sans-serif;
+  color: #fff;
+  user-select: none;
+}
+.usr-avatar__photo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.user-row__info {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.user-row__name {
+  font: 700 15px/1.25 Arial, sans-serif;
+  color: var(--admin-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The email replaces "Joined: <date>" here. The join date moved to the meta
+   column, where it stopped competing with the one thing an admin scans a name
+   for: which account this is. */
+.user-row__sub {
+  font: 12.5px/1.3 Arial, sans-serif;
+  color: var(--admin-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* Plan + dates. Allowed to shrink and to wrap onto its own line rather than
+   pushing the row past the panel edge. */
+.usr-row__meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+  text-align: right;
+}
+.usr-plan {
+  font: 700 10.5px/1 Arial, sans-serif;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: #eef1f5;
+  color: #5b6472;
+  white-space: nowrap;
+}
+.usr-plan--live {
+  background: linear-gradient(135deg, #10b981, #047857);
+  color: #fff;
+  box-shadow: 0 4px 10px -4px rgba(16, 185, 129, .7);
+}
+.usr-row__when {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: 11.5px/1 Arial, sans-serif;
+  color: var(--admin-muted);
+  white-space: nowrap;
+}
+.usr-row__when i { width: 3px; height: 3px; border-radius: 50%; background: #c3cec8; }
+.usr-row__when--never { color: #a5b0aa; font-style: italic; }
+
+.usr-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font: 700 10.5px/1 Arial, sans-serif;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.usr-flag svg { width: 12px; height: 12px; }
+.usr-flag--down { background: var(--usr-down-wash, #fdeaee); color: #be123c; }
+.usr-flag--idle { background: var(--usr-idle-wash, #eef1f5); color: #475569; }
+.usr-flag--ok   { background: #e7f8f1; color: #047857; }
+
+.user-row__chevron {
+  font-size: 11px;
+  color: #16a34a;
+  flex-shrink: 0;
+  transition: transform .2s ease;
+}
+.user-row__chevron--open { transform: rotate(180deg); }
+
+/* The Admins queue shares .user-item / .user-row. It now uses the same
+   .usr-avatar markup, so this rule only has to cover any caller still on the
+   original element. */
 .user-avatar {
   border: 2px solid transparent;
   background: linear-gradient(#fff, #fff) padding-box, linear-gradient(135deg, #22c55e, #4f6bed) border-box;
-  box-shadow: 0 3px 10px rgba(34, 197, 94, 0.25);
-}
-.user-row__name {
-  font-weight: 700;
-  background: linear-gradient(92deg, #14532d, #15803d 60%, #4f6bed);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-.user-count-pill {
-  background: linear-gradient(135deg, #ecfdf5, #d1fae5);
+  box-shadow: 0 3px 10px rgba(34, 197, 94, .25);
 }
 
-.profile-panel {
-  background: var(--admin-white);
-  border: 1px solid var(--admin-line);
+/* ── Empty state ───────────────────────────────────────────────────────── */
+.usr-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 46px 20px;
+  border: 1px dashed #d5e2da;
   border-radius: 14px;
-  padding: 24px;
-  box-shadow: 0 8px 24px rgba(23, 35, 31, 0.08);
+  background: #fbfdfb;
+  text-align: center;
 }
-
-.profile-panel .text-muted {
+.usr-empty__icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  margin-bottom: 4px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #ecfdf5, #dbeafe);
+  color: #2d6a4f;
+}
+.usr-empty strong { font: 700 15px/1.3 Arial, sans-serif; color: var(--admin-ink); }
+.usr-empty p {
+  margin: 0;
+  max-width: 42ch;
+  font: 13px/1.5 Arial, sans-serif;
   color: var(--admin-muted);
 }
+.usr-empty .admin-secondary { margin-top: 6px; }
 
-.profile-panel .space-y-6 > * + * {
-  margin-top: 1.5rem;
-}
-
-.profile-panel .flex {
-  display: flex;
-}
-
-.profile-panel .items-center {
-  align-items: center;
-}
-
-.profile-panel .space-x-4 > * + * {
-  margin-left: 1rem;
-}
-
-.profile-panel .w-24 {
-  width: 6rem;
-}
-
-.profile-panel .h-24 {
-  height: 6rem;
-}
-
-.profile-panel .rounded-full {
-  border-radius: 9999px;
-}
-
-.profile-panel .rounded-md {
-  border-radius: 0.375rem;
-}
-
-.profile-panel .bg-gray-200 {
-  background-color: #e5e7eb;
-}
-
-.profile-panel .justify-center {
-  justify-content: center;
-}
-
-.profile-panel .text-4xl {
-  font-size: 2.25rem;
-}
-
-.profile-panel .text-gray-500 {
-  color: #6b7280;
-}
-
-.profile-panel .object-cover {
-  object-fit: cover;
-}
-
-.profile-panel .text-lg {
-  font-size: 1.125rem;
-}
-
-.profile-panel .font-semibold {
-  font-weight: 600;
-}
-
-.profile-panel .text-sm {
-  font-size: 0.875rem;
-}
-
-.profile-panel .mt-2 {
-  margin-top: 0.5rem;
-}
-
-.profile-panel .space-x-2 > * + * {
-  margin-left: 0.5rem;
-}
-
-.profile-panel .px-4 {
-  padding-left: 1rem;
-  padding-right: 1rem;
-}
-
-.profile-panel .py-2 {
-  padding-top: 0.5rem;
-  padding-bottom: 0.5rem;
-}
-
-.profile-panel .bg-blue-500 {
-  background-color: #3b82f6;
-}
-
-.profile-panel .text-white {
-  color: #fff;
-}
-
-.profile-panel .hover\:bg-blue-600:hover {
-  background-color: #2563eb;
-}
-
-.profile-panel .bg-red-500 {
-  background-color: #ef4444;
-}
-
-.profile-panel .hover\:bg-red-600:hover {
-  background-color: #dc2626;
-}
-
-.profile-panel .hidden {
-  display: none;
-}
-
-.profile-panel .mt-6 {
-  margin-top: 1.5rem;
-}
-
-.profile-panel .justify-end {
-  justify-content: flex-end;
-}
-
-.profile-panel .px-6 {
-  padding-left: 1.5rem;
-  padding-right: 1.5rem;
-}
-
-.profile-panel .bg-green-500 {
-  background-color: #22c55e;
-}
-
-.profile-panel .hover\:bg-green-600:hover {
-  background-color: #16a34a;
-}
-
-.profile-panel .disabled\:opacity-50:disabled {
-  opacity: 0.5;
-}
-  border: 1px solid #a7f3d0;
-  color: #065f46;
-  font-weight: 700;
-}
-.user-row__chevron {
-  color: #16a34a;
-  font-size: 13px;
-}
-
+/* ── Expanded detail panel ─────────────────────────────────────────────── */
 .user-details {
+  padding: 18px 20px 16px;
   background: linear-gradient(180deg, #f6fdf8 0%, #eef8f0 100%);
+  border-top: 1px solid var(--admin-line);
   /* `backwards` not `both`: a filled `to { transform }` outranks normal author
      rules and turns this into a containing block for position:fixed descendants. */
-  animation: user-details-in 0.3s ease backwards;
+  animation: user-details-in .3s ease backwards;
 }
 @keyframes user-details-in {
   from { opacity: 0; transform: translateY(-8px); }
-  to { opacity: 1; transform: translateY(0); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.user-details__grid {
+  display: grid;
+  /* `min()` on the track floor: the 200px minimum is a preference, not a hard
+     floor. On a narrow viewport an unbreakable value could otherwise push the
+     whole grid past the panel. */
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+  gap: 11px;
 }
 .user-detail-item {
-  background: rgba(255, 255, 255, 0.75);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* A flex/grid child defaults to `min-width: auto`, which refuses to shrink
+     below its content. A long unbroken value - an email like
+     `sess-win.1790561880588.u20t4r3lji@example.com` has no spaces to break at
+     - therefore widened the card past its grid track and spilled out of the
+     panel. `min-width: 0` lets the item actually shrink. */
+  min-width: 0;
+  background: rgba(255, 255, 255, .75);
   border: 1px solid #e2efe6;
   border-radius: 12px;
   padding: 12px 14px;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition: transform .15s ease, box-shadow .15s ease;
 }
 .user-detail-item:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 18px rgba(22, 101, 52, 0.10);
+  box-shadow: 0 8px 18px rgba(22, 101, 52, .10);
 }
-.user-detail-item strong {
-  color: #15803d;
+.user-detail-item strong { font: 700 12px Arial, sans-serif; color: #15803d; }
+.user-detail-item span {
+  font: 13px Arial, sans-serif;
+  color: var(--admin-ink);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.user-detail-item small {
+  font-size: 11px;
+  color: var(--admin-muted);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .user-detail-item select {
+  padding: 7px 10px;
   border: 1.5px solid #bbf7d0;
   background: #fff;
   border-radius: 8px;
-  padding: 7px 10px;
-  font-weight: 600;
+  font: 600 13px Arial, sans-serif;
   color: #14532d;
   cursor: pointer;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color .15s ease, box-shadow .15s ease;
 }
 .user-detail-item select:focus {
   outline: none;
   border-color: #22c55e;
-  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.15);
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, .15);
 }
+.user-detail-item--wide { grid-column: 1 / -1; }
+
+.user-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 10px;
+  border-top: 1px solid var(--admin-line);
+}
+
+/* Destructive action, stacked under a warning that says what it does. */
+.user-actions--stacked { flex-direction: column; align-items: stretch; gap: 10px; }
+.user-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #fecdd3;
+  border-radius: 10px;
+  background: #fff1f2;
+  color: #9f1239;
+  font: 12.5px/1.5 Arial, sans-serif;
+}
+.user-warning__icon {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #f43f5e;
+  color: #fff;
+  font: 800 12px/1 Arial, sans-serif;
+}
+
+/* ── Detail-panel accents ──────────────────────────────────────────────── */
 .subscription-status-badge {
   background: linear-gradient(135deg, #e2e8f0, #cbd5e1);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .6);
 }
 .subscription-status-badge--active {
   background: linear-gradient(135deg, #22c55e, #15803d);
   color: #fff;
-  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.35);
+  box-shadow: 0 4px 12px rgba(34, 197, 94, .35);
 }
-.subscription-plan-select {
-  border: 1.5px solid #bbf7d0 !important;
-}
+.subscription-plan-select { border: 1.5px solid #bbf7d0 !important; }
 .lockout-badge--locked {
   background: linear-gradient(135deg, #ef4444, #b91c1c) !important;
   color: #fff !important;
   border: none !important;
-  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.35);
+  box-shadow: 0 4px 12px rgba(220, 38, 38, .35);
   animation: lockout-blink 2s ease-in-out infinite;
 }
 @keyframes lockout-blink {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.75; }
+  50% { opacity: .75; }
 }
-.lockout-badge--clear {
-  background: linear-gradient(135deg, #ecfdf4, #bbf7d0) !important;
-}
+.lockout-badge--clear { background: linear-gradient(135deg, #ecfdf4, #bbf7d0) !important; }
 .lockout-unlock-btn {
+  align-self: flex-start;
   background: linear-gradient(135deg, #ef4444, #b91c1c) !important;
-  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
-  transition: transform 0.15s ease, box-shadow 0.15s ease !important;
+  color: #fff !important;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, .3);
+  transition: transform .15s ease, box-shadow .15s ease !important;
 }
 .lockout-unlock-btn:hover {
   transform: translateY(-1px);
-  box-shadow: 0 8px 18px rgba(220, 38, 38, 0.4) !important;
+  box-shadow: 0 8px 18px rgba(220, 38, 38, .4) !important;
 }
-.security-active {
-  color: #15803d !important;
-  font-weight: 700;
+.security-active { color: #15803d !important; font-weight: 700; }
+
+/* ── Narrow viewports ──────────────────────────────────────────────────── */
+/* A safety net on top of the wrapping above, not the mechanism: the wrap is
+   what actually handles a narrow PANEL, which these viewport widths only
+   approximate. */
+@media (max-width: 900px) {
+  .usr-row__meta { display: none; }
+}
+@media (max-width: 560px) {
+  .usr-searchbar { flex: 1 1 100%; width: 100%; }
+  .usr-stat { padding: 12px 13px 12px 15px; gap: 10px; }
+  .usr-stat__icon { width: 32px; height: 32px; border-radius: 9px; }
+  .usr-stat__value { font-size: 21px; }
+  .usr-stat__hint { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .usr-stat,
   .user-item,
   .user-detail-item,
-  .lockout-unlock-btn {
-    transition: none;
-  }
+  .lockout-unlock-btn { transition: none; }
+  .usr-stat:hover,
+  .user-item:hover,
+  .user-detail-item:hover { transform: none; }
   .user-details,
-  .lockout-badge--locked {
-    animation: none;
-  }
+  .lockout-badge--locked { animation: none; }
 }
 
 /* Subscription status badge + plan selector */
@@ -963,6 +1474,40 @@
   outline: 2px solid #4f6bed;
   outline-offset: 1px;
 }
+
+/* ── Subscription controls entry point ───────────────────────────────────
+   The plan dropdown this replaced could only set a tier: it had no way to add
+   days, make a grant permanent, or — the important one — restore the user's
+   original paid state. The panel behind this button does all of that. */
+.subscription-manage-btn {
+  margin-top: 10px;
+  padding: 8px 14px;
+  border: 1px solid var(--admin-line);
+  border-radius: 9px;
+  background: #fff;
+  color: var(--admin-ink, #1f2937);
+  font: 700 12.5px Arial, sans-serif;
+  cursor: pointer;
+  transition: background .16s ease, border-color .16s ease, transform .12s ease;
+}
+.subscription-manage-btn:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+  transform: translateY(-1px);
+}
+.subscription-manage-btn:active { transform: translateY(0); }
+.subscription-manage-btn:focus-visible {
+  outline: 2px solid #4f6bed;
+  outline-offset: 2px;
+}
+
+/* The subscription detail is a full-width block under the detail grid — the
+   two-layer layout needs the room, and squeezing it into one grid cell made the
+   plan/override side-by-side cards collapse on a laptop. */
+.user-subscription-panel {
+  margin-top: 14px;
+}
+.user-detail-item--wide { grid-column: 1 / -1; }
 
 .admin-header h1 { font-size: clamp(28px, 4vw, 45px); line-height: 1.05; margin: 10px 0 0; font-weight: 700; }
 
@@ -1180,14 +1725,27 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
   color: var(--admin-ink);
 }
 .notification-panel .notification {
-  display: block;
+  /* Flex row: text block + a fixed-width action box. The old float:right on
+     the delete button made it land in the middle of the last line of detail
+     text, and long words forced a horizontal scrollbar across the panel. */
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
   border: none;
   border-left: 3px solid #d46b35;
   border-radius: 0 10px 10px 0;
-  padding: 11px 12px;
+  padding: 11px 10px 11px 12px;
   margin: 6px 0;
   cursor: pointer;
-  transition: background .15s ease, transform .15s ease;
+  overflow-wrap: anywhere;
+  transition: background .15s ease, transform .15s ease, opacity .15s ease;
+}
+
+/* min-width:0 is what lets the text shrink and wrap inside the flex row
+   instead of pushing the delete button past the panel edge. */
+.notification__body {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .notification-panel .notification:hover {
@@ -1199,34 +1757,350 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
   font-weight: 700;
   color: var(--admin-ink);
   margin-bottom: 2px;
-  padding-right: 18px;
+  overflow-wrap: anywhere;
 }
-.provider-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 25px; }
-.provider {
+.notification-panel .notification__detail {
+  display: block;
+  color: #4d565c;
+  font: 400 12px/1.45 Arial, sans-serif;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+/* ═══════════════════════════════════════════════════════════════════════════
+   AI MANAGEMENT — the provider panel.
+   Same three tones the chat queue uses, so the console speaks one visual
+   language: emerald = working, rose = broken, slate = idle. Each tone is
+   declared once on `.aip` and every surface below reads it, so a card's cap,
+   its status pill and its count above it cannot drift apart.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.aip {
+  --aip-ok: #10b981;
+  --aip-ok-deep: #047857;
+  --aip-ok-wash: #e7f8f1;
+  --aip-down: #f43f5e;
+  --aip-down-deep: #be123c;
+  --aip-down-wash: #fdeaee;
+  --aip-idle: #64748b;
+  --aip-idle-deep: #475569;
+  --aip-idle-wash: #eef1f5;
+  --aip-all: #4f6bed;
+  --aip-all-deep: #3730a3;
+  --aip-violet: #7c3aed;
+}
+
+.aip-intro { margin-bottom: 4px; }
+.aip-intro p { max-width: 78ch; }
+
+/* ── Summary strip: the "is anything broken" answer, without reading 6 cards ── */
+.aip-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 18px 0 4px;
+}
+
+.aip-stat {
+  --t: var(--aip-all);
+  --t-deep: var(--aip-all-deep);
+  --t-wash: #eef1fe;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 14px 16px;
   border: 1px solid var(--admin-line);
-  padding: 18px;
-  font: 15px Arial, sans-serif;
   border-radius: 14px;
+  background: var(--t-wash);
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(20, 33, 27, 0.04);
+  transition: transform .16s ease, box-shadow .16s ease;
+}
+.aip-stat::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: linear-gradient(180deg, var(--t), var(--t-deep));
+}
+.aip-stat:hover { transform: translateY(-2px); box-shadow: 0 12px 24px -18px rgba(20, 33, 27, .5); }
+
+.aip-stat--ok   { --t: var(--aip-ok);   --t-deep: var(--aip-ok-deep);   --t-wash: var(--aip-ok-wash); }
+.aip-stat--down { --t: var(--aip-down); --t-deep: var(--aip-down-deep); --t-wash: var(--aip-down-wash); }
+.aip-stat--idle { --t: var(--aip-idle); --t-deep: var(--aip-idle-deep); --t-wash: var(--aip-idle-wash); }
+.aip-stat--all  { --t: var(--aip-all);  --t-deep: var(--aip-all-deep);  --t-wash: #eef1fe; }
+
+.aip-stat__value {
+  color: var(--t-deep);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 27px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+.aip-stat__label { color: var(--admin-ink); font: 700 12.5px Arial, sans-serif; }
+.aip-stat__hint { color: var(--admin-muted); font: 11.5px Arial, sans-serif; }
+
+/* Header row for the provider grid: heading on the left, freshness and the
+   manual re-check on the right, so the cards always have a visible way to
+   refresh without waiting for the dashboard's 10 s poll. Declared after
+   .admin-panel h3 so the nested heading keeps the row's vertical rhythm. */
+.ai-panel-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 1.9rem 0 14px;
+}
+.ai-panel-bar h3 { margin: 0; }
+.ai-panel-actions { display: inline-flex; align-items: center; gap: 12px; }
+.ai-panel-actions .admin-muted { margin: 0; font-size: 12px; }
+
+.ai-panel-actions .admin-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.ai-panel-actions .is-checking .aip-spin { animation: aip-spin .9s linear infinite; }
+
+@keyframes aip-spin { to { transform: rotate(360deg); } }
+
+/* ── Provider cards ─────────────────────────────────────────────────────── */
+.provider-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 16px; margin-bottom: 22px; }
+
+.provider {
+  --t: var(--aip-idle);
+  --t-deep: var(--aip-idle-deep);
+  --t-wash: var(--aip-idle-wash);
+
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  padding: 18px 18px 16px;
+  border: 1px solid var(--admin-line);
+  border-radius: 16px;
   background: linear-gradient(180deg, #ffffff, #fbfefc);
   overflow: hidden;
   transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
 }
+
+.provider--ok   { --t: var(--aip-ok);   --t-deep: var(--aip-ok-deep);   --t-wash: var(--aip-ok-wash); }
+.provider--down { --t: var(--aip-down); --t-deep: var(--aip-down-deep); --t-wash: var(--aip-down-wash); }
+.provider--idle { --t: var(--aip-idle); --t-deep: var(--aip-idle-deep); --t-wash: var(--aip-idle-wash); }
+
+/* A cap plus a corner wash in the status colour: the grid is scannable by
+   colour alone, and the rows below are for the detail. */
 .provider::before {
   content: '';
   position: absolute;
   top: 0; left: 0; right: 0;
-  height: 3px;
-  background: linear-gradient(90deg, var(--admin-indigo), var(--admin-violet));
+  height: 4px;
+  background: linear-gradient(90deg, var(--t), var(--t-deep));
 }
+.provider::after {
+  content: '';
+  position: absolute;
+  top: 0; right: 0;
+  width: 190px; height: 190px;
+  background: radial-gradient(circle at 100% 0%, var(--t-wash) 0%, transparent 68%);
+  pointer-events: none;
+}
+
 .provider:hover {
   transform: translateY(-3px);
-  border-color: #c7d2fe;
-  box-shadow: 0 14px 30px -20px rgba(79,107,237,.9);
+  border-color: color-mix(in srgb, var(--t) 42%, var(--admin-line));
+  box-shadow: 0 16px 32px -22px color-mix(in srgb, var(--t) 85%, transparent);
 }
-.provider strong { display: block; font-weight: 700; color: var(--admin-ink); }
-.provider span { display: block; font-size: 12px; margin-top: 10px; font-weight: 700; }
-.provider small { font-size: 11px; }
+
+.provider__head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.provider__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 38px; height: 38px;
+  border-radius: 12px;
+  background: linear-gradient(140deg, var(--t), var(--t-deep));
+  color: #fff;
+  font: 800 15px/1 Arial, sans-serif;
+  box-shadow: 0 8px 16px -10px color-mix(in srgb, var(--t) 95%, transparent);
+}
+
+.provider__title { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.provider__title strong {
+  color: var(--admin-ink);
+  font: 700 15px/1.25 Georgia, 'Times New Roman', serif;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.provider__title em {
+  color: var(--admin-muted);
+  font: 11px Arial, sans-serif;
+  font-style: normal;
+  letter-spacing: .04em;
+}
+
+/* The status is a FILLED pill, not a floating coloured word. It is the reason
+   the card exists, so it gets the card's loudest element after the title. */
+.provider__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 4px 11px;
+  border-radius: 999px;
+  background: var(--t-wash);
+  color: var(--t-deep);
+  font: 800 11px Arial, sans-serif;
+  white-space: nowrap;
+}
+.provider__statusDot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--t);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--t) 22%, transparent);
+}
+.provider--ok .provider__statusDot { animation: aip-pulse 2s ease-in-out infinite; }
+@keyframes aip-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--t) 22%, transparent); }
+  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--t) 6%, transparent); }
+}
+
+/* Latency is the one number here an engineer actually wants, so it is lifted
+   out of the prose and given its own tile instead of being buried in a sentence. */
+.provider__metric {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--t) 26%, var(--admin-line));
+  border-radius: 11px;
+  background: var(--t-wash);
+}
+.provider__metric span {
+  color: var(--admin-muted);
+  font: 700 10.5px Arial, sans-serif;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+.provider__metric b {
+  color: var(--t-deep);
+  font: 800 15px/1 Arial, sans-serif;
+}
+
+/* Three rows, each LABELLED. The old card printed three identical grey lines,
+   so a health verdict, a model id and a list of call sites all looked the same
+   weight and none of them was findable. */
+.provider__rows { display: flex; flex-direction: column; gap: 9px; margin: 0; }
+.provider__row { display: grid; grid-template-columns: 62px 1fr; gap: 10px; align-items: start; }
+.provider__row dt {
+  margin: 0;
+  padding-top: 1px;
+  color: var(--admin-muted);
+  font: 700 10.5px Arial, sans-serif;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+.provider__row dd {
+  margin: 0;
+  color: var(--admin-body, #3d4b44);
+  font: 12.5px/1.5 Arial, sans-serif;
+  overflow-wrap: anywhere;
+}
+.provider--down .provider__row:first-child dd { color: var(--aip-down-deep); font-weight: 600; }
+
+/* "No route in this server calls it yet" — present, but quieter than live data. */
+.provider-usage--idle { opacity: .7; font-style: italic; }
+
+.aip-footnote {
+  margin: 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--admin-line);
+  max-width: 82ch;
+}
+
+/* Responsive. `.provider-grid` is already `auto-fill minmax(310px, 1fr)`, so it
+   reflows on its own; only the stat strip needs explicit steps. */
+@media (max-width: 1100px) {
+  .aip-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .aip-stats { grid-template-columns: 1fr; gap: 9px; }
+  .aip-stat { padding: 12px 14px; }
+  .aip-stat__value { font-size: 23px; }
+  .provider__row { grid-template-columns: 1fr; gap: 2px; }
+  .provider-env-stale .admin-secondary { margin-left: 0; width: 100%; justify-content: center; }
+  /* No button here, so the icon has to lead rather than share a row with one. */
+  .provider-env-reload { gap: 9px; font-size: 12.5px; }
+}
+
+/* The only motion here is the live-status pulse and the Check-now spinner. */
+@media (prefers-reduced-motion: reduce) {
+  .aip-stat,
+  .provider,
+  .provider__statusDot,
+  .ai-panel-actions .is-checking .aip-spin {
+    animation: none !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* server/.env edited after boot: the cards below may still describe the old
+   key, so the warning sits directly above them rather than in the page header. */
+.provider-env-stale {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 16px;
+  padding: 13px 15px;
+  border: 1px solid #f3d19a;
+  border-left: 4px solid var(--aip-idle, #b45309);
+  border-radius: 12px;
+  background: linear-gradient(110deg, #fdf6e6 0%, #fffdf8 100%);
+  font: 13px/1.5 Arial, sans-serif;
+  color: #7a5410;
+}
+.provider-env-stale > svg { flex: 0 0 auto; color: #b45309; }
+.provider-env-stale strong { font-weight: 700; }
+.provider-env-stale .admin-secondary { margin-left: auto; flex: 0 0 auto; }
+
+/* The receipt from "Check now": what the reload applied, or why it could not.
+   Success is quiet and green so it does not read as another problem; failure is
+   rose, because "your file could not be read" is the answer to "why is my key
+   still rejected" and must not be styled like a footnote. */
+.provider-env-reload {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 16px;
+  padding: 11px 15px;
+  border: 1px solid var(--admin-line, #e3e8e1);
+  border-left: 4px solid #2f7a4d;
+  border-radius: 12px;
+  background: #f4faf6;
+  font: 13px/1.5 Arial, sans-serif;
+  color: #245a3a;
+}
+.provider-env-reload > svg { flex: 0 0 auto; margin-top: 1px; color: #2f7a4d; }
+.provider-env-reload strong { font-weight: 700; }
+.provider-env-reload--ok { border-left-color: #2f7a4d; }
+
+.provider-env-reload--bad {
+  border-color: #f0c4c4;
+  border-left-color: #c0392b;
+  background: #fdf3f2;
+  color: #8c2b20;
+}
+.provider-env-reload--bad > svg { color: #c0392b; }
 .security-row { border-top: 1px solid #edf0ed; display: flex; gap: 15px; padding: 15px 0; font: 14px Arial, sans-serif; align-items: start; } .security-row > span { min-width: 72px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; } .security-row strong { font-weight: 600; }
 .admin-login-page { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: radial-gradient(circle at top right, #e6eee5, transparent 45%), #f5f7f3; }
 .admin-login-card { width: min(100%, 420px); padding: 40px; border: 1px solid var(--admin-line); background: #fff; box-shadow: 14px 14px 0 #dce7db; } .admin-login-card h1 { font-size: 38px; font-weight: 500; margin: 10px 0; } .admin-login-card label { display: grid; gap: 7px; margin: 18px 0; font: 12px Arial, sans-serif; color: var(--admin-muted); text-transform: uppercase; letter-spacing: .05em; } .admin-login-card input { width: 100%; } .admin-login-card .admin-primary { width: 100%; margin-top: 8px; }
@@ -1320,6 +2194,9 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
     justify-content: center;
     padding: 11px 0;
     margin: 0;
+    /* Same reason as the collapsed rule: the hidden label is still a flex item,
+       so the inherited gap would offset the icon off-centre in the 64px rail. */
+    gap: 0;
   }
   .admin-sidebar .sidebar-nav-label,
   .admin-sidebar--collapsed .sidebar-nav-label {
@@ -1327,6 +2204,11 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
     opacity: 0;
     flex: 0;
     pointer-events: none;
+    /* Same reason as the collapsed rule above: the box is 0px wide, so this
+       must not wrap or each label becomes a one-character-per-line column and
+       the rail rows blow out to ~167px tall. */
+    white-space: nowrap;
+    line-height: 0;
   }
   .admin-sidebar:not(.admin-sidebar--collapsed) .sidebar-header {
     justify-content: center;
@@ -1358,56 +2240,104 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
    Overview  (ov- prefix)
 ══════════════════════════════════════════════════════════════════════════ */
 
-/* ── Metric cards ────────────────────────────────────────────────────── */
+/* ── Metric cards ──────────────────────────────────────────────────────── */
+/* Colour is injected per card as --ov-from/--ov-to/--ov-glow (see
+   METRIC_STYLE in AdminDashboard.jsx) — the card fills with its own gradient,
+   so the top row reads as four distinct facts rather than four white boxes.
+   The panels below stay white; the cards carry all the colour, which is what
+   keeps the page reading as one document instead of a colour swatch grid. */
 .ov-metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
+  gap: 16px;
   margin-bottom: 20px;
 }
 
 .ov-metric {
-  background: var(--admin-white);
-  border: 1px solid var(--admin-line);
-  border-radius: 10px;
-  padding: 18px 20px;
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
   display: flex;
   align-items: center;
   gap: 16px;
-  transition: box-shadow 0.15s;
+  padding: 20px 22px;
+  border-radius: 18px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--ov-from, #4f46e5), var(--ov-to, #8b5cf6));
+  box-shadow: 0 12px 26px -16px var(--ov-glow, rgba(79, 70, 229, .7));
+  transition: transform 0.22s ease, box-shadow 0.22s ease;
+  /* `backwards`, not `both`: a persisted identity transform would outrank the
+     normal :hover rule below and the card would never lift again. */
+  animation: ov-metric-in 0.45s ease backwards;
 }
-.ov-metric:hover { box-shadow: 0 2px 10px rgba(23,35,31,.07); }
+.ov-metric-grid .ov-metric:nth-child(1) { animation-delay: 0.03s; }
+.ov-metric-grid .ov-metric:nth-child(2) { animation-delay: 0.08s; }
+.ov-metric-grid .ov-metric:nth-child(3) { animation-delay: 0.13s; }
+.ov-metric-grid .ov-metric:nth-child(4) { animation-delay: 0.18s; }
+.ov-metric-grid .ov-metric:nth-child(5) { animation-delay: 0.23s; }
+.ov-metric-grid .ov-metric:nth-child(6) { animation-delay: 0.28s; }
+@keyframes ov-metric-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+/* Light from the top-left plus a shaded bottom-right corner: a flat gradient
+   reads as a colour swatch, this reads as a lit surface. */
+.ov-metric::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(120% 90% at 8% 0%, rgba(255, 255, 255, .30), transparent 58%),
+    radial-gradient(90% 70% at 100% 100%, rgba(0, 0, 0, .18), transparent 62%);
+}
+.ov-metric:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 26px 42px -20px var(--ov-glow, rgba(79, 70, 229, .8));
+}
+.ov-metric:focus-within { outline: 2px solid var(--ov-to, #8b5cf6); outline-offset: 3px; }
 
 .ov-metric__icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
+  width: 46px;
+  height: 46px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .45);
+  transition: transform 0.2s ease;
 }
-.ov-metric__icon svg { width: 20px; height: 20px; }
+.ov-metric__icon svg { width: 22px; height: 22px; }
 
 .ov-metric__body {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
 }
 .ov-metric__label {
-  font: 700 10px Arial, sans-serif;
+  font: 800 10px/1.3 Arial, sans-serif;
   text-transform: uppercase;
-  letter-spacing: .07em;
-  color: var(--admin-muted);
+  letter-spacing: .09em;
+  color: rgba(255, 255, 255, .86);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .ov-metric__value {
-  font: 500 30px Georgia, serif;
-  color: var(--admin-green);
-  line-height: 1;
+  font: 800 34px/1.05 Arial, sans-serif;
+  letter-spacing: -0.03em;
+  color: #fff;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, .2);
+}
+.ov-metric__note {
+  font: 600 11px/1.35 Arial, sans-serif;
+  color: rgba(255, 255, 255, .8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ── Bottom grid ─────────────────────────────────────────────────────── */
@@ -1421,19 +2351,58 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
 /* ── Analytics row (3 cards) ─────────────────────────────────────────── */
 .ov-analytics-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 18px;
   align-items: stretch;
   margin-bottom: 18px;
 }
-.ov-analytics { margin-bottom: 0; }
+.ov-analytics { margin-bottom: 0; display: flex; flex-direction: column; }
 
-/* Assessment activity bars */
+/* Assessment activity chart.
+   The grid lines and the y-axis share one 20px offset (the day-label row), so
+   a bar's height can be read against a labelled scale instead of eyeballed. */
+.ov-chart {
+  display: flex;
+  gap: 10px;
+  height: 190px;
+  flex: 1;
+}
+.ov-chart__axis {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding-bottom: 20px;
+  font: 700 10px Arial, sans-serif;
+  color: #8d9a94;
+  text-align: right;
+}
+.ov-chart__plot {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+.ov-chart__grid {
+  position: absolute;
+  inset: 0 0 20px 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.ov-chart__grid i {
+  display: block;
+  height: 1px;
+  background: repeating-linear-gradient(90deg, #e6ebe8 0 6px, transparent 6px 12px);
+}
 .ov-bars {
+  position: relative;
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: stretch;
-  gap: 6px;
-  height: 132px;
+  gap: 5px;
 }
 .ov-bar-col {
   flex: 1;
@@ -1441,96 +2410,340 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  border-radius: 8px;
+  transition: background 0.15s ease;
 }
+.ov-bar-col:hover { background: rgba(99, 102, 241, .07); }
+/* No overflow:hidden here — the value tip rides ABOVE the bar and a clipping
+   track would swallow it on a full-height column. */
 .ov-bar-track {
   flex: 1;
   width: 100%;
   max-width: 26px;
   display: flex;
   align-items: flex-end;
-  background: var(--admin-paper);
-  border-radius: 6px;
-  overflow: hidden;
 }
 .ov-bar-fill {
+  position: relative;
   width: 100%;
-  border-radius: 6px;
-  background: linear-gradient(180deg, #34d399, #059669);
-  min-height: 4px;
-  transition: height 0.4s ease;
+  border-radius: 7px 7px 4px 4px;
+  background: linear-gradient(180deg, #818cf8, #4f46e5 55%, #4338ca);
+  box-shadow: 0 5px 14px -7px rgba(79, 70, 229, .95);
+  transition: height 0.45s cubic-bezier(.4, 0, .2, 1);
 }
-.ov-bar-value {
-  font: 700 10px Arial, sans-serif;
-  color: var(--admin-muted);
+/* A quiet day is a 3px stub, not a 4%-tall bar — the old floor made zero read
+   as "a little bit of activity". */
+.ov-bar-fill--empty {
+  background: #e4eae7;
+  box-shadow: none;
+  border-radius: 3px;
+}
+.ov-bar-col--peak .ov-bar-fill {
+  background: linear-gradient(180deg, #f0abfc, #c026d3 55%, #a21caf);
+  box-shadow: 0 5px 14px -7px rgba(192, 38, 211, .95);
+}
+.ov-bar-tip {
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  transform: translate(-50%, -4px) scale(.9);
+  padding: 3px 8px;
+  border-radius: 7px;
+  background: #17231f;
+  color: #fff;
+  font: 700 10px/1 Arial, sans-serif;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.ov-bar-col:hover .ov-bar-tip { opacity: 1; transform: translate(-50%, -8px) scale(1); }
+.ov-bar-label {
+  height: 14px;
+  font: 700 10px/14px Arial, sans-serif;
+  color: #8d9a94;
+  text-align: center;
+  white-space: nowrap;
 }
 
-/* Plan mix rows */
-.ov-plans { display: flex; flex-direction: column; gap: 12px; }
+/* Shared empty state — an icon, one sentence, one next step. Used wherever a
+   panel has nothing to show, so no panel invents its own "—". */
+.ov-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 168px;
+  flex: 1;
+  padding: 24px 18px;
+  text-align: center;
+  border: 1px dashed #d6e0da;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fbfdfc, #f4f8f5);
+}
+.ov-empty-state__icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  margin-bottom: 2px;
+  border-radius: 15px;
+  background: linear-gradient(135deg, #eef2ff, #e0f2fe);
+  color: #6366f1;
+}
+.ov-empty-state strong { font: 700 15px Arial, sans-serif; color: var(--admin-ink); }
+.ov-empty-state p {
+  margin: 0;
+  font: 13px/1.5 Arial, sans-serif;
+  color: var(--admin-muted);
+  max-width: 34ch;
+}
+
+/* ── Loading placeholder ──────────────────────────────────────────────────
+   The metric row shows these in place of the cards while the first
+   /admin/overview is still in flight — the tab used to render nothing at all
+   in that window, which read as a broken page rather than a slow one. Same
+   grid, same row heights, so nothing reflows when the data lands. */
+.ov-skeleton__card {
+  height: 98px;
+  border-radius: 18px;
+  background: linear-gradient(100deg, #edf1f3 28%, #f8fafb 48%, #edf1f3 68%);
+  background-size: 300% 100%;
+  animation: ov-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes ov-shimmer {
+  from { background-position: 150% 0; }
+  to { background-position: -50% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ov-skeleton__card { animation: none; }
+}
+
+/* Plan mix — donut over a legend. The legend carries the numbers, the donut
+   carries the proportion, so the two never have to be decoded separately. */
+.ov-plan-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  flex: 1;
+}
+.ov-donut {
+  width: 148px;
+  height: 148px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  animation: ov-donut-in 0.5s ease backwards;
+}
+.ov-donut__hole {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, .14);
+}
+.ov-donut__hole strong { font: 800 26px/1 Arial, sans-serif; color: var(--admin-ink); letter-spacing: -0.02em; }
+.ov-donut__hole span {
+  font: 800 9.5px Arial, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: var(--admin-muted);
+}
+/* A small scale-in, deliberately no rotation. A spinning ring is a nice idea
+   until the animation is interrupted — a backgrounded tab pauses CSS animations
+   mid-flight, and a donut caught at -50 degrees reads as a rendering bug rather
+   than an entrance. Scale settles cleanly from either direction. */
+@keyframes ov-donut-in {
+  from { opacity: 0; transform: scale(.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.ov-plan-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
 .ov-plan-row {
   display: grid;
-  grid-template-columns: 64px 1fr 28px;
+  grid-template-columns: 10px minmax(0, 1fr) minmax(44px, .8fr) auto;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
 }
-.ov-plan-label { font: 600 12px Arial, sans-serif; color: var(--admin-ink); }
+.ov-plan-dot { width: 10px; height: 10px; border-radius: 3px; }
+.ov-plan-text { display: flex; flex-direction: column; min-width: 0; }
+.ov-plan-label { font: 800 11.5px/1.25 Arial, sans-serif; letter-spacing: .04em; color: var(--admin-ink); }
+.ov-plan-hint { font: 500 10.5px/1.3 Arial, sans-serif; color: var(--admin-muted); }
 .ov-plan-track {
-  height: 10px;
-  background: var(--admin-paper);
+  height: 7px;
+  background: #eef1f4;
   border-radius: 999px;
   overflow: hidden;
 }
 .ov-plan-fill {
+  display: block;
   height: 100%;
   border-radius: 999px;
-  min-width: 4px;
-  transition: width 0.4s ease;
+  min-width: 3px;
+  transition: width 0.45s cubic-bezier(.4, 0, .2, 1);
 }
-.ov-plan-value { font: 700 13px Arial, sans-serif; color: var(--admin-ink); text-align: right; }
+.ov-plan-nums {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 36px;
+}
+.ov-plan-nums strong { font: 800 13px/1.15 Arial, sans-serif; color: var(--admin-ink); }
+.ov-plan-nums small { font: 700 10px/1.2 Arial, sans-serif; color: var(--admin-muted); }
 
-/* Security & growth stats */
+/* Security & growth tiles — one tone each, set through --tone-* so a tile can
+   never mix an indigo value with a rose chip. */
 .ov-stats {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+  flex: 1;
+  align-content: start;
 }
 .ov-stat {
-  background: var(--admin-paper);
-  border: 1px solid var(--admin-line);
-  border-radius: 12px;
-  padding: 12px 10px;
-  text-align: center;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 14px 13px;
+  border-radius: 15px;
+  border: 1px solid var(--tone-line, var(--admin-line));
+  background: var(--tone-bg, var(--admin-paper));
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.ov-stat:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 16px 28px -20px rgba(15, 23, 42, .55);
+}
+/* Four distinct tones so no two tiles can be confused at a glance. The
+   `locked` tile switches between emerald and rose depending on whether anyone
+   is actually locked out — it is the only tile whose colour is conditional. */
+.ov-stat--indigo  { --tone-bg: linear-gradient(150deg, #eef2ff, #e0e7ff); --tone-ink: #4338ca; --tone-line: #c7d2fe; }
+.ov-stat--emerald { --tone-bg: linear-gradient(150deg, #ecfdf5, #d1fae5); --tone-ink: #047857; --tone-line: #a7f3d0; }
+.ov-stat--violet  { --tone-bg: linear-gradient(150deg, #f5f3ff, #ede9fe); --tone-ink: #6d28d9; --tone-line: #ddd6fe; }
+.ov-stat--cyan    { --tone-bg: linear-gradient(150deg, #ecfeff, #cffafe); --tone-ink: #0e7490; --tone-line: #a5f3fc; }
+.ov-stat--rose    { --tone-bg: linear-gradient(150deg, #fff1f2, #ffe4e6); --tone-ink: #be123c; --tone-line: #fecdd3; }
+
+.ov-stat__icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-bottom: 6px;
+  border-radius: 10px;
+  background: #fff;
+  color: var(--tone-ink, #4338ca);
+  box-shadow: 0 2px 6px rgba(15, 23, 42, .1);
 }
 .ov-stat__value {
   display: block;
-  font: 700 20px Arial, sans-serif;
+  font: 800 24px/1 Arial, sans-serif;
+  letter-spacing: -0.02em;
   color: var(--admin-ink);
 }
 .ov-stat__label {
   display: block;
-  font: 600 10px Arial, sans-serif;
+  margin-top: 3px;
+  font: 800 9.5px Arial, sans-serif;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: .08em;
+  color: var(--tone-ink, #64748b);
+}
+.ov-stat__note {
+  display: block;
+  margin-top: 3px;
+  font: 500 10.5px/1.35 Arial, sans-serif;
   color: var(--admin-muted);
-  margin-top: 4px;
+}
+.ov-stat__meter {
+  display: block;
+  height: 6px;
+  margin-top: 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .85);
+  overflow: hidden;
+}
+.ov-stat__meter i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #6366f1, #8b5cf6);
+  transition: width 0.5s ease;
 }
 
-/* Panel header row (title + badge) */
+/* Panel header row (title + subtitle + badges) */
 .ov-panel-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: 14px;
   margin-bottom: 16px;
 }
-.ov-panel-header h3 { margin: 0; font-size: 18px; font-weight: 600; }
-.ov-panel-count {
-  font: 12px Arial, sans-serif;
+.ov-panel-header > div:first-child { min-width: 0; }
+.ov-panel-header h3 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+.ov-panel-sub {
+  margin: 3px 0 0;
+  font: 500 12px/1.4 Arial, sans-serif;
   color: var(--admin-muted);
-  background: var(--admin-paper);
-  padding: 3px 10px;
-  border-radius: 20px;
-  border: 1px solid var(--admin-line);
 }
+.ov-panel-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+.ov-panel-count {
+  font: 700 11px Arial, sans-serif;
+  color: #5b6670;
+  background: #fff;
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--admin-line);
+  white-space: nowrap;
+}
+
+/* Inline link-style action inside a panel header / footer */
+.ov-ghost-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font: 800 11.5px Arial, sans-serif;
+  letter-spacing: .04em;
+  color: #4338ca;
+  background: #fff;
+  border: 1px solid #c7d2fe;
+  border-radius: 999px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: background .15s ease, transform .15s ease, box-shadow .15s ease;
+}
+.ov-ghost-btn:hover {
+  background: linear-gradient(120deg, #eef2ff, #e0f2fe);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px -14px rgba(67, 56, 202, .95);
+}
+.ov-ghost-btn:focus-visible { outline: 2px solid #6366f1; outline-offset: 2px; }
+.ov-ghost-btn--wide { width: 100%; justify-content: center; margin-top: 14px; }
 
 /* ── Activity table ──────────────────────────────────────────────────── */
 .ov-activity { margin-bottom: 0; }
@@ -1538,56 +2751,87 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
 .ov-table { border-collapse: collapse; width: 100%; font: 13px Arial, sans-serif; }
 .ov-table th {
   color: var(--admin-muted);
-  font: 700 10px Arial, sans-serif;
+  font: 800 10px Arial, sans-serif;
   text-transform: uppercase;
-  letter-spacing: .06em;
+  letter-spacing: .07em;
   padding: 0 10px 10px;
   text-align: left;
-  border-bottom: 2px solid var(--admin-line);
+  border-bottom: 1px solid var(--admin-line);
+  white-space: nowrap;
 }
-.ov-row { transition: background 0.1s; }
-.ov-row:hover { background: var(--admin-paper); }
-.ov-row td { padding: 11px 10px; border-bottom: 1px solid #edf0ed; vertical-align: middle; }
+.ov-row { transition: background 0.15s ease; }
+.ov-row:hover { background: #f7faf8; }
+.ov-row td { padding: 12px 10px; border-bottom: 1px solid #eef1ef; vertical-align: middle; }
 .ov-row:last-child td { border-bottom: none; }
 
-.ov-user-name { display: block; font-weight: 600; color: var(--admin-ink); }
-.ov-user-email { display: block; font-size: 11px; color: var(--admin-muted); margin-top: 2px; }
-.ov-nowrap { white-space: nowrap; color: var(--admin-muted); }
-
-.ov-empty { padding: 20px 10px; color: var(--admin-muted); font-style: italic; text-align: center; }
-
-/* Subscription badge */
-.ov-sub-badge {
-  display: inline-block;
-  font: 700 10px Arial, sans-serif;
-  padding: 3px 9px;
-  border-radius: 20px;
-  background: var(--admin-paper);
+/* Initials chip — a deterministic tint per member (avatarColorFor) so the same
+   person is the same colour on every screen. */
+.ov-user { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.ov-user__avatar {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--ov-tint, #6366f1);
+  color: #fff;
+  font: 800 12px/1 Arial, sans-serif;
+  box-shadow: 0 3px 8px -3px var(--ov-tint, #6366f1);
+}
+.ov-user__text { display: flex; flex-direction: column; min-width: 0; }
+.ov-user-name {
+  display: block;
+  font: 700 13px/1.35 Arial, sans-serif;
+  color: var(--admin-ink);
+}
+.ov-user-email {
+  display: block;
+  font: 400 11.5px/1.35 Arial, sans-serif;
   color: var(--admin-muted);
-  border: 1px solid var(--admin-line);
+  max-width: 30ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.ov-sub-badge--active {
-  background: #dcfce7;
-  color: #166534;
-  border-color: #86efac;
+.ov-nowrap { white-space: nowrap; font: 500 12.5px Arial, sans-serif; color: var(--admin-muted); }
+
+/* Subscription badge — tinted by the tier itself so the eye can rank a
+   column of badges without reading them. */
+.ov-sub-badge {
+  display: inline-flex;
+  align-items: center;
+  font: 800 9.5px Arial, sans-serif;
+  letter-spacing: .06em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
 }
+/* Tinted per tier so the eye can rank a column of badges without reading them.
+   The hues deliberately match the plan-mix legend above (see buildPlanMix),
+   so the same plan is the same colour in both places. */
+.ov-sub-badge--monthly { background: #eef2ff; color: #4338ca; border-color: #c7d2fe; }
+.ov-sub-badge--annual  { background: #ecfeff; color: #0e7490; border-color: #a5f3fc; }
+.ov-sub-badge--custom  { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
 
 /* Security method badge */
 .ov-sec-badge {
-  display: inline-block;
-  font: 11px Arial, sans-serif;
-  padding: 3px 9px;
-  border-radius: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: 600 11.5px Arial, sans-serif;
+  padding: 4px 10px;
+  border-radius: 999px;
   white-space: nowrap;
   background: #fff7ed;
   color: #9a3412;
   border: 1px solid #fed7aa;
 }
-.ov-sec-badge--totp {
-  background: #eff6ff;
-  color: #1d4ed8;
-  border-color: #bfdbfe;
-}
+.ov-sec-badge svg { flex-shrink: 0; }
+.ov-sec-badge--totp { background: #eef2ff; color: #4338ca; border-color: #c7d2fe; }
 
 /* ── Threats panel ───────────────────────────────────────────────────── */
 .ov-threats { margin-bottom: 0; }
@@ -1596,72 +2840,127 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 6px;
-  border-radius: 20px;
-  background: #fee2e2;
-  color: #b91c1c;
-  font: 700 11px Arial, sans-serif;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #f43f5e, #e11d48);
+  color: #fff;
+  font: 800 11px Arial, sans-serif;
+  box-shadow: 0 6px 14px -6px rgba(225, 29, 72, .9);
 }
 
 .ov-all-clear {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 16px;
-  background: #f0fdf4;
-  border: 1px solid #86efac;
-  border-radius: 8px;
-  font: 13px/1.5 Arial, sans-serif;
-  color: #166534;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #ecfdf5, #d1fae5);
+  border: 1px solid #a7f3d0;
 }
 .ov-all-clear__icon {
-  font-size: 18px;
-  font-weight: 700;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
   flex-shrink: 0;
+  border-radius: 13px;
+  background: #fff;
+  color: #059669;
+  box-shadow: 0 4px 10px -4px rgba(5, 150, 105, .7);
 }
-.ov-all-clear p { margin: 0; }
+.ov-all-clear strong {
+  display: block;
+  margin-bottom: 3px;
+  font: 800 14px Arial, sans-serif;
+  color: #065f46;
+}
+.ov-all-clear p { margin: 0; font: 12.5px/1.5 Arial, sans-serif; color: #047857; }
 
-.ov-threat-list { display: flex; flex-direction: column; gap: 1px; }
+.ov-threat-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
 .ov-threat {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
-  padding: 12px 0;
-  border-bottom: 1px solid #edf0ed;
+  gap: 11px;
+  padding: 12px 13px;
+  border-radius: 13px;
+  background: linear-gradient(135deg, #fff1f2, #fff7ed);
+  border: 1px solid #fecdd3;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
-.ov-threat:last-child { border-bottom: none; padding-bottom: 0; }
-.ov-threat__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--admin-accent);
+.ov-threat:hover {
+  transform: translateX(3px);
+  box-shadow: 0 12px 24px -18px rgba(190, 18, 60, .95);
+}
+.ov-threat__icon {
+  width: 22px;
+  height: 22px;
   flex-shrink: 0;
-  margin-top: 5px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #f43f5e, #e11d48);
+  color: #fff;
+  font: 800 13px/1 Arial, sans-serif;
+  animation: threat-pulse 1.9s ease-in-out infinite;
 }
 .ov-threat__title {
   display: block;
-  font: 600 13px Arial, sans-serif;
-  color: var(--admin-ink);
-  margin-bottom: 3px;
+  margin-bottom: 2px;
+  font: 800 12.5px/1.35 Arial, sans-serif;
+  color: #881337;
 }
 .ov-threat__detail {
   margin: 0;
   font: 12px/1.5 Arial, sans-serif;
-  color: var(--admin-muted);
+  color: #9f1239;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ov-bar-tip,
+  .ov-plan-fill,
+  .ov-stat__meter i { transition: none; }
 }
 
 /* ── Responsive ──────────────────────────────────────────────────────── */
-@media (max-width: 900px) {
-  .ov-metric-grid { grid-template-columns: repeat(2, 1fr); }
-  .ov-grid        { grid-template-columns: 1fr; }
-  .ov-analytics-grid { grid-template-columns: 1fr; }
+@media (max-width: 1180px) {
+  /* The chart needs the width to stay readable, so it takes the full row and
+     the two narrower panels share the one beneath it. */
+  .ov-analytics-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .ov-activity-chart { grid-column: 1 / -1; }
 }
-@media (max-width: 480px) {
-  .ov-metric-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
-  .ov-metric      { padding: 14px; }
-  .ov-metric__value { font-size: 24px; }
+@media (max-width: 900px) {
+  .ov-metric-grid    { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ov-grid           { grid-template-columns: 1fr; }
+  .ov-analytics-grid { grid-template-columns: 1fr; }
+  .ov-activity-chart { grid-column: auto; }
+}
+@media (max-width: 620px) {
+  .ov-metric      { padding: 16px; gap: 12px; }
+  .ov-metric__icon { width: 40px; height: 40px; border-radius: 12px; }
+  .ov-metric__icon svg { width: 19px; height: 19px; }
+  .ov-metric__value { font-size: 27px; }
+  .ov-metric__note { font-size: 10.5px; }
+  .ov-chart { height: 168px; }
+  .ov-panel-header { flex-direction: column; align-items: stretch; gap: 10px; }
+  .ov-panel-badges { justify-content: flex-start; }
+  .ov-user-email { max-width: 18ch; }
+}
+@media (max-width: 430px) {
+  /* Below this the axis numbers alone carry the scale — the day-of-month row
+     no longer fits under 14 columns. */
+  .ov-bar-label { display: none; }
+  .ov-chart { height: 150px; }
+  .ov-chart__axis { padding-bottom: 0; }
+  .ov-chart__grid { inset: 0; }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -1828,96 +3127,36 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
   box-shadow: 0 0 0 3px rgba(255, 255, 255, .3);
 }
 
-/* Metric cards: color-coded top accent, lift, staggered entrance */
-.ov-metric {
-  position: relative;
-  overflow: hidden;
-  border-radius: 14px;
-  border: 1px solid var(--admin-line);
-  box-shadow: 0 2px 8px rgba(23, 35, 31, 0.05);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-  /* `backwards` not `both`: a filled `to { transform }` outranks normal author
-     rules, which would permanently kill the .ov-metric:hover lift below. */
-  animation: ov-metric-in 0.4s ease backwards;
-}
-.ov-metric-grid .ov-metric:nth-child(1) { animation-delay: 0.03s; }
-.ov-metric-grid .ov-metric:nth-child(2) { animation-delay: 0.08s; }
-.ov-metric-grid .ov-metric:nth-child(3) { animation-delay: 0.13s; }
-.ov-metric-grid .ov-metric:nth-child(4) { animation-delay: 0.18s; }
-.ov-metric-grid .ov-metric:nth-child(5) { animation-delay: 0.23s; }
-.ov-metric-grid .ov-metric:nth-child(6) { animation-delay: 0.28s; }
-@keyframes ov-metric-in {
-  from { opacity: 0; transform: translateY(14px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-.ov-metric:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 12px 26px rgba(23, 35, 31, 0.12);
-}
-.ov-metric::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 4px;
-  background: linear-gradient(90deg, #4f6bed, #22c55e);
-}
-.ov-metric-grid .ov-metric:nth-child(2)::before { background: linear-gradient(90deg, #0891b2, #22d3ee); }
-.ov-metric-grid .ov-metric:nth-child(3)::before { background: linear-gradient(90deg, #16a34a, #4ade80); }
-.ov-metric-grid .ov-metric:nth-child(4)::before { background: linear-gradient(90deg, #9ca3af, #d1d5db); }
-.ov-metric__icon {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 4px 10px rgba(23, 35, 31, 0.10);
-  transition: transform 0.2s ease;
-}
-.ov-metric:hover .ov-metric__icon { transform: scale(1.1) rotate(-4deg); }
-.ov-metric__value {
-  background: linear-gradient(92deg, #166534, #15803d 60%, #4f6bed);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
-/* Panels: depth */
+/* ── Overview follow-ups ────────────────────────────────────────────────
+   The Overview's own rules live in one block further up this sheet, where the
+   gradient cards and the chart are defined together. Only the pieces that
+   genuinely belong to the shared "vibrant refresh" pass are repeated here:
+   panel depth, the threat pulse keyframes, and reduced-motion. An earlier
+   version of this block re-declared .ov-metric as a white card with a 4px top
+   rail — later in the cascade than the gradient, so it silently repainted
+   every metric card and left white text on white. Do not re-introduce base
+   styles for ov-* classes here; add them to the Overview block instead. */
 .admin-panel {
   border-radius: 14px;
   box-shadow: 0 4px 16px rgba(23, 35, 31, 0.06);
 }
 
-/* Threat rows: hover glide + pulsing dot for active threats */
-.ov-threat {
-  border-radius: 8px;
-  transition: background 0.15s ease, transform 0.15s ease;
-}
-.ov-threat:hover {
-  background: #f8faf8;
-  transform: translateX(3px);
-}
 @keyframes threat-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.55; transform: scale(0.8); }
-}
-.ov-threat__dot {
-  animation: threat-pulse 1.8s ease-in-out infinite;
-}
-.ov-all-clear {
-  background: linear-gradient(180deg, #f0fdf4, #dcfce7);
-  border: 1px solid #bbf7d0;
-  border-radius: 12px;
-}
-.ov-threat-count {
-  background: linear-gradient(135deg, #dc2626, #b91c1c);
-  box-shadow: 0 4px 10px rgba(220, 38, 38, 0.35);
+  50% { opacity: 0.55; transform: scale(0.82); }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .ov-metric,
-  .ov-threat__dot {
+  .ov-donut,
+  .ov-threat__icon {
     animation: none;
   }
   .ov-metric,
   .ov-metric__icon,
-  .ov-threat {
+  .ov-threat,
+  .ov-stat,
+  .ov-bar-fill {
     transition: none;
   }
 }
@@ -2604,4 +3843,1143 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
   .admin-shell .profile-eye:hover,
   .admin-shell .profile-eye:active,
   .admin-shell .profile-eye:focus-visible { transform: translateY(-50%); }
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   ADMINS QUEUE — REDESIGN
+
+   A self-contained design system for the one panel where an operator decides who
+   holds the keys to the console. Everything is namespaced `adm-`, and the panel
+   opts out of the shared `.admin-panel` padding + top rail so the hero can run
+   edge to edge.
+
+   The palette, in one place:
+
+     indigo   #4f6bed → #3730a3   everything
+     emerald  #10b981 → #047857   enabled, can sign in
+     amber    #f59e0b → #b45309   disabled on purpose
+     rose     #f43f5e → #be123c   locked out — the only interrupting state
+
+   Amber is the one deliberate departure from the Users queue, which paints
+   "administratively off" slate. A disabled ADMIN is worth a second look in a
+   way a banned customer is not: somebody who cannot reach the console is
+   usually a problem someone is waiting on. Slate would have made it invisible.
+
+   Tones are set as custom properties on `.adm-stats` and inherited down, so a
+   card, a row pill and an empty state can never disagree about a colour.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+.admin-panel.adm-panel {
+  /* The hero owns the top edge. `.admin-panel` pads by 24px and paints a 3px
+     gradient rail at the very top; both are suppressed here so the hero can be
+     flush and BE the accent. The rail was also drawn over the hero anyway —
+     `::before` is positioned, the hero is not, so positioned paints on top. */
+  padding: 0;
+}
+.admin-panel.adm-panel::before { display: none; }
+
+/* ── Hero ──────────────────────────────────────────────────────────────── */
+.adm-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 22px 24px;
+  border-radius: 15px 15px 0 0;
+  color: #fff;
+  background:
+    radial-gradient(520px 220px at 88% -30%, rgba(244, 63, 94, .55), transparent 68%),
+    radial-gradient(420px 240px at 8% 130%, rgba(14, 165, 233, .5), transparent 70%),
+    linear-gradient(118deg, #4f46e5 0%, #6d28d9 42%, #9333ea 68%, #c026d3 100%);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, .16);
+  animation: adm-hero-in .45s cubic-bezier(.2, .8, .3, 1) backwards;
+}
+@keyframes adm-hero-in {
+  from { opacity: 0; transform: translateY(-10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Two slow-drifting specular blobs. Purely decorative and behind everything
+   (`z-index: -1` under the hero's own `isolation: isolate` stacking context),
+   so they can never intercept a click on the search field. */
+.adm-hero::before,
+.adm-hero::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  border-radius: 50%;
+  filter: blur(2px);
+  pointer-events: none;
+}
+.adm-hero::before {
+  width: 260px; height: 260px;
+  top: -150px; right: 14%;
+  background: radial-gradient(circle, rgba(255, 255, 255, .3), transparent 70%);
+  animation: adm-drift 14s ease-in-out infinite alternate;
+}
+.adm-hero::after {
+  width: 200px; height: 200px;
+  bottom: -140px; left: 6%;
+  background: radial-gradient(circle, rgba(56, 189, 248, .4), transparent 70%);
+  animation: adm-drift 18s ease-in-out infinite alternate-reverse;
+}
+@keyframes adm-drift {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to   { transform: translate3d(26px, 18px, 0) scale(1.08); }
+}
+
+.adm-hero__mark {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  border-radius: 18px;
+  color: #fff;
+  background: rgba(255, 255, 255, .16);
+  border: 1px solid rgba(255, 255, 255, .34);
+  box-shadow: 0 12px 26px -14px rgba(15, 23, 42, .9), inset 0 1px 0 rgba(255, 255, 255, .4);
+}
+
+.adm-hero__text {
+  flex: 1 1 300px;
+  min-width: 0;
+}
+.adm-hero__kicker {
+  display: inline-block;
+  padding: 3px 11px;
+  margin-bottom: 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .18);
+  border: 1px solid rgba(255, 255, 255, .3);
+  font: 800 10px/1.5 Arial, sans-serif;
+  letter-spacing: .15em;
+  text-transform: uppercase;
+  color: #fff;
+}
+/* `h3` keeps the heading role the panel outline relies on, so the rule has to
+   out-specify the shared `.admin-panel h3` rather than fight it. */
+.admin-panel .adm-hero__title {
+  margin: 0;
+  font: 800 clamp(22px, 2.4vw, 28px)/1.15 Arial, sans-serif;
+  letter-spacing: -.02em;
+  color: #fff;
+  /* Guard for a browser without background-clip:text — without this the
+     gradient would paint over a transparent glyph and the title would vanish. */
+  -webkit-text-fill-color: currentColor;
+}
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .admin-panel .adm-hero__title {
+    background: linear-gradient(96deg, #ffffff 8%, #ede9fe 52%, #fbcfe8 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+}
+.admin-panel .adm-hero__sub {
+  margin: 6px 0 0;
+  max-width: 62ch;
+  font: 400 13px/1.55 Arial, sans-serif;
+  color: rgba(255, 255, 255, .84);
+}
+
+/* ── Hero search ────────────────────────────────────────────────────────── */
+.adm-searchbar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  /* A preference, not a 260px floor: this is a sidebar-width column on a
+     laptop, and a hard floor is what made the old bar 14px wider than the
+     panel. `min-width: 0` lets the flex item actually shrink. */
+  flex: 0 1 300px;
+  min-width: 0;
+  /* Capped so it does not stretch into a 580px empty field on a wide column —
+     and auto-margin keeps it against the trailing edge either way it wraps. */
+  max-width: 320px;
+  margin-left: auto;
+}
+.adm-searchbar__icon {
+  position: absolute;
+  left: 13px;
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, .78);
+  pointer-events: none;
+  transition: color .16s ease;
+}
+.adm-searchbar input {
+  width: 100%;
+  min-width: 0;
+  padding: 11px 62px 11px 38px;
+  border: 1px solid rgba(255, 255, 255, .34);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .14);
+  color: #fff;
+  font: 600 14px Arial, sans-serif;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .2);
+  transition: background .16s ease, border-color .16s ease, box-shadow .16s ease;
+  appearance: none;
+}
+.adm-searchbar input::placeholder { color: rgba(255, 255, 255, .72); }
+.adm-searchbar input:hover { background: rgba(255, 255, 255, .2); }
+.adm-searchbar input:focus {
+  outline: none;
+  background: rgba(255, 255, 255, .96);
+  border-color: #fff;
+  color: #2e1065;
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, .22);
+}
+.adm-searchbar input:focus::placeholder { color: #7c3aed; }
+.adm-searchbar:focus-within .adm-searchbar__icon { color: #fff; }
+
+.adm-searchbar__clear {
+  position: absolute;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .28);
+  color: #fff;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease, transform .15s ease;
+}
+.adm-searchbar__clear:hover { background: #fff; color: #7c3aed; transform: scale(1.08); }
+.adm-searchbar__clear:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+/* A keyboard hint, not a control. `aria-hidden` because the field's own label
+   already says what it does. */
+.adm-searchbar__kbd {
+  position: absolute;
+  right: 10px;
+  padding: 3px 7px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .2);
+  border: 1px solid rgba(255, 255, 255, .3);
+  font: 800 10px/1.4 Arial, sans-serif;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, .9);
+  pointer-events: none;
+}
+
+/* ── Body ───────────────────────────────────────────────────────────────── */
+.adm-body { padding: 20px 24px 24px; }
+
+.adm-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  padding: 11px 14px;
+  border: 1px solid #e6ddfb;
+  border-radius: 13px;
+  background: linear-gradient(120deg, #faf7ff, #fdf2f8);
+  color: #5b21b6;
+  font: 400 12.5px/1.5 Arial, sans-serif;
+}
+.adm-note strong { font-weight: 800; }
+.adm-note__icon {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #8b5cf6, #6d28d9);
+  color: #fff;
+  box-shadow: 0 6px 14px -8px rgba(109, 40, 217, .95);
+}
+
+/* ── Stat cards (they are the filter) ───────────────────────────────────── */
+.adm-stats {
+  --adm-all: #4f6bed;   --adm-all-deep: #3730a3;   --adm-all-wash: #eef1fe;
+  --adm-ok: #10b981;   --adm-ok-deep: #047857;   --adm-ok-wash: #e7f8f1;
+  --adm-off: #f59e0b;  --adm-off-deep: #b45309;  --adm-off-wash: #fef4e2;
+  --adm-down: #f43f5e; --adm-down-deep: #be123c; --adm-down-wash: #fdeaee;
+
+  display: grid;
+  /* auto-fit rather than a fixed 4: this panel is a sidebar-width column, and
+     four fixed columns there squeezed each card until the hint wrapped to four
+     lines and the strip outgrew the list it is meant to summarise. */
+  grid-template-columns: repeat(auto-fit, minmax(198px, 1fr));
+  gap: 12px;
+  margin: 18px 0 0;
+}
+
+.adm-stat {
+  --t: var(--adm-all);
+  --t-deep: var(--adm-all-deep);
+  --t-wash: var(--adm-all-wash);
+
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px 14px 18px;
+  border: 1px solid var(--admin-line);
+  border-radius: 14px;
+  background: var(--t-wash);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(20, 33, 27, .04);
+  transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+  animation: adm-stat-in .4s ease backwards;
+}
+.adm-stats .adm-stat:nth-child(1) { animation-delay: .04s; }
+.adm-stats .adm-stat:nth-child(2) { animation-delay: .09s; }
+.adm-stats .adm-stat:nth-child(3) { animation-delay: .14s; }
+.adm-stats .adm-stat:nth-child(4) { animation-delay: .19s; }
+@keyframes adm-stat-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* The rail that makes the tone readable before the eye reaches the number —
+   classifying at a glance is the card's entire job. */
+.adm-stat::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: linear-gradient(180deg, var(--t), var(--t-deep));
+  opacity: .55;
+  transition: opacity .16s ease;
+}
+.adm-stat:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--t) 45%, var(--admin-line));
+  box-shadow: 0 14px 26px -18px rgba(20, 33, 27, .6);
+}
+.adm-stat:hover::before { opacity: 1; }
+.adm-stat:focus-visible { outline: 2px solid var(--t); outline-offset: 2px; }
+
+.adm-stat--ok   { --t: var(--adm-ok);   --t-deep: var(--adm-ok-deep);   --t-wash: var(--adm-ok-wash); }
+.adm-stat--off  { --t: var(--adm-off);  --t-deep: var(--adm-off-deep);  --t-wash: var(--adm-off-wash); }
+.adm-stat--down { --t: var(--adm-down); --t-deep: var(--adm-down-deep); --t-wash: var(--adm-down-wash); }
+
+/* The pressed card inverts to its own tone. A 2px outline alone is too quiet to
+   answer "what am I looking at?" — this panel can be a long list and a
+   forgotten filter is how you audit the wrong thing. */
+.adm-stat--on {
+  background: linear-gradient(135deg, var(--t) 0%, var(--t-deep) 100%);
+  border-color: transparent;
+  box-shadow: 0 14px 28px -16px color-mix(in srgb, var(--t) 92%, transparent);
+}
+.adm-stat--on::before { opacity: 0; }
+.adm-stat--on:hover { transform: translateY(-2px); }
+.adm-stat--on .adm-stat__icon { background: rgba(255, 255, 255, .24); color: #fff; }
+.adm-stat--on .adm-stat__value { color: #fff; }
+.adm-stat--on .adm-stat__label { color: rgba(255, 255, 255, .97); }
+.adm-stat--on .adm-stat__hint  { color: rgba(255, 255, 255, .78); }
+
+.adm-stat__icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .72);
+  color: var(--t-deep);
+  transition: background .16s ease, color .16s ease;
+}
+.adm-stat__body { display: flex; flex-direction: column; min-width: 0; }
+.adm-stat__value {
+  font: 800 26px/1 Arial, sans-serif;
+  color: var(--t-deep);
+  letter-spacing: -.02em;
+  transition: color .16s ease;
+}
+.adm-stat__label {
+  font: 700 12.5px/1.3 Arial, sans-serif;
+  color: var(--admin-ink);
+  margin-top: 3px;
+  transition: color .16s ease;
+}
+.adm-stat__hint {
+  font: 11.5px/1.35 Arial, sans-serif;
+  color: var(--admin-muted);
+  margin-top: 1px;
+  transition: color .16s ease;
+  /* Two lines then ellipsis: the hint is a gloss on the label, and a fourth
+     wrapped line makes the strip taller than the list beneath it. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── Result count / reset ───────────────────────────────────────────────── */
+.adm-listbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 16px 0 10px;
+}
+.adm-listbar__count {
+  margin: 0;
+  font: 700 11px/1 Arial, sans-serif;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--admin-muted);
+}
+.adm-listbar__reset {
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 13px;
+  background: #eef1fe;
+  color: #3730a3;
+  font: 700 11.5px Arial, sans-serif;
+  cursor: pointer;
+  transition: background .15s ease, transform .15s ease;
+}
+.adm-listbar__reset:hover { background: #e0e5fd; transform: translateX(2px); }
+.adm-listbar__reset:focus-visible { outline: 2px solid var(--adm-all, #4f6bed); outline-offset: 2px; }
+
+/* ── Cards ─────────────────────────────────────────────────────────────── */
+.adm-list { display: grid; gap: 10px; }
+
+.adm-card {
+  --t: var(--adm-all);
+  --t-deep: var(--adm-all-deep);
+
+  position: relative;
+  overflow: hidden;
+  border-radius: 15px;
+  border: 1px solid #e3e9e4;
+  background: linear-gradient(180deg, #ffffff 0%, #fcfdfc 100%);
+  box-shadow: 0 2px 8px rgba(22, 101, 52, .05);
+  /* `backwards`, so the filled `to { transform }` never persists and keeps
+     winning over the :hover lift below. */
+  animation: adm-card-in .34s ease backwards;
+  transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+}
+@keyframes adm-card-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.adm-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 28px -18px color-mix(in srgb, var(--t-deep) 70%, transparent);
+  border-color: color-mix(in srgb, var(--t) 38%, #e3e9e4);
+}
+.adm-card--ok   { --t: var(--adm-ok);   --t-deep: var(--adm-ok-deep); }
+.adm-card--off  { --t: var(--adm-off);  --t-deep: var(--adm-off-deep); }
+.adm-card--down { --t: var(--adm-down); --t-deep: var(--adm-down-deep); }
+
+/* State rail down the leading edge, so a disabled or locked account is obvious
+   on the COLLAPSED card — before anyone opens it. Drawn as ::before rather than
+   `border-left` for the same reason as .usr-stat: a `border-left` shorthand
+   races the base `border` shorthand for the colour, and it rounds away exactly
+   where a left edge needs to look solid. */
+.adm-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: linear-gradient(180deg, var(--t), var(--t-deep));
+  opacity: .8;
+}
+.adm-card--open {
+  border-color: color-mix(in srgb, var(--t) 55%, #e3e9e4);
+  box-shadow: 0 16px 34px -20px color-mix(in srgb, var(--t-deep) 78%, transparent);
+}
+
+/* ── Collapsed row ─────────────────────────────────────────────────────── */
+.adm-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  /* Wraps rather than overflows. The row carries the avatar, the name, the
+     status pill and the chevron, and the pill and chevron are `flex-shrink: 0`
+     by design, so on a narrow panel the only graceful outcome is for the meta
+     column to drop onto its own line. A viewport media query cannot see this:
+     the panel is a sidebar-width column, so its width is not the window's. */
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  padding: 13px 18px 13px 20px;
+  background: none;
+  border: 0;
+  border-radius: 15px 15px 0 0;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+.adm-row:hover { background: color-mix(in srgb, var(--t) 6%, transparent); }
+.adm-row:focus-visible { outline: 2px solid var(--t); outline-offset: -2px; }
+
+/* Avatar. Two stacked layers, so the gradient rim cannot be lost: an inline
+   `background` here once overrode the `background` shorthand and stripped the
+   ring, leaving this panel's avatars visibly flatter than the Users ones. The
+   per-person colour arrives as `--adm-tint` rather than as `background`, which
+   is what makes the layered rim possible. */
+.adm-avatar {
+  position: relative;
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  display: block;
+  border-radius: 50%;
+  overflow: hidden;
+  background: #eef2ef;
+  box-shadow: 0 4px 12px -4px color-mix(in srgb, var(--adm-tint, #4f6bed) 65%, transparent);
+}
+.adm-avatar__initials {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 800 15px/1 Arial, sans-serif;
+  color: #fff;
+  letter-spacing: .02em;
+  user-select: none;
+  background: linear-gradient(140deg,
+    color-mix(in srgb, var(--adm-tint, #4f6bed) 78%, #ffffff) 0%,
+    var(--adm-tint, #4f6bed) 62%,
+    color-mix(in srgb, var(--adm-tint, #4f6bed) 70%, #1e1b4b) 100%);
+}
+/* A second, brighter pass on hover, so the row feels responsive without the
+   whole card shifting. */
+.adm-avatar__ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  background: linear-gradient(#fff, #fff), linear-gradient(135deg, #f472b6, #6366f1);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: .22;
+  transition: opacity .18s ease, inset .18s ease;
+}
+.adm-row:hover .adm-avatar__ring { opacity: 1; inset: -2px; }
+
+.adm-row__info {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.adm-row__name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font: 800 15px/1.25 Arial, sans-serif;
+  color: var(--admin-ink);
+  min-width: 0;
+}
+/* The alias carries the ellipsis, never the "You" chip beside it. */
+.adm-row__alias {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.adm-row__sub {
+  font: 12.5px/1.3 Arial, sans-serif;
+  color: var(--admin-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* "You" marker. A chip, not a " (you)" appended to the name: appending broke
+   the name's own ellipsis and read like part of the account's name. */
+.adm-tag {
+  flex-shrink: 0;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font: 800 10px/1.4 Arial, sans-serif;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.adm-tag--you {
+  background: linear-gradient(135deg, #a855f7, #6366f1);
+  color: #fff;
+  box-shadow: 0 5px 12px -6px rgba(99, 102, 241, .95);
+}
+
+.adm-row__meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+  flex: 0 1 auto;
+  min-width: 0;
+  text-align: right;
+}
+.adm-pill {
+  --t: var(--adm-all);
+  --t-deep: var(--adm-all-deep);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--t) 12%, #fff);
+  color: var(--t-deep);
+  border: 1px solid color-mix(in srgb, var(--t) 32%, transparent);
+  font: 800 10.5px/1.4 Arial, sans-serif;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.adm-pill--ok   { --t: var(--adm-ok);   --t-deep: var(--adm-ok-deep); }
+.adm-pill--off  { --t: var(--adm-off);  --t-deep: var(--adm-off-deep); }
+.adm-pill--down { --t: var(--adm-down); --t-deep: var(--adm-down-deep); }
+.adm-pill__dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent);
+}
+/* A locked-out account is the one state worth interrupting for, so it pulses.
+   The shared `prefers-reduced-motion` block at the end of this file stops all
+   animation under the shell; this is belt-and-braces for anywhere it does not
+   apply. */
+.adm-pill--down .adm-pill__dot { animation: adm-pulse 1.8s ease-in-out infinite; }
+@keyframes adm-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent); }
+  50%      { box-shadow: 0 0 0 6px color-mix(in srgb, currentColor 6%, transparent); }
+}
+
+.adm-row__when {
+  font: 11.5px/1 Arial, sans-serif;
+  color: var(--admin-muted);
+  white-space: nowrap;
+}
+.adm-row__when--never { color: #a5b0aa; font-style: italic; }
+
+.adm-chevron {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  color: var(--t-deep);
+  background: color-mix(in srgb, var(--t) 10%, #fff);
+  transition: transform .22s ease, background .18s ease, color .18s ease;
+}
+.adm-row:hover .adm-chevron { background: color-mix(in srgb, var(--t) 20%, #fff); }
+.adm-chevron--open { transform: rotate(180deg); }
+
+/* ── Expanded detail panel ─────────────────────────────────────────────── */
+.adm-details {
+  padding: 18px 20px 16px;
+  border-top: 1px solid var(--admin-line);
+  background:
+    radial-gradient(420px 160px at 100% 0%, color-mix(in srgb, var(--t) 9%, transparent), transparent 70%),
+    linear-gradient(180deg, #fbfcff 0%, #f6f8fc 100%);
+  /* `backwards`, not `both`: a filled `to { transform }` outranks normal author
+     rules and would turn this into a containing block for position:fixed
+     descendants (a dropdown opened from inside the panel). */
+  animation: adm-details-in .26s ease backwards;
+}
+@keyframes adm-details-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.adm-details__grid {
+  display: grid;
+  /* `min()` on the track floor: 190px is a preference, not a hard floor, or an
+     unbreakable value could push the whole grid past the panel on a phone. */
+  grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr));
+  gap: 11px;
+}
+.adm-detail {
+  /* A grid child defaults to `min-width: auto`, which refuses to shrink below
+     its content — an unbreakable value would widen the card past its track. */
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid #e6e9f0;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, .82);
+  transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+}
+.adm-detail:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--t) 30%, #e6e9f0);
+  box-shadow: 0 10px 22px -16px color-mix(in srgb, var(--t-deep) 75%, transparent);
+}
+.adm-detail--wide { grid-column: 1 / -1; }
+.adm-detail__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: 800 10.5px/1.4 Arial, sans-serif;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--t-deep);
+}
+.adm-detail__value {
+  font: 600 13.5px/1.4 Arial, sans-serif;
+  color: var(--admin-ink);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.adm-detail__hint {
+  font: 11.5px/1.45 Arial, sans-serif;
+  color: var(--admin-muted);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* Alias / status read heavier than the timestamps beside them — they are the
+   two things the panel is actually for. */
+.adm-detail__value--strong { font-weight: 800; font-size: 14.5px; }
+
+.adm-state {
+  --t: var(--adm-all);
+  --t-deep: var(--adm-all-deep);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--t-deep);
+  font-weight: 800;
+}
+.adm-state--ok   { --t: var(--adm-ok);   --t-deep: var(--adm-ok-deep); }
+.adm-state--off  { --t: var(--adm-off);  --t-deep: var(--adm-off-deep); }
+.adm-state--down { --t: var(--adm-down); --t-deep: var(--adm-down-deep); }
+.adm-state .adm-pill__dot { background: currentColor; }
+
+/* The lockout controls sit on one line so the wide card does not become a
+   two-storey block. */
+.adm-detail__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+.adm-detail__row .lockout-badge { font-size: 12.5px; padding: 6px 14px; }
+.adm-detail__row .lockout-unlock-btn,
+.adm-detail__row .lockout-reset-btn { margin-top: 0; }
+.adm-detail__row .lockout-reset-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--admin-line);
+  border-radius: 9px;
+  background: #fff;
+  color: var(--admin-ink);
+  text-decoration: none;
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+.adm-detail__row .lockout-reset-btn:hover {
+  background: #f8fafc;
+  border-color: color-mix(in srgb, var(--t) 45%, var(--admin-line));
+  color: var(--t-deep);
+}
+
+/* ── Actions ───────────────────────────────────────────────────────────── */
+.adm-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--admin-line);
+}
+.adm-actions__note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  flex: 1 1 260px;
+  min-width: 0;
+  margin: 0;
+  padding: 10px 13px;
+  border: 1px solid #ddd6fe;
+  border-radius: 12px;
+  background: linear-gradient(120deg, #f5f3ff, #fdf4ff);
+  color: #5b21b6;
+  font: 600 12.5px/1.5 Arial, sans-serif;
+}
+.adm-actions__note-icon {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #8b5cf6, #6d28d9);
+  color: #fff;
+  font: 800 12px/1 Arial, sans-serif;
+}
+/* The muted variant is guidance about an action that sits right next to it, not
+   an explanation of something that went wrong — so it stays quiet. */
+.adm-actions__note--muted {
+  border-color: var(--admin-line);
+  background: #f8faf9;
+  color: var(--admin-muted);
+  font-weight: 400;
+}
+
+.adm-btn {
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 12px;
+  padding: 11px 18px;
+  color: #fff;
+  font: 800 12.5px/1.2 Arial, sans-serif;
+  letter-spacing: .02em;
+  cursor: pointer;
+  transition: transform .15s ease, box-shadow .18s ease, filter .18s ease;
+}
+.adm-btn:hover { transform: translateY(-2px); filter: brightness(1.06); }
+.adm-btn:active { transform: translateY(0) scale(.985); }
+.adm-btn:focus-visible { outline: 2px solid var(--t, #4f6bed); outline-offset: 3px; }
+.adm-btn--enable {
+  background: linear-gradient(135deg, #10b981, #047857);
+  box-shadow: 0 12px 24px -14px rgba(4, 120, 87, .95);
+}
+.adm-btn--danger {
+  background: linear-gradient(135deg, #f43f5e, #be123c);
+  box-shadow: 0 12px 24px -14px rgba(190, 18, 60, .95);
+}
+/* Indigo, not the emerald of `--enable`: green is this panel's "your account
+   is fine" colour, and reusing it for an action that sends mail to six
+   inboxes would read as a status. */
+.adm-btn--primary {
+  background: linear-gradient(135deg, #4f6bed, #3730a3);
+  box-shadow: 0 12px 24px -14px rgba(55, 48, 163, .95);
+}
+/* A disabled primary must still read as a button, not as body text — it is
+   disabled because no address is configured, and that reason is shown in the
+   hint below it, so it has to look like a thing you would otherwise press. */
+.adm-btn:disabled {
+  cursor: not-allowed;
+  filter: grayscale(.75);
+  opacity: .55;
+  transform: none;
+}
+
+/* ── Credential-update notice ───────────────────────────────────────────────
+   The one control in this panel that leaves the server, so it is separated
+   from the list below it rather than sitting in the listbar with the filter
+   reset: a mis-click on it is not undoable, and a button that clears a view
+   filter should not sit a centimetre from it. */
+.adm-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 14px 0 0;
+  padding: 15px 18px;
+  border: 1px solid #d7e3fd;
+  border-radius: 16px;
+  background: linear-gradient(120deg, #f5f9ff, #eef4ff);
+}
+.adm-notice__text { min-width: 0; }
+.adm-notice__title {
+  display: block;
+  margin: 0 0 3px;
+  font: 800 13px/1.3 Arial, sans-serif;
+  color: #1e3a8a;
+}
+.adm-notice__body {
+  margin: 0;
+  font: 400 12.5px/1.5 Arial, sans-serif;
+  color: #475569;
+}
+.adm-notice__hint {
+  margin: 8px 0 0;
+  font: 400 12px/1.55 Arial, sans-serif;
+  color: #b45309;
+}
+.adm-notice__hint code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  font: 600 11.5px ui-monospace, Menlo, Consolas, monospace;
+}
+
+/* The report after a send. Amber rather than red when partial: a rejected
+   address is an operational problem to fix, not a failure of the system, and
+   red here would wrongly imply the administrators were not reached. */
+.adm-notice__result {
+  margin: 10px 0 0;
+  padding: 13px 16px;
+  border: 1px solid #bbf7d0;
+  border-radius: 14px;
+  background: #f0fdf4;
+}
+.adm-notice__result--partial { border-color: #fed7aa; background: #fffbeb; }
+.adm-notice__result-line {
+  margin: 0 0 5px;
+  font: 400 12.5px/1.5 Arial, sans-serif;
+  color: #166534;
+}
+.adm-notice__result--partial .adm-notice__result-line { color: #92400e; }
+.adm-notice__result-line--bad { color: #b91c1c; }
+.adm-notice__result-line--warn { color: #b45309; }
+.adm-notice__result .adm-btn--ghost { margin-top: 7px; }
+
+/* Confirmation. Modal because the action is irreversible and reaches other
+   people's inboxes — an inline confirm next to the button is the pattern
+   people click through without reading. */
+.adm-confirm {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, .55);
+  backdrop-filter: blur(2px);
+}
+.adm-confirm__box {
+  width: min(520px, 100%);
+  padding: 24px;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 24px 60px -20px rgba(15, 23, 42, .45);
+}
+.adm-confirm__title {
+  margin: 0 0 10px;
+  font: 800 17px/1.3 Arial, sans-serif;
+  color: #0f172a;
+}
+.adm-confirm__body {
+  margin: 0 0 10px;
+  font: 400 13px/1.55 Arial, sans-serif;
+  color: #475569;
+}
+.adm-confirm__body--warn { color: #b45309; }
+.adm-confirm__body code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  font: 600 12px ui-monospace, Menlo, Consolas, monospace;
+}
+/* The exact sentence the recipients will receive, so the operator approves
+   the real wording rather than a description of it. */
+.adm-confirm__quote {
+  margin: 0 0 12px;
+  padding: 11px 14px;
+  border-left: 3px solid #4f6bed;
+  border-radius: 0 10px 10px 0;
+  background: #f8fafc;
+  font: 600 13px/1.5 Arial, sans-serif;
+  color: #1e3a8a;
+}
+.adm-confirm__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 16px;
+}
+
+/* ── Credential hand-off ──────────────────────────────────────────────────
+   A second .adm-notice variant, in amber rather than the notice's blue. The
+   colour is the only thing distinguishing the two strips, and it has to: one
+   sends a sentence, the other sends live passwords, and an operator should not
+   have to read both to tell them apart. */
+.adm-notice--warn {
+  border-color: #fed7aa;
+  background: linear-gradient(120deg, #fffbf5, #fff7ed);
+}
+.adm-notice--warn .adm-notice__title { color: #9a3412; }
+
+/* The standing warning inside the dialog. Restated at the point of action
+   rather than only on the strip, because the strip is scrolled away from by the
+   time the operator reaches the button. */
+.adm-handoff__warn {
+  margin: 0 0 14px;
+  padding: 11px 13px;
+  border: 1px solid #fed7aa;
+  border-left: 3px solid #ea580c;
+  border-radius: 10px;
+  background: #fff7ed;
+  font: 400 12.5px/1.55 Arial, sans-serif;
+  color: #9a3412;
+}
+
+.adm-handoff__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  max-height: 260px;
+  margin: 0 0 14px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+  overflow-y: auto;
+}
+.adm-handoff__row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.adm-handoff__label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.adm-handoff__alias {
+  font: 800 12.5px/1.3 Arial, sans-serif;
+  color: #0f172a;
+}
+.adm-handoff__email {
+  min-width: 0;
+  font: 400 11.5px/1.3 Arial, sans-serif;
+  color: #64748b;
+  overflow-wrap: anywhere;
+}
+.adm-handoff__input,
+.adm-handoff__textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  font: 400 13px/1.4 Arial, sans-serif;
+  color: #0f172a;
+}
+.adm-handoff__input:focus,
+.adm-handoff__textarea:focus {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, .16);
+}
+.adm-handoff__textarea { resize: vertical; }
+.adm-handoff__label-text {
+  display: block;
+  margin-bottom: 4px;
+  font: 700 12.5px/1.3 Arial, sans-serif;
+  color: #334155;
+}
+/* An alias with no authenticator key in .env. Shown in place of the field
+   rather than as a disabled one, so the operator can see WHY there is nothing
+   to type — the server would refuse to mail this alias a half-message. */
+.adm-handoff__blocked {
+  margin: 0;
+  padding: 7px 10px;
+  border: 1px dashed #fcd34d;
+  border-radius: 8px;
+  background: #fffbeb;
+  font: 600 11.5px/1.45 Arial, sans-serif;
+  color: #b45309;
+}
+.adm-handoff__blocked code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: #fef3c7;
+  font: 600 11px ui-monospace, Menlo, Consolas, monospace;
+}
+
+@media (max-width: 640px) {
+  .adm-notice { flex-direction: column; align-items: stretch; }
+  .adm-notice .adm-btn { width: 100%; }
+}
+
+.adm-btn--ghost {
+  margin-top: 6px;
+  border: 1px solid var(--admin-line);
+  background: #fff;
+  color: var(--admin-ink);
+  box-shadow: none;
+}
+.adm-btn--ghost:hover {
+  border-color: #c7d2fe;
+  background: #f5f7ff;
+  color: #3730a3;
+  box-shadow: 0 10px 22px -16px rgba(55, 48, 163, .9);
+}
+
+/* ── Empty state ────────────────────────────────────────────────────────── */
+.adm-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 44px 22px;
+  border: 1px dashed #d8d5f0;
+  border-radius: 15px;
+  background: linear-gradient(180deg, #fbfaff, #f7f7fd);
+  text-align: center;
+}
+.adm-empty__icon {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  margin-bottom: 4px;
+  border-radius: 17px;
+  background: linear-gradient(135deg, #ede9fe, #fce7f3);
+  color: #6d28d9;
+  box-shadow: 0 12px 26px -18px rgba(109, 40, 217, .95);
+}
+.adm-empty strong { font: 800 15px/1.3 Arial, sans-serif; color: var(--admin-ink); }
+.adm-empty p {
+  margin: 0;
+  max-width: 46ch;
+  font: 13px/1.55 Arial, sans-serif;
+  color: var(--admin-muted);
+}
+
+/* ── Narrow columns ────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .adm-hero { padding: 18px 16px; gap: 12px; }
+  .adm-hero__mark { width: 46px; height: 46px; border-radius: 15px; }
+  .adm-searchbar { flex: 1 1 100%; max-width: none; margin-left: 0; }
+  .adm-searchbar__kbd { display: none; }
+  .adm-body { padding: 16px 14px 18px; }
+  .adm-stat { padding: 12px 13px 12px 15px; gap: 10px; }
+  .adm-stat__icon { width: 32px; height: 32px; border-radius: 10px; }
+  .adm-stat__value { font-size: 21px; }
+  .adm-stat__hint { display: none; }
+  .adm-row { padding: 12px 14px 12px 16px; }
+  .adm-row__meta { align-items: flex-start; text-align: left; }
+  .adm-actions { flex-direction: column; align-items: stretch; }
+  .adm-actions .adm-btn { width: 100%; }
+}
+
+/* ── Reduced motion ────────────────────────────────────────────────────── */
+/* The shell-wide block at the end of this file already neutralises animation
+   and transition under `.admin-shell`; these restore the two things a
+   transition was carrying, so a reduced-motion render does not also lose the
+   pressed/hover colour cues. */
+@media (prefers-reduced-motion: reduce) {
+  .adm-hero,
+  .adm-stat,
+  .adm-card,
+  .adm-details,
+  .adm-avatar__ring,
+  .adm-pill--down .adm-pill__dot { animation: none; }
+  .adm-stat:hover,
+  .adm-card:hover,
+  .adm-detail:hover,
+  .adm-btn:hover,
+  .adm-btn:active { transform: none; }
 }

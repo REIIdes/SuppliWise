@@ -16,6 +16,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 require('dotenv').config();
 const mongoose = require('mongoose');
+const { connectTestDb, skipMessage } = require('./Test File/testDbGuard');
 
 const BASE = process.env.SMOKE_BASE_URL || 'http://localhost:5000/api';
 
@@ -66,7 +67,11 @@ async function register(tag) {
   const captcha = await solveCaptcha();
   const res = await call('POST', '/auth/register', {
     body: {
-      firstName: 'Web3',
+      // Must satisfy utils/nameValidation.js: letters, spaces, hyphens,
+      // apostrophes and periods only — digits and symbols are rejected. This
+      // used to be "Web3", which the name rule refuses with a 400, so every
+      // run died at registration before reaching a single assertion.
+      firstName: 'Web',
       lastName: tag,
       email: `web3-smoke-${tag.toLowerCase()}-${Date.now()}@example.com`,
       password: 'Web3SmokeTest123!',
@@ -151,24 +156,57 @@ async function seedAssessment(userId) {
 }
 
 async function main() {
-  await mongoose.connect(process.env.MONGO_URI);
+  // Tests write real User/Web3 documents. Never let them reach the
+  // application's own database — see Test File/testDbGuard.js.
+  const db = await connectTestDb();
+  if (!db.connected) { console.log(skipMessage(db)); return; }
   const W = require('./models/Web3');
   const { sha256Hex } = require('./blockchain/crypto');
 
   section('Setup');
+  const User = require('./models/User');
   const cleaned = await cleanupPreviousRuns();
   check('previous smoke-run accounts purged', true,
     `${cleaned.removed} user(s), ${cleaned.orphans} orphan wallet(s) removed`);
-  // Only STAKED non-system wallets can be drawn as jurors — real accounts may
-  // legitimately hold an unstaked wallet, so that is not a failure here.
+  // Only STAKED non-system wallets can be drawn as jurors. Real accounts on this
+  // database may legitimately hold staked WELL, so the pool size is not fixed —
+  // this is an observation about the environment, not a product defect, and the
+  // juror assertions below check the real invariant (independent, stake-backed,
+  // never a party) instead of an exact panel size.
   const stakedForeign = await W.Wallet.countDocuments({ isSystem: { $ne: true }, staked: { $gt: 0 } });
-  check('no staked foreign wallets before run (jury stays deterministic)',
-    stakedForeign === 0, `${stakedForeign} staked non-system wallet(s)`);
+  console.log(`  NOTE  ${stakedForeign} staked non-system wallet(s) pre-existing (juror pool may include them)`);
 
   const A = await register('SmokeA'); // buyer / proposer / brand
   const B = await register('SmokeB'); // seller / counter-voter
   const C = await register('SmokeC'); // independent juror
   check('three accounts registered with session tokens', !!(A.token && B.token && C.token));
+
+  // The whole Web3 layer is a DELUXE entitlement, so a freshly registered FREE
+  // account gets 403 from every endpoint below and the run cannot reach a
+  // single assertion. There is no payment processor, and self-serve purchase
+  // now fails closed by design, so grant the plan directly in the database —
+  // the same thing an admin does through /api/admin/users/:id/subscription.
+  // These are throwaway accounts purged on the next run.
+  await User.updateMany(
+    { _id: { $in: [A.id, B.id, C.id] } },
+    {
+      $set: {
+        subscriptionActive: true,
+        subscriptionPlan: 'custom',
+        subscriptionPermanent: true,
+        subscriptionSource: 'admin',
+        subscriptionStartedAt: new Date(),
+        subscriptionExpiresAt: null,
+      },
+    }
+  );
+  const granted = await User.countDocuments({
+    _id: { $in: [A.id, B.id, C.id] },
+    subscriptionPlan: 'custom',
+    subscriptionActive: true,
+  });
+  check('smoke accounts granted the DELUXE-tier entitlement the web3 layer requires',
+    granted === 3, `${granted}/3 entitled`);
 
   // ── 5. DID + wallet ────────────────────────────────────────────────────
   section('Feature 5 — DID & wallet');
@@ -268,7 +306,7 @@ async function main() {
   const shareToken = psl.data.link.token;
   const pub = await call('GET', `/web3/share/${shareToken}`);
   check('PUBLIC read without an account (doctor view)',
-    pub.status === 200 && pub.data.sharedProfile.name === 'Web3 SmokeA' && pub.data.views >= 1,
+    pub.status === 200 && pub.data.sharedProfile.name === 'Web SmokeA' && pub.data.views >= 1,
     JSON.stringify(pub.data.sharedProfile).slice(0, 160));
   const pslList = await call('GET', '/web3/profile-shares', { token: A.token });
   const pslId = pslList.data.links[0]._id;
@@ -424,8 +462,11 @@ async function main() {
 
   // ── 15. Decentralized dispute resolution ──────────────────────────────
   section('Feature 15 — Decentralized dispute resolution');
-  // Jurors are drawn from STAKED non-party wallets: account C joins the pool
-  // so the panel is exactly [C] and the verdict below is deterministic.
+  // Jurors are drawn from STAKED non-party wallets: account C joins the pool so
+  // C is on the panel. The panel is NOT asserted to be exactly [C] — a real
+  // account on this database may hold staked WELL too, and selectJurors
+  // correctly draws up to 5. What matters is the invariant: every juror is
+  // independent and stake-backed, and neither party to the order is on it.
   const stkC = await call('POST', '/web3/stake', { token: C.token, body: { amount: 20 } });
   check('account C stakes 20 WELL to join the juror pool',
     stkC.status === 200 && stkC.data.staked === 20, JSON.stringify(stkC.data).slice(0, 200));
@@ -433,13 +474,16 @@ async function main() {
   check('second order escrowed', o2.status === 201 && o2.data.order.status === 'escrow',
     JSON.stringify({ status: o2.status, body: o2.data }).slice(0, 200));
   const disp = await call('POST', `/web3/market/orders/${o2.data.order._id}/dispute`, { token: A.token, body: { reason: 'Bottle arrived with a broken seal and missing batch code.' } });
-  check('dispute opened; juror = independent staked holder (not a party)',
-    disp.status === 201 && disp.data.dispute.jurors.length === 1
-      && disp.data.dispute.jurors[0] !== undefined,
-    JSON.stringify(disp.data.dispute).slice(0, 200));
   const cAddr = wC.data.wallet.address;
-  check('selected juror is account C', disp.data.dispute.jurors.includes(cAddr),
-    `jurors ${JSON.stringify(disp.data.dispute.jurors)} C ${cAddr}`);
+  const aAddr = wA.data.wallet.address;
+  const bAddr = wB.data.wallet.address;
+  const panel = disp.data?.dispute?.jurors || [];
+  check('dispute opened; juror panel is independent staked holders (never a party)',
+    disp.status === 201 && panel.length >= 1
+      && !panel.includes(aAddr) && !panel.includes(bAddr),
+    JSON.stringify(disp.data?.dispute).slice(0, 200));
+  check('selected juror is account C', panel.includes(cAddr),
+    `jurors ${JSON.stringify(panel)} C ${cAddr}`);
 
   const voteAsA = await call('POST', `/web3/market/disputes/${disp.data.dispute._id}/vote`, { token: A.token, body: { choice: 'buyer' } });
   check('order party cannot vote on own dispute (403)', voteAsA.status === 403, `status ${voteAsA.status}`);

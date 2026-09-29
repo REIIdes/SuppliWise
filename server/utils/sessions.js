@@ -3,6 +3,13 @@ const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 const User = require('../models/User');
 const Session = require('../models/Session');
+const {
+  USER_IDLE_LIMIT_MS,
+  USER_IDLE_DAYS,
+  REMEMBER_TOKEN_LIFETIME,
+  USER_ACTIVITY_TOUCH_INTERVAL_MS,
+  USER_ACTIVITY_MAX_AGE_MS,
+} = require('./userSession');
 
 // ─── Session rules (backend authority) ───────────────────────────────────────
 // • Different accounts NEVER invalidate each other: state is per-user
@@ -12,13 +19,60 @@ const Session = require('../models/Session');
 //   revokes ONLY the session it displaced. Concurrent sign-ins serialize on
 //   that single-document update, so the last one to commit wins
 //   deterministically.
-// • Sessions never expire on their own (`exp` absent from user JWTs,
-//   Session.expiresAt = null). They end only by replacement or sign-out.
+// • A session ends when it is replaced by a newer sign-in, when it is revoked
+//   at sign-out, or after 30 DAYS WITHOUT ACTIVITY (see utils/userSession.js).
+//   Validity is revocation-based, not token-based: a user JWT carries no `exp`,
+//   so the session record is the single authority on whether a token still acts.
+//   The idle window exists because a token with no expiry is valid forever, and
+//   a token thief controls neither sign-in nor sign-out.
 // • The server is authoritative: a JWT is necessary but never sufficient.
+
+// In-memory throttle for the activity stamp, keyed by session id. A write
+// amplification guard only — it is NOT what expires anything, so unlike the
+// admin heartbeat it is not required to be shorter than the window (30 days vs
+// minutes). Two processes each keep their own map, so the stamp may be written
+// more often than this suggests; that is harmless, it only ever pushes the
+// deadline further out.
+const activityTouches = new Map();
+
+/**
+ * Record that this session is still in use, sliding its idle deadline.
+ *
+ * Two guards keep this honest:
+ *   - throttled, so a busy member is not one write per API call;
+ *   - only a RECENT request counts, so replaying a captured request cannot
+ *     slide the deadline out forever. Without the age check the timeout would be
+ *     decorative — an attacker holding a stolen token could keep a session
+ *     alive indefinitely by resending one old request.
+ *
+ * Fire-and-forget: a failed activity stamp must never fail the request it was
+ * made for. Worst case the window is not extended and the member signs in again.
+ */
+function touchActivity(sid, at = Date.now()) {
+  if (!sid) return;
+  if (at - (activityTouches.get(sid) || 0) < USER_ACTIVITY_TOUCH_INTERVAL_MS) return;
+  if (activityTouches.size > 5000) {
+    const oldest = activityTouches.keys().next().value;
+    activityTouches.delete(oldest);
+  }
+  activityTouches.set(sid, at);
+  Session.updateOne(
+    { _id: toObjectId(sid), revokedAt: null, expiresAt: null },
+    { $set: { lastActivityAt: new Date(at) } }
+  ).exec().catch(() => {});
+}
+
 
 const SESSION_ENDED_MESSAGE = 'Your session has ended. Please sign in again.';
 const SESSION_INVALID = 'SESSION_INVALID'; // token malformed / no sid / unknown user
 const SESSION_REVOKED = 'SESSION_REVOKED'; // session replaced, revoked or missing
+// Distinct from SESSION_REVOKED so the client can TELL the member why. Without
+// it, being signed out after a month away looks identical to being signed out by
+// an administrator or by a second login — and a member whose own password works
+// concludes the app is broken.
+const SESSION_IDLE_EXPIRED = 'SESSION_IDLE_EXPIRED';
+const SESSION_IDLE_MESSAGE =
+  `You were signed out after ${USER_IDLE_DAYS} days of inactivity. Sign in again to pick up where you left off.`;
 const NO_SESSION = 'NO_SESSION'; // no credential presented
 const INVALID_TOKEN = 'INVALID_TOKEN'; // signature/verification failed
 const TOKEN_EXPIRED = 'TOKEN_EXPIRED'; // admin-only TTL (users never expire)
@@ -42,12 +96,21 @@ function toObjectId(value) {
   }
 }
 
-// User tokens: no `exp` — validity is revocation-based, not time-based.
-function signUserToken(userId, sessionId) {
-  return jwt.sign(
-    { sub: asId(userId), id: asId(userId), sid: asId(sessionId) },
-    process.env.JWT_SECRET
-  );
+// User tokens: normally no `exp` — validity is decided by the session record,
+// not by the token's own clock, so a session that was displaced or revoked stops
+// working on the very next request even though the token still looks fine.
+//
+// The ONE exception is a token minted from a saved-login credential
+// (mintFromRememberToken). That token is long-lived by design — it is what saves
+// someone re-typing a password — so it carries a real expiry, deliberately set
+// LONGER than the idle window. Without it a returning member could land in a gap
+// where the credential still worked and the session was still alive but the
+// token it produced had already died.
+function signUserToken(userId, sessionId, options = {}) {
+  const payload = { sub: asId(userId), id: asId(userId), sid: asId(sessionId) };
+  return options.expiresIn
+    ? jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: options.expiresIn })
+    : jwt.sign(payload, process.env.JWT_SECRET);
 }
 
 /**
@@ -118,8 +181,8 @@ async function issueUserSession(userId, deviceMeta = {}) {
 /**
  * Validate a decoded user JWT against the server-side session state.
  * Checks, in order: identity claims → session exists → session belongs to
- * this account → not revoked → is the account's current active session →
- * account still usable.
+ * this account → not revoked → is the account's current active session → not
+ * expired → account still usable.
  *
  * Throws nothing: DB failures propagate to the caller, which must answer 503
  * (a database outage must NEVER log users out).
@@ -142,7 +205,7 @@ async function verifyUserSession(decoded) {
     User.findById(decoded.id)
       .select('-password -profilePicture -bannerPicture +currentSessionId')
       .lean(),
-    Session.findById(sid).select('user revokedAt createdAt').lean(),
+    Session.findById(sid).select('user revokedAt createdAt lastActivityAt expiresAt').lean(),
   ]);
 
   if (!user) return deny(401, SESSION_INVALID, SESSION_ENDED_MESSAGE);
@@ -161,6 +224,39 @@ async function verifyUserSession(decoded) {
     ).exec().catch(() => {});
     return deny(401, SESSION_REVOKED, SESSION_ENDED_MESSAGE);
   }
+
+  // ── Expiry ──────────────────────────────────────────────────────────────
+  // Two mechanisms, and the stored field is checked FIRST so a future policy
+  // that sets a hard cap on some session type overrides the sliding window
+  // rather than being ignored by it.
+  const now = Date.now();
+  if (session.expiresAt && new Date(session.expiresAt).getTime() <= now) {
+    // An absolute cap elapsed. This is final, so it is stamped revoked exactly
+    // like a displacement — otherwise a stale token would re-enter this branch
+    // on every request and pay for a query each time.
+    Session.updateOne(
+      { _id: sid, user: uid, revokedAt: null },
+      { $set: { revokedAt: new Date() } }
+    ).exec().catch(() => {});
+    return deny(401, SESSION_REVOKED, SESSION_ENDED_MESSAGE);
+  }
+  if (!session.expiresAt) {
+    // Sliding idle window, computed from the last ACTIVITY stamp rather than
+    // from a stored moving deadline. Deriving it means the deadline cannot drift
+    // out of step with the value it is derived from — there is no second copy to
+    // fall behind, and no window to extend on a write-heavy path.
+    const lastActivity = session.lastActivityAt
+      ? new Date(session.lastActivityAt).getTime()
+      : new Date(session.createdAt || 0).getTime();
+    if (now - lastActivity > USER_IDLE_LIMIT_MS) {
+      Session.updateOne(
+        { _id: sid, user: uid, revokedAt: null },
+        { $set: { revokedAt: new Date() } }
+      ).exec().catch(() => {});
+      return deny(401, SESSION_IDLE_EXPIRED, SESSION_IDLE_MESSAGE);
+    }
+  }
+
   if (user.accountStatus && user.accountStatus !== 'active') {
     return deny(
       403,
@@ -169,6 +265,12 @@ async function verifyUserSession(decoded) {
         ? 'This account has been banned.'
         : 'This account is no longer active.'
     );
+  }
+
+  // Genuine, recent activity slides the window. Uses the TOKEN's issue time, not
+  // the clock: a replayed old request cannot hold a session open indefinitely.
+  if (decoded.iat && now - decoded.iat * 1000 <= USER_ACTIVITY_MAX_AGE_MS) {
+    touchActivity(sid, now);
   }
 
   return { ok: true, user, sid: asId(sid) };
@@ -225,8 +327,15 @@ async function mintFromRememberToken(raw) {
   });
   if (!verified.ok) return verified;
 
-  const fresh = signUserToken(session.user, session._id);
-  // Audit stamp only — a failure here must never fail the mint.
+  const fresh = signUserToken(session.user, session._id, {
+    expiresIn: REMEMBER_TOKEN_LIFETIME,
+  });
+  // The activity stamp is NOT cosmetic here: it is what re-arms the sliding
+  // idle window. A member coming back through their saved login is definitionally
+  // active, so the 30-day countdown starts again from this moment rather than
+  // from whenever they first signed in weeks ago.
+  //
+  // Audit stamp beyond that is a failure that must never fail the mint.
   Session.updateOne(
     { _id: session._id },
     {
@@ -368,8 +477,15 @@ module.exports = {
   SESSION_ENDED_MESSAGE,
   SESSION_INVALID,
   SESSION_REVOKED,
+  SESSION_IDLE_EXPIRED,
+  SESSION_IDLE_MESSAGE,
   NO_SESSION,
   INVALID_TOKEN,
   TOKEN_EXPIRED,
   ACCOUNT_DISABLED,
+  // Re-exported so a caller (or a test) can reason about the window without
+  // importing a second module — and so there is exactly one import path to the
+  // policy in utils/userSession.js.
+  USER_IDLE_LIMIT_MS,
+  USER_IDLE_DAYS,
 };

@@ -149,6 +149,7 @@ async function main() {
 
   // ── Setup ────────────────────────────────────────────────────────────────
   section('Setup — purge debris, register hunter accounts');
+  const User = require('./models/User');
   const purge = await purgeProbeData();
   check('stale probe accounts + orphan wallets purged', purge.orphans >= 0, JSON.stringify(purge));
 
@@ -159,6 +160,32 @@ async function main() {
   const HW = await register('Wallet'); // fresh wallet + checkin race + 2nd booking
   const HB = await register('Booker'); // booking double-cancel target
   check('six hunter accounts registered', !!(HN.token && HS.token && HJ1.token && HJ2.token && HW.token && HB.token));
+
+  // The entire web3 layer is a DELUXE entitlement, so freshly registered FREE
+  // accounts get 403 from every endpoint below and the hunt cannot run. There is
+  // no payment processor and self-serve purchase now fails closed by design, so
+  // grant the plan directly — the same thing an admin does. These are throwaway
+  // probe accounts, purged at the start of every run.
+  const hunterIds = [HN.id, HS.id, HJ1.id, HJ2.id, HW.id, HB.id].filter(Boolean);
+  if (hunterIds.length) {
+    await User.updateMany(
+      { _id: { $in: hunterIds } },
+      {
+        $set: {
+          subscriptionActive: true,
+          subscriptionPlan: 'custom',
+          subscriptionPermanent: true,
+          subscriptionSource: 'admin',
+          subscriptionStartedAt: new Date(),
+          subscriptionExpiresAt: null,
+        },
+      }
+    );
+  }
+  check('hunter accounts granted the entitlement the web3 layer requires',
+    hunterIds.length > 0
+      && (await User.countDocuments({ _id: { $in: hunterIds }, subscriptionPlan: 'custom' })) === hunterIds.length,
+    `${hunterIds.length} account(s)`);
 
   const wHN = await walletOf(HN.token);
   const wHS = await walletOf(HS.token);
@@ -497,8 +524,13 @@ async function main() {
 
   if (disp.status === 201) {
     const jurSet = new Set(disp.data.dispute.jurors || []);
-    check('jurors = exactly the two staked hunters (no foreign/random jurors)',
-      jurSet.size === 2 && jurSet.has(wHJ1.address) && jurSet.has(wHJ2.address),
+    // The invariant is that BOTH staked hunters are on the panel and NEITHER
+    // party to the order is — not that the panel is exactly two. selectJurors
+    // correctly draws up to 5 staked wallets, and a real account on this
+    // database may hold staked WELL, so an exact count is environment-dependent.
+    check('both staked hunters are jurors, and no party to the order is',
+      jurSet.size >= 2 && jurSet.has(wHJ1.address) && jurSet.has(wHJ2.address)
+        && !jurSet.has(wHN.address) && !jurSet.has(wHS.address),
       JSON.stringify(disp.data.dispute.jurors));
 
     const confWhileDisp = await call('POST', `/web3/market/orders/${oDisp.data.order._id}/confirm`, { token: HN.token, body: {} });

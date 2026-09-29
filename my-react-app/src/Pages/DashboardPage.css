@@ -2,6 +2,11 @@
 .dashboard-wrapper {
   min-height: 100vh;
   background: linear-gradient(135deg, #f0faf0 0%, #e8f5e9 100%);
+  /* Height of the sticky Navbar that sits above this page (10px padding +
+     44px logo row + 10px padding, per Navbar.css). Declared here so the one
+     sticky offset on the dashboard is derived from it instead of being a
+     magic number that silently rots when the bar's height changes. */
+  --dash-nav-h: 64px;
 }
 
 /* Dashboard Container */
@@ -377,7 +382,11 @@
   gap: 20px;
   align-self: start;
   position: sticky;
-  top: 20px;
+  /* Must clear the sticky Navbar, not just sit near the top of the viewport.
+     At `top: 20px` the column parked 44px UNDER the 64px bar, so on scroll its
+     heading and the top of the wellness score slid behind the navbar and were
+     unreachable. Same reason PricingPage sticks its dock at --p-nav-h. */
+  top: calc(var(--dash-nav-h, 64px) + 16px);
 }
 
 /* Wellness Score Section */
@@ -640,10 +649,15 @@
 }
 
 
-/* Completion Toast */
+/* Completion Toast
+   The dashboard renders its completion toast with inline styles, so this block
+   is not what positions it — but it is loaded into the same global stylesheet
+   as TrackIntakePage's identically-named toast, so it is kept in step with that
+   one (and with the shared .toast) rather than left encoding the old
+   `top: 24px`, which sat inside the sticky Navbar. */
 .completion-toast {
   position: fixed;
-  top: 24px;
+  top: 80px;
   right: 24px;
   background: linear-gradient(135deg, #6ee7b7 0%, #3dbf8a 100%);
   border-radius: 16px;

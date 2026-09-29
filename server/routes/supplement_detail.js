@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
 const SupplementDetail = require('../models/SupplementDetail');
+const { get, set, dedupe } = require('../utils/cache');
 
 const OPENROUTER_MODEL = 'deepseek/deepseek-v4-flash-0731';
 
@@ -32,13 +33,21 @@ router.post('/', protect, async (req, res) => {
   const patientProfile = buildPatientProfile(context);
   const isPersonalized = !!patientProfile;
 
-  // Non-personalized guides are identical for every user — serve from the DB
-  // cache instead of burning an AI call on each request.
+  // Non-personalized guides are identical for every user — serve from cache
+  // instead of burning an AI call on each request.
   const nameKey = supplementName.toLowerCase().trim();
   if (!isPersonalized) {
+    // Check in-memory cache first (avoids DB round-trip)
+    const memCached = get(`supplement:${nameKey}`);
+    if (memCached) return res.json({ ...memCached, cached: true });
+
     try {
       const cached = await SupplementDetail.findOne({ nameKey }).select('detail').lean();
-      if (cached?.detail) return res.json({ ...cached.detail, cached: true });
+      if (cached?.detail) {
+        // Store in memory cache for 5 minutes
+        set(`supplement:${nameKey}`, cached.detail);
+        return res.json({ ...cached.detail, cached: true });
+      }
     } catch (cacheError) {
       console.error('[supplement_detail] cache read failed:', cacheError.message);
     }
@@ -119,62 +128,70 @@ Rules:
 - Use possibility language — never make absolute claims
 - Be specific and clinically accurate`;
 
+  // Deduplicate concurrent identical requests — if two users request the same
+  // supplement at the same time, only one AI call is made.
+  const cacheKey = `supplement-ai:${nameKey}`;
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20000);
+    const detail = await dedupe(cacheKey, async () => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 20000);
 
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: OPENROUTER_MODEL,
-        messages: [
-          {
-            role: 'system',
-            content: 'You are an expert clinical nutritionist. Always respond with valid JSON only — no markdown, no code fences, no extra text.',
-          },
-          { role: 'user', content: prompt },
-        ],
-        max_tokens: 2000,
-        temperature: 0.3,
-        stream: false,
-      }),
-      signal: controller.signal,
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: OPENROUTER_MODEL,
+          messages: [
+            {
+              role: 'system',
+              content: 'You are an expert clinical nutritionist. Always respond with valid JSON only — no markdown, no code fences, no extra text.',
+            },
+            { role: 'user', content: prompt },
+          ],
+          max_tokens: 2000,
+          temperature: 0.3,
+          stream: false,
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error('[supplement_detail] OpenRouter error:', response.status, errText.substring(0, 500));
+        throw new Error('AI service unavailable');
+      }
+
+      const data = await response.json();
+      const choice = data.choices?.[0]?.message;
+      const raw = (choice?.content || choice?.reasoning || '').trim();
+      const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+
+      if (!jsonMatch) {
+        throw new Error('Could not parse supplement details');
+      }
+
+      const detail = JSON.parse(jsonMatch[0]);
+
+      // Populate the cache for future non-personalized requests (best-effort)
+      if (!isPersonalized) {
+        SupplementDetail.updateOne(
+          { nameKey },
+          { $set: { name: detail.name || supplementName, detail } },
+          { upsert: true }
+        ).exec().catch((cacheError) => console.error('[supplement_detail] cache write failed:', cacheError.message));
+        // Also store in memory cache
+        set(`supplement:${nameKey}`, detail);
+      }
+
+      return detail;
     });
-    clearTimeout(timeout);
-
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error('[supplement_detail] OpenRouter error:', response.status, errText.substring(0, 500));
-      return res.status(502).json({ message: 'AI service unavailable. Please try again.' });
-    }
-
-    const data = await response.json();
-    const choice = data.choices?.[0]?.message;
-    const raw = (choice?.content || choice?.reasoning || '').trim();
-    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-
-    if (!jsonMatch) {
-      return res.status(502).json({ message: 'Could not parse supplement details.' });
-    }
-
-    const detail = JSON.parse(jsonMatch[0]);
-
-    // Populate the cache for future non-personalized requests (best-effort)
-    if (!isPersonalized) {
-      SupplementDetail.updateOne(
-        { nameKey },
-        { $set: { name: detail.name || supplementName, detail } },
-        { upsert: true }
-      ).exec().catch((cacheError) => console.error('[supplement_detail] cache write failed:', cacheError.message));
-    }
 
     return res.json(detail);
-
   } catch (err) {
     const isTimeout = err.name === 'AbortError';
     console.error(`Supplement detail ${isTimeout ? 'timeout' : 'error'}:`, err.message);

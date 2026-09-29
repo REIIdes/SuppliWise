@@ -1,0 +1,844 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   SUBSCRIPTION MANAGEMENT QUEUE
+   The "Subscription management" tab body: plan requests and cancellations.
+
+   Same three tones the chat queue and the AI panel use, so the whole console
+   speaks one visual language:
+     amber    → waiting on an administrator (pending)
+     emerald  → done, and the member's account now matches it
+     slate    → declined; finished, but not "reached"
+
+   Each tone is declared once here and every surface reads it — the stat card,
+   the status pill, the card rail and the action button for one state cannot
+   drift apart.
+
+   THE VISUAL PRIORITY IS DELIBERATE. A reviewer scans for three things, in this
+   order: how many people are waiting, who is waiting, and how much they owe.
+   Those are the stat strip, the card head, and the amount. The proof image is a
+   contained click-to-enlarge panel, never a full-bleed banner: receipts are
+   tall and narrow, and one blown up to fill the row pushes the approve button
+   off screen — which is how a purchase gets approved by accident.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.asr {
+  /* Tones. Declared on the root of the queue so both components that import
+     this file (requests and cancels) read the same values. */
+  --asr-pending: #f97316;
+  --asr-pending-deep: #c2410c;
+  --asr-pending-wash: #fff4ec;
+  --asr-ok: #10b981;
+  --asr-ok-deep: #047857;
+  --asr-ok-wash: #e7f8f1;
+  --asr-down: #64748b;
+  --asr-down-deep: #475569;
+  --asr-down-wash: #eef1f5;
+  --asr-all: #4f6bed;
+  --asr-all-deep: #3730a3;
+  --asr-all-wash: #eef1fe;
+  --asr-violet: #7c3aed;
+
+  --asr-ink: #14211b;
+  --asr-body: #3d4b44;
+  --asr-muted: #7d8b84;
+  --asr-line: #e2e9e4;
+  --asr-line-soft: #eef2ef;
+  --asr-paper: #ffffff;
+  --asr-canvas: #f7faf8;
+  --asr-radius: 16px;
+  --asr-shadow: 0 1px 2px rgba(20, 33, 27, 0.04), 0 10px 28px -18px rgba(20, 33, 27, 0.35);
+
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  color: var(--asr-body);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   The queue switcher
+   Plan requests and cancellations are the same job — reviewing a member's
+   subscription change — so they share one tab and one stylesheet.
+
+   Which queue you are reading is a BIGGER decision than which status filter is
+   active, so it gets the loudest control on the screen, and it carries an icon
+   as well as a word. The old version was a full-width grey bar with two small
+   centred words and a lot of dead space, which read as a broken form control
+   rather than a choice.
+   ══════════════════════════════════════════════════════════════════════════ */
+.asr-queues {
+  display: inline-flex;
+  gap: 5px;
+  padding: 5px;
+  border: 1px solid var(--asr-line);
+  border-radius: 14px;
+  background: #eef2f0;
+  align-self: flex-start;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.asr-queue {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--asr-muted);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+}
+.asr-queue:hover { color: var(--asr-ink); background: rgba(255, 255, 255, 0.6); }
+.asr-queue svg { width: 17px; height: 17px; flex: 0 0 auto; }
+
+.asr-queue--active {
+  background: linear-gradient(125deg, #14211b 0%, #2d6a4f 100%);
+  color: #fff;
+  box-shadow: 0 10px 20px -12px rgba(20, 33, 27, 0.9);
+}
+.asr-queue--active:hover { background: linear-gradient(125deg, #14211b 0%, #2d6a4f 100%); color: #fff; }
+.asr-queue:focus-visible { outline: 2px solid var(--asr-all); outline-offset: 2px; }
+
+/* ── Stat cards — these are the filters ────────────────────────────────── */
+.asr-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.asr-stat {
+  --t: var(--asr-all);
+  --t-deep: var(--asr-all-deep);
+  --t-wash: var(--asr-all-wash);
+
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 14px 15px;
+  border: 1px solid var(--asr-line);
+  border-radius: var(--asr-radius);
+  background: var(--asr-paper);
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+  overflow: hidden;
+  box-shadow: var(--asr-shadow);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+}
+.asr-stat--pending { --t: var(--asr-pending); --t-deep: var(--asr-pending-deep); --t-wash: var(--asr-pending-wash); }
+.asr-stat--ok { --t: var(--asr-ok); --t-deep: var(--asr-ok-deep); --t-wash: var(--asr-ok-wash); }
+.asr-stat--down { --t: var(--asr-down); --t-deep: var(--asr-down-deep); --t-wash: var(--asr-down-wash); }
+.asr-stat--all { --t: var(--asr-all); --t-deep: var(--asr-all-deep); --t-wash: var(--asr-all-wash); }
+
+.asr-stat::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, var(--t-wash) 0%, transparent 62%);
+  opacity: 0.9;
+  pointer-events: none;
+}
+.asr-stat:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--t) 40%, var(--asr-line)); }
+.asr-stat:hover::before { opacity: 1; }
+
+.asr-stat--on {
+  border-color: transparent;
+  background: linear-gradient(125deg, var(--t) 0%, var(--t-deep) 100%);
+  box-shadow: 0 12px 26px -14px color-mix(in srgb, var(--t) 90%, transparent);
+}
+.asr-stat--on::before { display: none; }
+
+.asr-stat__icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 40px; height: 40px;
+  border-radius: 12px;
+  background: linear-gradient(140deg, var(--t) 0%, var(--t-deep) 100%);
+  color: #fff;
+  box-shadow: 0 8px 16px -10px color-mix(in srgb, var(--t) 95%, transparent);
+}
+/* On the active card the tile inverts, so it keeps its silhouette against the
+   full-bleed gradient instead of vanishing into it. */
+.asr-stat--on .asr-stat__icon {
+  background: rgba(255, 255, 255, 0.2);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+}
+.asr-stat__icon svg { width: 19px; height: 19px; }
+
+.asr-stat__body { position: relative; display: flex; flex-direction: column; min-width: 0; }
+.asr-stat__value {
+  color: var(--asr-ink);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+.asr-stat--on .asr-stat__value { color: #fff; }
+.asr-stat__label { color: var(--asr-body); font-size: 12.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.asr-stat--on .asr-stat__label { color: rgba(255, 255, 255, 0.97); }
+.asr-stat__hint { color: var(--asr-muted); font-size: 11.5px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.asr-stat--on .asr-stat__hint { color: rgba(255, 255, 255, 0.78); }
+
+/* ── Toolbar ──────────────────────────────────────────────────────────── */
+.asr-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.asr-toolbar__right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* The search bar's wrapper.
+   Deliberately NOT `.asr-field`. That class is the review form's labelled
+   field, and it carries `.asr-field input { padding: 9px 12px; … }`. Sharing the
+   name put the search input inside that rule, which silently overrode its
+   33px left padding (so the magnifier sat on top of the text), its border and
+   its focus ring. Two unrelated things must not share a class. */
+.asr-searchbar { position: relative; display: inline-flex; align-items: center; }
+.asr-searchbar__icon { position: absolute; left: 11px; color: var(--asr-muted); pointer-events: none; }
+
+.asr-search {
+  min-width: 250px;
+  padding: 9px 12px 9px 33px;
+  border: 1px solid var(--asr-line);
+  border-radius: 10px;
+  background: var(--asr-paper);
+  color: var(--asr-ink);
+  font-size: 13px;
+  font-family: inherit;
+  box-shadow: var(--asr-shadow);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.asr-search:focus {
+  outline: none;
+  border-color: var(--asr-all);
+  box-shadow: 0 0 0 3px rgba(79, 107, 237, 0.16);
+}
+
+.asr-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 15px;
+  border: 1px solid var(--asr-line);
+  border-radius: 10px;
+  background: var(--asr-paper);
+  color: var(--asr-body);
+  font-size: 13px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: var(--asr-shadow);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.asr-refresh:hover:not(:disabled) {
+  background: linear-gradient(125deg, var(--asr-all) 0%, var(--asr-violet) 100%);
+  border-color: transparent;
+  color: #fff;
+}
+.asr-refresh:disabled { opacity: 0.6; cursor: not-allowed; }
+.asr-refresh--busy svg { animation: asr-spin 0.9s linear infinite; }
+
+@keyframes asr-spin { to { transform: rotate(360deg); } }
+
+/* ── Messages ─────────────────────────────────────────────────────────── */
+.asr-hint {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 11px 15px;
+  border: 1px solid #fbd9b6;
+  border-radius: 12px;
+  background: linear-gradient(110deg, #fff4e6 0%, #fff9f2 100%);
+  color: #9a3412;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.asr-hint__dot {
+  flex: 0 0 auto;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: var(--asr-pending);
+  box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.18);
+  animation: asr-pulse 1.9s ease-in-out infinite;
+}
+@keyframes asr-pulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.18); }
+  50% { box-shadow: 0 0 0 8px rgba(249, 115, 22, 0.05); }
+}
+.asr-hint strong { font-weight: 800; }
+
+.asr-error,
+.asr-notice {
+  margin: 0;
+  padding: 11px 15px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.asr-error { color: #a32121; background: linear-gradient(110deg, #fdecec 0%, #fff7f7 100%); border: 1px solid #f8c9c9; }
+.asr-notice { color: var(--asr-ok-deep); background: linear-gradient(110deg, #e7f8f1 0%, #f5fdfa 100%); border: 1px solid #b9e7d1; }
+
+/* ── Empty + loading states ───────────────────────────────────────────── */
+.asr-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 0;
+  padding: 34px 22px;
+  border: 1px dashed var(--asr-line);
+  border-radius: var(--asr-radius);
+  background: var(--asr-canvas);
+  text-align: center;
+}
+.asr-empty__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px; height: 52px;
+  margin-bottom: 6px;
+  border-radius: 16px;
+  background: linear-gradient(140deg, var(--asr-all) 0%, var(--asr-violet) 100%);
+  color: #fff;
+  box-shadow: 0 12px 24px -14px rgba(79, 107, 237, 0.9);
+}
+.asr-empty__icon svg { width: 25px; height: 25px; }
+.asr-empty__title { margin: 0; color: var(--asr-ink); font-family: Georgia, 'Times New Roman', serif; font-size: 16px; font-weight: 700; }
+.asr-empty__text { margin: 0; max-width: 46ch; color: var(--asr-muted); font-size: 13px; line-height: 1.5; }
+/* Bare prose variant, for an empty state sitting inside a panel. */
+.asr-proof .asr-empty,
+.asr-empty--inline { padding: 22px 16px; border: 0; background: none; }
+
+.asr-skeletons { display: flex; flex-direction: column; gap: 12px; }
+.asr-skeleton {
+  padding: 16px;
+  border: 1px solid var(--asr-line);
+  border-left: 4px solid #e8efea;
+  border-radius: 12px;
+  background: var(--asr-paper);
+}
+.asr-skeleton__top { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.asr-skeleton__avatar { flex: 0 0 auto; width: 38px; height: 38px; border-radius: 50%; background: #e8efea; }
+.asr-skeleton__lines { flex: 1 1 auto; display: flex; flex-direction: column; gap: 7px; }
+.asr-skeleton__line { height: 9px; border-radius: 999px; background: #edf2ef; width: 80%; }
+.asr-skeleton__line--sm { width: 40%; height: 11px; }
+.asr-skeleton__facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 18px; }
+.asr-skeleton__fact { height: 30px; border-radius: 9px; background: #f2f6f3; }
+.asr-skeleton > *,
+.asr-skeleton__fact { animation: asr-shimmer 1.35s ease-in-out infinite; }
+@keyframes asr-shimmer { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+.asr-label {
+  margin: 0 0 8px;
+  color: var(--asr-muted);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Plan-request cards
+   ══════════════════════════════════════════════════════════════════════════ */
+.asr-list { display: flex; flex-direction: column; gap: 14px; margin: 0; padding: 0; list-style: none; }
+
+.asr-card {
+  --t: var(--asr-down);
+  --t-deep: var(--asr-down-deep);
+  --t-wash: var(--asr-down-wash);
+
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  padding: 17px 18px;
+  border: 1px solid var(--asr-line);
+  border-radius: var(--asr-radius);
+  background: var(--asr-paper);
+  text-align: left;
+  box-shadow: var(--asr-shadow);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+.asr-card--pending { --t: var(--asr-pending); --t-deep: var(--asr-pending-deep); --t-wash: var(--asr-pending-wash); }
+.asr-card--approved { --t: var(--asr-ok); --t-deep: var(--asr-ok-deep); --t-wash: var(--asr-ok-wash); }
+.asr-card--rejected { --t: var(--asr-down); --t-deep: var(--asr-down-deep); --t-wash: var(--asr-down-wash); }
+
+/* The status rail: colour alone is not the only cue, but it is what lets a
+   reviewer sort the queue by eye without reading a single label. */
+.asr-card::before,
+.asr-row::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  background: linear-gradient(180deg, var(--t), var(--t-deep));
+  border-radius: var(--asr-radius) 0 0 var(--asr-radius);
+}
+.asr-card--open { border-color: color-mix(in srgb, var(--t) 45%, var(--asr-line)); box-shadow: 0 14px 30px -22px color-mix(in srgb, var(--t) 90%, transparent); }
+
+.asr-card__head { display: flex; align-items: center; gap: 12px; }
+
+.asr-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  /* Fallback for the case where the inline style is absent. */
+  background-image: linear-gradient(135deg, #f97316 0%, #e11d48 100%);
+  color: #fff;
+  font-size: 13.5px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  box-shadow: 0 6px 14px -8px rgba(20, 33, 27, 0.6);
+}
+
+.asr-card__who { flex: 1 1 auto; min-width: 0; }
+.asr-card__name {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--asr-ink);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.asr-card__email { margin: 2px 0 0; color: var(--asr-muted); font-size: 12.5px; word-break: break-all; }
+
+.asr-flag { padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 800; letter-spacing: 0.06em; }
+.asr-flag--banned { background: #fdecec; color: #a32121; border: 1px solid #f8c9c9; }
+
+.asr-status {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.asr-status::before {
+  content: '';
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.asr-status--pending { background: var(--asr-pending-wash); color: var(--asr-pending-deep); }
+.asr-status--approved,
+.asr-status--applied { background: var(--asr-ok-wash); color: var(--asr-ok-deep); }
+.asr-status--rejected { background: var(--asr-down-wash); color: var(--asr-down-deep); }
+
+/* ── Facts grid ──────────────────────────────────────────────────────── */
+.asr-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px 18px;
+  margin: 0;
+  padding: 13px 15px;
+  border: 1px solid var(--asr-line-soft);
+  border-radius: 12px;
+  background: var(--asr-canvas);
+}
+.asr-fact { min-width: 0; }
+.asr-fact dt {
+  margin: 0;
+  color: var(--asr-muted);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.asr-fact dd { margin: 4px 0 0; color: var(--asr-ink); font-size: 14.5px; font-weight: 700; word-break: break-word; }
+
+/* The amount is the one number a reviewer scans for, so it is the one fact
+   given a colour and a heavier weight. */
+.asr-fact--money dt { color: var(--asr-ok-deep); }
+.asr-fact--money dd { color: var(--asr-ok-deep); font-size: 16px; }
+
+.asr-fact__sub { display: block; margin-top: 2px; color: var(--asr-muted); font-size: 11.5px; font-weight: 600; }
+.asr-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+
+/* The member's own words. Italic blockquote — this is `.asr-note` and nothing
+   else; the cancellation composer is `.asr-note-input` (see below). Those two
+   were one class, so the textarea inherited this blockquote's one-sided border
+   and italic. */
+.asr-note {
+  margin: 0;
+  padding: 10px 13px;
+  border-left: 3px solid #cfe4d4;
+  border-radius: 0 8px 8px 0;
+  background: #fbfdfb;
+  color: #4a5c4a;
+  font-size: 13px;
+  font-style: italic;
+  line-height: 1.5;
+}
+
+.asr-decision {
+  margin: 0;
+  padding: 10px 13px;
+  border-radius: 10px;
+  background: var(--asr-canvas);
+  color: var(--asr-body);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.asr-decision strong { color: var(--asr-ink); }
+.asr-decision__note { display: block; margin-top: 4px; color: var(--asr-muted); font-style: italic; }
+
+.asr-resolved { margin: 0; color: var(--asr-muted); font-size: 13px; line-height: 1.5; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Cancellation rows
+
+   These styles DID NOT EXIST. The cancellations component was written against
+   .asr-row* / .asr-actions / .asr-note-label and the sheet had never defined
+   them, so opening the Cancellations tab rendered an unstyled stack of
+   inline-block text with no card, no rail and no button affordance. Defined
+   here against the same tones, because a queue that is the same job should
+   look like the same job.
+   ══════════════════════════════════════════════════════════════════════════ */
+.asr-row {
+  --t: var(--asr-down);
+  --t-deep: var(--asr-down-deep);
+  --t-wash: var(--asr-down-wash);
+
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--asr-line);
+  border-radius: var(--asr-radius);
+  background: var(--asr-paper);
+  overflow: hidden;
+  box-shadow: var(--asr-shadow);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+.asr-row--pending { --t: var(--asr-pending); --t-deep: var(--asr-pending-deep); --t-wash: var(--asr-pending-wash); }
+.asr-row--applied { --t: var(--asr-ok); --t-deep: var(--asr-ok-deep); --t-wash: var(--asr-ok-wash); }
+.asr-row--rejected { --t: var(--asr-down); --t-deep: var(--asr-down-deep); --t-wash: var(--asr-down-wash); }
+.asr-row--open { border-color: color-mix(in srgb, var(--t) 45%, var(--asr-line)); box-shadow: 0 14px 30px -22px color-mix(in srgb, var(--t) 90%, transparent); }
+
+/* The whole head row is the expander, so it must read as one big target. */
+.asr-row__head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 16px 18px 16px 20px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.asr-row__head:hover { background: var(--asr-canvas); }
+.asr-row__head:focus-visible { outline: 2px solid var(--asr-all); outline-offset: -2px; }
+
+.asr-row__who { display: flex; flex-direction: column; min-width: 0; }
+.asr-row__who strong {
+  color: var(--asr-ink);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.asr-row__sub { color: var(--asr-muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.asr-row__plan {
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--asr-all-wash);
+  color: var(--asr-all-deep);
+  font-size: 11.5px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.asr-row__when {
+  min-width: 74px;
+  color: var(--asr-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.asr-row__body {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  padding: 15px 18px 18px 20px;
+  border-top: 1px solid var(--asr-line-soft);
+  background: var(--asr-canvas);
+}
+.asr-row__body .asr-detail {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px 18px;
+  padding: 13px 15px;
+  border: 1px solid var(--asr-line-soft);
+  border-radius: 12px;
+  background: var(--asr-paper);
+}
+
+/* The composer's label. Also undefined before this rewrite. */
+.asr-note-label {
+  display: block;
+  margin: 0;
+  color: var(--asr-muted);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.asr-note-label span { font-weight: 700; letter-spacing: 0.02em; text-transform: none; }
+
+/* The composer's TEXTAREA. Split from `.asr-note` (the member's blockquote)
+   so it gets real input styling instead of inheriting italic and a one-sided
+   border radius. */
+.asr-note-input {
+  width: 100%;
+  padding: 11px 13px;
+  border: 1px solid var(--asr-line);
+  border-radius: 11px;
+  background: var(--asr-paper);
+  color: var(--asr-ink);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.55;
+  resize: vertical;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.asr-note-input:focus { outline: none; border-color: var(--asr-all); box-shadow: 0 0 0 3px rgba(79, 107, 237, 0.16); }
+.asr-note-input::placeholder { color: #9daaa4; }
+.asr-note-input:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* Also undefined before this rewrite. */
+.asr-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+
+/* ── Buttons ─────────────────────────────────────────────────────────── */
+.asr-card__actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+
+.asr-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 15px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.asr-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.asr-btn--small { padding: 7px 12px; font-size: 12.5px; margin-right: 0; }
+
+.asr-btn--ghost {
+  background: var(--asr-paper);
+  border-color: var(--asr-line);
+  color: var(--asr-body);
+  margin-right: auto;
+}
+.asr-btn--ghost:hover:not(:disabled) { background: var(--asr-canvas); border-color: #c6d4cb; }
+
+/* Neutral: "keep their plan", "Go back". */
+.asr-btn--plain { background: var(--asr-paper); border-color: var(--asr-line); color: var(--asr-body); }
+.asr-btn--plain:hover:not(:disabled) { background: var(--asr-canvas); border-color: #c6d4cb; }
+
+.asr-btn--primary {
+  background: linear-gradient(125deg, var(--asr-ok) 0%, var(--asr-ok-deep) 100%);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 10px 20px -13px rgba(16, 185, 129, 0.95);
+}
+.asr-btn--primary:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.06); }
+
+/* Destructive, OUTLINE. "Decline" is the wrong side of a decision the reviewer
+   has not finished making, so it must not be the loudest thing on the card.
+   The solid red treatment belongs to `--solid`, below. */
+.asr-btn--danger {
+  background: var(--asr-paper);
+  border-color: #f2d3d3;
+  color: #b02a2a;
+}
+.asr-btn--danger:hover:not(:disabled) { background: #fdecec; border-color: #e0a5a5; }
+
+/* Destructive, SOLID. Reserved for the irreversible one: ending a plan. */
+.asr-btn--solid {
+  background: linear-gradient(125deg, #f43f5e 0%, #be123c 100%);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 10px 20px -13px rgba(244, 63, 94, 0.95);
+}
+.asr-btn--solid:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.06); }
+
+/* ── Expanded detail ─────────────────────────────────────────────────── */
+.asr-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+  gap: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--asr-line-soft);
+}
+.asr-detail > * { min-width: 0; }
+
+.asr-proof__link {
+  display: block;
+  border: 1px solid var(--asr-line);
+  border-radius: 11px;
+  overflow: hidden;
+  background: var(--asr-canvas);
+  text-decoration: none;
+  transition: border-color 0.15s ease;
+}
+.asr-proof__link:hover { border-color: var(--asr-all); }
+
+/* Receipts are tall and narrow: contain the height so one portrait screenshot
+   cannot push the review form and the approve buttons off screen. */
+.asr-proof__img {
+  display: block;
+  width: 100%;
+  max-height: 340px;
+  object-fit: contain;
+  object-position: top center;
+  background: #fff;
+}
+.asr-proof__hint {
+  display: block;
+  padding: 8px;
+  border-top: 1px solid var(--asr-line-soft);
+  color: var(--asr-all-deep);
+  font-size: 11.5px;
+  font-weight: 700;
+  text-align: center;
+}
+.asr-proof__link:hover .asr-proof__hint { background: var(--asr-all-wash); }
+
+.asr-review { display: flex; flex-direction: column; gap: 11px; }
+.asr-field { display: flex; flex-direction: column; gap: 5px; }
+.asr-field span { color: var(--asr-body); font-size: 12px; font-weight: 700; }
+.asr-field input {
+  padding: 9px 12px;
+  border: 1px solid var(--asr-line);
+  border-radius: 10px;
+  background: var(--asr-paper);
+  color: var(--asr-ink);
+  font-size: 13.5px;
+  font-family: inherit;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.asr-field input:focus { outline: none; border-color: var(--asr-all); box-shadow: 0 0 0 3px rgba(79, 107, 237, 0.16); }
+
+.asr-manual { display: flex; flex-direction: column; gap: 10px; padding-top: 14px; border-top: 1px solid var(--asr-line-soft); }
+
+/* ── Confirm modal (cancellations only) ──────────────────────────────── */
+.asr-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 3200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(6, 12, 8, 0.55);
+}
+.asr-modal__card {
+  width: 100%;
+  max-width: 440px;
+  padding: 22px;
+  border: 1px solid var(--asr-line);
+  border-radius: 16px;
+  background: var(--asr-paper);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.24);
+}
+.asr-modal__title { margin: 0 0 8px; color: var(--asr-ink); font-family: Georgia, 'Times New Roman', serif; font-size: 17px; font-weight: 700; line-height: 1.35; }
+.asr-modal__text { margin: 0 0 18px; color: var(--asr-body); font-size: 13.5px; line-height: 1.55; }
+.asr-modal__actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+
+/* ── Focus ───────────────────────────────────────────────────────────── */
+.asr-btn:focus-visible,
+.asr-stat:focus-visible,
+.asr-queue:focus-visible,
+.asr-refresh:focus-visible,
+.asr-row__head:focus-visible {
+  outline: 2px solid var(--asr-all);
+  outline-offset: 2px;
+}
+
+/* ── Narrow screens ──────────────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  .asr-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 860px) {
+  .asr-detail { grid-template-columns: 1fr; }
+  .asr-queues { align-self: stretch; }
+  .asr-queue { flex: 1 1 auto; justify-content: center; }
+  .asr-toolbar__right { width: 100%; }
+  .asr-searchbar { flex: 1 1 200px; }
+  .asr-search { min-width: 0; width: 100%; }
+
+  /* The cancellation head is a 5-column grid on a wide screen; below this it
+     stacks, or the plan chip and the timestamp fall off the right edge. */
+  .asr-row__head { grid-template-columns: auto minmax(0, 1fr); row-gap: 10px; }
+  .asr-row__head .asr-status,
+  .asr-row__plan { grid-column: 2; justify-self: start; }
+  .asr-row__when { grid-column: 2; justify-self: start; text-align: left; min-width: 0; }
+
+  /* Stack the action buttons full width — a 3-across row of 13px labels does
+     not fit a phone, and a clipped "Approve & activate" is a support ticket. */
+  .asr-card__actions,
+  .asr-actions { justify-content: stretch; }
+  .asr-btn { flex: 1 1 140px; margin-right: 0; justify-content: center; }
+  .asr-btn--ghost { flex-basis: 100%; }
+}
+
+@media (max-width: 560px) {
+  .asr-stats { grid-template-columns: 1fr; gap: 9px; }
+  .asr-stat { padding: 12px 14px; }
+  .asr-stat__value { font-size: 23px; }
+  .asr-card,
+  .asr-row__head { padding-left: 16px; }
+  .asr-facts { grid-template-columns: 1fr 1fr; }
+}
+
+/* The only motion here is the pending pulse, the refresh spinner and the
+   skeleton shimmer. Respect the OS setting. */
+@media (prefers-reduced-motion: reduce) {
+  .asr *,
+  .asr *::before,
+  .asr *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

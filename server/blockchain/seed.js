@@ -101,12 +101,16 @@ const SEED_LISTINGS = [
 ];
 
 // Deterministic daily oracle values — same day, same numbers (auditable).
+//
+// The rounding divisor must match the precision the unit needs: `Math.round(x *
+// 100) / 10` keeps the *hundredths* digit and then throws the value away by a
+// factor of ten, so an $8.40 supplement was published as $85.50.
 function seededValue(feed, day) {
   const drift = (parseInt(sha256Hex(`${day}:${feed.key}`).slice(0, 8), 16) % 2000) / 1000; // 0–1.999
   if (feed.unit === '%') return Math.round((feed.base - drift * 0.4) * 10) / 10;
   if (feed.unit === 'studies') return Math.round(feed.base + drift * 6 - 3);
   if (feed.unit === 'USD' && feed.base < 1) return Math.round((feed.base + drift * 0.02) * 1000) / 1000;
-  return Math.round((feed.base * (0.96 + drift * 0.03)) * 100) / 10;
+  return Math.round(feed.base * (0.96 + drift * 0.03) * 100) / 100;
 }
 
 async function ensureConfig() {
@@ -129,30 +133,116 @@ async function ensureExperts() {
   }
 }
 
-async function ensureOracleFeeds() {
+// A feed older than this is re-published even if the day's value happens to be
+// unchanged, so `updatedAt` is a real liveness signal (the admin monitor reads
+// it) rather than a "nothing changed today" stamp. Kept well under the 48 h
+// staleness threshold the monitor warns on.
+const ORACLE_STALE_MS = 6 * 60 * 60 * 1000;
+// How often the background sweeper re-derives the feeds for a long-running
+// process. Without it a server left up across a day boundary would serve
+// yesterday's values until it was restarted, because the boot sweep is a no-op
+// once every feed row exists.
+const ORACLE_SWEEP_MS = 30 * 60 * 1000;
+
+// Timestamp of the last completed refresh sweep (in-process, monotonic enough
+// for a throttle). Read-through callers use it to avoid re-scanning on every
+// request.
+let lastSweepAt = 0;
+
+// Publish today's deterministic value for every feed, anchoring each change.
+//
+// Idempotent by construction: the value is a pure function of (key, day), so a
+// feed whose stored value already equals today's derivation AND that was
+// published recently is left completely untouched — no chain write, no
+// updatedAt churn. That is what makes it safe to call from boot, from a timer
+// and from a request handler.
+async function refreshOracleFeeds({ force = false } = {}) {
   const day = dayKey();
+  const now = Date.now();
+  const updated = [];
   for (const feed of SEED_ORACLE_FEEDS) {
-    const existing = await OracleFeed.findOne({ key: feed.key }).lean();
-    if (existing) continue;
     const value = seededValue(feed, day);
-    const tx = await ledger.append([
-      {
-        type: 'oracle:publish',
-        actor: 'sw:oracle',
-        data: { key: feed.key, value, unit: feed.unit, day },
-      },
-    ]);
-    await OracleFeed.create({
-      key: feed.key,
-      label: feed.label,
-      value,
-      unit: feed.unit,
-      category: feed.category,
-      source: 'SuppliWise Oracle Network',
-      txHash: tx.txs[0],
-      updatedAt: Date.now(),
+    const existing = await OracleFeed.findOne({ key: feed.key });
+    const age = existing ? now - (Number(existing.updatedAt) || 0) : Infinity;
+    const current =
+      !!existing &&
+      !!existing.txHash &&
+      existing.value === value &&
+      age < ORACLE_STALE_MS;
+    if (current && !force) {
+      updated.push({ key: feed.key, value, changed: false });
+      continue;
+    }
+    const tx = await engine.anchor('oracle:update', 'sw:oracle', {
+      public: { key: feed.key, value, unit: feed.unit, day },
     });
+    const txHash = tx.txs[0] || '';
+    if (existing) {
+      // Targeted update (not a full-doc save) so a concurrent refresh of the
+      // same key cannot be clobbered by a stale in-memory snapshot.
+      existing.value = value;
+      existing.txHash = txHash;
+      existing.updatedAt = now;
+      await existing.save();
+    } else {
+      try {
+        await OracleFeed.create({
+          key: feed.key,
+          label: feed.label,
+          value,
+          unit: feed.unit,
+          category: feed.category,
+          source: 'SuppliWise Oracle Network',
+          txHash,
+          updatedAt: now,
+        });
+      } catch (err) {
+        // Another request seeded this feed first — apply the value to the
+        // winner instead of crashing the sweep.
+        if (err && err.code === 11000) {
+          await OracleFeed.updateOne(
+            { key: feed.key },
+            { $set: { value, txHash, updatedAt: now } }
+          );
+        } else {
+          throw err;
+        }
+      }
+    }
+    updated.push({ key: feed.key, value, changed: true });
   }
+  lastSweepAt = Date.now();
+  return { day, updated };
+}
+
+// Read-through freshness for request handlers: guarantees a caller never sees a
+// stale feed even if the sweeper lagged (event-loop stall, suspended VM,
+// a manually restarted timer). Throttled to one scan per sweep window, so the
+// steady-state cost is a single in-memory comparison.
+async function ensureOracleFeedsFresh() {
+  if (Date.now() - lastSweepAt < ORACLE_SWEEP_MS) return;
+  return refreshOracleFeeds();
+}
+
+let sweepTimer = null;
+function startOracleSweeper() {
+  if (sweepTimer) return sweepTimer;
+  sweepTimer = setInterval(() => {
+    refreshOracleFeeds().catch((err) => {
+      console.error('[web3] oracle sweep failed:', err.message);
+    });
+  }, ORACLE_SWEEP_MS);
+  // Never hold the process open just to run a background refresh.
+  if (typeof sweepTimer.unref === 'function') sweepTimer.unref();
+  return sweepTimer;
+}
+
+// Genesis entry point: seed any missing feed, then bring the existing ones up to
+// today's value. Previously this only ever inserted, so a feed published once at
+// first boot kept its original `updatedAt` forever and the monitor flagged the
+// whole oracle network as stale.
+async function ensureOracleFeeds(options) {
+  return refreshOracleFeeds(options);
 }
 
 async function ensureListings() {
@@ -288,9 +378,15 @@ function bootstrap() {
     await ensureConfig();
     await engine.ensureSystemWallets();
     await Promise.all([ensureTrials(), ensureExperts(), ensureListings()]);
-    await ensureOracleFeeds();
+    const oracles = await ensureOracleFeeds();
     await ensureSupplyBatches();
-    console.log(`[web3] chain ready at height ${ledger.height} (difficulty ${ledger.difficulty})`);
+    const changed = oracles.updated.filter((u) => u.changed).length;
+    console.log(
+      `[web3] chain ready at height ${ledger.height} (difficulty ${ledger.difficulty})` +
+        ` · oracles ${oracles.updated.length} feed(s) for ${oracles.day} (${changed} re-published)`
+    );
+    // Keep the feeds fresh for as long as this process lives.
+    startOracleSweeper();
   })().catch((err) => {
     console.error('[web3] bootstrap failed:', err.message);
     bootstrapPromise = null;
@@ -305,8 +401,13 @@ module.exports = {
   ensureTrials,
   ensureExperts,
   ensureOracleFeeds,
+  ensureOracleFeedsFresh,
+  refreshOracleFeeds,
+  startOracleSweeper,
   ensureListings,
   ensureSupplyBatches,
   seededValue,
   SEED_ORACLE_FEEDS,
+  ORACLE_STALE_MS,
+  ORACLE_SWEEP_MS,
 };

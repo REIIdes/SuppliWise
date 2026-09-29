@@ -107,19 +107,40 @@ export default function ProfileSecurityControls({
   // codes, recovery email and device counts, so the cards cannot disagree with
   // each other or with the server.
   const [summary, setSummary] = useState(null);
+  // Whether the LAST attempt to load the summary failed. Distinct from
+  // "summary is null", which on first render simply means "not loaded yet" —
+  // the cards must not report a confident "you have no recovery codes" from a
+  // read that never came back.
+  const [summaryFailed, setSummaryFailed] = useState(false);
   const [pending, setPending] = useState(null); // { reason, action }
   const mounted = useRef(true);
 
-  useEffect(() => () => { mounted.current = false; }, []);
+  // `mounted` guards against calling setState on a component that has gone
+  // away. It has to be RE-ARMED on mount, not just cleared on cleanup: React
+  // (StrictMode in dev, and any real remount) runs mount → cleanup → mount
+  // again, so a version that only ever set the flag to `false` left it `false`
+  // for the rest of the page's life. Every /security/summary response was then
+  // thrown away before it reached setState, `summary` stayed null, and the
+  // cards below reported hard facts they did not have: the Recovery Codes card
+  // said "None" and "You have no recovery codes" on an account the server
+  // could answer for perfectly well, because nothing ever asked it.
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   const refreshSummary = useCallback(async () => {
     try {
       const data = await getSecuritySummary();
       if (!mounted.current) return;
       setSummary(data);
+      setSummaryFailed(false);
       onSecurityChange?.();
     } catch {
-      // Leave the last good values on screen rather than blanking the page.
+      // Leave the last good values on screen rather than blanking the page —
+      // but record that the count is UNKNOWN, so nothing downstream mistakes a
+      // failed read for a real "you have none".
+      if (mounted.current) setSummaryFailed(true);
     }
   }, [onSecurityChange]);
 
@@ -331,7 +352,30 @@ export default function ProfileSecurityControls({
         {pwError && <p className="psc-alert psc-alert--error" role="alert">{pwError}</p>}
         {pwDone && <p className="psc-alert psc-alert--ok" role="status">{pwDone}</p>}
 
-        <form className="psc-form" onSubmit={handleChangePassword} noValidate>
+        {/* NOT a <form>, and that is load-bearing.
+            This card is rendered inside ProfilePage's own <form className="profile-form">.
+            The HTML parser silently DROPS the start tag of a nested <form>, so the
+            onSubmit below could never fire: the real DOM had no second form here.
+            Every `type="submit"` in this block therefore fell through to the OUTER
+            form, which meant pressing "Change password" (or Enter in any of these
+            three fields) saved the profile and never touched the password at all.
+            React's validateDOMNesting warning was the only symptom.
+
+            So the container is a div and submission is driven explicitly: the button
+            is type="button" so it cannot submit the outer form by accident, and the
+            keydown handler restores the Enter-to-submit a real form would have given.
+            `noValidate` is unnecessary for the same reason — the browser was never
+            validating this markup, which is why the JS checks above do the work. */}
+        <div
+          className="psc-form"
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' || e.target.tagName === 'TEXTAREA') return;
+            // Keep the event from bubbling into the outer form's submit.
+            e.preventDefault();
+            e.stopPropagation();
+            handleChangePassword(e);
+          }}
+        >
           <div className="psc-field">
             <label className="psc-label" htmlFor="psc-current-pw">Current password</label>
             <input
@@ -375,14 +419,32 @@ export default function ProfileSecurityControls({
             />
           </div>
 
-          <button type="submit" className="psc-btn psc-btn--primary" disabled={pwBusy}>
+          <button
+            type="button"
+            className="psc-btn psc-btn--primary"
+            disabled={pwBusy}
+            onClick={handleChangePassword}
+          >
             {pwBusy ? 'Updating…' : 'Change password'}
           </button>
-        </form>
+        </div>
       </section>
 
       {/* ── Recovery & Authentication ──────────────────────────────────── */}
-      <BackupCodesCard summary={summary} onRequireStepUp={requireStepUp} onChanged={refreshSummary} />
+      {/* `twoFactorEnabled` is handed down rather than re-derived from the
+          summary: the parent already owns that state and keeps it correct
+          across the setup and disable modals, which live outside this file.
+          The card reading it from the summary instead left it describing a
+          two-factor state the account had already left behind. */}
+      <BackupCodesCard
+        summary={summary}
+        summaryFailed={summaryFailed}
+        twoFactorEnabled={twoFactorEnabled}
+        onRequireStepUp={requireStepUp}
+        onChanged={refreshSummary}
+        onEnableTwoFactor={onStartAuthenticatorSetup}
+        onRetry={refreshSummary}
+      />
       <RecoveryEmailCard summary={summary} onRequireStepUp={requireStepUp} onChanged={refreshSummary} />
 
       {/* ── Sessions & Activity ─────────────────────────────────────────── */}

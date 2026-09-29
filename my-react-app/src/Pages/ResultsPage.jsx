@@ -1200,7 +1200,7 @@ function ResultsPage() {
             requiredPlan={upgradeInfo.requiresPlan}
             currentPlan={upgradeInfo.currentPlan}
             onClose={() => setUpgradeInfo(null)}
-            onViewPlans={() => navigate('/profile')}
+            onViewPlans={() => navigate('/pricing')}
           />
         )}
       </div>

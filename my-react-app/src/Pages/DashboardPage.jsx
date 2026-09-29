@@ -401,10 +401,15 @@ function DashboardPage() {
 
       {/* Completion Toast */}
       {showCompletionToast && (
-        <div 
+        <div
           style={{
             position: 'fixed',
-            top: isMobile ? '90px' : '24px',
+            // Must sit BELOW the sticky Navbar, not inside it. At `top: 24px`
+            // this panel (z-index 1001) was painted straight over the bar's
+            // right-hand side, covering the notifications bell and the account
+            // pill. The desktop value clears the 64px bar plus a gap; the
+            // mobile value already did and is kept for the taller phone bar.
+            top: isMobile ? '90px' : '80px',
             right: isMobile ? '12px' : '24px',
             left: isMobile ? '12px' : 'auto',
             width: isMobile ? 'auto' : '420px',

@@ -658,7 +658,11 @@
 /* Completion Toast */
 .completion-toast {
   position: fixed;
-  top: 24px;
+  /* Below the sticky Navbar, not inside it. At `top: 24px` this covered the
+     bar's right-hand side (notifications bell, account pill) because its
+     z-index outranks the Navbar's. Matches the 90px the phone override in
+     mobile-responsive.css already used, and the shared .toast. */
+  top: 80px;
   right: 24px;
   background: linear-gradient(135deg, #6ee7b7 0%, #3dbf8a 100%);
   border-radius: 16px;

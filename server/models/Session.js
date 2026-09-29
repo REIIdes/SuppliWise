@@ -9,9 +9,16 @@ const mongoose = require('mongoose');
 //
 // A JWT alone is NEVER enough: middleware verifies the signature, then this
 // record must exist, belong to the authenticated account, be the account's
-// current active session, and not be revoked. Sessions have no idle or
-// absolute expiry (`expiresAt` stays null) — they end only when replaced by a
-// newer sign-in or explicitly revoked at sign-out.
+// current active session, and not be revoked.
+//
+// EXPIRY. A session ends when it is replaced by a newer sign-in, when it is
+// revoked at sign-out, or after 30 days WITHOUT ACTIVITY (the sliding window in
+// utils/userSession.js). That last one exists because a user JWT carries no
+// `exp`, so without it a leaked token would be valid forever — and a token
+// thief controls neither sign-in nor sign-out.
+//
+// The window is DERIVED from `lastActivityAt` at verification time rather than
+// stored as a moving deadline, so there is no second copy to fall out of step.
 const sessionSchema = new mongoose.Schema(
   {
     // The session id embedded in the JWT as the `sid` claim.
@@ -44,8 +51,12 @@ const sessionSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
-    // Informational activity stamp (throttled server-side). Never used to
-    // expire a session: users do not get logged out for being idle.
+    // When this session was last genuinely used. The sliding idle window is
+    // derived from this at verification time — see the header note.
+    //
+    // Only RECENT activity counts (a request's own age is checked, so a
+    // replayed old request cannot hold the session open), and the write is
+    // throttled, so a busy member is not one update per API call.
     lastActivityAt: {
       type: Date,
       default: Date.now,
@@ -81,8 +92,9 @@ const sessionSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
-    // null = the session never expires on its own. Kept as a field so a
-    // future policy (e.g. admin-only TTL) can opt in per session type.
+    // An OPTIONAL hard cap, consulted BEFORE the sliding window so a future
+    // policy can bound a particular session type without the window overriding
+    // it. null = no hard cap, and the sliding idle window applies.
     expiresAt: {
       type: Date,
       default: null,

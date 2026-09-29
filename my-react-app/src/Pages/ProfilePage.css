@@ -955,6 +955,20 @@
   cursor: not-allowed;
 }
 
+/* A recovery code is 10 letters/digits and a hyphen, not 6 digits, so the
+   8px digit tracking above cannot be reused: it would push the hyphen and the
+   last symbol outside the box. Tighter tracking, and a monospace face so the
+   two halves of the code line up for someone reading it off paper. */
+.profile-otp-input--code {
+  letter-spacing: 2px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-transform: uppercase;
+}
+
+.profile-otp-input--code::placeholder {
+  letter-spacing: 1px;
+}
+
 .profile-modal-error {
   background: #fef2f2;
   color: #991b1b;
@@ -1202,4 +1216,135 @@
   .profile-modal-btn {
     width: 100%;
   }
+}
+
+/* ── Plan & billing ────────────────────────────────────────────────────
+   Where "Manage billing" lands. The plan name uses the CUSTOMER-facing label
+   (Free/Deluxe/Premium/Ultimate) rather than the internal tier key, because this
+   is the one screen a subscriber reads to answer "what am I paying for". */
+.profile-section--billing { max-width: 640px; }
+
+.billing-card {
+  margin-top: 6px;
+  padding: 20px;
+  border: 1px solid #dbeee2;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.billing-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #eaf3ed;
+}
+
+.billing-card__label {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #7a8a7a;
+  margin-bottom: 3px;
+}
+
+.billing-card__plan {
+  display: block;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #14301f;
+}
+
+/* Mirrors the pricing page's PAID / ADMIN chips so the two screens read the
+   same way. */
+.billing-source {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  white-space: nowrap;
+}
+
+.billing-source--paid { color: #047857; background: #ecfdf5; border-color: #a7f3d0; }
+.billing-source--admin { color: #b45309; background: #fffbeb; border-color: #fde68a; }
+.billing-source--free { color: #7a8a7a; background: #f1f5f2; border-color: #dbeee2; }
+
+.billing-rows { margin: 16px 0 0; display: flex; flex-direction: column; gap: 11px; }
+
+.billing-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.billing-row dt {
+  margin: 0;
+  font-size: 12.5px;
+  color: #6b7c6b;
+}
+
+.billing-row dd {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #1f3d2c;
+  text-align: right;
+}
+
+.billing-note {
+  margin: 16px 0 0;
+  padding: 11px 13px;
+  border-radius: 10px;
+  border: 1px solid #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.billing-note strong { color: #78350f; }
+
+/* "change" beside the seat count: a text link, because the row itself is a
+   readout and the action belongs on the pricing page, not here. */
+.billing-link {
+  border: none;
+  background: none;
+  padding: 0;
+  margin-left: 4px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  color: #047857;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.billing-link:hover { color: #065f46; }
+.billing-link:focus-visible { outline: 2px solid #10b981; outline-offset: 2px; }
+
+.billing-actions { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 10px; }
+
+.billing-footnote {
+  margin: 14px 0 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: #7a8a7a;
+}
+
+@media (max-width: 640px) {
+  .billing-card { padding: 16px; }
+  .billing-card__plan { font-size: 21px; }
+  .billing-row { flex-direction: column; gap: 2px; }
+  .billing-row dd { text-align: left; }
 }

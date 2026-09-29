@@ -21,8 +21,25 @@ router.use(userOnly, requireFeature('dao'));
 // flip status, and if it passed, APPLY the parameter change on-chain. This is
 // what makes the DAO real: passed proposals change how the platform pays,
 // charges and quorums.
+//
+// Bounded in BOTH dimensions. Proposals can be created by any account holding
+// a non-zero wallet balance, and each one that passes costs a `ledger.append`
+// (a CPU-bound mined block). An unbounded sweep driven from a GET endpoint
+// therefore turned a single request into attacker-controlled mining work, and
+// the sweep re-ran in full on every call.
+const FINALIZE_BATCH = 25;
+const FINALIZE_MIN_INTERVAL_MS = 15 * 1000;
+let lastFinalizeAt = 0;
+
 async function finalizeExpired() {
-  const expired = await Proposal.find({ status: 'active', endsAt: { $lte: Date.now() } }).lean();
+  // Latch: at most one sweep per interval no matter how many requests arrive.
+  const now = Date.now();
+  if (now - lastFinalizeAt < FINALIZE_MIN_INTERVAL_MS) return;
+  lastFinalizeAt = now;
+  const expired = await Proposal.find({ status: 'active', endsAt: { $lte: now } })
+    .sort({ endsAt: 1 })
+    .limit(FINALIZE_BATCH)
+    .lean();
   if (!expired.length) return;
   const cfg = await engine.getConfig();
   for (const proposal of expired) {
@@ -52,7 +69,16 @@ async function finalizeExpired() {
     } catch (err) {
       // A single bad proposal must never abort the sweep (or the GET that
       // triggered it) — log it and keep finalizing the rest.
+      //
+      // If the failure landed AFTER the status claim, the proposal is now
+      // 'passed' with no executedTx and the chain cannot explain the parameter
+      // value it holds — permanently, because the claim can never be re-taken.
+      // Mark it for a reconciliation sweep rather than losing the evidence.
       console.error('[web3 dao finalize]', String(proposal._id), err.message);
+      await Proposal.updateOne(
+        { _id: proposal._id, status: 'passed', executedTx: { $in: ['', null] } },
+        { $set: { executionError: String(err.message).slice(0, 300) } }
+      ).catch(() => {});
     }
   }
 }
@@ -194,8 +220,18 @@ router.post('/dao/proposals/:id/vote', async (req, res) => {
 
     // Atomic push: concurrent votes append instead of overwriting each other,
     // with the one-vote-per-user rule enforced in the filter itself.
+    // The deadline MUST also be in the filter. Checking `endsAt` in JS only
+    // (lines 184-186) is a TOCTOU race: a vote whose write commits a
+    // millisecond after the window closed still landed, and finalizeExpired
+    // tallies `proposal.votes` verbatim — so a late vote could change the
+    // outcome of an already-closed vote.
     const pushed = await Proposal.updateOne(
-      { _id: proposal._id, status: 'active', 'votes.user': { $ne: req.user._id } },
+      {
+        _id: proposal._id,
+        status: 'active',
+        endsAt: { $gt: Date.now() },
+        'votes.user': { $ne: req.user._id },
+      },
       { $push: { votes: { user: req.user._id, address: wallet.address, choice, weight, at: Date.now() } } }
     );
     if (pushed.modifiedCount !== 1) {

@@ -197,12 +197,21 @@ const probes = {
     // Behavioral replay test with a throwaway secret (never touches real users)
     const secret = speakeasy.generateSecret({ length: 20 }).base32;
     const code = speakeasy.totp({ secret, encoding: 'base32' });
-    const first = verifyTotpOnce(secret, code);
-    const replay = verifyTotpOnce(secret, code);
+    const first = verifyTotpOnce(secret, code, 'probe:replay');
+    const replay = verifyTotpOnce(secret, code, 'probe:replay');
     if (!first || replay) {
       return { status: 'critical', detail: 'TOTP replay protection failed self-test.' };
     }
-    return { status: 'healthy', detail: 'TOTP codes single-use (90 s replay cache); email OTPs lock after 5 attempts; sensitive auth endpoints rate-limited.' };
+    // A code must be single-use PER ACCOUNT, not per seed. Two admins
+    // provisioned on one shared seed mint the identical code in the same 30 s
+    // step, so a secret-only cache let the first sign-in spend it for everyone
+    // else and the rest were refused with a misleading "invalid code".
+    const shared = verifyTotpOnce(secret, code, 'probe:account-a')
+      && verifyTotpOnce(secret, code, 'probe:account-b');
+    if (!shared) {
+      return { status: 'critical', detail: 'TOTP replay cache is not scoped per account: one admin on a shared seed denies the others.' };
+    }
+    return { status: 'healthy', detail: 'TOTP codes single-use per account (90 s replay cache); email OTPs lock after 5 attempts; sensitive auth endpoints rate-limited.' };
   },
 
   // ── CSRF: stateless JWT header auth must hold (no cookie sessions) ─────

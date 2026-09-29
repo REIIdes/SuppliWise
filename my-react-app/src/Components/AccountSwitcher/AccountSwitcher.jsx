@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { listAccounts, getActiveAccountId, switchAccount, signOutAccount } from '../../api';
+import { pictureUrl } from '../../utils/pictureUrl';
 import { AUTH_CHANGED_EVENT, DIRECTORY_KEY } from '../../auth/authState';
 import './AccountSwitcher.css';
 
@@ -29,9 +30,15 @@ const initialOf = (account) => {
   return (profile.firstName?.charAt(0) || profile.name?.charAt(0) || account.name?.charAt(0) || account.email?.charAt(0) || 'A').toUpperCase();
 };
 
-const avatarStyle = (profile) => (profile?.profilePicture
-  ? { backgroundImage: `url(${profile.profilePicture})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-  : {});
+// `pictureUrl` resolves the stored `/pictures/…` path against the API origin.
+// Without it the browser would resolve it against this page's origin, 404, and
+// the row would silently show a blank tile instead of the avatar.
+const avatarStyle = (profile) => {
+  const src = pictureUrl(profile?.profilePicture);
+  return src
+    ? { backgroundImage: `url(${src})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+    : {};
+};
 
 // Account management for one browser: shows every account signed in here and
 // flips between them instantly — each account owns its own session, so

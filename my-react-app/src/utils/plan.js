@@ -23,10 +23,28 @@ export {
   HISTORY_LIMITS, normalizePlanId, resolveFeatureKey,
 };
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const nowMs = () => Date.now();
+
 function isPast(value) {
   if (!value) return false;
   const t = value instanceof Date ? value.getTime() : new Date(value).getTime();
   return Number.isFinite(t) && t <= Date.now();
+}
+
+/**
+ * Whole days left, rounded UP — the same rule the server uses, so a value read
+ * from a fresh payload and one computed locally always agree ("30 days
+ * remaining" at purchase, "4 days" 26 days later).
+ */
+export function daysLeftFrom(expiresAt, from = Date.now()) {
+  if (!expiresAt) return null;
+  const t = expiresAt instanceof Date ? expiresAt.getTime() : new Date(expiresAt).getTime();
+  if (!Number.isFinite(t)) return null;
+  const ms = t - from;
+  if (ms <= 0) return 0;
+  return Math.ceil(ms / DAY_MS);
 }
 
 function readStoredUser() {
@@ -52,41 +70,88 @@ export function getStoredPlan() {
   return planFromUser(user);
 }
 
-// Normalize any user-like object (server /me, login payload, SSE snapshot,
-// admin PATCH) into { active, plan, rank, label, status, end, version,
-// entitlements, limits }. Inactive/expired always falls back to FREE.
+/**
+ * Normalize a server snapshot into the shape every component consumes.
+ *
+ * Carries the DURATION read-out alongside the plan, so the UI can say
+ * "4 days remaining" or "PERMANENT" straight from the server's value instead of
+ * recomputing day counts in a dozen places (and getting them out of step).
+ *
+ * `daysRemaining` is a point-in-time value from the server. A countdown that has
+ * to keep ticking uses a local 1-minute ticker (see CountdownText) rather than
+ * this snapshot, so the shared store never re-renders on a clock.
+ */
+function fromSnapshot(snap) {
+  const expired = isPast(snap.subscriptionEnd) && snap.subscriptionPermanent !== true;
+  const plan = !expired && PLAN_RANK[snap.currentPlan] !== undefined ? snap.currentPlan : 'free';
+  const active = !expired && snap.subscriptionActive === true && plan !== 'free';
+  const permanent = active && snap.subscriptionPermanent === true;
+  const daysRemaining = permanent ? null : (Number.isFinite(snap.daysRemaining) ? snap.daysRemaining : null);
+  // Seats: 1 for an individual plan, N for a Team subscription (the same tier,
+  // shared). Never below 1 — a zero here would read as "no seats" and break the
+  // Team band's own labelling.
+  const seats = active ? Math.max(1, Number(snap.subscriptionSeats) || 1) : 1;
+  return {
+    active,
+    plan,
+    rank: PLAN_RANK[plan] ?? 0,
+    label: PLAN_LABELS[plan] || PLAN_LABELS.free,
+    status: expired && snap.subscriptionStatus ? 'expired' : (snap.subscriptionStatus || (active ? 'active' : 'free')),
+    end: snap.subscriptionEnd || null,
+    start: snap.subscriptionStart || null,
+    permanent,
+    daysRemaining,
+    remainingMs: Number.isFinite(snap.remainingMs) ? snap.remainingMs : null,
+    seats,
+    isTeam: active && seats > 1,
+    // 'PAID' | 'ADMIN' | 'FREE' — where the access in force came from.
+    source: snap.subscriptionSource || (active ? 'payment' : 'free'),
+    // The two layers, when the server sends them: what the user paid for and
+    // what an admin layered on top (plus what "restore original" returns to).
+    layers: snap.subscriptionLayers && typeof snap.subscriptionLayers === 'object'
+      ? snap.subscriptionLayers
+      : null,
+    version: snap.version || null,
+    entitlements: snap.entitlements && typeof snap.entitlements === 'object' ? snap.entitlements : null,
+    limits: snap.limits && typeof snap.limits === 'object' ? snap.limits : null,
+  };
+}
+
+/**
+ * Normalize any user-like object (server /me, login payload, SSE snapshot,
+ * admin PATCH) into { active, plan, rank, label, status, end, version,
+ * entitlements, limits, daysRemaining, permanent, source }.
+ * Inactive/expired always falls back to FREE.
+ */
 export function planFromUser(user) {
   const snap = snapshotOf(user);
-  if (snap) {
-    const expired = isPast(snap.subscriptionEnd);
-    const plan = !expired && PLAN_RANK[snap.currentPlan] !== undefined ? snap.currentPlan : 'free';
-    const active = !expired && snap.subscriptionActive === true && plan !== 'free';
-    return {
-      active,
-      plan,
-      rank: PLAN_RANK[plan] ?? 0,
-      label: PLAN_LABELS[plan] || PLAN_LABELS.free,
-      status: expired && snap.subscriptionStatus ? 'expired' : (snap.subscriptionStatus || (active ? 'active' : 'free')),
-      end: snap.subscriptionEnd || null,
-      version: snap.version || null,
-      entitlements: snap.entitlements && typeof snap.entitlements === 'object' ? snap.entitlements : null,
-      limits: snap.limits && typeof snap.limits === 'object' ? snap.limits : null,
-    };
-  }
+  if (snap) return fromSnapshot(snap);
 
   const flaggedActive = user?.subscriptionActive === true;
-  const expired = isPast(user?.subscriptionExpiresAt);
+  const permanent = flaggedActive && user?.subscriptionPermanent === true;
+  const expired = !permanent && isPast(user?.subscriptionExpiresAt);
   const plan = flaggedActive && !expired && PLAN_RANK[user?.subscriptionPlan] !== undefined
     ? user.subscriptionPlan
     : 'free';
   const active = plan !== 'free';
+  const end = user?.subscriptionExpiresAt || null;
+  const remainingMs = active && !permanent && end ? Math.max(0, new Date(end).getTime() - Date.now()) : null;
+  const seats = active ? Math.max(1, Number(user?.subscriptionSeats) || 1) : 1;
   return {
     active,
     plan,
     rank: PLAN_RANK[plan] ?? 0,
     label: PLAN_LABELS[plan] || PLAN_LABELS.free,
     status: expired ? 'expired' : active ? 'active' : 'free',
-    end: user?.subscriptionExpiresAt || null,
+    end,
+    start: user?.subscriptionStartedAt || null,
+    permanent,
+    daysRemaining: active ? daysLeftFrom(end, nowMs()) : null,
+    remainingMs,
+    seats,
+    isTeam: active && seats > 1,
+    source: user?.subscriptionSource || (active ? 'payment' : 'free'),
+    layers: null,
     version: null,
     entitlements: null,
     limits: null,
@@ -119,6 +184,23 @@ export function applyPlanToCache(fresh) {
     subscriptionPlan: fresh?.subscriptionPlan ?? (snap ? snap.currentPlan : cached.subscriptionPlan),
     subscriptionExpiresAt: fresh?.subscriptionExpiresAt
       ?? (snap ? snap.subscriptionEnd : cached.subscriptionExpiresAt)
+      ?? null,
+    subscriptionStartedAt: fresh?.subscriptionStartedAt ?? (snap ? snap.subscriptionStart : cached.subscriptionStartedAt) ?? null,
+    // Permanence and source must survive in the raw fields too: they are what
+    // lets a page rendered from the CACHE (before its first network reply)
+    // still say "PERMINENT" or "ADMIN GRANT" instead of guessing from a null
+    // expiry date.
+    subscriptionPermanent: fresh?.subscriptionPermanent
+      ?? (snap ? snap.subscriptionPermanent : cached.subscriptionPermanent)
+      ?? false,
+    subscriptionSource: fresh?.subscriptionSource
+      ?? (snap ? snap.subscriptionSource : cached.subscriptionSource)
+      ?? null,
+    // Seats ride along in the raw fields too, so a page rendered from the
+    // CACHE (before its first network reply) still knows whether this is a Team
+    // subscription rather than guessing from a plan id.
+    subscriptionSeats: fresh?.subscriptionSeats
+      ?? (snap ? snap.subscriptionSeats : cached.subscriptionSeats)
       ?? null,
     subscriptionUpdatedAt: fresh?.subscriptionUpdatedAt ?? cached.subscriptionUpdatedAt ?? null,
     subscription: nextSnap ?? null,

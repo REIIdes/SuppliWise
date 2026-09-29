@@ -38,6 +38,29 @@ blockSchema.index({ 'txs.txHash': 1 });
 
 const Block = mongoose.model('SwBlock', blockSchema);
 
+// ── Chain audit checkpoint ────────────────────────────────────────────────
+// The last position proven good, persisted so it survives a process restart.
+//
+// The ledger is append-only, so "everything up to block N, whose hash is H,
+// was re-hashed and verified" stays a valid claim indefinitely — the only way
+// it can stop being true is if someone edits history, which the next deep audit
+// catches. Keeping this in memory only meant every restart threw it away and
+// forced the next check to re-walk the entire chain before it could answer,
+// which is what made a freshly-restarted server time the check out and report
+// a perfectly valid chain as a warning.
+const chainAuditSchema = new mongoose.Schema({
+  key: { type: String, required: true, unique: true, default: 'chain' },
+  // Highest block index re-hashed and confirmed, and that block's hash — the
+  // anchor an incremental walk chains from.
+  upTo: { type: Number, required: true },
+  prevHash: { type: String, required: true },
+  // When the deep whole-chain audit that established this checkpoint ran.
+  verifiedAt: { type: Date, default: null },
+  checked: { type: Number, default: 0 },
+});
+
+const ChainAudit = mongoose.model('SwChainAudit', chainAuditSchema);
+
 // ── Wallet / Decentralized Identity ────────────────────────────────────────
 // Keyed by `address`. Users get one wallet (`user` set — unique + sparse, so
 // system wallets, which omit the field entirely, can coexist). System wallets
@@ -73,6 +96,9 @@ const walletSchema = new mongoose.Schema(
     spentTotal: { type: Number, default: 0 },
     lastStakeAccrualAt: { type: Number, default: () => Date.now() },
     welcomeBonusAt: { type: Number, default: 0 },
+    // Stamped whenever the signing key is exported, so a key disclosure leaves
+    // an auditable trace on the wallet instead of being invisible.
+    keyExportedAt: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
@@ -355,6 +381,7 @@ const dataShareSchema = new mongoose.Schema(
     // Anonymized, coarse dataset — encrypted and content-addressed (IPFS-like)
     datasetCid: { type: String, default: '' },
     reward: { type: Number, default: 0 },
+    rewardTx: { type: String, default: '' },
     status: { type: String, enum: ['active', 'revoked'], default: 'active', index: true },
     consentTx: { type: String, default: '' },
     revokeTx: { type: String, default: '' },
@@ -367,7 +394,12 @@ const dataShareSchema = new mongoose.Schema(
 const DataShare = mongoose.model('SwDataShare', dataShareSchema);
 
 const storageObjectSchema = new mongoose.Schema({
-  cid: { type: String, required: true, unique: true },
+  // NOT globally unique. A CID is a pure function of the ciphertext, so two
+  // users pinning byte-identical content MUST collide — and the routes upsert on
+  // { cid, owner } and read back per-owner (`GET /storage/:cid`), which is
+  // impossible with a global unique index: the second user's upsert missed the
+  // filter, tried to insert, and died on E11000 with a 500.
+  cid: { type: String, required: true, index: true },
   owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   kind: { type: String, default: 'generic' },
   ciphertext: { type: String, required: true },
@@ -376,6 +408,9 @@ const storageObjectSchema = new mongoose.Schema({
   size: { type: Number, default: 0 },
   pinnedAt: { type: Number, default: () => Date.now() },
 });
+
+// Uniqueness is per owner, matching the { cid, owner } upsert/read pattern.
+storageObjectSchema.index({ cid: 1, owner: 1 }, { unique: true });
 
 const StorageObject = mongoose.model('SwStorageObject', storageObjectSchema);
 
@@ -437,6 +472,7 @@ const trialConsentSchema = new mongoose.Schema({
   trial: { type: mongoose.Schema.Types.ObjectId, ref: 'SwTrial', required: true },
   status: { type: String, enum: ['opted-in', 'withdrawn'], default: 'opted-in', index: true },
   reward: { type: Number, default: 0 },
+  rewardTx: { type: String, default: '' },
   termsHash: { type: String, default: '' },
   consentTx: { type: String, default: '' },
   withdrawTx: { type: String, default: '' },
@@ -479,7 +515,9 @@ const bookingSchema = new mongoose.Schema({
   userAddress: { type: String, required: true },
   hours: { type: Number, required: true, min: 1, max: 8 },
   cost: { type: Number, required: true, min: 0 },
-  status: { type: String, enum: ['confirmed', 'cancelled'], default: 'confirmed' },
+  // 'pending' is the short window between creating the booking row and taking
+  // payment; a payment failure deletes the row rather than leaving it behind.
+  status: { type: String, enum: ['pending', 'confirmed', 'cancelled'], default: 'confirmed' },
   txHash: { type: String, default: '' },
   createdAt: { type: Number, default: () => Date.now() },
 });
@@ -488,6 +526,7 @@ const Booking = mongoose.model('SwBooking', bookingSchema);
 
 module.exports = {
   Block,
+  ChainAudit,
   Wallet,
   Web3Config,
   DEFAULT_PARAMS,

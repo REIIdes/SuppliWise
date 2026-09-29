@@ -257,40 +257,70 @@ img.admin-topbar__dropdown-avatar { display: block; object-fit: cover; }
 /* ── Collapsible account menu ──────────────────────── */
 .admin-topbar__menu { position: relative; }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   The admin account menu.
+
+   Same three tones as the rest of the console, so a menu in the topbar and a
+   queue in the body read as one system:
+     emerald → identity and security
+     indigo  → routine work
+     rose    → destructive
+
+   WHY PER-ITEM TONES AT ALL
+   The previous version painted Edit Profile with a hot orange→red gradient
+   because it was the "accent", and left the security action quiet. That made the
+   most innocuous item in the menu the loudest, and the colours meant nothing.
+   Now every icon tile is a gradient of its own tone — equal weight, so the eye
+   is not dragged to the wrong one — and the HOVER/focus state is what
+   emphasises an item. Destructive is separated by a rose-tinted rule, which is
+   the only place the distinction has to be legible.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.admin-topbar__menu { position: relative; }
+
 /* position: fixed (like the notification panel) so the menu is never clipped
-   by the topbar and stays pinned under the pill while the page scrolls. */
+   by the topbar and stays pinned under the pill while the page scrolls.
+   Wide enough for the longest hint ("Password, authenticator & account details")
+   to sit on one line at desktop width — it was wrapping to two, which made the
+   three items look like different heights. */
 .admin-topbar__dropdown {
+  --abm-ok: #10b981;
+  --abm-ok-deep: #047857;
+  --abm-ok-wash: rgba(16, 185, 129, .22);
+  --abm-primary: #818cf8;
+  --abm-primary-deep: #4f6bed;
+  --abm-primary-wash: rgba(99, 102, 241, .24);
+  --abm-down: #fb7185;
+  --abm-down-deep: #e11d48;
+  --abm-down-wash: rgba(244, 63, 94, .22);
+
   position: fixed;
   top: calc(var(--admin-topbar-h, 60px) + 8px);
   right: 22px;
-  width: min(272px, calc(100vw - 28px));
+  width: min(304px, calc(100vw - 28px));
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 10px;
-  border: 1px solid rgba(255,255,255,.14);
-  border-radius: 16px;
-  background: linear-gradient(160deg, #1a3b2f 0%, #143026 60%, #11271e 100%);
-  box-shadow: 0 28px 54px -24px rgba(0,0,0,.95), inset 0 1px 0 rgba(255,255,255,.08);
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 18px;
+  background: linear-gradient(160deg, #1a3b2f 0%, #143026 58%, #101f19 100%);
+  box-shadow: 0 28px 54px -24px rgba(0, 0, 0, .95), inset 0 1px 0 rgba(255, 255, 255, .08);
   z-index: 160;
   animation: admin-menu-in .16s ease both;
 }
-@keyframes admin-menu-in {
-  from { opacity: 0; transform: translateY(-8px) scale(.97); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
-}
 
+/* ── Identity block ───────────────────────────────────────────────────── */
 .admin-topbar__dropdown-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 4px 6px 10px;
-  margin-bottom: 5px;
-  border-bottom: 1px solid rgba(255,255,255,.1);
+  gap: 12px;
+  padding: 6px 8px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, .1);
 }
 .admin-topbar__dropdown-avatar {
-  width: 40px;
-  height: 40px;
+  width: 42px;
+  height: 42px;
   border-radius: 50%;
   background: linear-gradient(140deg, #fbbf24, #f97316 55%, #e11d48);
   color: #fff;
@@ -299,32 +329,66 @@ img.admin-topbar__dropdown-avatar { display: block; object-fit: cover; }
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  box-shadow: 0 0 0 2px rgba(255,255,255,.22);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, .22);
 }
-.admin-topbar__dropdown-id { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.admin-topbar__dropdown-id { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .admin-topbar__dropdown-id strong {
-  font: 800 14px/1.2 Arial, sans-serif;
+  font: 700 16px/1.2 Georgia, 'Times New Roman', serif;
   color: #fff;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.admin-topbar__dropdown-id em {
-  font: 700 10px/1 Arial, sans-serif;
-  font-style: normal;
-  letter-spacing: .09em;
-  text-transform: uppercase;
+
+/* A badge with a live dot, not a bare coloured word. */
+.admin-topbar__role {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 3px 9px;
+  border: 1px solid rgba(16, 185, 129, .38);
+  border-radius: 999px;
+  background: var(--abm-ok-wash);
   color: #6ee7b7;
+  font: 800 9.5px/1 Arial, sans-serif;
+  font-style: normal;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.admin-topbar__role i {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--abm-ok);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, .2);
+  animation: admin-role-pulse 2.2s ease-in-out infinite;
 }
 
+@keyframes admin-role-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(16, 185, 129, .2); }
+  50% { box-shadow: 0 0 0 6px rgba(16, 185, 129, .04); }
+}
+
+/* ── Items ────────────────────────────────────────────────────────────── */
+.admin-topbar__dropdown-list { display: flex; flex-direction: column; gap: 2px; }
+
+/* Each item is wrapped so the rose rule above "Sign out" belongs to the ROW,
+   not to the button — a separator inside the button would be part of its hit
+   area and would swallow clicks. */
+.admin-topbar__menu-row { display: flex; flex-direction: column; }
+
 .admin-topbar__menu-item {
+  --t: var(--abm-primary);
+  --t-deep: var(--abm-primary-deep);
+  --t-wash: var(--abm-primary-wash);
+
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
-  padding: 9px 10px;
+  padding: 10px;
   border: 0;
-  border-radius: 11px;
+  border-radius: 12px;
   background: transparent;
   color: #dcebe2;
   text-align: left;
@@ -332,44 +396,75 @@ img.admin-topbar__dropdown-avatar { display: block; object-fit: cover; }
   cursor: pointer;
   transition: background .15s ease, color .15s ease, transform .15s ease;
 }
-.admin-topbar__menu-item:hover {
-  background: rgba(255,255,255,.1);
+.admin-topbar__menu-item:hover,
+.admin-topbar__menu-item:focus-visible {
+  background: var(--t-wash);
   color: #fff;
   transform: translateX(2px);
 }
 .admin-topbar__menu-item:focus-visible {
-  outline: 2px solid #f97316;
-  outline-offset: 2px;
+  outline: 2px solid var(--t);
+  outline-offset: -2px;
 }
+
+.admin-topbar__menu-item--ok { --t: var(--abm-ok); --t-deep: var(--abm-ok-deep); --t-wash: var(--abm-ok-wash); }
+.admin-topbar__menu-item--down { --t: var(--abm-down); --t-deep: var(--abm-down-deep); --t-wash: var(--abm-down-wash); }
+/* The destructive row is also the one that can be reached by muscle memory, so
+   its label is tinted to match its tile — that and the rule above it are the
+   only places the "this one ends things" signal lives. */
+.admin-topbar__menu-item--down .admin-topbar__menu-text strong { color: #ffe4e6; }
+
+/* Every tile is a gradient so no single item shouts. The one that is hovered
+   brightens via the row's own wash behind it. */
 .admin-topbar__menu-icon {
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
   flex-shrink: 0;
-  background: rgba(255,255,255,.09);
-  color: #a7f3d0;
-}
-.admin-topbar__menu-icon--accent {
-  background: linear-gradient(135deg, #f97316, #e11d48);
+  background: linear-gradient(140deg, var(--t) 0%, var(--t-deep) 100%);
   color: #fff;
-  box-shadow: 0 6px 14px -8px rgba(225,29,72,.95);
+  box-shadow: 0 8px 16px -10px color-mix(in srgb, var(--t) 95%, transparent);
 }
-.admin-topbar__menu-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.admin-topbar__menu-text strong { font: 700 13px/1.25 Arial, sans-serif; }
+
+.admin-topbar__menu-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.admin-topbar__menu-text strong {
+  font: 700 13.5px/1.25 Arial, sans-serif;
+  color: #fff;
+}
 .admin-topbar__menu-text em {
   font: 500 11px/1.35 Arial, sans-serif;
   font-style: normal;
   color: #9db8ab;
+  /* A hint that wraps must not make its row taller than the others, or the menu
+     reads as three unrelated buttons. Clamped to one line at this width; the
+     label above it already says what the item is. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.admin-topbar__menu-item--danger .admin-topbar__menu-icon { color: #fda4af; }
-.admin-topbar__menu-item--danger:hover { background: rgba(225,29,72,.24); }
 
+/* The affordance arrow, revealed on hover — the one moving part of the row, and
+   the only thing that changes between "at rest" and "you can go here". */
+.admin-topbar__menu-go {
+  flex: 0 0 auto;
+  color: var(--t);
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity .15s ease, transform .15s ease;
+}
+.admin-topbar__menu-item:hover .admin-topbar__menu-go,
+.admin-topbar__menu-item:focus-visible .admin-topbar__menu-go { opacity: 1; transform: translateX(0); }
+
+/* The only divider in the panel, and it is rose-tinted: the line between
+   "these change your account" and "this ends your session" is the one
+   distinction the menu actually has to make. */
 .admin-topbar__dropdown-sep {
+  display: block;
   height: 1px;
-  margin: 5px 6px;
-  background: rgba(255,255,255,.1);
+  margin: 6px 10px;
+  background: linear-gradient(90deg, rgba(244, 63, 94, .45) 0%, rgba(244, 63, 94, .12) 60%, transparent 100%);
 }
 
 /* ── Responsive ─────────────────────────────────── */

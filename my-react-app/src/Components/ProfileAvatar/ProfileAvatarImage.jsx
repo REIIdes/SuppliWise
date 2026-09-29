@@ -19,15 +19,25 @@
  * and no reset bookkeeping.
  */
 import { useState } from 'react';
+import { pictureUrl } from '../../utils/pictureUrl';
 
 /**
- * @param {string}  src        Picture URL/data-URL. Empty string = no picture.
+ * @param {string}  src        Picture URL, stored path, or data-URL. Empty = no picture.
  * @param {string}  name       Used for the initial-letter fallback.
  * @param {string}  className  Class for the <img>. Omitted when falling back.
  * @param {boolean} decorative Hide from assistive tech when the surrounding
  *                             element already labels the avatar.
  */
 export default function ProfileAvatarImage({ src, name = '', className = '', decorative = true }) {
+  // Images are stored on disk now and arrive as a root-relative path such as
+  // `/pictures/…`. Resolved here, at the one place a profile picture is
+  // rendered, so every caller benefits and none of them can forget: an
+  // unresolved path is silently resolved against the SPA's own origin (the Vite
+  // dev server), 404s, and the avatar falls back to an initial with nothing
+  // reporting an error. The failure record keys off the RESOLVED value, so it
+  // still identifies one specific resource.
+  const resolved = pictureUrl(src);
+
   // The failure is recorded AS the source that failed, not as a boolean. That
   // is what makes recovery automatic: a new `src` is by definition not equal
   // to `failedSrc`, so it renders immediately — no effect, no reset, and no
@@ -35,7 +45,7 @@ export default function ProfileAvatarImage({ src, name = '', className = '', dec
   const [failedSrc, setFailedSrc] = useState(null);
 
   const initial = (name || 'U').charAt(0).toUpperCase();
-  const showImage = Boolean(src) && failedSrc !== src;
+  const showImage = Boolean(resolved) && failedSrc !== resolved;
 
   return (
     <>
@@ -45,10 +55,10 @@ export default function ProfileAvatarImage({ src, name = '', className = '', dec
       {showImage && (
         <img
           className={className}
-          src={src}
+          src={resolved}
           alt=""
           aria-hidden={decorative ? 'true' : undefined}
-          onError={() => setFailedSrc(src)}
+          onError={() => setFailedSrc(resolved)}
         />
       )}
     </>

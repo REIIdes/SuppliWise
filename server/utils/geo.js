@@ -12,6 +12,8 @@ const GEO_CACHE_MAX = 1000;
 
 // ip -> { value, at }
 const geoCache = new Map();
+// ip -> { code, at } — the ISO-3166 alpha-2 country, for currency detection.
+const countryCache = new Map();
 
 function normalizeIp(raw) {
   if (!raw) return '';
@@ -39,6 +41,58 @@ function pruneCache() {
   for (const [key, entry] of geoCache) {
     if (now - entry.at > GEO_CACHE_TTL_MS) geoCache.delete(key);
     if (geoCache.size <= GEO_CACHE_MAX) break;
+  }
+}
+
+/** An ISO-3166 alpha-2 code is exactly two ASCII letters. */
+function sanitiseCountryCode(value) {
+  const code = String(value || '').trim().toLowerCase();
+  return /^[a-z]{2}$/.test(code) ? code : '';
+}
+
+/**
+ * Resolve a public IP to its ISO-3166 alpha-2 country code.
+ *
+ * Used to pick the display currency on the pricing page. It has the same
+ * guarantees as lookupLocation — cached, hard timeout, and a strict allow-list on
+ * the reply — because it is fed by the same untrusted provider. A poisoned or
+ * malformed answer is dropped, and the caller falls back to the default
+ * currency; this must never be able to stall or throw into a request path.
+ *
+ * Returns null for loopback/private/unknown addresses: a dev machine on
+ * localhost has no country, and guessing one would show a dev the wrong price.
+ */
+async function lookupCountryCode(rawIp) {
+  const ip = normalizeIp(rawIp);
+  const kind = ipKind(ip);
+  if (kind !== 'public') return null;
+
+  const cached = countryCache.get(ip);
+  if (cached && Date.now() - cached.at < GEO_CACHE_TTL_MS) return cached.code;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GEO_TIMEOUT_MS);
+  try {
+    const res = await fetch(
+      `http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,countryCode`,
+      { signal: controller.signal }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data?.status !== 'success') return null;
+    const code = sanitiseCountryCode(data.countryCode);
+    if (!code) return null;
+    countryCache.set(ip, { code, at: Date.now() });
+    // Bound this cache the same way as the location one.
+    if (countryCache.size > GEO_CACHE_MAX) {
+      const oldest = [...countryCache.entries()].sort((a, b) => a[1].at - b[1].at)[0];
+      if (oldest) countryCache.delete(oldest[0]);
+    }
+    return code;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -137,6 +191,7 @@ module.exports = {
   normalizeIp,
   ipKind,
   lookupLocation,
+  lookupCountryCode,
   resolveLoginLocation,
   backfillLocations,
 };

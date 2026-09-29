@@ -619,7 +619,7 @@ function InsightsPage() {
                 'Progress tracking & streaks',
                 'Downloadable PDF reports',
               ]}
-              onViewPlans={() => navigate('/profile')}
+              onViewPlans={() => navigate('/pricing')}
               onBack={() => navigate('/dashboard')}
             />
           ) : loading ? (

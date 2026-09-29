@@ -1,53 +1,100 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   SuppliWise Web3 layer — shared design system for the hub, marketplace,
-   governance and public QR verification pages.
+   SuppliWise — Web3 layer design system
+   Shared by the hub, marketplace, DAO governance and the public QR pages.
 
-   Palette is the app's own: deep forest (#18342a) + brand green (#24734e),
-   lit with the brand orange (#d46b35) and a spectrum of accents. Vibrant,
-   but every foreground/background pair below clears WCAG AA on its own
-   surface, and motion is fully disabled under prefers-reduced-motion.
+   PALETTE
+   A deep emerald → teal → cyan base (the brand), with amber, violet, rose and
+   sky used as TONES. A tone is a three-variable bundle (--tone-1 / --tone-2 /
+   --tone-ink / --tone-wash) set by a class, so a stat, a progress bar and a
+   badge can all agree on one colour without repeating literals.
+
+   CONTRAST
+   Every dark surface below (#w3-page hero, .w3-verify-icon, .w3-btn) is paired
+   with foregrounds that clear WCAG AA on that surface. The hero is the one
+   place with a busy background, so it carries an explicit left-to-right scrim
+   that darkens exactly the strip the copy sits in — the colour blooms on the
+   right are decoration and never sit under body text.
+
+   MOTION
+   Every animation is decoration and is switched off wholesale under
+   prefers-reduced-motion at the bottom of this file.
    ══════════════════════════════════════════════════════════════════════════ */
 
 .w3-page {
-  /* ── Tokens ──────────────────────────────────────────────────────── */
-  --w3-ink: #10241c;
-  --w3-ink-2: #33513f;
-  --w3-muted: #6b7f74;
-  --w3-line: #dce9e0;
-  --w3-paper: #f5f7f3;
+  /* ── Ink & surfaces ───────────────────────────────────────────────── */
+  --w3-ink: #0b1f18;
+  --w3-ink-2: #24483a;
+  /* Both of these carry 11–13px text, so they are pinned to a luminance that
+     clears 4.5:1 on the near-white card/tile surfaces. The previous, lighter
+     greens measured 4.45:1 and 2.57:1 — the hint line especially was
+     effectively invisible. */
+  --w3-muted: #527063;
+  --w3-faint: #5a7165;
+  --w3-line: #dbeae2;
+  --w3-line-soft: #eaf3ee;
+  --w3-paper: #f2f7f4;
 
-  --w3-deep: #18342a;
-  --w3-brand: #24734e;
-  --w3-brand-2: #2d6a4f;
-  --w3-lime: #22c55e;
-  --w3-teal: #0d9488;
-  --w3-sky: #4f6bed;
-  --w3-violet: #8b5cf6;
-  --w3-amber: #fbbf24;
-  --w3-orange: #d46b35;
+  /* ── Brand ────────────────────────────────────────────────────────── */
+  --w3-deep: #052e22;
+  --w3-brand: #0b7a5f;
+  --w3-brand-2: #0d9488;
+  --w3-lime: #10b981;
+
+  /* ── Tone spectrum ────────────────────────────────────────────────── */
+  --w3-amber: #f59e0b;
+  --w3-orange: #f97316;
   --w3-rose: #f43f5e;
+  --w3-violet: #8b5cf6;
+  --w3-indigo: #6366f1;
+  --w3-sky: #06b6d4;
 
-  --w3-focus: rgba(212, 107, 53, 0.6);
-  --w3-shadow-sm: 0 8px 20px -14px rgba(16, 36, 28, 0.55);
-  --w3-shadow-md: 0 18px 40px -30px rgba(16, 36, 28, 0.6);
-  --w3-shadow-lg: 0 30px 60px -34px rgba(16, 36, 28, 0.62);
+  --w3-focus: rgba(13, 148, 136, 0.65);
+  --w3-shadow-xs: 0 1px 2px rgba(11, 31, 24, 0.04);
+  --w3-shadow-sm: 0 2px 4px rgba(11, 31, 24, 0.03), 0 10px 24px -18px rgba(11, 31, 24, 0.55);
+  --w3-shadow-md: 0 2px 4px rgba(11, 31, 24, 0.03), 0 18px 38px -28px rgba(11, 31, 24, 0.6);
+  --w3-shadow-lg: 0 4px 10px rgba(11, 31, 24, 0.04), 0 34px 60px -40px rgba(11, 31, 24, 0.65);
+  --w3-glow: 0 18px 40px -22px rgba(13, 148, 136, 0.75);
+
+  /* The white-label surface colour. Every filled control uses this same
+     gradient, and it is deliberately DARKER than the brand's bright emerald:
+     white on #10b981 measures 2.5:1 and even #0d9488 only reaches 3.7:1, so a
+     bright gradient makes every button label unreadable. At #0f8477 and below
+     white clears 4.5:1 while the colour still reads unmistakably as the
+     brand. Vibrancy lives in the hero, the spectrum rails, the tab chips and
+     the tonal stat tiles — not in the button fill. */
+  --w3-fill-1: #0f8477;
+  --w3-fill-2: #0e7d72;
+  --w3-fill-3: #115e59;
+  --w3-fill-gradient: linear-gradient(135deg, #0f8477 0%, #0e7d72 52%, #115e59 100%);
 
   --w3-font: 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
   --w3-mono-font: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
 
   position: relative;
+  isolation: isolate;
   min-height: 100vh;
   color: var(--w3-ink);
   font-family: var(--w3-font);
-  /* Vibrant aurora: three coloured pools over a paper base. `fixed` keeps
-     the colour from sliding while a long panel scrolls underneath. */
+}
+
+/* Aurora background as its own fixed layer.
+   It used to be `background-attachment: fixed` on the page itself, which iOS
+   Safari and Android WebView both mishandle (the colour slides, or never
+   paints at all on scroll). A `position: fixed` pseudo-element with
+   `z-index: 0` sits behind the opaque content without touching scroll, and
+   `.w3-container` opts back in with `z-index: 1`. */
+.w3-page::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
   background:
-    radial-gradient(1080px 520px at 10% -10%, rgba(34, 197, 94, 0.32), transparent 62%),
-    radial-gradient(880px 460px at 92% -6%, rgba(212, 107, 53, 0.26), transparent 64%),
-    radial-gradient(820px 440px at 72% 2%, rgba(79, 107, 237, 0.18), transparent 62%),
-    radial-gradient(760px 420px at 30% 12%, rgba(13, 148, 136, 0.16), transparent 64%),
-    linear-gradient(180deg, #eafaf0 0%, #f7faf6 44%, var(--w3-paper) 100%);
-  background-attachment: fixed;
+    radial-gradient(1100px 540px at 8% -12%, rgba(16, 185, 129, 0.34), transparent 62%),
+    radial-gradient(900px 480px at 94% -8%, rgba(6, 182, 212, 0.26), transparent 64%),
+    radial-gradient(840px 460px at 74% 0%, rgba(99, 102, 241, 0.18), transparent 62%),
+    radial-gradient(780px 440px at 26% 10%, rgba(245, 158, 11, 0.12), transparent 66%),
+    linear-gradient(180deg, #e9fbf2 0%, #f6fbf8 42%, var(--w3-paper) 100%);
 }
 
 /* Text inputs inherit the page font unless they opt into mono. */
@@ -60,39 +107,193 @@
 
 .w3-container {
   position: relative;
+  z-index: 1;
   max-width: 1200px;
   margin: 0 auto;
-  /* Bottom padding reserves the strip the fixed "Ask AI" FAB floats over so
-     it can never sit on top of the last row of content. */
-  padding: 28px 24px 132px;
+  /* Bottom padding reserves the strip the fixed chat handle floats over so it
+     can never sit on top of the last row of content. */
+  padding: 24px 24px 128px;
 }
 
-/* ── Hero header ───────────────────────────────────────────────────── */
-.w3-header {
+/* ══ Hero ═══════════════════════════════════════════════════════════════
+   One reusable banner. `variant` re-tints the gradient per area so the three
+   screens feel related without looking identical:
+     emerald  — hub        teal   — marketplace      violet — DAO
+   The scrim is a SEPARATE first layer above the colour, not a property of
+   the tint, so a text-coloured hero can never lose its contrast. */
+.w3-hero {
+  --hero-a: #04241a;
+  --hero-b: #07553f;
+  --hero-c: #0a7a5f;
+  --hero-d: #0c9184;
+  --hero-e: #14a9a0;
+  --hero-bloom-1: rgba(251, 191, 36, 0.42);
+  --hero-bloom-2: rgba(167, 139, 250, 0.44);
+  --hero-bloom-3: rgba(244, 63, 94, 0.26);
+
   position: relative;
   overflow: hidden;
-  margin-bottom: 22px;
-  padding: 30px 32px;
-  border-radius: 24px;
+  margin-bottom: 20px;
+  padding: 26px 30px 28px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 26px;
   color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 30px 60px -38px rgba(5, 46, 34, 0.85);
   background:
-    radial-gradient(620px 260px at 88% -30%, rgba(251, 191, 36, 0.55), transparent 70%),
-    linear-gradient(120deg, #18342a 0%, #24734e 46%, #0d9488 100%);
-  box-shadow: 0 30px 60px -34px rgba(16, 36, 28, 0.8);
+    linear-gradient(100deg, rgba(2, 26, 20, 0.93) 0%, rgba(2, 26, 20, 0.86) 40%, rgba(2, 26, 20, 0.66) 66%, rgba(2, 26, 20, 0.2) 100%),
+    radial-gradient(680px 300px at 88% -34%, var(--hero-bloom-1), transparent 66%),
+    radial-gradient(560px 320px at 4% 118%, var(--hero-bloom-2), transparent 66%),
+    radial-gradient(460px 250px at 60% 120%, var(--hero-bloom-3), transparent 68%),
+    linear-gradient(118deg, var(--hero-a) 0%, var(--hero-b) 32%, var(--hero-c) 60%, var(--hero-d) 82%, var(--hero-e) 100%);
+  isolation: isolate;
 }
 
-/* Faint diagonal weave so the hero reads as a surface, not a flat fill. */
-.w3-header::after {
+/* Slow sheen across the colour, and a fine diagonal weave so the banner
+   reads as a surface with texture rather than a flat fill. */
+.w3-hero::after {
   content: '';
   position: absolute;
   inset: 0;
+  z-index: -1;
   pointer-events: none;
-  background-image: repeating-linear-gradient(
-    115deg,
-    rgba(255, 255, 255, 0.07) 0 2px,
-    transparent 2px 14px
-  );
+  background-image:
+    repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.055) 0 2px, transparent 2px 14px),
+    linear-gradient(115deg, transparent 34%, rgba(255, 255, 255, 0.09) 50%, transparent 66%);
+  background-size: auto, 260% 100%;
+  animation: w3-sheen 14s ease-in-out infinite alternate;
+}
+
+@keyframes w3-sheen {
+  from { background-position: 0 0, 100% 50%; }
+  to   { background-position: 0 0, 0% 50%; }
+}
+
+.w3-hero.variant-teal {
+  --hero-a: #04262a;
+  --hero-b: #065a5c;
+  --hero-c: #0a7f7a;
+  --hero-d: #0d9a9a;
+  --hero-e: #14b3c0;
+  --hero-bloom-1: rgba(253, 224, 71, 0.4);
+  --hero-bloom-2: rgba(34, 211, 238, 0.42);
+  --hero-bloom-3: rgba(244, 63, 94, 0.24);
+}
+
+.w3-hero.variant-violet {
+  --hero-a: #16103a;
+  --hero-b: #2f2170;
+  --hero-c: #4c34a3;
+  --hero-d: #5b45c4;
+  --hero-e: #6d5ae0;
+  --hero-bloom-1: rgba(251, 191, 36, 0.4);
+  --hero-bloom-2: rgba(52, 211, 153, 0.34);
+  --hero-bloom-3: rgba(244, 114, 182, 0.3);
+}
+
+/* Decorative mark. Hidden on narrow screens where the copy needs the width. */
+.w3-hero-mark {
+  position: absolute;
+  top: 50%;
+  right: 30px;
+  z-index: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 132px;
+  height: 132px;
+  transform: translateY(-50%) rotate(-8deg);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 34px;
+  font-size: 62px;
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.05));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 26px 50px -30px rgba(0, 0, 0, 0.8);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+.w3-hero-body {
+  position: relative;
+  z-index: 1;
+  max-width: 68ch;
+}
+
+.w3-hero-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 5px 13px 5px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.13);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+.w3-hero-eyebrow::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4ade80;
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.32);
+  animation: w3-dot 2.4s ease-in-out infinite;
+}
+
+@keyframes w3-dot {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.32); }
+  50%      { box-shadow: 0 0 0 6px rgba(74, 222, 128, 0.08); }
+}
+
+.w3-hero .w3-title,
+.w3-hero .w3-subtitle {
+  color: #fff;
+}
+
+/* Secondary line: the copy under the title is the one that has to clear AA,
+   so it is pure white at 92% rather than a tint. */
+.w3-hero .w3-subtitle {
+  color: rgba(255, 255, 255, 0.92);
+  max-width: 62ch;
+}
+
+.w3-title {
+  margin: 0 0 8px;
+  font-size: clamp(25px, 3.2vw, 34px);
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  line-height: 1.12;
+  color: var(--w3-ink);
+}
+
+.w3-subtitle {
+  margin: 0;
+  max-width: 78ch;
+  font-size: 15px;
+  line-height: 1.62;
+  color: var(--w3-muted);
+}
+
+/* Legacy alias — SharePage and the plan gate still open with the old markup. */
+.w3-header {
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 20px;
+  padding: 26px 30px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 26px;
+  color: #fff;
+  box-shadow: 0 30px 60px -38px rgba(5, 46, 34, 0.85);
+  background:
+    linear-gradient(100deg, rgba(2, 26, 20, 0.93) 0%, rgba(2, 26, 20, 0.86) 40%, rgba(2, 26, 20, 0.66) 66%, rgba(2, 26, 20, 0.2) 100%),
+    radial-gradient(680px 300px at 88% -34%, rgba(251, 191, 36, 0.42), transparent 66%),
+    radial-gradient(560px 320px at 4% 118%, rgba(167, 139, 250, 0.44), transparent 66%),
+    linear-gradient(118deg, #04241a 0%, #07553f 32%, #0a7a5f 60%, #0c9184 82%, #14a9a0 100%);
 }
 
 .w3-header .w3-title,
@@ -102,48 +303,109 @@
   color: #fff;
 }
 
-.w3-title {
-  margin: 0 0 8px;
-  font-size: clamp(26px, 3.4vw, 34px);
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  line-height: 1.15;
-  color: var(--w3-ink);
-}
-
-.w3-subtitle {
-  margin: 0;
-  max-width: 78ch;
-  font-size: 15.5px;
-  line-height: 1.6;
-  color: var(--w3-muted);
-}
-
 .w3-header .w3-subtitle {
-  color: rgba(255, 255, 255, 0.9);
+  color: rgba(255, 255, 255, 0.92);
 }
 
-/* ── Cross-section links ───────────────────────────────────────────── */
-.w3-subnav {
+/* ══ Area switcher ═════════════════════════════════════════════════════
+   Navigation BETWEEN the three blockchain areas, which is a different job
+   from the section tabs underneath it. It used to be a row of ghost buttons
+   that looked identical on every page, so nothing indicated where you were;
+   these are NavLinks and the active one is filled. */
+.w3-navrow {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 18px;
+  gap: 10px;
+  margin-bottom: 16px;
 }
 
-/* ── Tabs ───────────────────────────────────────────────────────────────
+.w3-subnav {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 5px;
+  border: 1px solid rgba(11, 31, 24, 0.08);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.86);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--w3-shadow-sm);
+  scrollbar-width: none;
+}
+
+.w3-subnav::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+.w3-area {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 15px;
+  border-radius: 11px;
+  font-size: 13.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  text-decoration: none;
+  color: var(--w3-ink-2);
+  transition: background 0.18s ease, color 0.18s ease, transform 0.18s ease,
+    box-shadow 0.2s ease;
+}
+
+.w3-area:hover {
+  color: var(--w3-brand);
+  background: rgba(16, 185, 129, 0.1);
+  transform: translateY(-1px);
+}
+
+.w3-area.active {
+  color: #fff;
+  background: var(--w3-fill-gradient);
+  box-shadow: 0 12px 24px -14px rgba(5, 46, 34, 0.95);
+}
+
+/* The small leading glyph, boxed so each area keeps a recognisable anchor. */
+.w3-area-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  font-size: 13px;
+  background: rgba(11, 31, 24, 0.06);
+  transition: background 0.18s ease;
+}
+
+.w3-area.active .w3-area-icon {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+/* ══ Section tabs ══════════════════════════════════════════════════════
    Docked pill strip. The old version leaked a native scrollbar and clipped
-   the last tab, so the strip now hides its scrollbar, snap-aligns each tab
-   and keeps its rounded "dock" shape while it scrolls. */
+   the last tab with no affordance at all — the strip scrolled, but nothing
+   said so. The fades below are driven by measured scroll position, so they
+   appear only on the side that actually has hidden tabs. */
+.w3-tabs-wrap {
+  position: relative;
+  margin-bottom: 20px;
+}
+
 .w3-tabs {
   display: flex;
   gap: 6px;
   overflow-x: auto;
   padding: 7px;
-  margin-bottom: 22px;
-  border: 1px solid rgba(24, 52, 42, 0.09);
+  border: 1px solid rgba(11, 31, 24, 0.08);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.86);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
   box-shadow: var(--w3-shadow-sm);
@@ -158,13 +420,40 @@
   display: none;
 }
 
+.w3-tabs-fade {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  z-index: 2;
+  width: 54px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.22s ease;
+}
+
+.w3-tabs-fade[data-on='true'] {
+  opacity: 1;
+}
+
+.w3-tabs-fade.start {
+  left: 1px;
+  border-radius: 17px 0 0 17px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.97) 12%, rgba(255, 255, 255, 0));
+}
+
+.w3-tabs-fade.end {
+  right: 1px;
+  border-radius: 0 17px 17px 0;
+  background: linear-gradient(270deg, rgba(255, 255, 255, 0.97) 12%, rgba(255, 255, 255, 0));
+}
+
 .w3-tab {
   flex: 0 0 auto;
   scroll-snap-align: center;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
+  gap: 9px;
+  padding: 8px 14px 8px 8px;
   border: 1px solid transparent;
   border-radius: 13px;
   background: transparent;
@@ -178,55 +467,117 @@
 }
 
 .w3-tab:hover:not(.active) {
-  background: rgba(36, 115, 78, 0.1);
-  border-color: rgba(36, 115, 78, 0.18);
+  background: var(--tone-wash, rgba(16, 185, 129, 0.1));
+  border-color: color-mix(in srgb, var(--tone-1, #10b981) 34%, transparent);
   color: var(--w3-brand);
   transform: translateY(-1px);
+}
+
+/* Each tab carries its own hue so a long strip is scannable by colour as
+   well as by label. The SELECTED pill stays on the brand gradient — a
+   rainbow of actives would out-shout the content — but borrows the tab's
+   hue for its glow, which ties the two together. */
+.w3-tab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border-radius: 9px;
+  font-size: 15px;
+  line-height: 1;
+  background: linear-gradient(140deg, var(--tone-1, #34d399) 26%, var(--tone-2, #059669) 26%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  transition: background 0.18s ease, transform 0.18s ease;
+}
+
+.w3-tab:hover:not(.active) .w3-tab-icon {
+  transform: scale(1.06);
 }
 
 .w3-tab.active {
   color: #fff;
   border-color: transparent;
-  background: linear-gradient(135deg, #22c55e 0%, #24734e 58%, #18342a 100%);
-  box-shadow: 0 10px 20px -10px rgba(24, 52, 42, 0.85);
+  background: var(--w3-fill-gradient);
+  box-shadow: var(--w3-glow);
 }
 
-/* ── Cards ─────────────────────────────────────────────────────────── */
+.w3-tab.active .w3-tab-icon {
+  background: rgba(255, 255, 255, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.38);
+}
+
+.w3-tab-label {
+  min-width: 0;
+}
+
+/* ══ Cards ═══════════════════════════════════════════════════════════ */
 .w3-card {
   position: relative;
-  overflow: hidden;
-  margin-bottom: 20px;
-  padding: 24px;
+  margin-bottom: 18px;
+  padding: 22px;
   border: 1px solid var(--w3-line);
-  border-radius: 20px;
+  border-radius: 22px;
   background: #fff;
   box-shadow: var(--w3-shadow-md);
+  transition: border-color 0.24s ease, box-shadow 0.24s ease;
 }
 
-/* Full-bleed spectrum rail across the card top. */
-.w3-card::before {
+.w3-card:hover {
+  border-color: #c9e0d5;
+  box-shadow: var(--w3-shadow-lg);
+}
+
+/* The spectrum rail is a FEATURED-card marker, not a default. It used to sit
+   on every card, so a page of cards read as a stack of identical stripes.
+
+   The card deliberately does NOT set `overflow: hidden` (the old version did):
+   that clips the focus `outline` of anything inside it, so a keyboard user
+   tabbing to a button near a card's edge lost the ring. The rail rounds its
+   own top corners to match the card instead. */
+.w3-card.accent {
+  border-color: rgba(16, 185, 129, 0.24);
+  background:
+    radial-gradient(760px 250px at 0% 0%, rgba(16, 185, 129, 0.14), transparent 70%),
+    radial-gradient(560px 220px at 100% 0%, rgba(99, 102, 241, 0.11), transparent 72%),
+    linear-gradient(180deg, #ffffff 0%, #f9fffc 100%);
+  box-shadow: var(--w3-shadow-lg);
+}
+
+.w3-card.accent::before {
   content: '';
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
-  height: 4px;
+  height: 5px;
+  /* 21px, not 22px: the rail sits inside the 1px border, and the card's own
+     radius is measured from the border's outer edge. */
+  border-radius: 21px 21px 0 0;
   background: linear-gradient(
     90deg,
-    #22c55e 0%,
-    #0d9488 28%,
-    #4f6bed 58%,
-    #8b5cf6 78%,
-    #d46b35 100%
+    #10b981 0%,
+    #06b6d4 26%,
+    #6366f1 54%,
+    #a855f7 76%,
+    #f59e0b 100%
   );
 }
 
-.w3-card.accent {
-  border-color: rgba(34, 197, 94, 0.4);
-  background:
-    radial-gradient(760px 240px at 0% 0%, rgba(34, 197, 94, 0.13), transparent 72%),
-    linear-gradient(180deg, #ffffff 0%, #fbfffc 100%);
-  box-shadow: var(--w3-shadow-lg);
+/* Heading row: title block on the left, actions/meta on the right. */
+.w3-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin-bottom: 14px;
+}
+
+.w3-card-head > :first-child {
+  min-width: 0;
+  flex: 1 1 260px;
 }
 
 .w3-card-title {
@@ -237,26 +588,37 @@
   margin: 0 0 4px;
   font-size: 18px;
   font-weight: 800;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
   color: var(--w3-ink);
 }
 
 .w3-card-sub {
-  margin: 0 0 16px;
+  margin: 0 0 14px;
   font-size: 13.5px;
-  line-height: 1.6;
+  line-height: 1.62;
   color: var(--w3-muted);
 }
 
-/* ── Layout helpers ────────────────────────────────────────────────── */
+.w3-card.accent .w3-card-sub {
+  color: var(--w3-ink-2);
+}
+
+/* ══ Layout helpers ══════════════════════════════════════════════════ */
 .w3-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
 }
 
 .w3-grid.two {
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+/* Denser variant for the oracle read-outs, where the values are short. */
+.w3-grid.compact {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
 }
 
 .w3-row {
@@ -270,23 +632,46 @@
   justify-content: space-between;
 }
 
+.w3-row.end {
+  justify-content: flex-end;
+}
+
 .w3-col {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-/* ── Stats ─────────────────────────────────────────────────────────────
-   Tabular numerals in the UI font: the old Courier stack rendered
-   "3  days" and "Sep 27 , 2026" with distracting gaps. */
+/* ══ Stats ═══════════════════════════════════════════════════════════
+   Tone is carried on the tile as three custom properties, so the rail, the
+   number, the icon chip and the wash can never drift out of agreement.
+   Previously every tile had the same green rail and the same near-black
+   number, which made four different metrics read as one repeated block. */
 .w3-stat {
+  --tone-1: #34d399;
+  --tone-2: #0d9488;
+  --tone-ink: #047857;
+  --tone-wash: rgba(16, 185, 129, 0.1);
+
   position: relative;
   overflow: hidden;
-  padding: 16px 18px 16px 20px;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 15px 16px 15px 19px;
   border: 1px solid var(--w3-line);
-  border-radius: 16px;
-  background: linear-gradient(180deg, #ffffff 0%, #f7faf8 100%);
+  border-radius: 18px;
+  background:
+    radial-gradient(200px 80px at 100% 0%, var(--tone-wash), transparent 72%),
+    linear-gradient(180deg, #ffffff 0%, #f8fcfa 100%);
   box-shadow: var(--w3-shadow-sm);
+  transition: transform 0.2s ease, box-shadow 0.22s ease, border-color 0.22s ease;
+}
+
+.w3-stat:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--tone-1) 40%, var(--w3-line));
+  box-shadow: var(--w3-shadow-md);
 }
 
 .w3-stat::before {
@@ -295,35 +680,307 @@
   top: 0;
   left: 0;
   bottom: 0;
-  width: 4px;
-  background: linear-gradient(180deg, #22c55e, #0d9488);
+  width: 5px;
+  background: linear-gradient(180deg, var(--tone-1), var(--tone-2));
 }
 
+.w3-stat.tone-amber {
+  --tone-1: #fbbf24;
+  --tone-2: #f97316;
+  --tone-ink: #b45309;
+  --tone-wash: rgba(245, 158, 11, 0.14);
+}
+
+.w3-stat.tone-violet {
+  --tone-1: #a78bfa;
+  --tone-2: #8b5cf6;
+  --tone-ink: #6d28d9;
+  --tone-wash: rgba(139, 92, 246, 0.13);
+}
+
+.w3-stat.tone-rose {
+  --tone-1: #fb7185;
+  --tone-2: #f43f5e;
+  --tone-ink: #be123c;
+  --tone-wash: rgba(244, 63, 94, 0.13);
+}
+
+.w3-stat.tone-sky {
+  --tone-1: #22d3ee;
+  --tone-2: #0ea5e9;
+  --tone-ink: #0e7490;
+  --tone-wash: rgba(6, 182, 212, 0.14);
+}
+
+.w3-stat.tone-indigo {
+  --tone-1: #818cf8;
+  --tone-2: #4f46e5;
+  --tone-ink: #4338ca;
+  --tone-wash: rgba(99, 102, 241, 0.13);
+}
+
+.w3-stat-icon {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  font-size: 18px;
+  line-height: 1;
+  background: linear-gradient(140deg, rgba(255, 255, 255, 0.9), var(--tone-wash));
+  border: 1px solid color-mix(in srgb, var(--tone-1) 30%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.w3-stat-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Tabular numerals in the UI font. The old Courier stack rendered
+   "3  days" and "Sep 27 , 2026" with distracting gaps. */
 .w3-stat-value {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
   font-size: 25px;
   font-weight: 800;
-  line-height: 1.15;
-  letter-spacing: -0.01em;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
-  color: var(--w3-ink);
+  color: var(--tone-ink);
 }
 
-.w3-stat-value.green { color: #15803d; }
-.w3-stat-value.amber { color: #b45309; }
-
-.w3-stat-label {
-  margin-top: 3px;
-  font-size: 11.5px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+.w3-stat-unit {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
   color: var(--w3-muted);
 }
 
-/* ── Forms ─────────────────────────────────────────────────────────── */
+.w3-stat-label {
+  margin-top: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--w3-muted);
+}
+
+/* Optional third line — market price, expiry, anything supporting the figure
+   without competing with it. */
+.w3-stat-hint {
+  margin-top: 3px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--w3-faint);
+}
+
+/* Retained so any hand-written markup using the old value-level classes still
+   resolves; the Stat component now tints the whole tile instead. */
+.w3-stat-value.green { color: #047857; }
+.w3-stat-value.amber { color: #b45309; }
+
+/* Compact read-out used for oracle feeds and other short figures. */
+.w3-mini {
+  padding: 12px 14px;
+  border: 1px solid var(--w3-line);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff, #f6fbf8);
+  box-shadow: var(--w3-shadow-xs);
+}
+
+.w3-mini-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--w3-muted);
+}
+
+.w3-mini-value {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  margin-top: 3px;
+  font-size: 17px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: var(--w3-ink);
+}
+
+.w3-mini-value span {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--w3-muted);
+}
+
+/* ══ Identity panel ═════════════════════════════════════════════════
+   The DID, address and public key are the substance of a self-owned
+   identity. A term/definition list inside one framed panel says "these three
+   are the same thing" — as loose label-above-chip rows they read as three
+   unrelated fields. */
+.w3-ident {
+  margin-top: 18px;
+  padding: 16px 18px;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 18px;
+  background:
+    radial-gradient(460px 160px at 100% 0%, rgba(99, 102, 241, 0.1), transparent 72%),
+    linear-gradient(160deg, #fbfdff, #f6faf9);
+}
+
+.w3-ident-head {
+  margin-bottom: 12px;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--w3-ink-2);
+}
+
+.w3-ident-list {
+  margin: 0;
+}
+
+.w3-ident-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 200px) 1fr;
+  align-items: baseline;
+  gap: 6px 16px;
+  padding: 10px 0;
+  border-top: 1px solid var(--w3-line-soft);
+}
+
+.w3-ident-row:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.w3-ident-row dt {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--w3-muted);
+}
+
+.w3-ident-row dd {
+  margin: 0;
+  min-width: 0;
+}
+
+/* Long base64 keys wrap inside their own box rather than widening the card. */
+.w3-ident-key {
+  max-width: 100%;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--w3-line);
+  border-radius: 11px;
+  background: #fff;
+  font-family: var(--w3-mono-font);
+  font-size: 12px;
+  line-height: 1.6;
+  word-break: break-all;
+}
+
+@media (max-width: 640px) {
+  .w3-ident-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ══ Buttons ═════════════════════════════════════════════════════════ */
+.w3-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 20px;
+  border: 1px solid transparent;
+  border-radius: 13px;
+  background: var(--w3-fill-gradient);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: var(--w3-glow);
+  transition: transform 0.16s ease, box-shadow 0.2s ease, background 0.2s ease,
+    color 0.2s ease, border-color 0.2s ease, filter 0.2s ease;
+}
+
+.w3-btn svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.w3-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  filter: saturate(1.12);
+  box-shadow: 0 22px 38px -20px rgba(13, 148, 136, 0.9);
+}
+
+.w3-btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
+.w3-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Secondary emphasis without going grey: used where a second CTA has to
+   compete with the primary but must not look disabled. Indigo, and held to
+   the same 4.5:1 rule as the brand fill — #6366f1 would have been 4.45:1. */
+.w3-btn.accent {
+  background: linear-gradient(135deg, #5b5bf0 0%, #4f46e5 52%, #4338ca 100%);
+  box-shadow: 0 16px 32px -18px rgba(79, 70, 229, 0.95);
+}
+
+.w3-btn.accent:hover:not(:disabled) {
+  box-shadow: 0 22px 38px -20px rgba(79, 70, 229, 0.9);
+}
+
+.w3-btn.ghost {
+  border-color: #cfe0d8;
+  background: #fff;
+  color: var(--w3-ink-2);
+  box-shadow: var(--w3-shadow-sm);
+}
+
+.w3-btn.ghost:hover:not(:disabled) {
+  border-color: rgba(16, 185, 129, 0.55);
+  background: linear-gradient(135deg, #f0fdf6, #ffffff);
+  color: var(--w3-brand);
+  filter: none;
+  box-shadow: 0 16px 28px -18px rgba(5, 46, 34, 0.85);
+}
+
+.w3-btn.danger {
+  background: linear-gradient(135deg, #e11d48 0%, #be123c 55%, #881337 100%);
+  box-shadow: 0 16px 30px -18px rgba(190, 18, 60, 0.9);
+}
+
+.w3-btn.small {
+  padding: 8px 14px;
+  font-size: 13px;
+  border-radius: 11px;
+}
+
+.w3-btn.full {
+  width: 100%;
+}
+
+/* ══ Forms ═══════════════════════════════════════════════════════════ */
 .w3-label {
   display: block;
-  margin-bottom: 5px;
+  margin-bottom: 6px;
   font-size: 12.5px;
   font-weight: 700;
   letter-spacing: 0.01em;
@@ -335,7 +992,7 @@
 .w3-textarea {
   width: 100%;
   padding: 10px 13px;
-  border: 1px solid #cfe0d5;
+  border: 1px solid #cbe0d5;
   border-radius: 12px;
   font-size: 14px;
   color: var(--w3-ink);
@@ -346,30 +1003,38 @@
 
 .w3-input::placeholder,
 .w3-textarea::placeholder {
-  color: #9aada2;
+  color: #9db2a7;
 }
 
 .w3-input:hover,
 .w3-select:hover,
 .w3-textarea:hover {
-  border-color: #b4d4c2;
+  border-color: #a8d0bf;
 }
 
 .w3-input:focus,
 .w3-select:focus,
 .w3-textarea:focus {
-  border-color: var(--w3-brand);
-  background: #fcfffd;
-  box-shadow: 0 0 0 4px rgba(36, 115, 78, 0.16);
+  border-color: var(--w3-brand-2);
+  background: #fbfffd;
+  box-shadow: 0 0 0 4px rgba(13, 148, 136, 0.16);
 }
 
 .w3-textarea {
-  min-height: 96px;
+  min-height: 100px;
   resize: vertical;
+  line-height: 1.6;
 }
 
 .w3-field {
   margin-bottom: 14px;
+}
+
+.w3-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--w3-muted);
 }
 
 .w3-select {
@@ -377,80 +1042,78 @@
   -webkit-appearance: none;
   padding-right: 34px;
   /* Chevron drawn inline so no extra asset or background-position maths. */
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' fill='none' stroke='%2333513f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' fill='none' stroke='%2324483a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 13px center;
 }
 
-/* ── Buttons ───────────────────────────────────────────────────────── */
-.w3-btn {
+/* Number steppers: the native spinners duplicate the +/- controls below and
+   add nothing, and they are the widest-tappable target on the row. */
+.w3-input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.w3-input[type='number']::-webkit-outer-spin-button,
+.w3-input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* ── Quantity stepper ──────────────────────────────────────────────── */
+.w3-stepper {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 10px 20px;
-  border: 1px solid transparent;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid #cbe0d5;
   border-radius: 12px;
-  background: linear-gradient(135deg, #22c55e 0%, #24734e 60%, #18342a 100%);
-  color: #fff;
-  font-size: 14px;
+  background: #fff;
+  box-shadow: var(--w3-shadow-xs);
+}
+
+.w3-stepper button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--w3-brand);
+  font-size: 17px;
   font-weight: 700;
-  text-decoration: none;
-  white-space: nowrap;
+  line-height: 1;
   cursor: pointer;
-  box-shadow: 0 12px 24px -14px rgba(24, 52, 42, 0.95);
-  transition: transform 0.16s ease, box-shadow 0.2s ease, background 0.2s ease,
-    color 0.2s ease, border-color 0.2s ease, filter 0.2s ease;
+  transition: background 0.15s ease, transform 0.15s ease;
 }
 
-.w3-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  filter: saturate(1.1);
-  box-shadow: 0 18px 30px -16px rgba(24, 52, 42, 1);
+.w3-stepper button:hover:not(:disabled) {
+  background: rgba(16, 185, 129, 0.14);
+  transform: scale(1.06);
 }
 
-.w3-btn:active:not(:disabled) {
-  transform: translateY(0) scale(0.98);
-}
-
-.w3-btn:disabled {
-  opacity: 0.5;
+.w3-stepper button:disabled {
+  opacity: 0.35;
   cursor: not-allowed;
   transform: none;
-  box-shadow: none;
 }
 
-.w3-btn.ghost {
-  border-color: #cfe0d5;
-  background: #fff;
-  color: var(--w3-ink-2);
-  box-shadow: var(--w3-shadow-sm);
+.w3-stepper input {
+  width: 44px;
+  padding: 4px 0;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+  color: var(--w3-ink);
+  outline: none;
+  font-variant-numeric: tabular-nums;
 }
 
-.w3-btn.ghost:hover:not(:disabled) {
-  border-color: rgba(36, 115, 78, 0.5);
-  background: linear-gradient(135deg, #f2fbf5, #ffffff);
-  color: var(--w3-brand);
-  filter: none;
-  box-shadow: 0 14px 24px -16px rgba(24, 52, 42, 0.9);
-}
-
-.w3-btn.danger {
-  background: linear-gradient(135deg, #fb7185 0%, #e11d48 60%, #9f1239 100%);
-  box-shadow: 0 12px 24px -14px rgba(225, 29, 72, 0.95);
-}
-
-.w3-btn.small {
-  padding: 7px 14px;
-  font-size: 13px;
-  border-radius: 10px;
-}
-
-.w3-btn.full {
-  width: 100%;
-}
-
-/* ── Badges ────────────────────────────────────────────────────────── */
+/* ══ Badges ══════════════════════════════════════════════════════════ */
 .w3-badge {
   display: inline-flex;
   align-items: center;
@@ -458,7 +1121,7 @@
   padding: 4px 11px;
   border: 1px solid transparent;
   border-radius: 999px;
-  background: #edf3ef;
+  background: #edf3f0;
   color: var(--w3-ink-2);
   font-size: 12px;
   font-weight: 700;
@@ -466,100 +1129,188 @@
   white-space: nowrap;
 }
 
-.w3-badge.green  { background: #dcfce7; border-color: #bbf7d0; color: #15803d; }
-.w3-badge.amber  { background: #fef3c7; border-color: #fde68a; color: #b45309; }
-.w3-badge.red    { background: #ffe4e6; border-color: #fecdd3; color: #be123c; }
-.w3-badge.blue   { background: #e0e7ff; border-color: #c7d2fe; color: #3730a3; }
-.w3-badge.purple { background: #ede9fe; border-color: #ddd6fe; color: #6d28d9; }
+.w3-badge.green  { background: #d9fbe9; border-color: #a7f3c8; color: #047857; }
+.w3-badge.amber  { background: #fef3c7; border-color: #fcd77f; color: #9a4f08; }
+.w3-badge.red    { background: #ffe4e9; border-color: #fda4af; color: #be123c; }
+.w3-badge.blue   { background: #e0e7ff; border-color: #c3cbff; color: #3730a3; }
+.w3-badge.purple { background: #f1e9ff; border-color: #ddc9ff; color: #6d28d9; }
+.w3-badge.teal   { background: #ccfbf1; border-color: #99f6e4; color: #0f766e; }
+.w3-badge.sky    { background: #cffafe; border-color: #a5f3fc; color: #0e7490; }
 
-/* ── Alerts ────────────────────────────────────────────────────────── */
+/* ══ Alerts ═════════════════════════════════════════════════════════
+   Icon + message + optional dismiss on a three-column grid, so the dismiss
+   button cannot be pushed onto its own line by a long message. */
 .w3-alert {
-  padding: 12px 15px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: 11px;
+  padding: 13px 14px;
   margin-bottom: 16px;
   border: 1px solid transparent;
-  border-radius: 14px;
-  font-size: 14px;
-  line-height: 1.5;
+  border-radius: 15px;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.w3-alert-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 900;
+  color: #fff;
+}
+
+.w3-alert-msg {
+  min-width: 0;
+  padding-top: 1px;
+  overflow-wrap: anywhere;
+}
+
+/* Compact dismiss. A full-size ghost button inside a 13px-padded alert read
+   as a second call to action rather than a close control. */
+.w3-alert-close {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin: -1px -3px 0 0;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: currentColor;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.65;
+  transition: opacity 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+
+.w3-alert-close:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.07);
+  transform: scale(1.06);
 }
 
 .w3-alert.ok {
   border-color: #86efac;
-  background: linear-gradient(135deg, #f0fdf4, #f7fee7);
-  color: #15803d;
+  background: linear-gradient(120deg, #ecfdf5 0%, #f0fdfa 60%, #f5fee7 100%);
+  color: #047857;
 }
+
+.w3-alert.ok .w3-alert-icon { background: linear-gradient(140deg, #34d399, #059669); }
 
 .w3-alert.err {
   border-color: #fca5a5;
-  background: linear-gradient(135deg, #fef2f2, #fff1f2);
+  background: linear-gradient(120deg, #fef2f2 0%, #fff1f2 100%);
   color: #b91c1c;
 }
 
+.w3-alert.err .w3-alert-icon { background: linear-gradient(140deg, #fb7185, #e11d48); }
+
 .w3-alert.info {
   border-color: #93c5fd;
-  background: linear-gradient(135deg, #eff6ff, #eef2ff);
+  background: linear-gradient(120deg, #eff6ff 0%, #eef2ff 100%);
   color: #1d4ed8;
 }
 
-/* ── Monospace / copyable values ───────────────────────────────────── */
+.w3-alert.info .w3-alert-icon { background: linear-gradient(140deg, #60a5fa, #4f46e5); }
+
+/* ══ Monospace / copyable values ════════════════════════════════════ */
 .w3-mono {
   font-family: var(--w3-mono-font);
   font-size: 13px;
+  line-height: 1.6;
   color: var(--w3-ink-2);
   word-break: break-word;
 }
 
 .w3-hash {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   max-width: 100%;
-  padding: 3px 9px;
-  border: 1px solid #c7d2fe;
-  border-radius: 8px;
-  background: #eef2ff;
+  padding: 4px 10px;
+  border: 1px solid #c3cbff;
+  border-radius: 9px;
+  background: linear-gradient(140deg, #f5f7ff, #eef2ff);
   color: #3730a3;
   font-family: var(--w3-mono-font);
   font-size: 12px;
   text-align: left;
   cursor: pointer;
   word-break: break-all;
-  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease,
+    transform 0.16s ease;
 }
 
 .w3-hash:hover {
   border-color: #a5b4fc;
-  background: #e0e7ff;
+  background: linear-gradient(140deg, #eef2ff, #e0e7ff);
   color: #312e81;
+  transform: translateY(-1px);
 }
 
-/* ── Tables ────────────────────────────────────────────────────────── */
+.w3-hash-text {
+  min-width: 0;
+}
+
+.w3-hash-icon {
+  flex: 0 0 auto;
+  opacity: 0.6;
+  font-size: 11px;
+}
+
+/* Confirmed state: the chip turns emerald so the result of the click is
+   visible at a glance instead of only in the tooltip. */
+.w3-hash.copied {
+  border-color: #86efac;
+  background: linear-gradient(140deg, #ecfdf5, #d1fae5);
+  color: #047857;
+}
+
+.w3-hash.copied .w3-hash-icon {
+  opacity: 1;
+}
+
+/* ══ Tables ══════════════════════════════════════════════════════════ */
 .w3-table-wrap {
   overflow-x: auto;
   border: 1px solid var(--w3-line);
-  border-radius: 14px;
+  border-radius: 15px;
   background: #fff;
+  box-shadow: var(--w3-shadow-xs);
 }
 
 .w3-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 14px;
+  font-size: 13.5px;
 }
 
 .w3-table th {
-  padding: 10px 12px;
-  border-bottom: 2px solid var(--w3-line);
-  background: linear-gradient(180deg, #f7faf8, #eef5f0);
+  padding: 11px 13px;
+  border-bottom: 1px solid rgba(16, 185, 129, 0.28);
+  background: linear-gradient(180deg, #f3faf6, #e9f3ed);
   color: var(--w3-ink-2);
-  font-size: 11.5px;
+  font-size: 11px;
   font-weight: 800;
   text-align: left;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   white-space: nowrap;
 }
 
 .w3-table td {
-  padding: 11px 12px;
-  border-bottom: 1px solid #eef3f0;
+  padding: 12px 13px;
+  border-bottom: 1px solid var(--w3-line-soft);
   color: var(--w3-ink-2);
   vertical-align: top;
 }
@@ -573,40 +1324,82 @@
 }
 
 .w3-table tbody tr:hover {
-  background: #f6fbf8;
+  background: linear-gradient(90deg, #f4fbf7, #fbfefd);
 }
 
-/* ── Empty state & spinner ─────────────────────────────────────────── */
+/* Right-aligned numeric column, used for quantities and totals. */
+.w3-table td.num,
+.w3-table th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ══ Empty state & spinner ══════════════════════════════════════════ */
 .w3-empty {
-  padding: 40px 18px;
-  border: 1px dashed #c9ded2;
-  border-radius: 18px;
-  background: linear-gradient(180deg, #fbfdfb, #f5faf7);
+  padding: 36px 22px;
+  border: 1px dashed #c6ded1;
+  border-radius: 20px;
+  background:
+    radial-gradient(420px 150px at 50% 0%, rgba(16, 185, 129, 0.11), transparent 72%),
+    linear-gradient(180deg, #fbfffd, #f4faf7);
   color: var(--w3-muted);
-  font-size: 14px;
+  font-size: 13.5px;
+  line-height: 1.6;
   text-align: center;
 }
 
 .w3-empty-icon {
-  margin-bottom: 8px;
-  font-size: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 58px;
+  height: 58px;
+  margin-bottom: 13px;
+  border: 1px solid #b6ecd3;
+  border-radius: 19px;
+  font-size: 27px;
+  background: linear-gradient(150deg, #ffffff, #eafaf3);
+  box-shadow: 0 14px 26px -18px rgba(5, 150, 105, 0.8);
+}
+
+.w3-empty-title {
+  margin-bottom: 5px;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--w3-ink);
+}
+
+.w3-empty-text {
+  max-width: 46ch;
+  margin: 0 auto;
+}
+
+.w3-empty-action {
+  margin-top: 15px;
 }
 
 .w3-spinner {
-  width: 26px;
-  height: 26px;
-  margin: 28px auto;
-  border: 3px solid #d9e8df;
-  border-top-color: var(--w3-brand);
+  width: 30px;
+  height: 30px;
+  margin: 40px auto;
+  border: 3px solid #d7ebe1;
+  /* Two literal fallbacks, because a panel's loading spinner renders on its own
+     — before its `.w3-page` ancestor exists — and an unresolved var() would
+     drop the border-top colour and leave a grey ring that never appears to
+     spin. It is also why panels must NOT be wrapped in a second `.w3-page`:
+     that carries `min-height: 100vh` and would blow a 30px spinner up into a
+     full-viewport block. */
+  border-top-color: var(--w3-brand-2, #0d9488);
   border-radius: 50%;
-  animation: w3-spin 0.8s linear infinite;
+  animation: w3-spin 0.75s linear infinite;
 }
 
 @keyframes w3-spin {
   to { transform: rotate(360deg); }
 }
 
-/* ── Timeline ─────────────────────────────────────────────────────── */
+/* ══ Timeline ═══════════════════════════════════════════════════════ */
 .w3-timeline {
   margin: 0;
   padding: 0;
@@ -616,8 +1409,8 @@
 .w3-timeline-item {
   position: relative;
   margin-left: 8px;
-  padding: 0 0 20px 28px;
-  border-left: 2px solid #bbf7d0;
+  padding: 0 0 22px 28px;
+  border-left: 2px solid #c9ecdc;
 }
 
 .w3-timeline-item:last-child {
@@ -625,6 +1418,8 @@
   border-left-color: transparent;
 }
 
+/* Dots step through the brand spectrum down the chain, so a long history
+   reads as a progression instead of one repeated marker. */
 .w3-timeline-item::before {
   content: '';
   position: absolute;
@@ -634,9 +1429,14 @@
   height: 14px;
   border: 2px solid #fff;
   border-radius: 50%;
-  background: linear-gradient(135deg, #22c55e, #0d9488);
-  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.2);
+  background: linear-gradient(140deg, #34d399, #0d9488);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
 }
+
+.w3-timeline-item:nth-child(5n + 2)::before { background: linear-gradient(140deg, #22d3ee, #0ea5e9); }
+.w3-timeline-item:nth-child(5n + 3)::before { background: linear-gradient(140deg, #a78bfa, #6366f1); }
+.w3-timeline-item:nth-child(5n + 4)::before { background: linear-gradient(140deg, #fbbf24, #f97316); }
+.w3-timeline-item:nth-child(5n + 5)::before { background: linear-gradient(140deg, #fb7185, #e11d48); }
 
 .w3-timeline-title {
   font-size: 14px;
@@ -655,35 +1455,50 @@
   color: var(--w3-ink-2);
 }
 
-/* ── Progress ─────────────────────────────────────────────────────── */
+/* ══ Progress ═══════════════════════════════════════════════════════ */
 .w3-progress {
   height: 9px;
   overflow: hidden;
   border-radius: 999px;
-  background: #e6efe9;
+  background: #e2efe8;
+  box-shadow: inset 0 1px 2px rgba(11, 31, 24, 0.08);
 }
 
 .w3-progress-bar {
   height: 100%;
   border-radius: 999px;
-  background: linear-gradient(90deg, #22c55e, #0d9488 60%, #4f6bed);
-  transition: width 0.45s ease;
+  background: linear-gradient(90deg, #10b981, #0d9488 55%, #6366f1);
+  box-shadow: 0 0 12px -2px rgba(13, 148, 136, 0.7);
+  transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* ── NFT cards ─────────────────────────────────────────────────────── */
+/* ══ NFT cards ══════════════════════════════════════════════════════
+   The card fill is generated from a hash, so the hue — and with it the
+   luminance — is arbitrary: a green at the same lightness that reads fine in
+   red measures ~2:1 against white. The name/description/serial sit on the
+   bottom half, so that half gets a fixed dark scrim and the top stays
+   colourful. The emoji above the scrim is an image, not text. */
 .w3-nft {
   position: relative;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  min-height: 152px;
+  min-height: 158px;
   overflow: hidden;
   padding: 16px;
   border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 16px;
+  border-radius: 18px;
   color: #fff;
   box-shadow: var(--w3-shadow-md);
   transition: transform 0.2s ease, box-shadow 0.24s ease;
+}
+
+.w3-nft::after {
+  content: '';
+  position: absolute;
+  inset: 30% 0 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(6, 20, 16, 0) 0%, rgba(6, 20, 16, 0.55) 46%, rgba(6, 20, 16, 0.86) 100%);
 }
 
 .w3-nft:hover {
@@ -691,12 +1506,20 @@
   box-shadow: var(--w3-shadow-lg);
 }
 
+/* Lift the text block above the scrim. `:not(.w3-nft-emoji)` matters — a bare
+   `> *` rule would also re-declare `position` on the emoji and knock it out of
+   its absolute corner placement. */
+.w3-nft > *:not(.w3-nft-emoji) {
+  position: relative;
+  z-index: 1;
+}
+
 .w3-nft-emoji {
   position: absolute;
-  top: 10px;
+  top: 12px;
   right: 14px;
   font-size: 34px;
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+  filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.35));
 }
 
 .w3-nft-name {
@@ -707,7 +1530,8 @@
 .w3-nft-desc {
   margin-top: 4px;
   font-size: 12px;
-  opacity: 0.92;
+  line-height: 1.5;
+  opacity: 0.94;
 }
 
 .w3-nft-serial {
@@ -717,13 +1541,13 @@
   opacity: 0.85;
 }
 
-/* ── Achievements ─────────────────────────────────────────────────── */
+/* ══ Achievements ═══════════════════════════════════════════════════ */
 .w3-ach {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 11px 0;
-  border-bottom: 1px solid #eef3f0;
+  gap: 13px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--w3-line-soft);
 }
 
 .w3-ach:last-child {
@@ -731,13 +1555,21 @@
 }
 
 .w3-ach-icon {
-  width: 30px;
-  font-size: 22px;
-  text-align: center;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  font-size: 19px;
+  background: linear-gradient(150deg, #ffffff, #eef8f3);
+  border: 1px solid var(--w3-line);
+  box-shadow: var(--w3-shadow-xs);
 }
 
 .w3-ach-body {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -749,55 +1581,72 @@
 
 .w3-ach-desc {
   font-size: 12px;
+  line-height: 1.5;
   color: var(--w3-muted);
 }
 
-/* ── Marketplace listings ──────────────────────────────────────────── */
+/* ══ Marketplace listings ═══════════════════════════════════════════ */
 .w3-listing {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 9px;
   padding: 18px;
   border: 1px solid var(--w3-line);
-  border-radius: 18px;
-  background: linear-gradient(180deg, #ffffff 0%, #fbfdfb 100%);
+  border-radius: 20px;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdfc 100%);
   box-shadow: var(--w3-shadow-sm);
   transition: transform 0.2s ease, box-shadow 0.24s ease, border-color 0.24s ease;
 }
 
 .w3-listing:hover {
   transform: translateY(-3px);
-  border-color: rgba(34, 197, 94, 0.5);
-  box-shadow: 0 28px 52px -32px rgba(16, 36, 28, 0.75);
+  border-color: rgba(16, 185, 129, 0.45);
+  box-shadow: 0 30px 54px -34px rgba(11, 31, 24, 0.8);
 }
 
 .w3-listing-brand {
-  font-size: 11.5px;
-  font-weight: 700;
+  font-size: 11px;
+  font-weight: 800;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--w3-muted);
+  letter-spacing: 0.08em;
+  color: var(--w3-brand);
 }
 
 .w3-listing-title {
-  font-size: 16px;
+  font-size: 16.5px;
   font-weight: 800;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
   color: var(--w3-ink);
 }
 
 .w3-listing-desc {
-  flex: 1;
+  flex: 1 1 auto;
   font-size: 13px;
-  line-height: 1.55;
+  line-height: 1.6;
   color: var(--w3-muted);
 }
 
+.w3-listing-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+  padding-top: 13px;
+  border-top: 1px solid var(--w3-line-soft);
+}
+
 .w3-price {
-  font-size: 21px;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 22px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
-  color: #15803d;
+  letter-spacing: -0.02em;
+  color: #047857;
 }
 
 .w3-price small {
@@ -806,34 +1655,172 @@
   color: var(--w3-muted);
 }
 
-/* ── Governance tally ──────────────────────────────────────────────── */
-.w3-tally {
+/* ── Loyalty-code block ──────────────────────────────────────────────
+   A dashed "ticket" so the promo field is visibly a coupon attached to the
+   order below it, rather than a bare label floating on the page. */
+.w3-coupon {
   display: flex;
-  height: 11px;
+  align-items: flex-start;
+  gap: 16px;
+  border-style: dashed;
+  border-color: rgba(16, 185, 129, 0.4);
+  background:
+    radial-gradient(420px 150px at 0% 0%, rgba(251, 191, 36, 0.12), transparent 70%),
+    linear-gradient(120deg, #fbfffd, #f4fdf9);
+}
+
+.w3-coupon-icon {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border: 1px solid #a7f3c8;
+  border-radius: 15px;
+  font-size: 22px;
+  background: linear-gradient(150deg, #ffffff, #ecfdf5);
+  box-shadow: 0 12px 22px -16px rgba(5, 150, 105, 0.9);
+}
+
+.w3-coupon-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.w3-coupon-body .w3-card-sub {
+  margin-bottom: 10px;
+}
+
+@media (max-width: 520px) {
+  .w3-coupon {
+    flex-direction: column;
+    gap: 12px;
+  }
+}
+
+/* ══ Governance: proposals ══════════════════════════════════════════
+   Status is carried by a full-height rail on the card's leading edge, so a
+   wall of proposals can be triaged without reading a single word.
+
+   The rail rounds its own outer corners rather than the card being given
+   `overflow: hidden` — that would clip the focus ring of the vote buttons
+   near the card's leading edge. */
+.w3-proposal {
+  padding-left: 24px;
+}
+
+.w3-proposal::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 6px;
+  border-radius: 21px 0 0 21px;
+  background: linear-gradient(180deg, #94a3b8, #64748b);
+}
+
+.w3-proposal.status-active::before {
+  background: linear-gradient(180deg, #34d399, #0d9488);
+  box-shadow: 0 0 18px -2px rgba(13, 148, 136, 0.8);
+}
+
+.w3-proposal.status-passed::before {
+  background: linear-gradient(180deg, #a78bfa, #6366f1);
+}
+
+.w3-proposal.status-rejected::before {
+  background: linear-gradient(180deg, #fb7185, #e11d48);
+}
+
+/* The parameter a passed proposal would rewrite, shown as before → after. */
+.w3-param {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 8px 13px;
+  border: 1px solid #ddd6fe;
+  border-radius: 12px;
+  background: linear-gradient(120deg, #f5f3ff, #eef2ff);
+  font-size: 12.5px;
+  color: #5b21b6;
+}
+
+.w3-param b {
+  font-family: var(--w3-mono-font);
+  font-size: 12px;
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.w3-param i {
+  font-style: normal;
+  opacity: 0.7;
+}
+
+/* For / against tally. The track is the "against" colour and the fill is the
+   "for" share, so the split is readable without counting. */
+.w3-vote-bar {
+  display: flex;
+  height: 13px;
   overflow: hidden;
   border-radius: 999px;
   background: linear-gradient(90deg, #ffe4e6, #fecdd3);
+  box-shadow: inset 0 1px 3px rgba(11, 31, 24, 0.12);
 }
 
-.w3-tally-for {
+.w3-vote-for {
   height: 100%;
-  background: linear-gradient(90deg, #22c55e, #10b981);
+  border-radius: 999px;
+  background: linear-gradient(90deg, #34d399, #0d9488);
+  box-shadow: 0 0 14px -2px rgba(13, 148, 136, 0.85);
+  transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.w3-tally-labels {
+.w3-vote-legend {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 6px 12px;
-  margin-top: 6px;
-  font-size: 12px;
+  gap: 6px 14px;
+  margin-top: 8px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--w3-muted);
 }
 
-/* ── Public verification page ─────────────────────────────────────────
-   The hero used to float on an empty page; it now lives in a real card so
-   the form has a surface, and the code field + button read as one control. */
+.w3-vote-legend .for {
+  color: #047857;
+  font-weight: 800;
+}
+
+.w3-vote-legend .against {
+  color: #be123c;
+  font-weight: 800;
+}
+
+.w3-vote-legend .quorum {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  background: #eef2f0;
+  color: var(--w3-muted);
+}
+
+.w3-vote-legend .quorum.met {
+  background: #d9fbe9;
+  color: #047857;
+}
+
+/* ══ Public verification page ═══════════════════════════════════════ */
 .w3-verify-shell {
   position: relative;
   overflow: hidden;
@@ -855,7 +1842,7 @@
   border-radius: 50%;
   transform: translateX(-50%);
   pointer-events: none;
-  background: radial-gradient(circle, rgba(34, 197, 94, 0.18), transparent 70%);
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.18), transparent 70%);
 }
 
 .w3-verify-hero {
@@ -869,14 +1856,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 72px;
-  height: 72px;
-  margin-bottom: 12px;
+  width: 74px;
+  height: 74px;
+  margin-bottom: 13px;
   border: 1px solid rgba(255, 255, 255, 0.4);
-  border-radius: 22px;
+  border-radius: 24px;
   font-size: 34px;
-  background: linear-gradient(135deg, #22c55e, #0d9488);
-  box-shadow: 0 18px 34px -18px rgba(13, 148, 136, 0.9);
+  background: linear-gradient(140deg, #10b981, #0d9488 70%, #0f766e);
+  box-shadow: 0 20px 36px -20px rgba(13, 148, 136, 0.95);
 }
 
 .w3-verify-badge {
@@ -892,7 +1879,7 @@
 
 .w3-verify-badge.good {
   border: 2px solid #86efac;
-  background: linear-gradient(135deg, #dcfce7, #bbf7d0);
+  background: linear-gradient(135deg, #dcfce7, #a7f3d0);
   color: #166534;
   box-shadow: 0 14px 30px -18px rgba(22, 101, 52, 0.9);
 }
@@ -917,7 +1904,7 @@
   flex: 1 1 220px;
   min-width: 0;
   padding: 14px 16px;
-  border: 2px solid #cfe0d5;
+  border: 2px solid #cbe0d5;
   border-radius: 14px;
   background: #fff;
   color: var(--w3-ink);
@@ -936,11 +1923,11 @@
 }
 
 .w3-code-input:focus {
-  border-color: var(--w3-brand);
-  box-shadow: 0 0 0 4px rgba(36, 115, 78, 0.16);
+  border-color: var(--w3-brand-2);
+  box-shadow: 0 0 0 4px rgba(13, 148, 136, 0.16);
 }
 
-/* ── Overflow guards ───────────────────────────────────────────────────
+/* ══ Overflow guards ═════════════════════════════════════════════════
    Long unspaced tokens — batch codes, tx hashes, a user-entered product
    title like "NNNNNNNN…" — used to widen their whole grid column and spill
    the page sideways, because grid/flex items default to min-width:auto and
@@ -955,7 +1942,10 @@
 .w3-stat,
 .w3-card,
 .w3-nft,
-.w3-ach-body {
+.w3-ach-body,
+.w3-mini,
+.w3-stat-body,
+.w3-hero-body {
   min-width: 0;
 }
 
@@ -973,7 +1963,9 @@
 .w3-stat-value,
 .w3-price,
 .w3-verify-hero,
-.w3-empty {
+.w3-empty,
+.w3-param,
+.w3-mini-value {
   overflow-wrap: anywhere;
 }
 
@@ -982,20 +1974,23 @@
   overflow-wrap: anywhere;
 }
 
-/* ── Tab panel ────────────────────────────────────────────────────── */
-/* Programmatically focusable for screen readers, but never a visible
-   focus ring — the tab itself already shows the selection. */
+/* ══ Tab panel ══════════════════════════════════════════════════════
+   Programmatically focusable for screen readers, but never a visible focus
+   ring — the tab itself already shows the selection. */
 .w3-tabpanel:focus {
   outline: none;
 }
 
-/* ── Focus visibility (keyboard only) ─────────────────────────────── */
-.w3-page :is(.w3-tab, .w3-btn, .w3-hash, .w3-input, .w3-select, .w3-textarea, .w3-code-input):focus-visible {
+/* ══ Focus visibility (keyboard only) ════════════════════════════════ */
+.w3-page :is(
+  .w3-tab, .w3-area, .w3-btn, .w3-hash, .w3-input, .w3-select,
+  .w3-textarea, .w3-code-input, .w3-stepper button
+):focus-visible {
   outline: 3px solid var(--w3-focus);
   outline-offset: 2px;
 }
 
-/* Screen-reader-only helper for labels that the design carries visually. */
+/* Screen-reader-only helper for labels the design carries visually. */
 .w3-sr-only {
   position: absolute;
   width: 1px;
@@ -1007,21 +2002,61 @@
   border: 0;
 }
 
-/* ── Responsive ───────────────────────────────────────────────────── */
+/* ══ Responsive ══════════════════════════════════════════════════════ */
+@media (max-width: 1040px) {
+  .w3-hero-mark {
+    right: 20px;
+    width: 108px;
+    height: 108px;
+    font-size: 50px;
+  }
+}
+
 @media (max-width: 900px) {
+  .w3-hero {
+    padding: 22px 20px 24px;
+    border-radius: 22px;
+  }
+
+  .w3-hero-mark {
+    display: none;
+  }
+
+  /* With the mark gone the copy can reach the bright end of the gradient, so
+     the contrast scrim is extended across the full width here. */
+  .w3-hero,
   .w3-header {
-    padding: 24px 22px;
+    background-image:
+      linear-gradient(100deg, rgba(2, 26, 20, 0.93) 0%, rgba(2, 26, 20, 0.88) 55%, rgba(2, 26, 20, 0.72) 100%),
+      radial-gradient(680px 300px at 88% -34%, var(--hero-bloom-1, rgba(251, 191, 36, 0.42)), transparent 66%),
+      radial-gradient(560px 320px at 4% 118%, var(--hero-bloom-2, rgba(167, 139, 250, 0.44)), transparent 66%),
+      radial-gradient(460px 250px at 60% 120%, var(--hero-bloom-3, rgba(244, 63, 94, 0.26)), transparent 68%),
+      linear-gradient(118deg, var(--hero-a, #04241a) 0%, var(--hero-b, #07553f) 32%, var(--hero-c, #0a7a5f) 60%, var(--hero-d, #0c9184) 82%, var(--hero-e, #14a9a0) 100%);
   }
 }
 
 @media (max-width: 768px) {
   .w3-container {
-    padding: 18px 14px 128px;
+    padding: 16px 14px 120px;
   }
 
+  .w3-hero,
   .w3-header {
-    padding: 20px 18px;
+    padding: 20px 18px 22px;
     border-radius: 20px;
+  }
+
+  .w3-hero-eyebrow {
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+  }
+
+  .w3-navrow {
+    gap: 10px;
+  }
+
+  .w3-subnav {
+    width: 100%;
   }
 
   .w3-card {
@@ -1029,18 +2064,49 @@
     border-radius: 18px;
   }
 
+  .w3-proposal {
+    padding-left: 20px;
+  }
+
   .w3-grid,
-  .w3-grid.two {
+  .w3-grid.two,
+  .w3-grid.compact {
     grid-template-columns: 1fr;
   }
 
+  /* Two-up on a phone: a 1-column stat wall turns a short panel into a long
+     scroll with nothing to compare. */
+  .w3-grid.compact {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  }
+
+  .w3-stat {
+    padding: 13px 13px 13px 17px;
+  }
+
+  .w3-stat-icon {
+    width: 34px;
+    height: 34px;
+    font-size: 16px;
+  }
+
   .w3-stat-value {
-    font-size: 22px;
+    font-size: 21px;
   }
 
   .w3-tab {
-    padding: 9px 13px;
+    padding: 7px 12px 7px 7px;
     font-size: 13px;
+  }
+
+  .w3-tab-icon {
+    width: 26px;
+    height: 26px;
+    font-size: 14px;
+  }
+
+  .w3-tabs-fade {
+    width: 34px;
   }
 
   .w3-verify-hero {
@@ -1061,7 +2127,23 @@
   }
 }
 
-/* ── Reduced motion ───────────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .w3-listing-foot {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .w3-listing-foot .w3-btn {
+    width: 100%;
+  }
+
+  .w3-stepper {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+/* ══ Reduced motion ═════════════════════════════════════════════════ */
 @media (prefers-reduced-motion: reduce) {
   .w3-page *,
   .w3-page *::before,
@@ -1072,7 +2154,13 @@
     scroll-behavior: auto !important;
   }
 
-  .w3-page {
-    background-attachment: scroll;
+  .w3-stat:hover,
+  .w3-listing:hover,
+  .w3-nft:hover,
+  .w3-tab:hover:not(.active),
+  .w3-area:hover,
+  .w3-btn:hover:not(:disabled),
+  .w3-btn:active:not(:disabled) {
+    transform: none;
   }
 }

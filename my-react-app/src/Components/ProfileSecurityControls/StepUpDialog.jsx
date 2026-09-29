@@ -64,7 +64,23 @@ export default function StepUpDialog({ onClose, onVerified, needsTotp, reason })
           {reason || 'For your protection, security changes need your password before they can be made.'}
         </p>
 
-        <form onSubmit={submit} noValidate>
+        {/* NOT a <form>, and that is load-bearing.
+            This dialog is rendered by ProfileSecurityControls, which lives
+            inside ProfilePage's <form className="profile-form">. The HTML parser
+            drops the start tag of a nested <form>, so this onSubmit could never
+            fire: `type="submit"` on the Confirm button fell through to the OUTER
+            form and saved the profile instead of verifying the password. That
+            silently disarmed the step-up gate on every security change.
+            A div plus an explicit handler does the same job with no second form
+            in the tree; the keydown handler restores Enter-to-submit. */}
+        <div
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' || e.target.tagName === 'TEXTAREA') return;
+            e.preventDefault();
+            e.stopPropagation();
+            submit(e);
+          }}
+        >
           {error && <p className="psud__error" role="alert">{error}</p>}
 
           <label className="psud__label" htmlFor="psud-pw">Current password</label>
@@ -96,11 +112,16 @@ export default function StepUpDialog({ onClose, onVerified, needsTotp, reason })
 
           <div className="psud__actions">
             <button type="button" className="psud__btn psud__btn--ghost" onClick={onClose} disabled={busy}>Cancel</button>
-            <button type="submit" className="psud__btn psud__btn--primary" disabled={busy}>
+            <button
+              type="button"
+              className="psud__btn psud__btn--primary"
+              disabled={busy}
+              onClick={submit}
+            >
               {busy ? 'Confirming…' : 'Confirm'}
             </button>
           </div>
-        </form>
+        </div>
 
         <p className="psud__note">Your confirmation is valid for 5 minutes and only for this device.</p>
       </div>

@@ -7,6 +7,11 @@ const Assessment = require('../models/Assessment');
 const router = express.Router();
 router.use(protect);
 
+// Dismissed rows are only kept so the backfill below can tell "already seen"
+// from "never existed". Past this window the distinction no longer matters, so
+// the storage is reclaimed instead of growing forever.
+const DISMISSED_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
 // @route   GET /api/notifications
 // @desc    Current user's notifications, newest first. Self-healing: every
 //          Priority assessment is guaranteed a matching unread severe-flag
@@ -18,13 +23,16 @@ router.get('/', async (req, res) => {
     if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
     const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
 
-    // Backfill missing flags (idempotent — only creates what is absent)
+    // Backfill missing flags (idempotent — only creates what is absent).
+    // Coverage counts EVERY severe-flag row for the user, read or dismissed:
+    // a notice the member has already read (or thrown away) must not be
+    // recreated as unread on the next poll.
     try {
       const [priorityItems, existingFlags] = await Promise.all([
         Assessment.find({ user: req.user._id, priority: 'Priority' })
           .select('_id flagReasons flaggedAt createdAt')
           .lean(),
-        UserNotification.find({ user: req.user._id, type: 'severe-flag', read: false })
+        UserNotification.find({ user: req.user._id, type: 'severe-flag' })
           .select('assessmentId')
           .lean(),
       ]);
@@ -49,11 +57,11 @@ router.get('/', async (req, res) => {
     }
 
     const [items, unreadCount] = await Promise.all([
-      UserNotification.find({ user: req.user._id })
+      UserNotification.find({ user: req.user._id, dismissed: false })
         .sort({ createdAt: -1 })
         .limit(limit)
         .lean(),
-      UserNotification.countDocuments({ user: req.user._id, read: false }),
+      UserNotification.countDocuments({ user: req.user._id, read: false, dismissed: false }),
     ]);
     res.json({ notifications: items, unreadCount });
   } catch (error) {
@@ -70,7 +78,7 @@ router.patch('/:id/read', async (req, res) => {
     if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
     if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid notification.' });
     const item = await UserNotification.findOneAndUpdate(
-      { _id: req.params.id, user: req.user._id },
+      { _id: req.params.id, user: req.user._id, dismissed: false },
       { $set: { read: true } },
       { new: true }
     ).lean();
@@ -88,7 +96,10 @@ router.patch('/:id/read', async (req, res) => {
 router.post('/read-all', async (req, res) => {
   try {
     if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
-    await UserNotification.updateMany({ user: req.user._id, read: false }, { $set: { read: true } });
+    await UserNotification.updateMany(
+      { user: req.user._id, read: false, dismissed: false },
+      { $set: { read: true } }
+    );
     res.json({ message: 'All notifications marked as read.' });
   } catch (error) {
     console.error('[notifications POST /read-all]', error.message);
@@ -96,14 +107,45 @@ router.post('/read-all', async (req, res) => {
   }
 });
 
+// @route   POST /api/notifications/delete-read
+// @desc    Clear every notification the current user has already read. Unread
+//          ones are left alone so they stay actionable in the bell.
+// @access  Private
+router.post('/delete-read', async (req, res) => {
+  try {
+    if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
+    const cleared = await UserNotification.updateMany(
+      { user: req.user._id, read: true, dismissed: false },
+      { $set: { dismissed: true } }
+    );
+    // Reclaim storage now that the read rows are gone from the inbox.
+    await UserNotification.deleteMany({
+      user: req.user._id,
+      dismissed: true,
+      createdAt: { $lt: new Date(Date.now() - DISMISSED_RETENTION_MS) },
+    });
+    res.json({
+      message: 'Read notifications cleared.',
+      deletedCount: cleared.modifiedCount || 0,
+    });
+  } catch (error) {
+    console.error('[notifications POST /delete-read]', error.message);
+    res.status(500).json({ message: 'Could not clear read notifications.' });
+  }
+});
+
 // @route   DELETE /api/notifications/:id
-// @desc    Delete one notification (owner only)
+// @desc    Dismiss one notification (owner only)
 // @access  Private
 router.delete('/:id', async (req, res) => {
   try {
     if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
     if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid notification.' });
-    const item = await UserNotification.findOneAndDelete({ _id: req.params.id, user: req.user._id });
+    const item = await UserNotification.findOneAndUpdate(
+      { _id: req.params.id, user: req.user._id, dismissed: false },
+      { $set: { dismissed: true } },
+      { new: true }
+    ).lean();
     if (!item) return res.status(404).json({ message: 'Notification not found.' });
     res.json({ message: 'Notification deleted.' });
   } catch (error) {

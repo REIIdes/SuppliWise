@@ -186,6 +186,34 @@ test('achievement catalog metrics are unique and documented', () => {
   assert.equal(new Set(kinds).size, kinds.length);
 });
 
+test('every achievement metric is one collectStats actually publishes', () => {
+  // collectStats used to publish `streak` while the catalog read `checkinStreak`
+  // for week-warrior / monthly-master / year-hero, so those three resolved to
+  // undefined → 0 and were permanently unattainable at any streak length. This
+  // asserts the shape of the stats object the route builds, so a rename on
+  // either side fails here instead of silently disabling an achievement.
+  const stats = {
+    userId: '507f1f77bcf86cd799439011',
+    streak: 7,
+    checkinStreak: 7,
+    checkinDays: 7,
+    assessments: 1, dataShares: 0, daoVotes: 0, ordersCompleted: 0,
+    trials: 0, bookings: 0, staked: 0, balance: 0, earnedTotal: 0,
+    trackedStreak: 0, today: '2026-01-07', checkinRows: [],
+  };
+  for (const a of ACHIEVEMENTS) {
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(stats, a.metric),
+      `achievement "${a.kind}" reads metric "${a.metric}", which collectStats does not publish`
+    );
+    assert.equal(typeof stats[a.metric], 'number', `metric "${a.metric}" must be numeric`);
+  }
+  // And the streak-driven ones really do unlock from the published field.
+  const kinds = eligibleAchievements(stats, []).map((a) => a.kind);
+  assert.ok(kinds.includes('week-warrior'), 'a 7-day streak must unlock week-warrior');
+  assert.ok(!kinds.includes('year-hero'), 'but not year-hero');
+});
+
 // ── Escrow economics ───────────────────────────────────────────────────────
 test('escrow split takes the protocol fee and pays out the remainder', () => {
   const { fee, proceeds } = escrowSplit(100, 3);
@@ -215,22 +243,115 @@ test('juror majority decides the dispute', () => {
 });
 
 test('non-juror votes are ignored', () => {
+  // The point of this test is that an address which was NOT appointed to the
+  // panel contributes nothing to the tally — a bystander must not be able to
+  // swing a verdict. A three-juror panel is used so the quorum (a majority of
+  // the panel) is 2 and a single appointed vote is genuinely not yet decisive.
   const verdict = disputeOutcome(
     [
       { juror: '0xintruder', choice: 'buyer' },
       { juror: '0xj1', choice: 'seller' },
     ],
-    ['0xj1', '0xj2']
+    ['0xj1', '0xj2', '0xj3']
   );
-  assert.equal(verdict.buyer, 0);
+  assert.equal(verdict.buyer, 0, 'the intruder vote must not be counted for buyer');
+  assert.equal(verdict.cast, 1, 'only the appointed juror vote is counted');
   assert.equal(verdict.outcome, 'seller');
-  assert.equal(verdict.complete, false); // 0xj2 has not voted yet
+  assert.equal(verdict.complete, false); // quorum of 2 not yet reached
 });
 
-test('open jury (no appointed jurors) resolves on first clear verdict', () => {
-  const verdict = disputeOutcome([{ juror: '0xany', choice: 'seller' }], []);
-  assert.equal(verdict.outcome, 'seller');
-  assert.equal(verdict.complete, true);
+test('an open jury resolves once MIN_OPEN_JURY agree — never on a single vote', () => {
+  // An open jury (no staked juror existed when the dispute was filed) used to
+  // settle on ONE vote from any account that could obtain a wallet. Since
+  // getWalletDoc mints a welcome bonus on demand, that made a single throwaway
+  // account enough to decide an escrow, take a full refund for goods already
+  // received, and collect the juror bounty. A stake-backed panel is required.
+  const one = disputeOutcome([{ juror: '0xany', choice: 'seller' }], []);
+  assert.equal(one.outcome, 'seller', 'the leading side is still reported');
+  assert.equal(one.complete, false, 'but ONE vote must not settle the escrow');
+  assert.equal(one.needed, 3, 'the open jury needs a three-vote panel');
+
+  const two = disputeOutcome(
+    [{ juror: '0xa', choice: 'seller' }, { juror: '0xb', choice: 'seller' }],
+    []
+  );
+  assert.equal(two.complete, false, 'two agreeing votes are still not a panel');
+
+  // A clear majority of the panel settles it — the open-jury intent is preserved.
+  const three = disputeOutcome(
+    [{ juror: '0xa', choice: 'seller' }, { juror: '0xb', choice: 'seller' }, { juror: '0xc', choice: 'seller' }],
+    []
+  );
+  assert.equal(three.outcome, 'seller');
+  assert.equal(three.complete, true, 'a full stake-backed panel resolves the dispute');
+});
+
+test('a dead-heat open jury reports no winner, so the escrow is never settled', () => {
+  // tryResolve() only claims a dispute as resolved when there IS an outcome, so
+  // a tie must report outcome: ''. Otherwise the dispute was marked resolved
+  // while NEITHER payout branch ran — the buyer's escrowed WELL stayed locked
+  // forever and every juror was still paid their bounty.
+  const tie = disputeOutcome(
+    [
+      { juror: '0xa', choice: 'buyer' },
+      { juror: '0xb', choice: 'seller' },
+      { juror: '0xc', choice: 'buyer' },
+      { juror: '0xd', choice: 'seller' },
+    ],
+    []
+  );
+  assert.equal(tie.outcome, '', 'a 2-2 split has no winner');
+  assert.equal(tie.buyer, 2);
+  assert.equal(tie.seller, 2);
+  assert.equal(tie.cast, 4);
+
+  // A genuine majority still wins — this is not a route to a dead escrow.
+  const majority = disputeOutcome(
+    [
+      { juror: '0xa', choice: 'buyer' },
+      { juror: '0xb', choice: 'seller' },
+      { juror: '0xc', choice: 'buyer' },
+      { juror: '0xd', choice: 'buyer' },
+    ],
+    []
+  );
+  assert.equal(majority.outcome, 'buyer');
+  assert.equal(majority.complete, true);
+});
+
+test('a closed panel settles on a quorum, so one non-voting juror cannot freeze escrow forever', () => {
+  // selectJurors draws up to 5 staked wallets and the rule used to require
+  // EVERY one of them to vote. A juror who never opened the app left the buyer's
+  // escrowed WELL locked in the shared pool permanently — no expiry, no
+  // timeout, no substitute juror. The code even acknowledged the risk and
+  // "solved" it by only appointing staked wallets, which does not help: a
+  // staked juror can still simply not vote.
+  //
+  // Headline case: two jurors appointed, only one ever votes. Under unanimity
+  // this escrow was frozen forever; on a majority quorum it settles.
+  const twoPanel = ['0xj1', '0xj2'];
+  const oneOfTwo = disputeOutcome([{ juror: '0xj1', choice: 'seller' }], twoPanel);
+  assert.equal(oneOfTwo.needed, 1, 'two jurors need a one-vote quorum');
+  assert.equal(oneOfTwo.complete, true, 'a 1-0 vote from a staked panel is decisive');
+  assert.equal(oneOfTwo.outcome, 'seller');
+
+  // A larger panel scales the quorum, but a clear majority still settles.
+  const four = ['0xj1', '0xj2', '0xj3', '0xj4'];
+  const oneOfFour = disputeOutcome([{ juror: '0xj1', choice: 'seller' }], four);
+  assert.equal(oneOfFour.needed, 2, 'four jurors need a two-vote quorum');
+  assert.equal(oneOfFour.complete, false, 'one of four is short of the quorum');
+
+  const twoOfFour = disputeOutcome(
+    [{ juror: '0xj1', choice: 'buyer' }, { juror: '0xj2', choice: 'buyer' }],
+    four
+  );
+  assert.equal(twoOfFour.complete, true);
+  assert.equal(twoOfFour.outcome, 'buyer');
+
+  // A single appointed juror still decides alone (the quorum floors at 1).
+  const solo = disputeOutcome([{ juror: '0xj1', choice: 'seller' }], ['0xj1']);
+  assert.equal(solo.complete, true);
+  assert.equal(solo.outcome, 'seller');
 });
 
 test('a tie yields no verdict', () => {

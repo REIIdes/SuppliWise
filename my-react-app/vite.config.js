@@ -3,7 +3,23 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  // `vite build` and `vite dev` otherwise share one node_modules/.vite cache,
+  // so a build run while the dev server is up can rewrite state the running
+  // server still depends on (observed: orphaned deps_temp_* folders and a
+  // deps/ tree that stopped matching the committed metadata). Giving each
+  // command its own cache keeps them independent.
+  cacheDir: command === 'build' ? 'node_modules/.vite-build' : 'node_modules/.vite',
+  optimizeDeps: {
+    // jspdf is pulled in by a DYNAMIC import when the user clicks Export, so
+    // Vite's startup scan never discovers it. The first click then triggers a
+    // mid-session re-optimize, which bumps `browserHash`; the page that is
+    // already loaded keeps requesting the previous `?v=<hash>`, and the server
+    // answers 504 "Outdated Optimize Dep" - surfacing in the browser as
+    // "Failed to fetch dynamically imported module: .../deps/jspdf.js?v=...".
+    // Pre-bundling them up front keeps one hash for the whole session.
+    include: ['jspdf', 'jspdf-autotable'],
+  },
   plugins: [
     react(),
     // basicSsl(), // DISABLED: Causes Mixed Content errors with HTTP backend
@@ -98,6 +114,11 @@ export default defineConfig({
   ],
   server: {
     host: 'localhost',
+    // Fail loudly instead of silently moving to 5174 when something is already
+    // holding 5173. A shifted port leaves you reading a stale browser tab
+    // pointed at a dead port, and running a second Vite process against the
+    // same node_modules/.vite cache corrupts the dependency optimizer.
+    strictPort: true,
     proxy: {
       '/api': {
         target: 'http://localhost:5000',
@@ -105,4 +126,4 @@ export default defineConfig({
       },
     },
   },
-})
+}))

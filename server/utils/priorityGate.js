@@ -31,6 +31,8 @@
 
 const IntakeRecord = require('../models/IntakeRecord');
 const Assessment = require('../models/Assessment');
+const AdminEvent = require('../models/AdminEvent');
+const { expiryFromCreatedAt } = require('./assessments');
 
 /** Today in YYYY-MM-DD, matching the dayKey used by IntakeRecord. */
 function getTodayKey() {
@@ -121,6 +123,27 @@ function decideRaisePriority({ intake, openId } = {}) {
  * @returns {Promise<{ok: boolean, code?: string, message?: string, intake?: object, openId?: string}>}
  */
 async function guardRaisePriority(userId, assessmentId) {
+  // Fail closed on an unresolvable owner.
+  //
+  // Without this, `intakeStateFor(null, id)` finds no intake rows and reports
+  // `{ total: 0, taken: 0, complete: false }`, which the rule below reads as
+  // "nothing finished, go ahead" — so the flag was written onto an assessment
+  // with no owner. Such a flag can never be released, notified or audited,
+  // because every repair path is keyed on the user. That is precisely the
+  // "panicked user has no exit" failure this guard exists to prevent, so an
+  // ownerless assessment must be refused rather than flagged blind.
+  if (userId === null || userId === undefined || userId === '' || userId === false) {
+    return {
+      ok: false,
+      code: 'invalid-assessment',
+      intake: null,
+      openId: null,
+      message:
+        'This assessment has no resolvable owner, so a priority flag could never be released, ' +
+        'notified or audited. Repair the record before flagging it.',
+    };
+  }
+
   const intake = await intakeStateFor(userId, assessmentId);
 
   const open = await Assessment.findOne({
@@ -157,13 +180,30 @@ async function selfHealOpenPriority(userId) {
         {
           $set: {
             priority: 'Standard',
+            // Release must also RESTORE the retention date. A Priority record
+            // stores `expiresAt: null` (expiration is suspended while flagged),
+            // so without this a released assessment was left with no expiry at
+            // all and the record silently became undeletable-in-practice.
+            expiresAt: expiryFromCreatedAt(doc.createdAt),
             resolvedAt: new Date(),
             resolvedReason: 'intake-complete',
           },
         }
       ).then((r) => !!r);
-      if (ok) released.push(String(doc._id));
-      else remaining.push(doc);
+      if (ok) {
+        released.push(String(doc._id));
+        // An automatic release must be auditable, not silent: the user was told
+        // "New Assessments Paused" and is now being told nothing, so an admin
+        // needs to see why the gate opened on its own.
+        await AdminEvent.create({
+          type: 'resolved',
+          title: 'Priority auto-resolved (intake complete)',
+          detail: `Assessment ${doc._id} was released automatically — the day\u2019s plan is already complete, so there was no outstanding review.`,
+          user: doc.user,
+          assessmentId: doc._id,
+          linkUserId: doc.user,
+        }).catch(() => {});
+      } else remaining.push(doc);
     } else {
       remaining.push(doc);
     }

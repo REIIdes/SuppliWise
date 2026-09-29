@@ -1,8 +1,9 @@
-﻿import { useState, useRef, useEffect } from 'react';
+﻿import { memo, useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { sendChatMessage } from '../api';
 import useAuth from '../hooks/useAuth';
 import { PLAN_LABELS } from '../utils/plan';
+import { subscribeOverlays } from '../utils/overlayRegistry';
 import { useSubscription } from '../hooks/useSubscription';
 import UpgradeModal from '../Components/UpgradeModal/UpgradeModal';
 import './ChatAssistant.css';
@@ -84,6 +85,16 @@ function renderMarkdown(text) {
 
   return elements;
 }
+
+// The renderer is pure in `text`, so memoising it means a long transcript is
+// parsed exactly once per message instead of on every render of the widget.
+// The widget re-renders far more often than messages change — scroll-button
+// flips, `useSubscription()` notifies and `useAuth()` reads all land here —
+// and each render used to re-run the splitter plus a regex per line for every
+// assistant message already on screen.
+const Markdown = memo(function Markdown({ text }) {
+  return renderMarkdown(text);
+});
 
 function MdTable({ lines }) {
   const rows = lines
@@ -239,7 +250,10 @@ export default function ChatAssistant() {
       setShowScrollButton(!isAtBottom && scrollHeight > clientHeight);
     };
 
-    container.addEventListener('scroll', handleScroll);
+    // Passive: this listener only reads layout and flips a boolean, so it must
+    // never be able to block scrolling while the browser waits on it (same
+    // contract as useScrolledPast).
+    container.addEventListener('scroll', handleScroll, { passive: true });
     return () => container.removeEventListener('scroll', handleScroll);
   }, [open]);
 
@@ -361,6 +375,15 @@ export default function ChatAssistant() {
     setOpen(false);
   };
 
+  // Stand the edge tab down while another overlay owns the right edge (the
+  // account menu). See the note on the button below for why an OPEN chat window
+  // keeps its tab.
+  const [overlayOpen, setOverlayOpenState] = useState(false);
+  useEffect(() => subscribeOverlays((openSet) => {
+    setOverlayOpenState(openSet.size > 0);
+  }), []);
+  const standDown = overlayOpen && !open;
+
   return (
     <>
       {/* Edge handle — the assistant's hide/show control. Pointing right while
@@ -374,6 +397,26 @@ export default function ChatAssistant() {
         aria-expanded={open}
         aria-controls="suppliwise-chat-window"
         title={open ? 'Hide the AI assistant' : 'Show the AI assistant'}
+        /* The tab is `position: fixed` at z-index 1000, parked at the right edge
+           exactly where the account menu drops. The menu lives inside the
+           Navbar's stacking context (100 on desktop; forced to 1000 on phones,
+           which only ties the tab and still loses on DOM order), so no
+           z-index of its own can lift it over the tab. The tab stands down
+           instead.
+
+           It stays visible while the chat window is OPEN: the panel is anchored
+           to the bottom-right and the menu to the top-right, so they never
+           actually collide, and that tab is the only way to put the chat away
+           again — hiding it there would strand the panel open.
+
+           `visibility` rather than `display` so the transition still runs, and
+           `pointer-events: none` takes it out of the hit-test, so it cannot
+           swallow clicks meant for the menu. (Deliberately NOT the `hidden`
+           attribute: `.chat-edge-toggle { display: flex }` is an author rule and
+           beats the UA's `[hidden] { display: none }`, so `hidden` would change
+           nothing visually while still telling assistive tech the control is
+           gone — the worst of both.) */
+        data-stand-down={standDown ? 'true' : undefined}
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
           {open ? (
@@ -497,9 +540,9 @@ export default function ChatAssistant() {
                       straight back on this paywall. */}
                   <button
                     className="auth-btn auth-btn-primary"
-                    onClick={() => { setOpen(false); navigate('/profile'); }}
+                    onClick={() => { setOpen(false); navigate('/pricing'); }}
                   >
-                    View my plan
+                    View plans
                     <svg className="paywall__cta-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                       <path d="M5 12h14M13 6l6 6-6 6" />
                     </svg>
@@ -532,7 +575,7 @@ export default function ChatAssistant() {
                   {messages.map((msg, i) => (
                     <div key={i} className={`chat-bubble ${msg.role}${msg.kind === 'error' ? ' chat-error' : ''}`}>
                       {msg.role === 'assistant'
-                        ? renderMarkdown(msg.text)
+                        ? <Markdown text={msg.text} />
                         : <p className="md-p">{msg.text}</p>
                       }
                     </div>
@@ -615,7 +658,7 @@ export default function ChatAssistant() {
           requiredPlan={upgradeInfo.requiresPlan}
           currentPlan={upgradeInfo.currentPlan}
           onClose={() => setUpgradeInfo(null)}
-          onViewPlans={() => { setUpgradeInfo(null); navigate('/profile'); }}
+          onViewPlans={() => { setUpgradeInfo(null); navigate('/pricing'); }}
         />
       )}
     </>

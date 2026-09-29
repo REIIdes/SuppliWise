@@ -7,9 +7,17 @@ const QRCode = require('qrcode');
 const User = require('../models/User');
 const AdminAccount = require('../models/AdminAccount');
 const AdminEvent = require('../models/AdminEvent');
-// Admin idle window (single source of truth — middleware/auth.js mirrors it).
-// Frontend countdown (3:30) must match the server idle kill exactly.
-const ADMIN_IDLE_TIMEOUT_MS = (3 * 60 + 30) * 1000;
+// The admin session policy (idle window, token lifetime, heartbeat interval) is
+// defined ONCE in utils/adminSession.js and imported here. It used to be a second
+// literal copy of the idle window in this file, with a comment saying the
+// frontend countdown "must match" it — the client and the two server copies
+// could each be edited independently and quietly disagree.
+const {
+  ADMIN_IDLE_LIMIT_SECONDS,
+  ADMIN_IDLE_TIMEOUT_MS,
+  ADMIN_TOKEN_LIFETIME,
+  ADMIN_TOKEN_LIFETIME_SECONDS,
+} = require('../utils/adminSession');
 const { protect, rejectSession } = require('../middleware/auth');
 const {
   issueUserSession,
@@ -26,20 +34,55 @@ const {
 const { describeSubscription } = require('../utils/entitlements');
 const SecurityEvent = require('../models/SecurityEvent');
 const { describeDevice } = require('../utils/device');
-const { sendOtpEmail } = require('../utils/email');
+const { sendOtpEmail, sendPasswordChangedEmail } = require('../utils/email');
+const { evaluatePassword } = require('../utils/passwordRules');
+// The link-based password reset lives in its own router; these four legacy
+// OTP endpoints are aliases onto the same service. See the block below.
+const passwordResetService = require('../utils/passwordReset');
 const { normalizeIp, ipKind, resolveLoginLocation } = require('../utils/geo');
 const { verifyTotpOnce } = require('../utils/totp');
 const { newChallenge, verifyCaptcha } = require('../utils/captcha');
+// Profile/banner images are stored on disk and referenced by URL, never held
+// inline on the document. `safePictureValue` is the guard that keeps a
+// response from ever shipping a multi-megabyte base64 payload again.
+const {
+  storePicture,
+  safePictureValue,
+  MAX_AVATAR_BYTES: MAX_PROFILE_BYTES,
+  MAX_BANNER_BYTES,
+} = require('../utils/pictures');
 
 // Math CAPTCHA challenge for registration (bot-resistant signup).
 // Public but rate-limited with the rest of /api/auth.
 router.get('/captcha', (req, res) => {
   res.json(newChallenge());
 });
-const { recordOffense, recordAccountFailure, lockRemainingMs, clearOffenses, clearAccountState, accountKey, limitReachedHandler, reportAccountLockout, deviceFingerprint, noteIpAccountFailure, lockMeta } = require('../utils/lockout');
+const { recordOffense, recordOtpOffense, recordAccountFailure, lockRemainingMs, clearOffenses, clearAccountState, accountKey, limitReachedHandler, reportAccountLockout, deviceFingerprint, noteIpAccountFailure, clearIpAccountFailures, stuffingCooldownMs, lockMeta } = require('../utils/lockout');
 
 // lockMeta (the evidence bundle attached to lockout entries) now lives in
 // utils/lockout.js so every caller builds the same shape.
+
+/**
+ * The credential-stuffing tripwire, applied where a failure is detected.
+ *
+ * An address that has failed on many DISTINCT accounts is slowed down — but
+ * only on its failed attempts. It used to be escalated onto the escalating IP
+ * ladder, which `lockoutCheck` reads as a hard stop on the whole /api/auth
+ * surface: three ordinary typos from one address locked EVERY user behind it
+ * out of every sign-in for 15 minutes, including attempts carrying the correct
+ * password, and nothing but waiting cleared it. See utils/lockout.js.
+ *
+ * Refusing the failed attempt is enough to make spraying uneconomic, and it
+ * cannot deny service to a user who knows their own password.
+ *
+ * @returns true when the caller should answer 429 instead of 401.
+ */
+function tripwireThrottle(res, ip) {
+  const left = stuffingCooldownMs(ip);
+  if (left <= 0) return false;
+  res.set('Retry-After', String(Math.ceil(left / 1000)));
+  return true;
+}
 
 // Stricter brute-force guard for the most sensitive auth steps (admin login,
 // 2FA and OTP verification). Layered on top of the global /api/auth limiter;
@@ -90,6 +133,30 @@ function describeIpLocation(headerValue, rawIp) {
 // In-memory OTP storage (in production, use Redis or database)
 const otpStore = new Map(); // Format: { email: { otp, expiresAt, requestedAt, attempts } }
 
+// Plaintext OTPs must not accumulate for the process lifetime. Entries were
+// only removed when a code was verified, exhausted, or re-requested on the same
+// key — so a request that was simply abandoned (or an address that never
+// completed the flow) held its plaintext code forever. Prune on write once the
+// store grows, and on a timer.
+const OTP_STORE_MAX = 5000;
+function pruneOtpStore() {
+  const now = Date.now();
+  for (const [key, entry] of otpStore) {
+    if (!entry || !(entry.expiresAt > now)) otpStore.delete(key);
+  }
+  // If pruning by expiry is not enough (every code still live), drop the
+  // oldest by requestedAt until back under the ceiling.
+  if (otpStore.size <= OTP_STORE_MAX) return;
+  const byAge = [...otpStore.entries()].sort(
+    (a, b) => (a[1] && a[1].requestedAt) - (b[1] && b[1].requestedAt)
+  );
+  for (let i = 0; i < byAge.length && otpStore.size > OTP_STORE_MAX; i += 1) {
+    otpStore.delete(byAge[i][0]);
+  }
+}
+const otpStoreSweeper = setInterval(pruneOtpStore, 5 * 60 * 1000);
+if (typeof otpStoreSweeper.unref === 'function') otpStoreSweeper.unref();
+
 // Server-side proof that an address-change OTP was really verified for THIS
 // account. The previous flow trusted an `emailVerified` flag supplied by the
 // request body, so a stolen session could rebind the account to any address
@@ -114,24 +181,135 @@ function maskEmail(value) {
 // JSON types (objects/arrays for NoSQL injection) get a clean 400, never a 500.
 const str = (value) => (typeof value === 'string' ? value : value == null ? '' : String(value));
 
+/**
+ * True when a failure is OUR infrastructure being briefly unavailable, not
+ * anything the caller did. Shared with routes/passwordReset.js — see
+ * utils/transientError.js.
+ */
+const { isTransientInfrastructureError } = require('../utils/transientError');
+
+/**
+ * Report a failed auth request honestly.
+ *
+ * Infrastructure trouble is a 503 (retryable, and says so). Everything else
+ * keeps the generic 500, so no internal detail is ever handed to a caller.
+ */
+function authFailure(res, error, context) {
+  console.error(`[${context}]`, error.message);
+  if (isTransientInfrastructureError(error)) {
+    res.set('Retry-After', '5');
+    return res.status(503).json({
+      message: 'We could not reach our servers just now. Please try again in a moment.',
+    });
+  }
+  return res.status(500).json({ message: 'Something went wrong. Please try again later.' });
+}
+
 // Max wrong-code attempts per OTP before it is invalidated (brute-force guard)
 const MAX_OTP_ATTEMPTS = 5;
 
-// Fire-and-forget OTP delivery — responds at admin-login speed instead of
-// blocking on Gmail SMTP (often 3-10s per send). On failure the stored OTP
-// and cooldown are cleared so the user can retry immediately; the failure
-// is logged server-side for diagnosis.
-function sendOtpInBackground(toEmail, otp, type, otpKey, rateKey) {
-  sendOtpEmail(toEmail, otp, type).then((sent) => {
-    if (!sent) {
-      otpStore.delete(otpKey);
-      if (rateKey) otpRateLimitMap.delete(rateKey);
-      console.error(`[otp-email] background delivery failed (${type}) to ${maskEmail(toEmail)}`);
+// How long a one-time code stays valid. Defined once and used by issueOtp() so
+// every issuing route grants the same window — it used to be a literal
+// `10 * 60 * 1000` repeated at each of the five call sites, where one site
+// could be edited without the others and codes would silently disagree.
+const OTP_TTL_MS = 10 * 60 * 1000;
+
+// How long a single delivery may take before it is treated as failed. The
+// transporter is pooled, so a healthy relay answers in a few hundred ms; this
+// bound exists only so a hung SMTP server can never hold a sign-in open
+// forever, turning a slow mail server into a dead login button.
+const OTP_DELIVERY_TIMEOUT_MS = 10000;
+
+// A one-time code is only useful if it can be DELIVERED, so delivery is part
+// of the request and its real outcome is what the caller answers with.
+//
+// WHY THIS IS NOT FIRE-AND-FORGET
+// --------------------------------
+// It used to be. The route answered "Verification code sent to your email
+// successfully" immediately and kicked the send into the background — and when
+// the send failed, the failure handler DELETED the pending code from the store.
+// That is the code the client had just been told to wait for, so
+// /verify-login-otp answered "No OTP request found. Please try logging in
+// again." while the sign-in modal sat open on screen.
+//
+// The visible effect was that the entire user login was contingent on the mail
+// provider being healthy: a revoked Gmail app password, a Gmail outage, a
+// quota block or a momentary network blip locked every user out of their own
+// account, with the UI instructing them to check an inbox that would never
+// receive anything. The user is now told the truth instead — a code exists only
+// once the mail has actually gone out.
+//
+// A one-time code can be delivered for a dev only when the operator has
+// explicitly opted in: without a mailbox there is no other way to finish a
+// login locally, and a dev that cannot be signed into is a dev that gets tested
+// by weakening the checks instead.
+//
+// OFF unless LOG_OTP_IN_CONSOLE is explicitly truthy. It is never on by
+// default, it never logs in production (see the NODE_ENV guard), and the email
+// is masked so the line is not a map of who has an account.
+function logOtpToConsole(toEmail, otp, type) {
+  const logCodes = /^(1|true|yes|on)$/i.test(String(process.env.LOG_OTP_IN_CONSOLE || ''))
+    && process.env.NODE_ENV !== 'production';
+  if (logCodes) {
+    console.log(`[otp] ${type} code for ${maskEmail(toEmail)}: ${otp}`);
+  }
+}
+
+// Deliver a code and report whether it really went out. Never throws.
+// @returns {Promise<boolean>} true only when the mail was handed to the relay.
+async function deliverOtp(toEmail, otp, type) {
+  logOtpToConsole(toEmail, otp, type);
+  let timer = null;
+  const expiry = new Promise((resolve) => {
+    timer = setTimeout(() => resolve('timeout'), OTP_DELIVERY_TIMEOUT_MS);
+    if (typeof timer.unref === 'function') timer.unref();
+  });
+  try {
+    const outcome = await Promise.race([sendOtpEmail(toEmail, otp, type), expiry]);
+    if (outcome === 'timeout') {
+      console.error(`[otp-email] ${type} delivery to ${maskEmail(toEmail)} timed out after ${OTP_DELIVERY_TIMEOUT_MS}ms`);
+      return false;
     }
-  }).catch((err) => {
-    otpStore.delete(otpKey);
+    if (outcome !== true) {
+      console.error(`[otp-email] delivery failed (${type}) to ${maskEmail(toEmail)}`);
+    }
+    return outcome === true;
+  } catch (err) {
+    console.error(`[otp-email] delivery error (${type}) for ${maskEmail(toEmail)}: ${err.message}`);
+    return false;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+// Generate a code, deliver it, and only THEN make it real.
+//
+// The store is written on success and left untouched on failure, so a code the
+// user never received can never be accepted, never counts as a wrong attempt,
+// and can never be used to burn the account's lockout ladder. The 30s cooldown
+// is released on failure so an honest user whose mail bounced can retry
+// immediately instead of being told to wait for a code that never existed.
+//
+// @returns {Promise<{ok: true, otp: string} | {ok: false}>}
+async function issueOtp(toEmail, otpKey, rateKey, type) {
+  const otp = crypto.randomInt(100000, 999999).toString();
+  const delivered = await deliverOtp(toEmail, otp, type);
+  if (!delivered) {
     if (rateKey) otpRateLimitMap.delete(rateKey);
-    console.error(`[otp-email] background delivery error (${type}) for ${maskEmail(toEmail)}:`, err.message);
+    return { ok: false };
+  }
+  otpStore.set(otpKey, { otp, expiresAt: Date.now() + OTP_TTL_MS, requestedAt: Date.now() });
+  if (rateKey) otpRateLimitMap.set(rateKey, Date.now());
+  return { ok: true, otp };
+}
+
+// The single answer every OTP-issuing route gives when the mail did not go
+// out. Deliberately free of `requiresOtp`/`userId`: the client must stay on
+// the form and show this message rather than opening a verification step for a
+// code that does not exist.
+function otpDeliveryFailed(res) {
+  return res.status(503).json({
+    message: 'We could not send your verification code. Please wait a moment and try again.',
   });
 }
 
@@ -175,8 +353,12 @@ function legacyAdminConfiguration() {
   };
 }
 
+// The token must outlive the idle window, or an administrator who is actively
+// working gets signed out by token expiry while their countdown still shows
+// time in hand. adminSession.js asserts that ordering at import time, so the
+// lifetimes here and in the middleware cannot drift apart.
 function adminToken(account) {
-  return generateToken(String(account._id), { role: 'admin', alias: account.alias, adminId: String(account._id) }, { expiresIn: '5m' });
+  return generateToken(String(account._id), { role: 'admin', alias: account.alias, adminId: String(account._id) }, { expiresIn: ADMIN_TOKEN_LIFETIME });
 }
 
 // Email validation is shared with /api/security (recovery email) so both
@@ -263,18 +445,14 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ message: 'Please enter a valid date of birth (age must be between 1 and 120).' });
     }
 
-    // Password validation (length capped — keeps hashing inputs bounded)
-    if (password.length < 8) {
-      return res.status(400).json({ message: 'Your password is too short — please use at least 8 characters.' });
-    }
-    if (password.length > 128) {
-      return res.status(400).json({ message: 'Your password must be 128 characters or fewer.' });
-    }
-    if (!/[A-Z]/.test(password)) {
-      return res.status(400).json({ message: 'Add at least one capital letter to make your password stronger.' });
-    }
-    if (!/[0-9]/.test(password)) {
-      return res.status(400).json({ message: 'Add at least one number to make your password stronger.' });
+    // Password validation — the ONE policy (utils/passwordRules.js), shared
+    // with /reset-password and /change-password. These were four hand-written
+    // literals that had already drifted: this route capped the length at 128
+    // and the other two did not, so a reset would hand an unbounded string to
+    // argon2. The message names the one missing requirement.
+    const passwordVerdict = evaluatePassword(password, { email: trimmedEmail });
+    if (!passwordVerdict.ok) {
+      return res.status(400).json({ message: passwordVerdict.message });
     }
 
     // Check if user already exists
@@ -302,8 +480,8 @@ router.post('/register', async (req, res) => {
       dateOfBirth: user.dateOfBirth,
       age: user.age,
       gender: user.gender,
-      profilePicture: user.profilePicture,
-      bannerPicture: user.bannerPicture,
+      profilePicture: safePictureValue(user.profilePicture),
+      bannerPicture: safePictureValue(user.bannerPicture),
       subscriptionActive: user.subscriptionActive,
       subscriptionPlan: user.subscriptionPlan,
       // Resolved entitlement snapshot (honours expiry/cancellation) so the
@@ -358,7 +536,25 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    const user = await User.findOne({ email: trimmedEmail });
+    // Read ONLY what sign-in needs.
+    //
+    // This used to be an unprojected `User.findOne({ email })`, which pulled the
+    // account's ENTIRE document. With images stored inline (see
+    // utils/pictures.js) that was a ~3 MB read on every single sign-in — ~30 s
+    // each way over the Atlas link — and the route then called `user.save()`
+    // below, writing the same multi-megabyte document straight back. Sign-in
+    // could not finish inside any client timeout, and the resulting socket
+    // error surfaced as "We could not reach our servers just now." Excluding
+    // the pictures here makes the sign-in read a few kilobytes regardless of
+    // what the account is carrying.
+    //
+    // The secret is additionally REQUESTED (`+twoFactorSecret`): it is
+    // `select: false`, and the 2FA decision below has to be able to tell "this
+    // account has a working authenticator" from "this account claims one but has
+    // no secret", which would be a challenge nobody can satisfy. See
+    // usesAuthenticator below.
+    const user = await User.findOne({ email: trimmedEmail })
+      .select('-profilePicture -bannerPicture +twoFactorSecret');
 
     // Enumeration-safe rejection. An unknown address and a wrong password must
     // be indistinguishable in BOTH message and timing:
@@ -379,6 +575,9 @@ router.post('/login', async (req, res) => {
       // Recorded against the submitted address where possible, but with no
       // account to own it we cannot attach a user id — so this stays a lockout
       // signal only, never a row in somebody's history.
+      if (tripwireThrottle(res, req.ip)) {
+        return res.status(429).json({ message: 'Too many failed sign-in attempts from this network. Please wait a few minutes and try again.' });
+      }
       return res.status(401).json({ message: 'Invalid email or password.' });
     }
 
@@ -392,6 +591,9 @@ router.post('/login', async (req, res) => {
         location: user.lastLoginLocation || '',
         reason: 'Incorrect password',
       });
+      if (tripwireThrottle(res, req.ip)) {
+        return res.status(429).json({ message: 'Too many failed sign-in attempts from this network. Please wait a few minutes and try again.' });
+      }
       return res.status(401).json({ message: 'Invalid email or password.' });
     }
 
@@ -405,6 +607,11 @@ router.post('/login', async (req, res) => {
 
     // Correct password resets strikes and ladder locks
     clearAccountState(emailLockKey);
+    // ...and clears the stuffing tripwire too. A correct password is proof a
+    // human is at this address, so a shared address (household, office, campus)
+    // heals the moment anyone on it signs in properly instead of staying one
+    // typo away from a throttled network for the rest of the window.
+    clearIpAccountFailures(req.ip);
     // Transparent hash upgrade: legacy bcrypt → argon2id on successful login
     try {
       const { upgradeHashIfLegacy } = require('../utils/password');
@@ -421,7 +628,37 @@ router.post('/login', async (req, res) => {
     // it is caller-controlled text and this value is shown back to the user as
     // where they signed in from.
     user.lastLoginLocation = describeIpLocation('', loginIp);
-    if (typeof user.save === 'function') await user.save();
+
+    // Recording WHERE and WHEN the user signed in is incidental bookkeeping.
+    // It must never be able to deny a sign-in that has already been proven by
+    // the password.
+    //
+    // The document is saved with `user.save()` inside a try/catch, and that
+    // catch is load-bearing. It used to be a bare `await user.save()`, so ANY
+    // failure surfaced as a 500 "Something went wrong. Please try again later."
+    // AFTER the correct password had been accepted — a permanent lockout with
+    // no recourse, because it failed identically every time. It was reproduced
+    // by a user document holding a name the current validation rules reject:
+    // `User validation failed: lastName`. Nothing about signing in depends on
+    // the "last seen" fields, so a bad one is a reason to log, not to refuse.
+    //
+    // This used to be catastrophically slow as well. A `save()` sends the
+    // changed paths of the whole document, and the read above used to load the
+    // entire account including its inline base64 banner (~3 MB), so stamping a
+    // timestamp meant re-uploading those megabytes — ~30 s over the Atlas link,
+    // which is what made the login button unusable. The projection above means
+    // the document in memory is a few kilobytes and this write is now a tiny
+    // delta. It also carries the transparent bcrypt → argon2id hash upgrade,
+    // which the pre-save hook persists for us.
+    try {
+      await user.save();
+    } catch (err) {
+      // Name the account (masked) and the reason, so it is diagnosable — a
+      // document that can never be written is a data problem someone must fix.
+      // Nothing after this point saves the document again, so the sign-in
+      // simply continues.
+      console.error(`[login] could not record sign-in metadata for ${maskEmail(user.email)}: ${err.message}`);
+    }
     const isNewDevice = !!(previousUserAgent && previousUserAgent !== user.lastLoginUserAgent);
     if (isNewDevice) {
       AdminEvent.create({ type: 'new-device-login', title: 'New device login', detail: `${user.email} signed in from ${user.lastLoginLocation}.`, user: user._id }).catch(() => {});
@@ -456,7 +693,34 @@ router.post('/login', async (req, res) => {
     // an account that already had 2FA on was using an authenticator app, and
     // defaulting them to email here would silently downgrade their login.
     const twoFactorMethod = user.twoFactorMethod || 'authenticator';
-    const usesAuthenticator = user.twoFactorEnabled === true && twoFactorMethod === 'authenticator';
+    // An authenticator challenge is only satisfiable if there IS a secret to
+    // check the code against. The login read therefore has to ask for it
+    // explicitly — `twoFactorSecret` is `select: false`, so it is absent unless
+    // requested.
+    //
+    // WHY THE SECRET IS CHECKED
+    // ------------------------
+    // `twoFactorEnabled` can be true while no secret exists: the flag and the
+    // secret are written by different code paths, and a half-finished setup (or
+    // a document edited by a script) leaves the flag behind. The route used to
+    // branch on the flag alone and answer "Google Authenticator verification
+    // required." — a code that can never be produced, because there is nothing
+    // to produce it from. The account was then permanently locked out of its
+    // own second factor, with no recourse and no way for the holder to tell
+    // that was why. A real account (one that HAS set up an authenticator) is
+    // unaffected; only the impossible state falls through to the emailed code.
+    const usesAuthenticator = user.twoFactorEnabled === true
+      && twoFactorMethod === 'authenticator'
+      && Boolean(user.twoFactorSecret);
+
+    if (user.twoFactorEnabled === true && twoFactorMethod === 'authenticator' && !user.twoFactorSecret) {
+      // Data problem, not a credential problem: record it so it is diagnosable
+      // rather than silently papering over it forever.
+      console.error(
+        `[login] account ${maskEmail(user.email)} has twoFactorEnabled with no twoFactorSecret — `
+        + 'falling back to an emailed code so the account is not locked out. Re-run 2FA setup for it.'
+      );
+    }
 
     if (usesAuthenticator) {
       // Kick off background geo-resolution (never blocks the response)
@@ -468,19 +732,15 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    // Credentials valid - generate and send OTP
-    const otp = crypto.randomInt(100000, 999999).toString();
-    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
-
-    // Store OTP with user ID
-    const otpKey = `login_${user._id}`;
-    otpStore.set(otpKey, { otp, expiresAt, requestedAt: Date.now() });
-
-    // Update rate limit
-    otpRateLimitMap.set(user._id.toString(), Date.now());
-
-    // Deliver in the background — respond now at admin-login speed
-    sendOtpInBackground(trimmedEmail, otp, 'login', otpKey, user._id.toString());
+    // Credentials valid - issue the code, but only if it can actually be
+    // delivered. Announcing a code that was never sent is what used to strand
+    // users on a verification step with nothing valid to type.
+    const issued = await issueOtp(trimmedEmail, `login_${user._id}`, user._id.toString(), 'login');
+    if (!issued.ok) {
+      // The password WAS correct, so the account is not locked and the attempt
+      // is not counted against it — this is a delivery failure on our side.
+      return otpDeliveryFailed(res);
+    }
     // Geo-resolve the login IP in the background too (never blocks login)
     resolveLoginLocation(user._id, loginIp, user.lastLoginLocation);
 
@@ -493,8 +753,7 @@ router.post('/login', async (req, res) => {
       twoFactorMethod: user.twoFactorEnabled === true ? 'email' : null,
     });
   } catch (error) {
-    console.error('[login]', error.message);
-    res.status(500).json({ message: 'Something went wrong. Please try again later.' });
+    return authFailure(res, error, 'login');
   }
 });
 
@@ -543,7 +802,7 @@ router.post('/admin-login', async (req, res) => {
   } catch { /* upgrade best-effort; login already succeeded */ }
 
   const challengeId = crypto.randomBytes(24).toString('hex');
-  adminChallenges.set(challengeId, { accountId: account._id, alias: account.alias, totpSecret: account.totpSecret, expiresAt: Date.now() + ADMIN_CHALLENGE_TTL_MS });
+  adminChallenges.set(challengeId, { accountId: account._id, alias: account.alias, totpSecret: account.totpSecret, mustChangePassword: !!account.mustChangePassword, expiresAt: Date.now() + ADMIN_CHALLENGE_TTL_MS });
   return res.json({ requiresTwoFactor: true, challengeId, message: 'Authenticator verification required.' });
 });
 
@@ -570,7 +829,10 @@ router.post('/verify-admin-2fa', async (req, res) => {
     });
   }
 
-  const verified = verifyTotpOnce(challenge.totpSecret, otp);
+  // Scoped to the alias: administrators may share one authenticator seed, and a
+  // secret-only key would let the first of them to sign in spend the 30-second
+  // code for every other admin sharing it.
+  const verified = verifyTotpOnce(challenge.totpSecret, otp, challenge.alias);
   if (!verified) {
     // Three consecutive failures inside 15 min lock the alias — the same
     // bucket /admin-login checks, so a TOTP brute force also blocks retries.
@@ -581,8 +843,16 @@ router.post('/verify-admin-2fa', async (req, res) => {
   adminChallenges.delete(challengeId);
   const account = { _id: challenge.accountId, alias: challenge.alias };
   if (account._id && typeof account._id !== 'string') account._id = String(account._id);
+  // Carried on the 2FA challenge so the flag can be reported without a second
+  // read: the challenge already fetched the account, and this route must not
+  // mint a token for a stale view of it.
+  const mustChangePassword = !!challenge.mustChangePassword;
   if (account._id && account._id !== 'admin') await AdminAccount.findByIdAndUpdate(account._id, { lastLoginAt: new Date(), lastActivityAt: new Date() });
-  return res.json({ token: adminToken(account), role: 'admin', alias: account.alias });
+  // The flag rides on the RESPONSE, not just in the token. A JWT is immutable
+  // once signed, so putting it in the payload would leave the client believing
+  // "change required" for the life of the token even after the password is
+  // changed - and the client would keep redirecting to a page it no longer needs.
+  return res.json({ token: adminToken(account), role: 'admin', alias: account.alias, mustChangePassword });
 });
 
 // @route   POST /api/auth/admin-refresh
@@ -615,7 +885,13 @@ router.post('/admin-refresh', async (req, res) => {
       token: adminToken({ _id: String(admin._id), alias: admin.alias }),
       role: 'admin',
       alias: admin.alias,
-      expiresInSeconds: 5 * 60,
+      // Reported from the same constant the token was signed with. It used to be
+      // a second literal ("5 * 60") beside the "5m" in adminToken(), which is two
+      // places to forget when the lifetime changes.
+      expiresInSeconds: ADMIN_TOKEN_LIFETIME_SECONDS,
+      // The idle window too, so a client can render the real countdown instead
+      // of keeping its own copy of the number.
+      idleLimitSeconds: ADMIN_IDLE_LIMIT_SECONDS,
     });
   } catch (error) {
     console.error('[admin-refresh]', error.message);
@@ -651,8 +927,18 @@ router.post('/verify-login-otp', async (req, res) => {
     if (!user) {
       return res.status(401).json({ message: 'User not found' });
     }
+    // Ban enforcement on the OTP completion step. The password step already
+    // rejects non-active accounts; without the same check here a banned user
+    // finished the login, cleared their own lockout counters and displaced the
+    // account's currentSessionId before the token was rejected downstream.
+    if (user.accountStatus && user.accountStatus !== 'active') {
+      return res.status(403).json({ message: 'This account is not active.' });
+    }
 
-    const otpKey = `login_${userId}`;
+    // Keyed on the RESOLVED id, not the raw client string: the Map is written
+    // with the canonical `_id`, and `findById` accepts upper-case hex, so a
+    // non-canonical id resolved a user but missed its own pending OTP.
+    const otpKey = `login_${user._id}`;
     const storedData = otpStore.get(otpKey);
 
     if (!storedData) {
@@ -669,7 +955,11 @@ router.post('/verify-login-otp', async (req, res) => {
     if (storedData.otp !== str(otp).trim()) {
       const outcome = registerOtpAttempt(otpKey, storedData);
       if (outcome === 'locked') {
-        recordOffense(accountKey('otp-user', userId));
+        // Capped ladder + keyed on the RESOLVED id. This is an unauthenticated
+        // public route: keying on the raw client-supplied userId let anyone who
+        // knew a victim's email lock their 2FA / password reset / recovery codes,
+        // and the uncapped ladder let it reach a full day.
+        recordOtpOffense(accountKey('otp-user', user._id));
         return res.status(429).json({ message: 'Too many incorrect attempts. Please request a new code.' });
       }
       return res.status(400).json({ message: 'Invalid verification code. Please try again.' });
@@ -722,8 +1012,8 @@ router.post('/verify-login-otp', async (req, res) => {
       dateOfBirth: user.dateOfBirth,
       age: user.age,
       gender: user.gender,
-      profilePicture: user.profilePicture,
-      bannerPicture: user.bannerPicture,
+      profilePicture: safePictureValue(user.profilePicture),
+      bannerPicture: safePictureValue(user.bannerPicture),
       subscriptionActive: user.subscriptionActive,
       subscriptionPlan: user.subscriptionPlan,
       subscription: describeSubscription(user),
@@ -731,8 +1021,7 @@ router.post('/verify-login-otp', async (req, res) => {
       ...(rememberToken ? { rememberToken } : {}),
     });
   } catch (error) {
-    console.error('[verify-login-otp]', error.message);
-    res.status(500).json({ message: 'Something went wrong. Please try again later.' });
+    return authFailure(res, error, 'verify-login-otp');
   }
 });
 
@@ -764,8 +1053,8 @@ router.post('/remember', async (req, res) => {
         dateOfBirth: user.dateOfBirth,
         age: user.age,
         gender: user.gender,
-        profilePicture: user.profilePicture,
-        bannerPicture: user.bannerPicture,
+        profilePicture: safePictureValue(user.profilePicture),
+        bannerPicture: safePictureValue(user.bannerPicture),
         twoFactorEnabled: user.twoFactorEnabled === true,
         subscriptionActive: user.subscriptionActive,
         subscriptionPlan: user.subscriptionPlan,
@@ -813,7 +1102,7 @@ router.post('/verify-2fa', protect, async (req, res) => {
     if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
     const user = await User.findById(req.user._id).select('+twoFactorSecret');
     if (!user || !user.twoFactorSecret) return res.status(400).json({ message: 'Two-factor setup was not started.' });
-    const verified = verifyTotpOnce(user.twoFactorSecret, req.body.otp);
+    const verified = verifyTotpOnce(user.twoFactorSecret, req.body.otp, String(user._id));
     if (!verified) return res.status(401).json({ message: 'Invalid verification code.' });
     user.twoFactorEnabled = true;
     // Verifying a TOTP IS choosing the authenticator method — record it, so
@@ -840,6 +1129,13 @@ router.post('/login-2fa', async (req, res) => {
   try {
     const user = await User.findById(req.body.userId).select('+twoFactorSecret');
     if (!user || !user.twoFactorEnabled || !user.twoFactorSecret) return res.status(401).json({ message: 'Two-factor authentication is not enabled.' });
+    // A banned/deleted account must not be able to complete the SECOND factor.
+    // The ban was only enforced on the password step, so a banned user could
+    // still clear TOTP, be handed a session token, wipe their own lockout state
+    // and rotate the account's currentSessionId.
+    if (user.accountStatus && user.accountStatus !== 'active') {
+      return res.status(403).json({ message: 'This account is not active.' });
+    }
     // Account lockout check + failure recording (ladder 15 min → 1 day)
     const tfaLockKey = accountKey('otp-user', req.body.userId);
     if (lockRemainingMs(tfaLockKey) > 0) {
@@ -852,7 +1148,7 @@ router.post('/login-2fa', async (req, res) => {
         lockedBy: 'account',
       });
     }
-    const verified = verifyTotpOnce(user.twoFactorSecret, req.body.otp);
+    const verified = verifyTotpOnce(user.twoFactorSecret, req.body.otp, String(user._id));
     if (!verified) {
       recordAccountFailure(tfaLockKey, lockMeta(req, req.ip));
       await SecurityEvent.write({
@@ -884,7 +1180,7 @@ router.post('/login-2fa', async (req, res) => {
       location: user.lastLoginLocation || '',
       reason: 'Signed in with your authenticator app',
     });
-    res.json({ _id: user._id, firstName: user.firstName, lastName: user.lastName, name: user.fullName, email: user.email, dateOfBirth: user.dateOfBirth, age: user.age, gender: user.gender, profilePicture: user.profilePicture, bannerPicture: user.bannerPicture, twoFactorEnabled: true, subscriptionActive: user.subscriptionActive, subscriptionPlan: user.subscriptionPlan, subscription: describeSubscription(user), token, ...(rememberToken ? { rememberToken } : {}) });
+    res.json({ _id: user._id, firstName: user.firstName, lastName: user.lastName, name: user.fullName, email: user.email, dateOfBirth: user.dateOfBirth, age: user.age, gender: user.gender, profilePicture: safePictureValue(user.profilePicture), bannerPicture: safePictureValue(user.bannerPicture), twoFactorEnabled: true, subscriptionActive: user.subscriptionActive, subscriptionPlan: user.subscriptionPlan, subscription: describeSubscription(user), token, ...(rememberToken ? { rememberToken } : {}) });
   } catch (error) {
     res.status(401).json({ message: 'Unable to verify the 2FA code.' });
   }
@@ -906,7 +1202,7 @@ router.post('/disable-2fa', protect, async (req, res) => {
     //                   would be enough to silently drop the second factor.
     const method = user.twoFactorMethod || 'authenticator';
     if (method === 'authenticator') {
-      const verified = verifyTotpOnce(user.twoFactorSecret, req.body.otp);
+      const verified = verifyTotpOnce(user.twoFactorSecret, req.body.otp, String(user._id));
       if (!verified) return res.status(401).json({ message: 'Invalid Google Authenticator code.' });
     } else {
       const ok = await user.matchPassword(str(req.body.currentPassword));
@@ -964,268 +1260,154 @@ router.post('/resend-login-otp', async (req, res) => {
       }
     }
 
-    // Generate new OTP
-    const otp = crypto.randomInt(100000, 999999).toString();
-    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
-
-    // Store OTP
-    const otpKey = `login_${user._id}`;
-    otpStore.set(otpKey, { otp, expiresAt, requestedAt: Date.now() });
-
-    // Update rate limit
-    otpRateLimitMap.set(user._id.toString(), Date.now());
-
-    // Deliver in the background — respond now at admin-login speed
-    sendOtpInBackground(user.email, otp, 'login', otpKey, user._id.toString());
+    // Same rule as /login: a new code replaces the old one only once the mail
+    // has gone out. The old code was still valid, so a failed resend must not
+    // destroy it — the user can simply finish signing in with the code they
+    // already have.
+    const issued = await issueOtp(user.email, `login_${user._id}`, user._id.toString(), 'login');
+    if (!issued.ok) return otpDeliveryFailed(res);
 
     res.json({
       message: 'Verification code sent to your email successfully',
     });
   } catch (error) {
-    console.error('[resend-login-otp]', error.message);
-    res.status(500).json({ message: 'Something went wrong. Please try again later.' });
+    return authFailure(res, error, 'resend-login-otp');
   }
 });
 
-// @route   POST /api/auth/forgot-password
-// @desc    Request password reset - Send OTP to email
+// ─────────────────────────────────────────────────────────────────────────────
+// PASSWORD RESET — LEGACY ALIASES
+//
+// These four endpoints are the OLD 6-digit-code-in-a-modal flow. The flow they
+// belonged to has been replaced by an emailed link and two dedicated pages
+// (routes/passwordReset.js), but the endpoints are kept and still work: each
+// one now delegates to the same service the new pages use. That is deliberate.
+//
+//   • A client on a stale build (a PWA that has not refreshed, a tab open for
+//     days) can still finish a reset instead of hitting a 404.
+//   • Nothing here is a stub or a 410 — each alias reaches the same MongoDB
+//     grant, the same email and the same password rules, so the two paths
+//     cannot drift apart in behaviour.
+//   • The enumeration hole they shared is closed for both. The old
+//     /forgot-password returned a `userId` only for accounts that existed,
+//     which contradicted its own "we don't reveal whether an account exists"
+//     message; the alias now returns the same anonymous body for everyone.
+//
+// Note on rate limiting: all four remain in the `sensitiveLimiter` path list
+// above, so they inherit the stricter 10-min/60-req budget the sensitive auth
+// steps share. The new link endpoints carry their own, per-flow budget in
+// routes/passwordReset.js.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// @route   POST /api/auth/forgot-password  (legacy alias)
+// @desc    Request a password reset link
 // @access  Public
 router.post('/forgot-password', async (req, res) => {
-  const { email } = req.body;
-
   try {
-    if (!email) {
-      return res.status(400).json({ message: 'Please enter your email address.' });
-    }
-
-    const trimmedEmail = str(email).trim().toLowerCase();
-    if (!isValidEmail(trimmedEmail)) {
-      return res.status(400).json({ message: 'Please enter a valid email address.' });
-    }
-
-    const user = await User.findOne({ email: trimmedEmail });
-    
-    // Security: Don't reveal if email exists or not
-    if (!user) {
-      // Still return success to prevent email enumeration
-      return res.json({ 
-        message: 'If an account exists with this email, a verification code has been sent.',
-      });
-    }
-
-    // Check rate limiting (60 second cooldown)
-    const lastRequest = otpRateLimitMap.get(user._id.toString());
-    if (lastRequest) {
-      const timeSinceLastRequest = Date.now() - lastRequest;
-      if (timeSinceLastRequest < OTP_COOLDOWN_MS) {
-        const remainingSeconds = Math.ceil((OTP_COOLDOWN_MS - timeSinceLastRequest) / 1000);
-        return res.status(429).json({ 
-          message: `Please wait ${remainingSeconds} seconds before requesting another code.`,
-          remainingSeconds,
-        });
-      }
-    }
-
-    // Generate 6-digit OTP
-    const otp = crypto.randomInt(100000, 999999).toString();
-    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
-
-    // Store OTP with password_reset prefix
-    const otpKey = `password_reset_${user._id}`;
-    otpStore.set(otpKey, { otp, expiresAt, requestedAt: Date.now() });
-
-    // Update rate limit
-    otpRateLimitMap.set(user._id.toString(), Date.now());
-
-    // Deliver in the background — respond now at admin-login speed
-    sendOtpInBackground(trimmedEmail, otp, 'password-reset', otpKey, user._id.toString());
-
-    res.json({
-      message: 'Verification code sent to your email successfully',
-      userId: user._id,
-    });
+    const result = await passwordResetService.requestReset({ email: req.body?.email, req });
+    return res.status(result.status).json({ message: result.message });
   } catch (error) {
-    console.error('[forgot-password]', error.message);
-    res.status(500).json({ message: 'Something went wrong. Please try again later.' });
+    return authFailure(res, error, 'forgot-password');
   }
 });
 
-// @route   POST /api/auth/verify-password-reset-otp
-// @desc    Verify OTP for password reset
+// @route   POST /api/auth/resend-password-reset-otp  (legacy alias)
+// @desc    Re-send the reset email for an account named by id
+// @access  Public
+router.post('/resend-password-reset-otp', async (req, res) => {
+  try {
+    const result = await passwordResetService.resendForUser({ userId: req.body?.userId, req });
+    return res.status(result.status).json({ message: result.message });
+  } catch (error) {
+    return authFailure(res, error, 'resend-password-reset-otp');
+  }
+});
+
+// @route   POST /api/auth/verify-password-reset-otp  (legacy alias)
+// @desc    Verify the emailed 6-digit code, returning a short-lived grant
 // @access  Public
 router.post('/verify-password-reset-otp', async (req, res) => {
-  const { userId, otp } = req.body;
+  const { userId, otp } = req.body || {};
 
   try {
     if (!userId || !otp) {
-      return res.status(400).json({ message: 'User ID and OTP are required' });
+      return res.status(400).json({ message: 'User ID and verification code are required.' });
     }
 
-    // Account lockout: repeated OTP failures escalate 15 min → 1 day
-    const resetLockKey = accountKey('otp-user', userId);
-    const resetLockedMs = lockRemainingMs(resetLockKey);
-    if (resetLockedMs > 0) {
-      reportAccountLockout({ userId, minutes: Math.ceil(resetLockedMs / 60000), lockKey: resetLockKey });
+    // Escalating lockout (15 min → 1 h, capped) on top of the service's own
+    // per-record strike counter. This is an UNAUTHENTICATED public route, and
+    // the lock key is derived from the client-supplied id — a third party must
+    // not be able to lock a victim out of recovering, which is why the ladder
+    // is capped at an hour and the service burns the record after five strikes
+    // rather than escalating indefinitely.
+    const lockKey = accountKey('otp-user', userId);
+    const lockedMs = lockRemainingMs(lockKey);
+    if (lockedMs > 0) {
+      reportAccountLockout({ userId, minutes: Math.ceil(lockedMs / 60000), lockKey });
       return res.status(429).json({
-        message: `Too many incorrect attempts. Try again in ${Math.ceil(resetLockedMs / 60000)} minute(s).`,
-        remainingSeconds: Math.ceil(resetLockedMs / 1000),
+        message: `Too many incorrect attempts. Try again in ${Math.ceil(lockedMs / 60000)} minute(s).`,
+        remainingSeconds: Math.ceil(lockedMs / 1000),
         escalated: true,
         lockedBy: 'account',
       });
     }
 
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(401).json({ message: 'Invalid request' });
+    const result = await passwordResetService.verifyCodeForUser({ userId, code: otp, req });
+    if (result.status !== 200) {
+      if (result.status === 429) recordOtpOffense(lockKey);
+      return res.status(result.status).json({ message: result.message });
     }
 
-    const otpKey = `password_reset_${userId}`;
-    const storedData = otpStore.get(otpKey);
-
-    if (!storedData) {
-      return res.status(400).json({ message: 'No password reset request found. Please try again.' });
-    }
-
-    // Check if OTP has expired
-    if (Date.now() > storedData.expiresAt) {
-      otpStore.delete(otpKey);
-      return res.status(400).json({ message: 'Verification code has expired. Please request a new one.' });
-    }
-
-    // Verify OTP (wrong attempts are counted; the code is invalidated after MAX_OTP_ATTEMPTS)
-    if (storedData.otp !== str(otp).trim()) {
-      const outcome = registerOtpAttempt(otpKey, storedData);
-      if (outcome === 'locked') {
-        recordOffense(accountKey('otp-user', userId));
-        return res.status(429).json({ message: 'Too many incorrect attempts. Please request a new code.' });
-      }
-      return res.status(400).json({ message: 'Invalid verification code. Please try again.' });
-    }
-
-    // OTP is valid - return success but DON'T delete OTP yet
-    // We'll delete it after password is actually reset
-    clearOffenses(accountKey('otp-user', userId));
-    res.json({ 
-      message: 'Code verified successfully',
+    clearOffenses(lockKey);
+    return res.status(200).json({
+      message: result.message,
       verified: true,
+      // The legacy client already holds the raw code and calls /reset-password
+      // with it. A grant is returned as well so a client that dropped the code
+      // can still finish — either shape is accepted there.
+      resetToken: result.resetToken,
     });
   } catch (error) {
-    console.error('[verify-password-reset-otp]', error.message);
-    res.status(500).json({ message: 'Something went wrong. Please try again later.' });
+    return authFailure(res, error, 'verify-password-reset-otp');
   }
 });
 
-// @route   POST /api/auth/reset-password
-// @desc    Reset password after OTP verification
+// @route   POST /api/auth/reset-password  (legacy alias)
+// @desc    Set a new password from a grant, or directly from the emailed code
 // @access  Public
 router.post('/reset-password', async (req, res) => {
-  const { userId, otp, newPassword } = req.body;
+  const { userId, otp, resetToken, newPassword } = req.body || {};
 
   try {
-    if (!userId || !otp || !newPassword) {
-      return res.status(400).json({ message: 'User ID, OTP, and new password are required' });
+    if (!newPassword) {
+      return res.status(400).json({ message: 'Please enter a new password.' });
     }
 
-    // Lockout gate — this route verifies the SAME code as
-    // /verify-password-reset-otp, so it must be just as hard to brute-force.
-    // It previously had no gate at all (and was not in sensitiveLimiter), so
-    // an attacker could skip the verify step entirely and hammer guesses here
-    // forever: the offenses it recorded were never checked by this route.
-    const resetLockKey = accountKey('otp-user', userId);
-    const resetLockedMs = lockRemainingMs(resetLockKey);
-    if (resetLockedMs > 0) {
-      reportAccountLockout({ userId, minutes: Math.ceil(resetLockedMs / 60000), lockKey: resetLockKey });
+    // Lockout gate — this route can be handed a code directly, so it must be
+    // just as hard to brute-force as /verify-password-reset-otp. Without this
+    // an attacker could skip the verify step and hammer guesses here forever.
+    const lockKey = accountKey('otp-user', userId || 'grant');
+    const lockedMs = lockRemainingMs(lockKey);
+    if (lockedMs > 0) {
+      reportAccountLockout({ userId, minutes: Math.ceil(lockedMs / 60000), lockKey });
       return res.status(429).json({
-        message: `Too many incorrect attempts. Try again in ${Math.ceil(resetLockedMs / 60000)} minute(s).`,
-        remainingSeconds: Math.ceil(resetLockedMs / 1000),
+        message: `Too many incorrect attempts. Try again in ${Math.ceil(lockedMs / 60000)} minute(s).`,
+        remainingSeconds: Math.ceil(lockedMs / 1000),
         escalated: true,
         lockedBy: 'account',
       });
     }
 
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(401).json({ message: 'Invalid request' });
-    }
+    // Two accepted shapes: the grant from /verify-password-reset-otp, or the
+    // code straight from the email for a client that never verified separately.
+    const result = resetToken
+      ? await passwordResetService.completeWithGrant({ resetToken, newPassword, req })
+      : await passwordResetService.completeWithCode({ userId, code: otp, newPassword, req });
 
-    const otpKey = `password_reset_${userId}`;
-    const storedData = otpStore.get(otpKey);
-
-    if (!storedData) {
-      return res.status(400).json({ message: 'No password reset request found. Please try again.' });
-    }
-
-    // Check if OTP has expired
-    if (Date.now() > storedData.expiresAt) {
-      otpStore.delete(otpKey);
-      return res.status(400).json({ message: 'Verification code has expired. Please try again.' });
-    }
-
-    // Verify OTP one more time. Wrong attempts share the per-OTP attempt
-    // counter used by /verify-password-reset-otp (5 strikes invalidates the
-    // code and escalates the ladder) instead of only recording an offense
-    // that nothing on this route ever consulted.
-    if (storedData.otp !== str(otp).trim()) {
-      const outcome = registerOtpAttempt(otpKey, storedData);
-      if (outcome === 'locked') {
-        recordOffense(resetLockKey);
-        return res.status(429).json({ message: 'Too many incorrect attempts. Please request a new code.' });
-      }
-      return res.status(400).json({ message: 'Invalid verification code. Please try again.' });
-    }
-
-    // Password validation
-    if (newPassword.length < 8) {
-      return res.status(400).json({ message: 'Your password is too short — please use at least 8 characters.' });
-    }
-    if (!/[A-Z]/.test(newPassword)) {
-      return res.status(400).json({ message: 'Add at least one capital letter to make your password stronger.' });
-    }
-    if (!/[0-9]/.test(newPassword)) {
-      return res.status(400).json({ message: 'Add at least one number to make your password stronger.' });
-    }
-
-    // Check if new password is same as current password
-    const isSamePassword = await user.matchPassword(newPassword);
-    if (isSamePassword) {
-      return res.status(400).json({ message: 'Your new password must be different from your current password.' });
-    }
-
-    // Update password
-    user.password = newPassword;
-    await user.save();
-
-    // End every existing session for this account. A password reset is the
-    // account owner proving they recovered from a compromise — the whole
-    // point is that any token an intruder still holds stops working. This
-    // route is unauthenticated, so before this fix someone who had already
-    // signed in simply kept their access after the victim reset.
-    await revokeAllUserSessions(user._id).catch(() => {});
-
-    // Delete OTP after successful password reset
-    otpStore.delete(otpKey);
-    clearOffenses(accountKey('otp-user', userId));
-
-    console.log(`[PASSWORD RESET] Password successfully reset for user: ${maskEmail(user.email)}`);
-
-    // Security trail: password resets show up in Recent security activity
-    try {
-      const UserNotification = require('../models/UserNotification');
-      await UserNotification.create({
-        user: user._id,
-        type: 'info',
-        title: 'Password changed',
-        detail: 'Your password was just reset. If this wasn\'t you, reset it again and contact support immediately.',
-      }).catch(() => {});
-    } catch { /* best-effort */ }
-
-    res.json({
-      message: 'Password reset successfully. You can now sign in with your new password.',
-      success: true,
-    });
+    if (result.status === 200) clearOffenses(lockKey);
+    return res.status(result.status).json({ message: result.message, success: !!result.success });
   } catch (error) {
-    console.error('[reset-password]', error.message);
-    res.status(500).json({ message: 'Something went wrong. Please try again later.' });
+    return authFailure(res, error, 'reset-password');
   }
 });
 
@@ -1306,14 +1488,11 @@ router.post('/change-password', protect, async (req, res) => {
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ message: 'Your current password and a new password are both required.' });
     }
-    if (newPassword.length < 8) {
-      return res.status(400).json({ message: 'New password must be at least 8 characters.' });
-    }
-    if (!/[A-Z]/.test(newPassword)) {
-      return res.status(400).json({ message: 'New password must contain at least one uppercase letter.' });
-    }
-    if (!/[0-9]/.test(newPassword)) {
-      return res.status(400).json({ message: 'New password must contain at least one number.' });
+    // The ONE password policy (utils/passwordRules.js), the same object the
+    // reset flow and the signup form validate against.
+    const passwordVerdict = evaluatePassword(newPassword, { email: user.email });
+    if (!passwordVerdict.ok) {
+      return res.status(400).json({ message: passwordVerdict.message });
     }
     if (newPassword === currentPassword) {
       return res.status(400).json({ message: 'Your new password must be different from your current one.' });
@@ -1346,6 +1525,11 @@ router.post('/change-password', protect, async (req, res) => {
           : "Your password was just changed. If this wasn't you, reset it and contact support immediately.",
       }).catch(() => {});
     } catch { /* best-effort trail */ }
+
+    // Confirmation mail, same as a reset. A credential change is exactly the
+    // event an account owner needs to hear about, and it is the one signal that
+    // reaches them if the change came from a session an intruder held.
+    sendPasswordChangedEmail(user.email).catch(() => {});
 
     res.json({
       message: 'Your password has been updated.',
@@ -1491,19 +1675,9 @@ router.post('/resend-password-reset-otp', async (req, res) => {
       }
     }
 
-    // Generate new OTP
-    const otp = crypto.randomInt(100000, 999999).toString();
-    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
-
-    // Store OTP
-    const otpKey = `password_reset_${user._id}`;
-    otpStore.set(otpKey, { otp, expiresAt, requestedAt: Date.now() });
-
-    // Update rate limit
-    otpRateLimitMap.set(user._id.toString(), Date.now());
-
-    // Deliver in the background — respond now at admin-login speed
-    sendOtpInBackground(user.email, otp, 'password-reset', otpKey, user._id.toString());
+    // As with /login: keep the existing code if the replacement never went out.
+    const issued = await issueOtp(user.email, `password_reset_${user._id}`, user._id.toString(), 'password-reset');
+    if (!issued.ok) return otpDeliveryFailed(res);
 
     res.json({
       message: 'Verification code sent to your email successfully',
@@ -1567,19 +1741,10 @@ router.post('/request-email-otp', async (req, res) => {
       return res.status(400).json({ message: 'Email already in use by another account.' });
     }
 
-    // Generate 6-digit OTP
-    const otp = crypto.randomInt(100000, 999999).toString();
-    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
-
-    // Store OTP
-    const otpKey = `${user._id}_${trimmedEmail}`;
-    otpStore.set(otpKey, { otp, expiresAt, requestedAt: Date.now() });
-
-    // Update rate limit
-    otpRateLimitMap.set(user._id.toString(), Date.now());
-
-    // Deliver in the background — respond now at admin-login speed
-    sendOtpInBackground(trimmedEmail, otp, 'email-change', otpKey, user._id.toString());
+    // The code proves control of the NEW address, so it must not exist in the
+    // store unless it actually reached that address.
+    const issued = await issueOtp(trimmedEmail, `${user._id}_${trimmedEmail}`, user._id.toString(), 'email-change');
+    if (!issued.ok) return otpDeliveryFailed(res);
 
     res.json({
       message: 'Verification code sent to your email successfully',
@@ -1651,7 +1816,7 @@ router.post('/verify-email-otp', async (req, res) => {
     if (storedData.otp !== str(otp).trim()) {
       const outcome = registerOtpAttempt(otpKey, storedData);
       if (outcome === 'locked') {
-        recordOffense(accountKey('otp-user', user._id));
+        recordOtpOffense(accountKey('otp-user', user._id));
         return res.status(429).json({ message: 'Too many incorrect attempts. Please request a new code.' });
       }
       return res.status(400).json({ message: 'Invalid verification code. Please try again.' });
@@ -1806,25 +1971,37 @@ router.put('/profile', async (req, res) => {
     user.dateOfBirth = birthDate;
     user.gender = gender;
 
-    // Base64 images are capped so a single profile update cannot bloat the DB
-    // (profile ≤ ~2 MB, banner ≤ ~3 MB incl. data-URL overhead)
-    const MAX_PROFILE_BYTES = 2 * 1024 * 1024;
-    const MAX_BANNER_BYTES = 3 * 1024 * 1024;
-
-    // Update profile picture if provided
+    // Images are written to disk and referenced by URL rather than stored
+    // inline. Storing the `data:` string on the document made this account
+    // ~3 MB, which then had to be read and rewritten on every sign-in — see
+    // utils/pictures.js. `storePicture` validates the type and decoded size,
+    // and passes an already-stored path straight back through, so re-saving a
+    // profile that did not change its picture costs nothing.
     if (profilePicture !== undefined) {
-      if (typeof profilePicture !== 'string' || Buffer.byteLength(profilePicture, 'utf8') > MAX_PROFILE_BYTES) {
-        return res.status(413).json({ message: 'Profile picture is too large (max 2 MB).' });
+      try {
+        user.profilePicture = storePicture({
+          ownerId: user._id,
+          kind: 'profile',
+          value: profilePicture,
+          maxBytes: MAX_PROFILE_BYTES,
+        });
+      } catch (err) {
+        return res.status(err.statusCode || 400).json({ message: err.message });
       }
-      user.profilePicture = profilePicture;
     }
 
     // Update banner picture if provided
     if (bannerPicture !== undefined) {
-      if (typeof bannerPicture !== 'string' || Buffer.byteLength(bannerPicture, 'utf8') > MAX_BANNER_BYTES) {
-        return res.status(413).json({ message: 'Banner image is too large (max 3 MB).' });
+      try {
+        user.bannerPicture = storePicture({
+          ownerId: user._id,
+          kind: 'banner',
+          value: bannerPicture,
+          maxBytes: MAX_BANNER_BYTES,
+        });
+      } catch (err) {
+        return res.status(err.statusCode || 400).json({ message: err.message });
       }
-      user.bannerPicture = bannerPicture;
     }
 
     await user.save();
@@ -1862,8 +2039,8 @@ router.put('/profile', async (req, res) => {
       dateOfBirth: user.dateOfBirth,
       age: user.age,
       gender: user.gender,
-      profilePicture: user.profilePicture,
-      bannerPicture: user.bannerPicture,
+      profilePicture: safePictureValue(user.profilePicture),
+      bannerPicture: safePictureValue(user.bannerPicture),
       subscriptionActive: user.subscriptionActive,
       subscriptionPlan: user.subscriptionPlan,
       subscriptionUpdatedAt: user.subscriptionUpdatedAt,

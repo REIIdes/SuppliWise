@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import WalletPanel from '../Components/Web3Panels/WalletPanel';
 import RewardsPanel from '../Components/Web3Panels/RewardsPanel';
@@ -9,7 +8,7 @@ import AiProofPanel from '../Components/Web3Panels/AiProofPanel';
 import EcosystemPanel from '../Components/Web3Panels/EcosystemPanel';
 import SupplyPanel from '../Components/Web3Panels/SupplyPanel';
 import ExplorerPanel from '../Components/Web3Panels/ExplorerPanel';
-import { TabBar } from '../Components/Web3Panels/w3ui';
+import { AreaNav, Hero, TabBar } from '../Components/Web3Panels/w3ui';
 import './Web3.css';
 
 // Tab shell for the blockchain layer: one route (/web3) hosting every panel.
@@ -35,19 +34,15 @@ function Web3HubPage() {
     <div className="w3-page">
       <Navbar />
       <div className="w3-container">
-        <header className="w3-header">
-          <h1 className="w3-title">⛓️ SuppliWise Web3 Hub</h1>
-          <p className="w3-subtitle">
-            Your self-owned wallet, token rewards, immutable health records, data consent and the
-            proof-of-work ledger behind every action on the platform.
-          </p>
-        </header>
+        <Hero
+          variant="emerald"
+          mark="⛓️"
+          eyebrow="Blockchain layer"
+          title="SuppliWise Web3 Hub"
+          subtitle="Your self-owned wallet, token rewards, immutable health records, data consent and the proof-of-work ledger behind every action on the platform."
+        />
 
-        <div className="w3-subnav">
-          <Link className="w3-btn ghost small" to="/marketplace">🛒 Marketplace</Link>
-          <Link className="w3-btn ghost small" to="/governance">🏛️ Governance</Link>
-          <Link className="w3-btn ghost small" to="/verify">🔍 Verify a product</Link>
-        </div>
+        <AreaNav />
 
         <TabBar tabs={TABS} active={activeKey} onChange={setActiveKey} label="Web3 sections" />
 

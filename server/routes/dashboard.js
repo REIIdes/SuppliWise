@@ -167,14 +167,18 @@ router.get('/', protect, async (req, res) => {
         }))
         .filter(doc => doc.supplementName);
       if (seeds.length > 0) {
-        // Per-supplement upserts: idempotent if two devices load at once
-        await Promise.all(seeds.map(doc =>
-          IntakeRecord.updateOne(
-            { user: doc.user, assessment: doc.assessment, supplementName: doc.supplementName, dayKey: doc.dayKey },
-            { $setOnInsert: doc },
-            { upsert: true }
-          ).exec()
-        ));
+        // Bulk upsert: one round-trip instead of N (was a major bottleneck
+        // for users with 15+ supplements — each upsert was a separate DB call)
+        await IntakeRecord.bulkWrite(
+          seeds.map(doc => ({
+            updateOne: {
+              filter: { user: doc.user, assessment: doc.assessment, supplementName: doc.supplementName, dayKey: doc.dayKey },
+              update: { $setOnInsert: doc },
+              upsert: true,
+            },
+          })),
+          { ordered: false } // continue on error — one failure shouldn't block the rest
+        );
         todayIntakeRecords = await IntakeRecord.find({
           user: req.user._id,
           assessment: latestAssessment._id,

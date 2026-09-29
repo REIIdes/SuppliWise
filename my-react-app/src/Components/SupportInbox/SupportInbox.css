@@ -1,0 +1,1412 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   SUPPORT INBOX (member side)
+
+   The vibrant refresh. It sits in the same family as the navbar and the
+   pricing page: an emerald → sky → indigo accent, an animated rainbow hairline
+   echoing the navbar's ribbon, gradient pills for actions, and soft tinted
+   surfaces instead of grey-white boxes on flat mint.
+
+   ── WHY THE COLOUR IS ORGANISED THE WAY IT IS ──────────────────────────────
+   Two accent systems, each defined ONCE and read everywhere:
+
+     • Topic accents — .sci-acc--payment / billing / account / technical /
+       other. A category picks a hue, and that hue then drives the topic card,
+       the icon tile in the list row and the chip in the thread header. A
+       conversation about a payment is therefore recognisable at every size
+       without reading a word. SupportInbox.jsx adds the class; nothing here
+       has to know which category it is styling.
+
+     • Status accents — .sci-status--open / pending / resolved, and the same
+       three hues on .sci-filter--* and .sci-stat--*. Amber means WE owe you a
+       reply, indigo means YOU owe us one, emerald means finished. That is the
+       single fastest signal on the page, so it is carried by colour rather
+       than left to a sentence in a 300px column.
+
+   Set --sci-accent and --sci-accent-soft on a container and every descendant
+   rule follows. Adding a sixth topic is one line of variables, not a sweep
+   through the file.
+
+   ── LAYOUT ────────────────────────────────────────────────────────────────
+   Two panes of equal, height-capped height, each with its own internal scroll
+   (list on the left, transcript on the right). The cap is what keeps the reply
+   box on screen: an earlier version let the page grow, so a long conversation
+   pushed the composer below the fold — a support inbox nobody replies from.
+   clamp() floors it, because 100vh minus a fixed number goes negative on a
+   short window and a negative max-height collapses the pane.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.sci {
+  --sci-emerald: #10b981;
+  --sci-teal: #14b8a6;
+  --sci-sky: #0ea5e9;
+  --sci-indigo: #6366f1;
+  --sci-violet: #a855f7;
+
+  --sci-ink: #0f2a20;
+  --sci-body: #33544a;
+  --sci-muted: #6b8378;
+  --sci-faint: #93a89d;
+
+  --sci-line: #e2ece7;
+  --sci-line-soft: #eef4f1;
+  --sci-surface: #ffffff;
+  --sci-wash: #f6fbf9;
+
+  --sci-grad: linear-gradient(135deg, #10b981 0%, #0ea5e9 55%, #6366f1 100%);
+  --sci-grad-soft: linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(14, 165, 233, 0.12) 55%, rgba(99, 102, 241, 0.12) 100%);
+  --sci-ring: 0 0 0 4px rgba(16, 185, 129, 0.18);
+
+  /* The page shell (.support-page__main) is a flex column that hands this
+     component whatever height is left over, so the two panes below can claim
+     it. `min-height: 0` is the load-bearing half: a flex item defaults to
+     `min-height: auto`, i.e. it refuses to be shorter than its own content, and
+     the content of a transcript is the whole conversation. With the default,
+     this element grew to fit every message, pushed the page to its full scroll
+     height and the panes were never actually squeezed — the reply box sat
+     hundreds of pixels below the fold exactly as it did before. */
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Everything above the panes is measured content: the hero wraps to a different
+   number of rows at every width, and the composer grows as you type. None of it
+   may be shrunk to make room — the transcript is the only thing that should
+   give, and it does that by scrolling inside itself. */
+.sci-hero,
+.sci-alert,
+.sci-compose { flex: 0 0 auto; }
+
+/* ── Accent scales ─────────────────────────────────────────────────────── */
+.sci-acc--payment  { --sci-accent: #f59e0b; --sci-accent-soft: #fef3c7; --sci-accent-ink: #b45309; }
+.sci-acc--billing  { --sci-accent: #a855f7; --sci-accent-soft: #f3e8ff; --sci-accent-ink: #7e22ce; }
+.sci-acc--account  { --sci-accent: #0ea5e9; --sci-accent-soft: #e0f2fe; --sci-accent-ink: #0369a1; }
+.sci-acc--technical{ --sci-accent: #f43f5e; --sci-accent-soft: #ffe4e6; --sci-accent-ink: #be123c; }
+.sci-acc--other    { --sci-accent: #14b8a6; --sci-accent-soft: #ccfbf1; --sci-accent-ink: #0f766e; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   HEADER — a hero card, not a heading and a button on the page background
+   ═══════════════════════════════════════════════════════════════════════════ */
+.sci-hero {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 22px;
+  flex-wrap: wrap;
+  padding: 24px 26px;
+  border: 1px solid rgba(16, 185, 129, 0.20);
+  border-radius: 22px;
+  /* Three stacked layers: an indigo wash top-left, a sky wash top-right, and
+     the near-white card underneath. The washes are what stop this reading as
+     a plain white box. */
+  background:
+    radial-gradient(720px 260px at 6% -40%, rgba(99, 102, 241, 0.20), transparent 62%),
+    radial-gradient(660px 250px at 96% -10%, rgba(14, 165, 233, 0.20), transparent 60%),
+    linear-gradient(140deg, #ffffff 0%, #f2fff9 52%, #f1f8ff 100%);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 22px 48px -30px rgba(13, 148, 136, 0.55);
+  overflow: hidden;
+  animation: sci-rise 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* The navbar's rainbow hairline, repeated so the page reads as part of the
+   same product rather than a bolted-on form. */
+.sci-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: linear-gradient(90deg, #34d399, #22d3ee, #818cf8, #fbbf24, #34d399);
+  background-size: 300% 100%;
+  animation: sci-ribbon 12s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes sci-ribbon {
+  from { background-position: 0% 50%; }
+  to   { background-position: 300% 50%; }
+}
+/* Opacity only, deliberately — and not for the usual "fade in" reason.
+
+   A `translateY()` in the `from` frame means that until the animation runs,
+   every one of these elements sits 8px below where it belongs, and the offset
+   is left there permanently in any context that never composites the
+   animation (a backgrounded tab, a headless render). That showed up as the
+   hero, the panes and the form all failing to line up. The navbar already
+   makes the same call for the same reason — see Navbar.css's warning about
+   transforms on the bars. The rise is nice; it is not worth a layout that can
+   be wrong. */
+@keyframes sci-rise {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.sci-hero__main {
+  display: flex;
+  align-items: flex-start;
+  gap: 15px;
+  min-width: 0;
+  flex: 1 1 340px;
+}
+
+.sci-hero__mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 54px;
+  height: 54px;
+  border-radius: 17px;
+  background: var(--sci-grad);
+  color: #fff;
+  box-shadow: 0 14px 26px -12px rgba(14, 165, 233, 0.85);
+  transform: rotate(-4deg);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.sci-hero__mark svg { width: 27px; height: 27px; transform: rotate(4deg); }
+.sci-hero:hover .sci-hero__mark { transform: rotate(0deg) scale(1.05); }
+
+.sci-hero__text { min-width: 0; }
+
+.sci-title {
+  margin: 0 0 5px;
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  color: #064e3b; /* fallback: readable even if the gradient below is dropped */
+}
+/* Only applied where background-clip is actually supported, so an engine
+   without it keeps the solid colour instead of rendering invisible text. */
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .sci-title {
+    background: linear-gradient(94deg, #047857 0%, #0891b2 52%, #4f46e5 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}
+
+.sci-sub {
+  margin: 0;
+  max-width: 58ch;
+  color: var(--sci-body);
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+
+.sci-hero__side {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+/* ── Stat chips: the queue at a glance ─────────────────────────────────── */
+.sci-stats {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sci-stat {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 78px;
+  padding: 8px 12px 7px;
+  border: 1px solid var(--sci-line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 6px 14px -12px rgba(13, 148, 136, 0.6);
+}
+
+.sci-stat__n {
+  font-size: 19px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+.sci-stat__l {
+  margin-top: 2px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--sci-faint);
+  white-space: nowrap;
+}
+
+/* Each stat wears its status hue — the same three colours the list pills use,
+   so the header is a legend for the list below it. */
+.sci-stat--all      { --sci-accent: #14b8a6; --sci-accent-ink: #0f766e; }
+.sci-stat--open     { --sci-accent: #f59e0b; --sci-accent-ink: #b45309; }
+.sci-stat--pending  { --sci-accent: #6366f1; --sci-accent-ink: #4338ca; }
+.sci-stat--resolved { --sci-accent: #10b981; --sci-accent-ink: #047857; }
+
+.sci-stat--all .sci-stat__n,
+.sci-stat--open .sci-stat__n,
+.sci-stat--pending .sci-stat__n,
+.sci-stat--resolved .sci-stat__n { color: var(--sci-accent-ink); }
+
+.sci-stat__flag {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--sci-grad);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  box-shadow: 0 8px 16px -8px rgba(99, 102, 241, 0.9);
+  animation: sci-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes sci-pulse {
+  0%, 100% { box-shadow: 0 8px 16px -8px rgba(99, 102, 241, 0.9); }
+  50%      { box-shadow: 0 8px 20px -6px rgba(99, 102, 241, 0.45); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   BUTTONS
+   ═══════════════════════════════════════════════════════════════════════════ */
+.sci-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 17px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+  font-family: inherit;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 0.18s ease, box-shadow 0.22s ease, background-color 0.16s,
+              border-color 0.16s, color 0.16s, opacity 0.16s;
+}
+.sci-btn svg { width: 17px; height: 17px; flex: 0 0 auto; }
+
+.sci-btn--primary {
+  background: var(--sci-grad);
+  color: #fff;
+  box-shadow: 0 12px 24px -12px rgba(14, 165, 233, 0.8);
+}
+.sci-btn--primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 30px -12px rgba(79, 70, 229, 0.65);
+}
+.sci-btn--primary:active:not(:disabled) { transform: translateY(0); }
+
+.sci-btn--lg { padding: 12px 21px; font-size: 14.5px; }
+
+.sci-btn--ghost {
+  background: #fff;
+  border-color: #cfe0d8;
+  color: #3c5a4e;
+}
+.sci-btn--ghost:hover:not(:disabled) {
+  background: var(--sci-wash);
+  border-color: #a7c9ba;
+  color: #0f2a20;
+  transform: translateY(-1px);
+}
+
+.sci-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+
+.sci-btn:focus-visible,
+.sci-cat:focus-visible,
+.sci-thread:focus-visible,
+.sci-back:focus-visible,
+.sci-filter:focus-visible,
+.sci-chip:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid rgba(16, 185, 129, 0.42);
+  outline-offset: 2px;
+}
+
+/* Inline spinner for "Sending…", so a submit in progress never becomes an
+   unlabelled grey button. */
+.sci-spinner {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  border: 2.2px solid rgba(255, 255, 255, 0.42);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: sci-spin 0.7s linear infinite;
+}
+.sci-spinner--lg {
+  width: 30px;
+  height: 30px;
+  border-width: 3px;
+  border-color: rgba(16, 185, 129, 0.22);
+  border-top-color: #10b981;
+}
+@keyframes sci-spin { to { transform: rotate(360deg); } }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ALERTS
+   ═══════════════════════════════════════════════════════════════════════════ */
+.sci-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  padding: 12px 15px;
+  border-radius: 14px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+  animation: sci-rise 0.3s ease both;
+}
+.sci-alert__icon { width: 19px; height: 19px; flex: 0 0 auto; margin-top: 1px; }
+
+.sci-alert--error {
+  background: linear-gradient(135deg, #fff1f2 0%, #ffe4e6 100%);
+  border: 1px solid #fda4af;
+  color: #9f1239;
+}
+.sci-alert--ok {
+  background: linear-gradient(135deg, #ecfdf5 0%, #e0f2fe 100%);
+  border: 1px solid #86efac;
+  color: #065f46;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   NEW-CONVERSATION FORM
+   ═══════════════════════════════════════════════════════════════════════════ */
+.sci-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 22px;
+  border: 1px solid rgba(14, 165, 233, 0.20);
+  border-radius: 20px;
+  background:
+    radial-gradient(560px 200px at 100% 0%, rgba(99, 102, 241, 0.10), transparent 60%),
+    linear-gradient(150deg, #ffffff 0%, #f4fffb 60%, #f5fbff 100%);
+  box-shadow: 0 22px 46px -32px rgba(13, 148, 136, 0.6);
+  animation: sci-rise 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.sci-compose__title {
+  margin: 0 0 4px;
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--sci-ink);
+}
+.sci-compose__lede {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--sci-muted);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.sci-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  min-width: 0; /* a fieldset defaults to min-content and refuses to shrink */
+}
+
+.sci-field > span,
+.sci-field > label,
+.sci-field > legend {
+  padding: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #23463a;
+}
+.sci-field em {
+  font-style: normal;
+  font-weight: 500;
+  color: var(--sci-faint);
+}
+
+.sci-hint { color: var(--sci-faint); font-size: 12px; }
+
+.sci-field input[type="text"],
+.sci-field textarea,
+.sci-reply textarea {
+  width: 100%;
+  padding: 11px 13px;
+  border: 1px solid #d5e5dd;
+  border-radius: 13px;
+  background: #fff;
+  color: var(--sci-ink);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.55;
+  transition: border-color 0.16s, box-shadow 0.16s;
+}
+.sci-field textarea { resize: vertical; }
+
+.sci-field input[type="text"]::placeholder,
+.sci-field textarea::placeholder,
+.sci-reply textarea::placeholder { color: #9db3a8; }
+
+.sci-field input[type="text"]:focus,
+.sci-field textarea:focus,
+.sci-reply textarea:focus {
+  outline: none;
+  border-color: var(--sci-emerald);
+  box-shadow: var(--sci-ring);
+}
+
+.sci-count { color: var(--sci-faint); font-size: 12px; }
+.sci-count--near { color: #b45309; font-weight: 700; }
+
+/* ── Topic cards ───────────────────────────────────────────────────────── */
+.sci-cats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.sci-cat {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 13px;
+  border: 1.5px solid var(--sci-line);
+  border-radius: 15px;
+  background: #fff;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.16s, background 0.16s, transform 0.16s, box-shadow 0.16s;
+}
+.sci-cat:hover { transform: translateY(-2px); border-color: var(--sci-accent); }
+.sci-cat:hover .sci-cat__icon { background: var(--sci-accent-soft); color: var(--sci-accent-ink); }
+
+.sci-cat__icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: var(--sci-wash);
+  color: var(--sci-accent-ink);
+  transition: background 0.16s, color 0.16s;
+}
+.sci-cat__icon svg { width: 20px; height: 20px; }
+
+.sci-cat__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sci-cat__label { font-size: 13.5px; font-weight: 800; color: var(--sci-ink); }
+.sci-cat__hint {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--sci-faint);
+  /* The hint is a second line of help text, not a third: two lines max, so a
+     long category never makes one card taller than its neighbours. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* The tick is reserved space in every card and only painted on the selected
+   one — a card that grows when you select it reflows the whole row. */
+.sci-cat__tick {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  display: grid;
+  place-items: center;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: var(--sci-accent);
+  color: #fff;
+  opacity: 0;
+  transform: scale(0.5);
+  transition: opacity 0.16s, transform 0.16s;
+}
+.sci-cat__tick svg { width: 12px; height: 12px; stroke-width: 3; }
+
+.sci-cat--on,
+.sci-cat--on:hover {
+  border-color: var(--sci-accent);
+  background: linear-gradient(135deg, var(--sci-accent-soft) 0%, #ffffff 78%);
+  box-shadow: 0 12px 24px -16px var(--sci-accent);
+}
+.sci-cat--on .sci-cat__icon { background: var(--sci-accent); color: #fff; }
+.sci-cat--on .sci-cat__tick { opacity: 1; transform: scale(1); }
+
+.sci-compose__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TWO-PANE BODY
+
+   Height is NOT a `calc(100vh - Npx)`. That formula has to guess how much of
+   the viewport the chrome above the panes eats, and the hero wraps to two or
+   three rows depending on the width, so any constant is wrong somewhere — it
+   pushed the reply box under the fold on a 607px-tall window.
+
+   Instead the page is a flex column (.support-page__main > .sci > .sci-body)
+   and each link in the chain takes the space that is actually left over. The
+   panes only carry a `min-height` floor, so a genuinely tiny window degrades
+   into ordinary page scrolling instead of squashing the composer to nothing.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.sci-body {
+  display: grid;
+  grid-template-columns: minmax(268px, 344px) 1fr;
+  /* `minmax(0, 1fr)`, not the default `auto` row. An auto row is sized by its
+     content, so one long transcript made the row 780px tall, the row overflowed
+     this element, and the "height left over" the flex chain handed down was
+     never applied to the panes at all. Pinning the row to the container is what
+     makes the panes actually fill the space they were given. */
+  grid-template-rows: minmax(0, 1fr);
+  gap: 18px;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.sci-list,
+.sci-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 400px;
+  border: 1px solid var(--sci-line);
+  border-radius: 20px;
+  background: var(--sci-surface);
+  box-shadow: 0 20px 44px -34px rgba(13, 148, 136, 0.7);
+  overflow: hidden;
+  animation: sci-rise 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ── List head + filters ───────────────────────────────────────────────── */
+.sci-list__head {
+  flex: 0 0 auto;
+  padding: 14px 15px 12px;
+  border-bottom: 1px solid var(--sci-line-soft);
+  background: linear-gradient(180deg, #ffffff 0%, #f8fdfa 100%);
+}
+
+.sci-list__titlerow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 11px;
+}
+.sci-list__head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--sci-ink);
+}
+.sci-tally {
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--sci-grad-soft);
+  color: #0f766e;
+  font-size: 11.5px;
+  font-weight: 800;
+}
+
+.sci-filters {
+  display: flex;
+  gap: 6px;
+  /* Four chips must never widen the 268px list column, so they scroll sideways
+     rather than wrap into a second row that eats the list's height. */
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 1px;
+}
+.sci-filters::-webkit-scrollbar { display: none; }
+
+.sci-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  padding: 6px 11px;
+  border: 1px solid var(--sci-line);
+  border-radius: 999px;
+  background: #fff;
+  color: #4c6a5d;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.16s, background 0.16s, border-color 0.16s, transform 0.16s;
+}
+.sci-filter:hover { transform: translateY(-1px); border-color: var(--sci-accent); color: var(--sci-accent-ink); }
+
+.sci-filter__n {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--sci-wash);
+  color: var(--sci-muted);
+  font-size: 10.5px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.sci-filter--all      { --sci-accent: #14b8a6; --sci-accent-ink: #0f766e; }
+.sci-filter--open     { --sci-accent: #f59e0b; --sci-accent-ink: #b45309; }
+.sci-filter--pending  { --sci-accent: #6366f1; --sci-accent-ink: #4338ca; }
+.sci-filter--resolved { --sci-accent: #10b981; --sci-accent-ink: #047857; }
+
+.sci-filter--on,
+.sci-filter--on:hover {
+  background: var(--sci-accent);
+  border-color: var(--sci-accent);
+  color: #fff;
+}
+.sci-filter--on .sci-filter__n { background: rgba(255, 255, 255, 0.26); color: #fff; }
+
+/* ── Rows ──────────────────────────────────────────────────────────────── */
+.sci-threads {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.sci-thread {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  width: 100%;
+  padding: 13px 15px;
+  border: none;
+  border-bottom: 1px solid var(--sci-line-soft);
+  border-left: 3px solid transparent;
+  background: #fff;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.sci-thread:hover { background: var(--sci-wash); }
+
+.sci-thread__icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background: var(--sci-accent-soft);
+  color: var(--sci-accent-ink);
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.sci-thread__icon svg { width: 19px; height: 19px; }
+.sci-thread:hover .sci-thread__icon { transform: scale(1.07) rotate(-3deg); }
+
+.sci-thread__col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.sci-thread__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sci-thread__top strong {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: #12281f;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sci-unread {
+  flex: 0 0 auto;
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--sci-grad);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+  box-shadow: 0 6px 12px -8px rgba(99, 102, 241, 0.95);
+}
+
+.sci-thread__preview {
+  color: #64796f;
+  font-size: 12.5px;
+  line-height: 1.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sci-thread__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 1px;
+}
+.sci-thread__time { color: var(--sci-faint); font-size: 11px; white-space: nowrap; }
+
+/* ── Status pills ──────────────────────────────────────────────────────── */
+.sci-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px 3px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.sci-status__dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.sci-status--open {
+  background: #fff4e2;
+  color: #b45309;
+}
+.sci-status--pending {
+  background: #eef0ff;
+  color: #4338ca;
+}
+.sci-status--resolved {
+  background: #e7f9f0;
+  color: #047857;
+}
+
+/* The selected row: a coloured rail, a tinted ground, and a soft inset glow so
+   it reads as "lifted" against the white list. */
+.sci-thread--on,
+.sci-thread--on:hover {
+  background: linear-gradient(100deg, #f0fdf8 0%, #f4fbff 100%);
+  border-left-color: var(--sci-emerald);
+  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.22);
+}
+.sci-thread--on .sci-thread__top strong { color: #064e3b; }
+
+/* A status-coloured rail on the UNSELECTED rows, so a scan down the list
+   picks out the ones that need the member. */
+.sci-thread--open { border-left-color: #fcd34d; }
+.sci-thread--pending { border-left-color: #a5b4fc; }
+.sci-thread--resolved { border-left-color: #86efac; }
+
+/* ── Topic chip (thread header) ────────────────────────────────────────── */
+.sci-topic {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 11px 3px 4px;
+  border-radius: 999px;
+  background: var(--sci-accent-soft);
+  color: var(--sci-accent-ink);
+  font-size: 11.5px;
+  font-weight: 800;
+}
+.sci-topic__icon {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  color: var(--sci-accent-ink);
+}
+.sci-topic__icon svg { width: 13px; height: 13px; }
+
+/* ── Empty states ──────────────────────────────────────────────────────── */
+.sci-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  margin: 0;
+  padding: 34px 22px;
+  color: var(--sci-muted);
+  font-size: 13.5px;
+  line-height: 1.55;
+  text-align: center;
+}
+/* A plain sentence, e.g. "No messages yet." inside the transcript. */
+.sci-messages > .sci-empty { padding: 28px 16px; }
+
+.sci-empty__art {
+  display: grid;
+  place-items: center;
+  width: 62px;
+  height: 62px;
+  border-radius: 20px;
+  background: var(--sci-grad-soft);
+  color: #0f766e;
+  box-shadow: 0 14px 26px -16px rgba(13, 148, 136, 0.8);
+}
+.sci-empty__art svg { width: 29px; height: 29px; }
+
+.sci-empty__title {
+  margin: 4px 0 0;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--sci-ink);
+}
+.sci-empty__body { margin: 0; max-width: 40ch; }
+.sci-empty .sci-btn { margin-top: 6px; }
+
+/* ── Skeleton (first load) ─────────────────────────────────────────────── */
+.sci-skel {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 14px 15px;
+  border-bottom: 1px solid var(--sci-line-soft);
+}
+.sci-skel__icon {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+}
+.sci-skel__lines { display: flex; flex-direction: column; gap: 7px; flex: 1 1 auto; padding-top: 3px; }
+.sci-skel__line { height: 9px; border-radius: 999px; }
+.sci-skel__line--title { width: 72%; height: 11px; }
+.sci-skel__line--short { width: 40%; }
+
+.sci-skel__icon,
+.sci-skel__line {
+  background: linear-gradient(100deg, #eef4f1 30%, #e2ece7 50%, #eef4f1 70%);
+  background-size: 220% 100%;
+  animation: sci-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes sci-shimmer {
+  from { background-position: 160% 0; }
+  to   { background-position: -60% 0; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THREAD VIEW
+   ═══════════════════════════════════════════════════════════════════════════ */
+.sci-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  padding: 30px 26px;
+  text-align: center;
+  /* A faint aurora so an idle pane is not a dead white rectangle. */
+  background:
+    radial-gradient(520px 220px at 50% 108%, rgba(14, 165, 233, 0.10), transparent 62%),
+    radial-gradient(420px 200px at 12% -10%, rgba(16, 185, 129, 0.10), transparent 60%),
+    #fff;
+}
+.sci-placeholder__art {
+  display: grid;
+  place-items: center;
+  width: 78px;
+  height: 78px;
+  margin-bottom: 4px;
+  border-radius: 26px;
+  background: var(--sci-grad);
+  color: #fff;
+  box-shadow: 0 20px 34px -16px rgba(14, 165, 233, 0.85);
+  animation: sci-float 4.5s ease-in-out infinite;
+}
+.sci-placeholder__art svg { width: 38px; height: 38px; }
+@keyframes sci-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-7px); }
+}
+
+.sci-placeholder__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--sci-ink);
+}
+.sci-placeholder__body { margin: 0; max-width: 44ch; color: var(--sci-muted); font-size: 13.5px; line-height: 1.6; }
+.sci-placeholder .sci-btn { margin-top: 8px; }
+
+.sci-view__head {
+  position: relative;
+  flex: 0 0 auto;
+  padding: 13px 18px 14px;
+  border-bottom: 1px solid var(--sci-line-soft);
+  background: linear-gradient(180deg, #ffffff 0%, #f8fdfa 100%);
+}
+
+/* A short gradient bar keyed to the thread's status — the same three colours
+   as the list pills, repeated on the pane itself, so "who owes whom" is legible
+   from the corner of the eye. */
+.sci-view__bar {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--sci-accent) 0%, var(--sci-accent) 100%);
+}
+.sci-view__head--open     { --sci-accent: #f59e0b; }
+.sci-view__head--pending  { --sci-accent: #6366f1; }
+.sci-view__head--resolved { --sci-accent: #10b981; }
+
+.sci-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 9px;
+  padding: 5px 11px 5px 8px;
+  border: 1px solid var(--sci-line);
+  border-radius: 999px;
+  background: #fff;
+  color: #2f6350;
+  font-size: 12.5px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.16s, border-color 0.16s, transform 0.16s;
+}
+.sci-back:hover { background: var(--sci-wash); border-color: #a7c9ba; transform: translateX(-2px); }
+.sci-back svg { width: 15px; height: 15px; }
+
+.sci-view__titlerow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 8px;
+}
+.sci-view__subject {
+  margin: 0;
+  min-width: 0;
+  color: var(--sci-ink);
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.32;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.sci-view__tags {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.sci-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 800;
+}
+.sci-chip--open     { background: #fff4e2; color: #b45309; }
+.sci-chip--pending  { background: #eef0ff; color: #4338ca; }
+.sci-chip--resolved { background: #e7f9f0; color: #047857; }
+
+.sci-view__meta { margin: 8px 0 0; color: var(--sci-faint); font-size: 12px; }
+
+.sci-view__body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ── Transcript ────────────────────────────────────────────────────────── */
+.sci-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 18px;
+  background:
+    radial-gradient(520px 200px at 100% 0%, rgba(99, 102, 241, 0.05), transparent 60%),
+    linear-gradient(180deg, #f8fcfb 0%, #f6faf9 100%);
+  /* NO `scroll-behavior: smooth` here. The pane jumps itself to the newest
+     message with `box.scrollTop = box.scrollHeight` on every open and every
+     send, and under `smooth` that assignment becomes an ANIMATION: it has not
+     completed when the next render lands, it is dropped outright when the
+     container is not being painted (a background tab), and it fights the
+     member who has just scrolled up to re-read something — the exact case
+     where a yanked scroll is most annoying. A jump is the correct behaviour
+     for "show me the new message"; the transcript is only ever scrolled by the
+     member otherwise. */
+}
+
+.sci-day {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 6px 0 2px;
+}
+.sci-day span {
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid var(--sci-line);
+  color: var(--sci-faint);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.sci-msg {
+  display: flex;
+  align-items: flex-end;
+  gap: 9px;
+  max-width: 78%;
+  animation: sci-msg-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes sci-msg-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.sci-msg--mine { align-self: flex-end; flex-direction: row; }
+.sci-msg--theirs { align-self: flex-start; }
+
+.sci-msg__avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  margin-bottom: 2px;
+  border-radius: 11px;
+  background: var(--sci-grad);
+  color: #fff;
+  box-shadow: 0 10px 18px -12px rgba(14, 165, 233, 0.9);
+}
+.sci-msg__avatar svg { width: 17px; height: 17px; }
+
+.sci-msg__col { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.sci-msg--mine .sci-msg__col { align-items: flex-end; }
+
+.sci-msg__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0 3px;
+}
+.sci-msg__who { color: #23463a; font-size: 12px; font-weight: 800; }
+.sci-msg__time { color: #9db3a8; font-size: 10.5px; }
+
+.sci-msg__body {
+  padding: 11px 15px;
+  border-radius: 16px;
+  /* Preserve the member's line breaks — a two-line question must not arrive
+     as one run-on line, which is exactly the "where did I pay?" case. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.58;
+}
+
+.sci-msg--mine .sci-msg__body {
+  background: var(--sci-grad);
+  color: #fff;
+  border-bottom-right-radius: 5px;
+  box-shadow: 0 14px 26px -18px rgba(14, 165, 233, 0.95);
+}
+.sci-msg--theirs .sci-msg__body {
+  border: 1px solid var(--sci-line);
+  background: #fff;
+  color: #1d3a2f;
+  border-bottom-left-radius: 5px;
+  box-shadow: 0 10px 22px -20px rgba(13, 148, 136, 0.9);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   COMPOSER
+   ═══════════════════════════════════════════════════════════════════════════ */
+.sci-reply {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  flex: 0 0 auto;
+  padding: 13px 18px 16px;
+  border-top: 1px solid var(--sci-line-soft);
+  background: linear-gradient(180deg, #ffffff 0%, #fbfffd 100%);
+}
+.sci-reply__box { position: relative; }
+.sci-reply textarea {
+  min-height: 46px;
+  /* The height is set in JS (see the auto-grow effect) so the box grows with
+     the message. Vertical resize would fight that: the next keystroke would
+     snap it back to whatever the script computed. */
+  resize: none;
+  overflow-y: auto;
+  border-radius: 15px;
+  padding-right: 15px;
+}
+
+.sci-reply__foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.sci-reply__hint { color: var(--sci-faint); font-size: 11.5px; }
+
+/* The read-only panel shown instead of a composer on a resolved thread. It is
+   deliberately prominent: a member who cannot reply is owed the reason, and the
+   way forward (a new conversation) has to be one click away rather than buried
+   in the header. */
+.sci-closed {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+  padding: 16px 18px;
+  border-top: 1px solid #a7e8c8;
+  background: linear-gradient(140deg, #e7f9f0 0%, #f3fbff 100%);
+}
+.sci-closed__icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  background: var(--sci-grad);
+  color: #fff;
+  box-shadow: 0 14px 24px -14px rgba(16, 185, 129, 0.95);
+}
+.sci-closed__icon svg { width: 22px; height: 22px; stroke-width: 2.6; }
+.sci-closed__text { flex: 1 1 240px; min-width: 0; }
+.sci-closed__title {
+  margin: 0 0 3px;
+  font-size: 15px;
+  font-weight: 800;
+  color: #065f46;
+}
+.sci-closed p {
+  margin: 0;
+  color: #3c6355;
+  font-size: 13px;
+  line-height: 1.55;
+  max-width: 62ch;
+}
+
+/* ── Screen-reader-only text ───────────────────────────────────────────── */
+.sci-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── Scrollbars ────────────────────────────────────────────────────────────
+   Three scroll boxes live in here (the list, the transcript and the page
+   shell). Chrome's default 15px overlay is wider than the gutters on this
+   layout and eats the row's right edge, so the list and the transcript get a
+   slim tinted one that disappears until you actually scroll. */
+.sci-threads,
+.sci-messages,
+.support-page__main {
+  scrollbar-width: thin;
+  scrollbar-color: #c6dcd2 transparent;
+}
+.sci-threads::-webkit-scrollbar,
+.sci-messages::-webkit-scrollbar,
+.support-page__main::-webkit-scrollbar { width: 9px; height: 9px; }
+.sci-threads::-webkit-scrollbar-track,
+.sci-messages::-webkit-scrollbar-track,
+.support-page__main::-webkit-scrollbar-track { background: transparent; }
+.sci-threads::-webkit-scrollbar-thumb,
+.sci-messages::-webkit-scrollbar-thumb,
+.support-page__main::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: #c6dcd2;
+  background-clip: content-box;
+}
+.sci-threads::-webkit-scrollbar-thumb:hover,
+.sci-messages::-webkit-scrollbar-thumb:hover,
+.support-page__main::-webkit-scrollbar-thumb:hover { background: #9fc4b4; background-clip: content-box; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE — one pane at a time below 900px
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 900px) {
+  .sci-body { grid-template-columns: 1fr; }
+
+  /* Without this both panes stack, so "open a conversation" pushes the list out
+     of view above it and the member cannot get back. */
+  .sci-body--reading .sci-list { display: none; }
+  .sci-body:not(.sci-body--reading) .sci-view { display: none; }
+
+  .sci-list,
+  .sci-view { min-height: 440px; }
+
+  .sci-msg { max-width: 88%; }
+
+  /* The hero stops being a side-by-side card: the title block takes the first
+     row, the counters and the button share the second. */
+  .sci-hero { padding: 20px 18px; gap: 14px; }
+  .sci-hero__main { flex: 1 1 100%; }
+  .sci-hero__side { width: 100%; justify-content: space-between; }
+  .sci-title { font-size: 25px; }
+
+  /* The four counters and the button fit on ONE row down to about 620px. Let
+     the chips grow to fill it, as they do on a wide screen, and the button is
+     pushed onto a line of its own — which made the hero 100px taller than it
+     needed to be and cost the reply box that height. */
+  .sci-stats { flex: 0 1 auto; min-width: 0; }
+  .sci-stat { flex: 0 1 auto; min-width: 62px; padding: 7px 10px 6px; }
+  .sci-stat__n { font-size: 17px; }
+  .sci-stat__l { font-size: 9.5px; }
+  .sci-hero__side .sci-btn { flex: 0 0 auto; }
+
+  .sci-cats { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .sci-compose { padding: 18px 16px; }
+}
+
+@media (max-width: 640px) {
+  /* Below this the counters and the button stop sharing a row. */
+  .sci-stats { width: 100%; }
+  .sci-stat { flex: 1 1 0; min-width: 0; }
+  .sci-hero__side .sci-btn { flex: 1 1 auto; }
+  .sci-sub { font-size: 13.5px; }
+}
+
+/* A short window — a laptop with the browser half-tiled, or a phone in
+   landscape. The panes take what is left over, so the hero and the thread
+   header are the two things that can give some of it back without costing the
+   member anything they need to read. */
+@media (max-height: 720px) {
+  .sci-hero { padding: 16px 18px; gap: 12px; }
+  .sci-title { font-size: 24px; }
+  .sci-sub { font-size: 13.5px; }
+  .sci-hero__mark { width: 46px; height: 46px; border-radius: 15px; }
+  .sci-hero__mark svg { width: 23px; height: 23px; }
+  .sci-stat { padding: 5px 9px 4px; }
+  .sci-stat__n { font-size: 16px; }
+
+  .sci-view__head { padding: 11px 16px 12px; }
+  .sci-view__subject { font-size: 16.5px; }
+  .sci-back { margin-bottom: 7px; padding: 4px 10px 4px 7px; }
+  .sci-view__meta { margin-top: 6px; }
+  .sci-messages { padding: 14px 16px; }
+  .sci-list__head { padding: 12px 14px 10px; }
+  .sci-list__titlerow { margin-bottom: 9px; }
+}
+
+@media (max-width: 560px) {
+  .sci-hero__main { gap: 12px; }
+  .sci-hero__mark { width: 46px; height: 46px; border-radius: 15px; }
+  .sci-hero__mark svg { width: 23px; height: 23px; }
+
+  .sci-list,
+  .sci-view { min-height: 340px; }
+  /* A pane with no height floor would let a long thread push the reply box off
+     the bottom of the screen; the transcript keeps its own scroll instead, so
+     the composer below it stays put. */
+  .sci-threads { overflow-y: visible; }
+  .sci-messages { max-height: 58vh; }
+
+  .sci-reply { padding: 12px 13px 14px; }
+  .sci-reply__hint { display: none; }
+  .sci-reply__foot { justify-content: flex-end; }
+  .sci-view__head { padding: 12px 14px 13px; }
+  .sci-messages { padding: 14px 13px; }
+  .sci-view__subject { font-size: 16.5px; }
+  .sci-msg { max-width: 92%; }
+  .sci-closed { padding: 14px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   REDUCED MOTION — keep the design, drop the movement
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  .sci-hero,
+  .sci-hero::before,
+  .sci-compose,
+  .sci-alert,
+  .sci-list,
+  .sci-view,
+  .sci-msg,
+  .sci-skel__icon,
+  .sci-skel__line,
+  .sci-spinner,
+  .sci-stat__flag,
+  .sci-placeholder__art {
+    animation: none !important;
+  }
+  .sci-btn,
+  .sci-cat,
+  .sci-filter,
+  .sci-thread__icon,
+  .sci-back,
+  .sci-hero__mark,
+  .sci-cat__tick {
+    transition: none !important;
+  }
+  .sci-btn--primary:hover:not(:disabled),
+  .sci-cat:hover,
+  .sci-filter:hover,
+  .sci-back:hover,
+  .sci-hero:hover .sci-hero__mark,
+  .sci-thread:hover .sci-thread__icon {
+    transform: none;
+  }
+}

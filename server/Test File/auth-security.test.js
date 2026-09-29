@@ -4,6 +4,7 @@ const express = require('express');
 
 const User = require('../models/User');
 const emailUtils = require('../utils/email');
+const { stubQuery } = require('./stubQuery');
 
 function buildApp() {
   delete require.cache[require.resolve('../routes/auth')];
@@ -20,7 +21,9 @@ test('login route does not leak OTPs in the JSON response', async () => {
   const originalNodeEnv = process.env.NODE_ENV;
 
   process.env.NODE_ENV = 'development';
-  User.findOne = async () => ({
+  // stubQuery, not a bare object: /login projects the fields it needs with
+  // `.select(...)`, and a plain object is not chainable. See stubQuery.js.
+  User.findOne = () => stubQuery({
     _id: '507f1f77bcf86cd799439011',
     email: 'demo@example.com',
     firstName: 'Demo',
@@ -31,6 +34,7 @@ test('login route does not leak OTPs in the JSON response', async () => {
     profilePicture: '',
     bannerPicture: '',
     matchPassword: async () => true,
+    save: async () => {},
   });
   emailUtils.sendOtpEmail = async () => true;
 

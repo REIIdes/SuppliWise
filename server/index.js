@@ -2,13 +2,23 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const helmet = require('helmet');
+const compression = require('compression');
 const rateLimit = require('express-rate-limit');
-require('dotenv').config({ path: require('path').join(__dirname, '.env') });
+// .env MUST be loaded by envFile, not by calling dotenv directly: envFile
+// snapshots the real environment first, so a later reload can tell an
+// OS-provided variable from one that only exists because .env defined it.
+// Requiring dotenv here instead would lose that distinction forever.
+require('./utils/envFile').reloadFromDisk();
 
 const authRoutes = require('./routes/auth');
+// Emailed-link password reset. A separate file rather than more of
+// routes/auth.js, mounted under the same /api/auth prefix (see STAGE 3).
+const passwordResetRoutes = require('./routes/passwordReset');
 const assessmentRoutes = require('./routes/assessment');
 const recommendRoutes = require('./routes/recommend');
 const chatRoutes = require('./routes/chat');
+const supportChatRoutes = require('./routes/supportChat');
+const adminSupportChatRoutes = require('./routes/adminSupportChats');
 const polishRoutes = require('./routes/polish');
 const supplementDetailRoutes = require('./routes/supplement_detail');
 const dashboardRoutes = require('./routes/dashboard');
@@ -18,6 +28,7 @@ const notificationRoutes = require('./routes/notifications');
 const securityRoutes = require('./routes/security');
 const subscriptionRoutes = require('./routes/subscription');
 const web3Routes = require('./routes/web3');
+const { PICTURE_DIR } = require('./utils/pictures');
 const AdminAccount = require('./models/AdminAccount');
 
 const app = express();
@@ -32,14 +43,30 @@ const app = express();
 // `1` trusts exactly one hop (the proxy itself), never the whole chain.
 if (process.env.TRUST_PROXY === 'true') app.set('trust proxy', 1);
 
+// `JWT_SECRET` signs BOTH user and admin session tokens. User tokens are minted
+// with no `exp` (sessions.js), so a guessed secret means forgeable tokens for
+// every account with no expiry to fall back on. The admin security monitor
+// reported short secrets as Critical, but nothing prevented one from booting.
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'suppliwise_jwt_secret_key_change_in_production') {
   throw new Error('JWT_SECRET is missing or still uses the default placeholder value.');
+}
+if (process.env.JWT_SECRET.length < 32) {
+  throw new Error('JWT_SECRET must be at least 32 characters. Use a long random value (e.g. `openssl rand -hex 32`).');
 }
 
 // Production safeguard: OTP values must never be exposed in API responses.
 // Refuse to boot live with the dev override enabled.
 if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DEV_OTP_RESPONSE === 'true') {
   throw new Error('ALLOW_DEV_OTP_RESPONSE must never be "true" in production.');
+}
+
+// Password reset links are built from PUBLIC_WEB_URL, and that value decides
+// where a real user's reset actually goes. Unset in production, the link is
+// built for http://localhost:5173 and every reset email a real user receives is
+// a dead end — a failure that only shows up once someone is actually locked out,
+// and looks like a broken product rather than a missing setting. Refuse to boot.
+if (process.env.NODE_ENV === 'production' && !String(process.env.PUBLIC_WEB_URL || '').trim()) {
+  throw new Error('PUBLIC_WEB_URL must be set in production — it is the origin password reset links point at.');
 }
 
 // ── Security headers ──────────────────────────────────────────────────────
@@ -55,6 +82,19 @@ app.use(helmet({
       defaultSrc: ["'none'"],
       frameAncestors: ["'none'"],
     },
+  },
+}));
+
+// ── Compression ────────────────────────────────────────────────────────────
+// Compress all responses. AI recommendation payloads can be ~500KB uncompressed;
+// gzip typically reduces them to ~50KB. This is a major latency win for
+// mobile users on slow connections.
+app.use(compression({
+  level: 6, // balanced between CPU and compression ratio
+  threshold: 1024, // only compress responses > 1KB
+  filter: (req, res) => {
+    if (req.headers['x-no-compression']) return false;
+    return compression.filter(req, res);
   },
 }));
 
@@ -91,6 +131,36 @@ app.use('/api', (req, res, next) => {
   res.set('Cache-Control', 'no-store');
   next();
 });
+
+// ── Profile / banner images ────────────────────────────────────────────────
+// Served from disk rather than stored inline in the user document: a single
+// inline banner made one account's document ~3 MB, which turned every sign-in
+// into two ~30 s round-trips and broke the login button outright. See
+// utils/pictures.js for the full story.
+//
+// Mounted OUTSIDE /api, so it is served with normal static caching instead of
+// the no-store above, and ahead of every rate limiter: an <img> tag cannot
+// carry an Authorization header, and pictures are immutable (the filename is
+// content-addressed), so they are safe to cache hard and cheap to serve.
+//
+// Helmet sets `Cross-Origin-Resource-Policy: same-origin`, which the browser
+// enforces when the SPA (dev server on :5173, or a deployed web origin) loads
+// an image from the API origin (:5000) — every avatar would be blocked. The
+// pictures are public, non-sensitive assets by nature, so this route opts back
+// in to cross-origin reads. Scoped to /pictures; every other response keeps
+// the stricter default.
+app.use('/pictures', (req, res, next) => {
+  res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+  next();
+});
+app.use('/pictures', express.static(PICTURE_DIR, {
+  index: false,
+  dotfiles: 'ignore',
+  // A picture's URL changes whenever its bytes change, so a cached copy can
+  // never be stale.
+  immutable: true,
+  maxAge: '365d',
+}));
 
 // ── Rate limiters ──────────────────────────────────────────────────────────
 // Keep production limits strict while allowing repeated localhost testing.
@@ -193,6 +263,10 @@ app.use('/api/assessment', userLimiter);
 app.use('/api/subscription', sessionLimiter);
 app.use('/api/recommend', recommendLimiter);
 app.use('/api/chat', userLimiter);
+// Human support conversations (the "where did I pay" channel). Same
+// non-escalating user bucket as the rest of the feature surface: a member
+// writing to support must never climb the brute-force lockout ladder.
+app.use('/api/support-chat', userLimiter);
 app.use('/api/polish', aiLimiter);
 app.use('/api/supplement-detail', aiLimiter);
 app.use('/api/dashboard', userLimiter);
@@ -220,7 +294,7 @@ const JSON_UPLOAD_LIMIT_BYTES = 10 * 1024 * 1024;   // base64 pictures only
 // worst case for a chunked body (which declares no length).
 app.use(bodyBudget(JSON_UPLOAD_LIMIT_BYTES));
 
-// Two base64-picture routes need the wide limit; everything else is text.
+// Three base64-picture routes need the wide limit; everything else is text.
 // body-parser sets req._body once it has run, so mounting the 10 mb parser on
 // just these paths *ahead of* the blanket parser scopes the allowance to them
 // and only them (audit finding L7 — "reduce with a per-route limit").
@@ -241,18 +315,30 @@ app.use(bodyBudget(JSON_UPLOAD_LIMIT_BYTES));
 // stops mid-flight.
 app.use('/api/auth/profile', rejectOversized(JSON_UPLOAD_LIMIT_BYTES));
 app.use('/api/admin/profile', rejectOversized(JSON_UPLOAD_LIMIT_BYTES));
+// Proof-of-payment receipts. Same rule, same reason: the request body carries a
+// base64 image (~2.7 MB for the 2 MB cap in utils/subscriptionRequests.js), so
+// the blanket 1 MB guard would reject a receipt the picker already accepted.
+app.use('/api/subscription/requests', rejectOversized(JSON_UPLOAD_LIMIT_BYTES));
 app.use(rejectOversized(JSON_LIMIT_BYTES));
 
 app.use('/api/auth/profile', express.json({ limit: JSON_UPLOAD_LIMIT_BYTES }));
 app.use('/api/admin/profile', express.json({ limit: JSON_UPLOAD_LIMIT_BYTES }));
+app.use('/api/subscription/requests', express.json({ limit: JSON_UPLOAD_LIMIT_BYTES }));
 app.use(express.json({ limit: JSON_LIMIT_BYTES }));
 
 // ── STAGE 3 — HANDLE ───────────────────────────────────────────────────────
+// Password reset (emailed link) is mounted BEFORE routes/auth.js so it owns
+// /api/auth/password-reset/*. It still inherits the /api/auth flood guard,
+// lockout check and global auth limiter registered in STAGE 1 — a narrower
+// mount of a wider middleware is normal Express, and the per-flow rate limits
+// inside the router stack on top of those.
+app.use('/api/auth/password-reset', passwordResetRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/assessment', assessmentRoutes);
 app.use('/api/subscription', subscriptionRoutes);
 app.use('/api/recommend', recommendRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/support-chat', supportChatRoutes);
 app.use('/api/polish', polishRoutes);
 app.use('/api/supplement-detail', supplementDetailRoutes);
 app.use('/api/dashboard', dashboardRoutes);
@@ -261,6 +347,10 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/security', securityRoutes);
 app.use('/api/web3', web3Routes);
 app.use('/api/admin', adminRoutes);
+// The admin "Chat management" queue. A separate file rather than more of
+// routes/admin.js, but mounted under the same /api/admin prefix so it inherits
+// the admin limiter and lockout check registered in STAGE 1 above.
+app.use('/api/admin/chats', adminSupportChatRoutes);
 
 // Health check — metered like every other /api path (it was the cheapest
 // unbounded endpoint before: no limiter, no headers, no ceiling).
@@ -358,21 +448,39 @@ if (!process.env.MONGO_URI) {
 
 mongoose
   .connect(process.env.MONGO_URI, {
-    maxPoolSize: 10,
-    minPoolSize: 1,
+    maxPoolSize: 50,
+    minPoolSize: 5,
     serverSelectionTimeoutMS: 10000,
     socketTimeoutMS: 30000,
+    // ── Surviving a blip instead of surfacing it ──────────────────────────
+    // A login once answered "Something went wrong. Please try again later."
+    // because one pooled socket to Atlas timed out:
+    //
+    //     [login] connection 10 to 159.143.174.62:27017 timed out
+    //
+    // The credential was correct; the request died anyway. The driver can
+    // transparently re-run a single-document read/write on a fresh connection
+    // when the failure was a dropped socket or a server that went away, which
+    // is exactly this case — but retryWrites/retryReads must be opted into
+    // explicitly for the options below to be honoured, and the default
+    // `waitQueueTimeoutMS: 0` means a saturated pool waits forever instead of
+    // failing cleanly. Both are set here, with a bounded wait so a genuinely
+    // exhausted pool reports a retryable 503 rather than hanging the request.
+    retryWrites: true,
+    retryReads: true,
+    waitQueueTimeoutMS: 10000,
   })
   .then(() => {
     console.log('Connected to MongoDB');
     const legacy = process.env.ADMIN_ALIAS && process.env.ADMIN_PASSWORD_HASH && process.env.ADMIN_TOTP_SECRET
       ? [{ alias: process.env.ADMIN_ALIAS, passwordHash: process.env.ADMIN_PASSWORD_HASH, totpSecret: process.env.ADMIN_TOTP_SECRET }]
       : [];
-    const configuredAdmins = String(process.env.ADMIN_ACCOUNTS || '').split(',').map(entry => {
-      const [alias, passwordHash, totpSecret] = entry.split('|').map(value => value.trim());
-      return alias && passwordHash && totpSecret ? { alias, passwordHash, totpSecret } : null;
-    }).filter(Boolean);
-    const accounts = [...legacy, ...configuredAdmins];
+    // Parsed by utils/adminAccounts, NOT with a bare split(','): the entries are
+    // comma-joined, but an argon2id hash is itself comma-separated
+    // ($argon2id$v=19$m=19456,t=2,p=1$...), so the naive split cut each account
+    // into three fragments and the seeder silently ensured only the legacy one.
+    // See utils/adminAccounts.js for the delimiter rule.
+    const accounts = require('./utils/adminAccounts').configuredAdminAccounts();
     return Promise.all(accounts.map(account => AdminAccount.updateOne({ alias: account.alias }, { $setOnInsert: account }, { upsert: true })))
       // Alias-only log (never secrets/hashes): proves every admin account
       // exists after boot on any device, so a fresh clone + .env self-heals.
@@ -399,15 +507,49 @@ mongoose
         server.once('error', reject);
       }))
       .then(() => {
-        // Genesis for the Web3 layer: chain + reference data. Non-blocking —
+        // Genesis for the Web3 layer: chain + reference data. Non-blocking, so
         // a seed hiccup must never keep the API from serving requests (the
-        // endpoints self-heal by lazy-initializing on first use).
-        require('./blockchain/seed').bootstrap().catch(() => {});
+        // endpoints self-heal by lazy-initializing on first use) — but NOT
+        // silent: a swallowed failure here used to present as a permanently
+        // "stale" oracle network in the admin monitor with no clue why.
+        require('./blockchain/seed').bootstrap().catch((err) => {
+          console.error('[web3] bootstrap failed — endpoints will lazy-initialize on first use:', err.message);
+        });
+        // Pre-compute the ledger's whole-chain audit so the first person to open
+        // the admin security monitor does not pay for it. The monitor itself
+        // only re-hashes blocks appended since the last proven-good one, so
+        // this single background walk is what makes every later check cheap.
+        require('./blockchain/ledger').audit().then(
+          (result) => {
+            if (result && result.valid) {
+              console.log(`[web3] chain verified at boot — ${result.checked} block(s), height ${result.height}`);
+            } else {
+              console.error('[web3] CHAIN INTEGRITY FAILED at boot:', JSON.stringify(result));
+            }
+          },
+          (err) => console.error('[web3] chain audit at boot failed:', err.message),
+        );
       })
       .then(() => {
         // Non-blocking SMTP check — bad credentials surface in the log at boot
         const { verifyEmailConfig } = require('./utils/email');
-        verifyEmailConfig().catch(() => {});
+        verifyEmailConfig().catch((err) => {
+          console.error('[email] configuration check failed:', err.message);
+        });
+      })
+      .then(() => {
+        // No payment processor is integrated, so self-serve "purchase" grants a
+        // paid plan for free. It fails closed, but if it has been switched on
+        // the entitlement bypass is real and must be visible in the log rather
+        // than discovered from a support ticket.
+        const { selfServeEnabled } = require('./utils/planCatalogue');
+        if (selfServeEnabled()) {
+          console.warn(
+            '[subscription] SELF-SERVE PURCHASE IS ENABLED — no payment is taken. ' +
+            'Any authenticated user can grant themselves a paid plan for free. ' +
+            'Set SUBSCRIPTION_SELF_SERVE_PURCHASE=false to close this.'
+          );
+        }
       });
   })
   .catch((err) => {

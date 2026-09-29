@@ -20,6 +20,19 @@
 
 .psc-fieldset .psc-input { width: 100%; }
 
+/* Secondary copy sitting inside a button row. Sized to stay subordinate to the
+   buttons it sits beside, and allowed to wrap onto its own line. */
+.psc-hint {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #64748b;
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.psc-codes .psc-btn-row { margin-bottom: 10px; }
+
 .psc-input--otp {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 19px;

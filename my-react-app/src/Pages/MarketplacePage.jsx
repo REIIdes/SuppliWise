@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import {
   getListings,
@@ -16,11 +15,17 @@ import {
   Alert,
   CopyChip,
   Empty,
+  Hero,
+  AreaNav,
   TabBar,
   fmtWell,
   fmtDay,
   usePanelState,
 } from '../Components/Web3Panels/w3ui';
+// Clamp a text input to a whole number inside [min, max], so the stepper and
+// the Buy button can never disagree about what will be ordered. The behaviour
+// is pinned by marketplaceQuantity.test.js.
+import { clampQty } from './marketplaceQuantity.js';
 import './Web3.css';
 
 // P2P marketplace with smart-contract escrow (features 3, 4 & 15): buyers
@@ -30,12 +35,52 @@ const CATEGORIES = ['Vitamins', 'Minerals', 'Herbs', 'Protein', 'Probiotics', 'O
 
 const STATUS_BADGE = { escrow: 'amber', released: 'green', refunded: 'red' };
 
+const STATUS_LABEL = {
+  escrow: 'In escrow',
+  released: 'Released',
+  refunded: 'Refunded',
+};
+
 const TABS = [
   { key: 'browse', icon: '🛒', label: 'Browse' },
   { key: 'orders', icon: '📦', label: 'My Orders' },
   { key: 'sell', icon: '🏷️', label: 'Sell' },
   { key: 'disputes', icon: '⚖️', label: 'Disputes' },
 ];
+
+/** − qty + with a typed value, clamped to what the seller actually has. */
+function QtyStepper({ value, max, disabled, onChange, label }) {
+  return (
+    <div className="w3-stepper">
+      <button
+        type="button"
+        onClick={() => onChange(clampQty(String(value - 1), 1, max))}
+        disabled={disabled || value <= 1}
+        aria-label={`Decrease quantity for ${label}`}
+      >
+        −
+      </button>
+      <input
+        type="number"
+        inputMode="numeric"
+        min="1"
+        max={max}
+        value={value}
+        disabled={disabled}
+        aria-label={`Quantity for ${label}`}
+        onChange={(e) => onChange(clampQty(e.target.value, 1, max))}
+      />
+      <button
+        type="button"
+        onClick={() => onChange(clampQty(String(value + 1), 1, max))}
+        disabled={disabled || value >= max}
+        aria-label={`Increase quantity for ${label}`}
+      >
+        +
+      </button>
+    </div>
+  );
+}
 
 export default function MarketplacePage() {
   const { loading, setLoading, alert, ok, fail, clear, info } = usePanelState();
@@ -99,10 +144,10 @@ export default function MarketplacePage() {
     }
   };
 
-  const buy = (listingId) => {
-    const qty = Math.max(1, parseInt(qtys[listingId], 10) || 1);
+  const buy = (listing) => {
+    const qty = clampQty(qtys[listing._id], 1, Math.max(1, listing.stock));
     return run(
-      () => placeOrder({ listingId, qty, discountCode: discount.trim() }),
+      () => placeOrder({ listingId: listing._id, qty, discountCode: discount.trim() }),
       (r) => {
         setDiscount('');
         setTab('orders');
@@ -156,32 +201,51 @@ export default function MarketplacePage() {
       }
     );
 
-  if (loading && !market) return <Spinner />;
+  // Navbar kept during the first load: a bare spinner replaced the whole page,
+  // so the bar blinked out and back in on every cold start of the route.
+  if (loading && !market) {
+    return (
+      <div className="w3-page">
+        <Navbar />
+        <div className="w3-container">
+          <Spinner />
+        </div>
+      </div>
+    );
+  }
 
   const emptyOrders = orders.bought.length === 0 && orders.sold.length === 0;
+  const listingReady =
+    form.title.trim().length >= 4 &&
+    Number(form.priceWell) > 0 &&
+    Number(form.stock) >= 1;
+  const disputeReady = disputeReason.trim().length >= 10;
+  const openEscrows = orders.bought.filter((o) => o.status === 'escrow').length;
 
   const orderRow = (o, side) => (
     <tr key={`${side}-${o._id}`}>
-      <td style={{ fontWeight: 600 }}>{o.listingTitle}</td>
-      <td>{o.qty}</td>
-      <td>
+      <td style={{ fontWeight: 700 }}>{o.listingTitle}</td>
+      <td className="num">{o.qty}</td>
+      <td className="num">
         {fmtWell(o.total)} WELL
         {o.discount > 0 && (
-          <div style={{ fontSize: 12, color: '#16a34a' }}>
+          <div style={{ fontSize: 12, color: '#047857', fontWeight: 700 }}>
             −{fmtWell(o.discount)} ({o.discountCode})
           </div>
         )}
       </td>
       <td>
-        <span className={`w3-badge ${STATUS_BADGE[o.status] || ''}`}>{o.status}</span>
-        {o.settleTx ? <div style={{ marginTop: 4 }}><CopyChip value={o.settleTx} label="settle" /></div> : null}
+        <span className={`w3-badge ${STATUS_BADGE[o.status] || ''}`}>
+          {STATUS_LABEL[o.status] || o.status}
+        </span>
+        {o.settleTx ? <div style={{ marginTop: 5 }}><CopyChip value={o.settleTx} label="settle tx" /></div> : null}
       </td>
       <td>{fmtDay(o.createdAt)}</td>
       <td>
         {side === 'buy' && o.status === 'escrow' ? (
           <span className="w3-row" style={{ gap: 6 }}>
             <button className="w3-btn small" disabled={busy} onClick={() => confirmDeliveryNow(o._id)}>
-              Confirm
+              Confirm delivery
             </button>
             <button
               className="w3-btn danger small"
@@ -204,19 +268,15 @@ export default function MarketplacePage() {
     <div className="w3-page">
       <Navbar />
       <div className="w3-container">
-        <header className="w3-header">
-          <h1 className="w3-title">🛒 Verified Marketplace</h1>
-          <p className="w3-subtitle">
-            Peer-to-peer supplement trading with on-chain escrow — funds release only when you
-            confirm delivery, and any disagreement goes to a decentralized jury.
-          </p>
-        </header>
+        <Hero
+          variant="teal"
+          mark="🛒"
+          eyebrow="Escrow-protected trading"
+          title="Verified Marketplace"
+          subtitle="Peer-to-peer supplement trading with on-chain escrow — funds release only when you confirm delivery, and any disagreement goes to a decentralized jury."
+        />
 
-        <div className="w3-subnav">
-          <Link className="w3-btn ghost small" to="/web3">← Web3 Hub</Link>
-          <Link className="w3-btn ghost small" to="/governance">🏛️ Governance</Link>
-          <Link className="w3-btn ghost small" to="/verify">🔍 Verify a product</Link>
-        </div>
+        <AreaNav />
 
         <TabBar
           tabs={TABS}
@@ -239,32 +299,47 @@ export default function MarketplacePage() {
         {tab === 'browse' && market && (
           <div>
             <div className="w3-card accent">
-              {/* Fee chip sits with the heading it describes — it used to be
-                  pushed to the far edge of a full-width row, reading as an
-                  unrelated floating label. */}
-              <div className="w3-card-title">
-                🔓 Escrow-protected trading
+              <div className="w3-card-head">
+                <div>
+                  <div className="w3-card-title">🔓 Escrow-protected trading</div>
+                  <p className="w3-card-sub">
+                    Payment is locked in the escrow contract until delivery is confirmed. On
+                    release the {market.feePct}% protocol fee goes to the DAO treasury and the
+                    remainder is paid to the seller.
+                  </p>
+                </div>
                 <span className="w3-badge green">protocol fee {market.feePct}%</span>
               </div>
-              <p className="w3-card-sub">
-                Payment is locked in the escrow contract until delivery is confirmed. On release
-                the {market.feePct}% protocol fee goes to the DAO treasury and the remainder is paid
-                to the seller.
-              </p>
+              {/* Oracle read-outs as a labelled mini grid. They were one row of
+                  blue pills — "Batch verification pass rate: 99.1 %" — which read
+                  as debug output rather than as market context. */}
               {Array.isArray(market.oracleFeeds) && market.oracleFeeds.length > 0 && (
-                <div className="w3-row" style={{ gap: 8 }}>
+                <div className="w3-grid compact">
                   {market.oracleFeeds.map((f) => (
-                    <span className="w3-badge blue" key={f.key}>
-                      {f.label}: {f.value}{f.unit ? ` ${f.unit}` : ''}
-                    </span>
+                    <div className="w3-mini" key={f.key}>
+                      <div className="w3-mini-label">{f.label}</div>
+                      <div className="w3-mini-value">
+                        {f.value}
+                        {f.unit ? <span>{f.unit}</span> : null}
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
             </div>
 
-            <div className="w3-row" style={{ alignItems: 'flex-end', marginBottom: 16 }}>
-              <div style={{ flex: 1, minWidth: 240 }}>
-                <label className="w3-label" htmlFor="mkt-discount">Loyalty code (optional)</label>
+            {/* The loyalty field used to sit on the page on its own, outside
+                any surface, so it looked like it belonged to nothing above or
+                below it. As a ticket-shaped block it reads as a coupon field
+                that applies to the order you are about to place. */}
+            <div className="w3-card w3-coupon">
+              <div className="w3-coupon-icon" aria-hidden="true">🎟️</div>
+              <div className="w3-coupon-body">
+                <div className="w3-label" htmlFor="mkt-discount">Loyalty code (optional)</div>
+                <p className="w3-card-sub" style={{ marginBottom: 10 }}>
+                  Converted WELL into a one-time code? Paste it here — the discount is taken off
+                  the order total when you buy.
+                </p>
                 <input
                   id="mkt-discount"
                   className="w3-input"
@@ -276,41 +351,57 @@ export default function MarketplacePage() {
             </div>
 
             {market.listings.length === 0 ? (
-              <Empty icon="🛒">No listings yet — be the first to publish one in the Sell tab.</Empty>
+              <Empty
+                icon="🛒"
+                title="No listings yet"
+                action={
+                  <button className="w3-btn" onClick={() => setTab('sell')}>
+                    🏷️ Publish the first listing
+                  </button>
+                }
+              >
+                Nobody has listed a supplement yet. Be the first and earn WELL on delivery.
+              </Empty>
             ) : (
               <div className="w3-grid two">
-                {market.listings.map((l) => (
-                  <div className="w3-listing" key={l._id}>
-                    <div className="w3-row between">
-                      <span className="w3-listing-brand">{l.brand || l.category}</span>
-                      <span className="w3-badge">{l.stock} in stock</span>
-                    </div>
-                    <div className="w3-listing-title">{l.title}</div>
-                    <div className="w3-listing-desc">{l.description || 'No description provided.'}</div>
-                    <div className="w3-row between" style={{ marginTop: 6 }}>
-                      <span className="w3-price">{fmtWell(l.priceWell)} <small>WELL</small></span>
-                      <span className="w3-row" style={{ gap: 8 }}>
-                        <input
-                          className="w3-input"
-                          style={{ width: 70 }}
-                          type="number"
-                          min="1"
-                          max={l.stock}
-                          value={qtys[l._id] || 1}
-                          onChange={(e) => setQtys((q) => ({ ...q, [l._id]: e.target.value }))}
-                          aria-label={`Quantity for ${l.title}`}
-                        />
-                        <button
-                          className="w3-btn small"
-                          disabled={busy || l.stock < 1}
-                          onClick={() => buy(l._id)}
-                        >
-                          Buy
-                        </button>
-                      </span>
-                    </div>
-                  </div>
-                ))}
+                {market.listings.map((l) => {
+                  const stock = Math.max(0, Number(l.stock) || 0);
+                  const qty = clampQty(qtys[l._id], 1, Math.max(1, stock));
+                  const soldOut = stock < 1;
+                  return (
+                    <article className="w3-listing" key={l._id}>
+                      <div className="w3-row between">
+                        <span className="w3-listing-brand">{l.brand || l.category}</span>
+                        <span className={`w3-badge ${soldOut ? 'red' : stock <= 3 ? 'amber' : ''}`}>
+                          {soldOut ? 'Sold out' : `${stock} in stock`}
+                        </span>
+                      </div>
+                      <div className="w3-listing-title">{l.title}</div>
+                      <div className="w3-listing-desc">{l.description || 'No description provided.'}</div>
+                      <div className="w3-listing-foot">
+                        <div className="w3-price">
+                          {fmtWell(l.priceWell)} <small>WELL</small>
+                        </div>
+                        <div className="w3-row" style={{ gap: 8 }}>
+                          <QtyStepper
+                            value={qty}
+                            max={Math.max(1, stock)}
+                            disabled={busy || soldOut}
+                            onChange={(next) => setQtys((q) => ({ ...q, [l._id]: next }))}
+                            label={l.title}
+                          />
+                          <button
+                            className="w3-btn small"
+                            disabled={busy || soldOut}
+                            onClick={() => buy(l)}
+                          >
+                            {soldOut ? 'Unavailable' : 'Buy'}
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -321,22 +412,30 @@ export default function MarketplacePage() {
           <div>
             {disputeTarget && (
               <div className="w3-card accent">
-                <div className="w3-card-title">⚖️ Open a dispute</div>
-                <p className="w3-card-sub">
-                  Describe the problem — jurors (staked WELL holders) will review the evidence and
-                  their vote decides whether you get refunded or the seller gets paid.
-                </p>
-                <textarea
-                  className="w3-textarea"
-                  placeholder="What went wrong with this order? (min 10 characters)"
-                  value={disputeReason}
-                  onChange={(e) => setDisputeReason(e.target.value)}
-                  aria-label="Dispute reason"
-                />
-                <div className="w3-row" style={{ marginTop: 12 }}>
+                <div className="w3-card-head">
+                  <div>
+                    <div className="w3-card-title">⚖️ Open a dispute</div>
+                    <p className="w3-card-sub">
+                      Describe the problem — jurors (staked WELL holders) will review the evidence
+                      and their vote decides whether you get refunded or the seller gets paid. Your
+                      WELL stays locked in escrow until the verdict.
+                    </p>
+                  </div>
+                </div>
+                <div className="w3-field">
+                  <label className="w3-label" htmlFor="dispute-reason">What went wrong?</label>
+                  <textarea
+                    id="dispute-reason"
+                    className="w3-textarea"
+                    placeholder="Describe the problem with this order… (min 10 characters)"
+                    value={disputeReason}
+                    onChange={(e) => setDisputeReason(e.target.value)}
+                  />
+                </div>
+                <div className="w3-row">
                   <button
                     className="w3-btn danger"
-                    disabled={busy || disputeReason.trim().length < 10}
+                    disabled={busy || !disputeReady}
                     onClick={submitDispute}
                   >
                     File dispute
@@ -349,9 +448,35 @@ export default function MarketplacePage() {
             )}
 
             {emptyOrders ? (
-              <Empty icon="📦">No orders yet — buy something from the Browse tab.</Empty>
+              <Empty
+                icon="📦"
+                title="No orders yet"
+                action={
+                  <button className="w3-btn" onClick={() => setTab('browse')}>
+                    🛒 Browse listings
+                  </button>
+                }
+              >
+                Anything you buy is locked in escrow until you confirm it arrived.
+              </Empty>
             ) : (
               <>
+                <div className="w3-card accent">
+                  <div className="w3-card-head">
+                    <div>
+                      <div className="w3-card-title">📊 Your escrow activity</div>
+                      <p className="w3-card-sub">
+                        {openEscrows > 0
+                          ? `${openEscrows} order${openEscrows === 1 ? '' : 's'} waiting on you. Your WELL is released to the seller only when you confirm delivery.`
+                          : 'Nothing is locked right now. Funds are released on your confirmation, never before.'}
+                      </p>
+                    </div>
+                    <span className={`w3-badge ${openEscrows > 0 ? 'amber' : 'green'}`}>
+                      {openEscrows > 0 ? `⏳ ${openEscrows} awaiting you` : '✓ all settled'}
+                    </span>
+                  </div>
+                </div>
+
                 <div className="w3-card">
                   <div className="w3-card-title">🛍️ Bought</div>
                   {orders.bought.length === 0 ? (
@@ -360,7 +485,10 @@ export default function MarketplacePage() {
                     <div className="w3-table-wrap">
                       <table className="w3-table">
                         <thead>
-                          <tr><th>Item</th><th>Qty</th><th>Total</th><th>Status</th><th>Ordered</th><th /></tr>
+                          <tr>
+                            <th>Item</th><th className="num">Qty</th><th className="num">Total</th>
+                            <th>Status</th><th>Ordered</th><th />
+                          </tr>
                         </thead>
                         <tbody>{orders.bought.map((o) => orderRow(o, 'buy'))}</tbody>
                       </table>
@@ -376,7 +504,10 @@ export default function MarketplacePage() {
                     <div className="w3-table-wrap">
                       <table className="w3-table">
                         <thead>
-                          <tr><th>Item</th><th>Qty</th><th>Total</th><th>Status</th><th>Ordered</th><th /></tr>
+                          <tr>
+                            <th>Item</th><th className="num">Qty</th><th className="num">Total</th>
+                            <th>Status</th><th>Ordered</th><th />
+                          </tr>
                         </thead>
                         <tbody>{orders.sold.map((o) => orderRow(o, 'sell'))}</tbody>
                       </table>
@@ -392,66 +523,89 @@ export default function MarketplacePage() {
         {tab === 'sell' && (
           <div>
             <div className="w3-card accent">
-              <div className="w3-card-title">🏷️ Create a listing</div>
-              <p className="w3-card-sub">
-                Listings are anchored on-chain, so your reputation as a seller is public and
-                tamper-proof. You receive WELL (minus the {market?.feePct ?? '—'}% protocol fee)
-                when the buyer confirms delivery.
-              </p>
+              <div className="w3-card-head">
+                <div>
+                  <div className="w3-card-title">🏷️ Create a listing</div>
+                  <p className="w3-card-sub">
+                    Listings are anchored on-chain, so your reputation as a seller is public and
+                    tamper-proof. You receive WELL (minus the {market?.feePct ?? '—'}% protocol fee)
+                    when the buyer confirms delivery.
+                  </p>
+                </div>
+                <span className="w3-badge green">fee {market?.feePct ?? '—'}%</span>
+              </div>
               <div className="w3-grid">
-                <input
-                  className="w3-input"
-                  placeholder="Title (min 4 chars)"
-                  value={form.title}
-                  onChange={(e) => setForm({ ...form, title: e.target.value })}
-                  aria-label="Title"
-                />
-                <input
-                  className="w3-input"
-                  placeholder="Brand"
-                  value={form.brand}
-                  onChange={(e) => setForm({ ...form, brand: e.target.value })}
-                  aria-label="Brand"
-                />
-                <select
-                  className="w3-select"
-                  value={form.category}
-                  onChange={(e) => setForm({ ...form, category: e.target.value })}
-                  aria-label="Category"
-                >
-                  {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <input
-                  className="w3-input"
-                  type="number"
-                  min="1"
-                  placeholder="Price (WELL)"
-                  value={form.priceWell}
-                  onChange={(e) => setForm({ ...form, priceWell: e.target.value })}
-                  aria-label="Price"
-                />
-                <input
-                  className="w3-input"
-                  type="number"
-                  min="1"
-                  placeholder="Stock"
-                  value={form.stock}
-                  onChange={(e) => setForm({ ...form, stock: e.target.value })}
-                  aria-label="Stock"
+                <div>
+                  <label className="w3-label" htmlFor="sell-title">Title</label>
+                  <input
+                    id="sell-title"
+                    className="w3-input"
+                    placeholder="e.g. Magnesium Glycinate 90ct"
+                    value={form.title}
+                    onChange={(e) => setForm({ ...form, title: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="w3-label" htmlFor="sell-brand">Brand</label>
+                  <input
+                    id="sell-brand"
+                    className="w3-input"
+                    placeholder="Optional"
+                    value={form.brand}
+                    onChange={(e) => setForm({ ...form, brand: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="w3-label" htmlFor="sell-category">Category</label>
+                  <select
+                    id="sell-category"
+                    className="w3-select"
+                    value={form.category}
+                    onChange={(e) => setForm({ ...form, category: e.target.value })}
+                  >
+                    {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="w3-label" htmlFor="sell-price">Price (WELL)</label>
+                  <input
+                    id="sell-price"
+                    className="w3-input"
+                    type="number"
+                    min="1"
+                    step="0.01"
+                    placeholder="13.13"
+                    value={form.priceWell}
+                    onChange={(e) => setForm({ ...form, priceWell: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="w3-label" htmlFor="sell-stock">Stock</label>
+                  <input
+                    id="sell-stock"
+                    className="w3-input"
+                    type="number"
+                    min="1"
+                    placeholder="10"
+                    value={form.stock}
+                    onChange={(e) => setForm({ ...form, stock: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="w3-field" style={{ marginTop: 14, marginBottom: 0 }}>
+                <label className="w3-label" htmlFor="sell-desc">Description</label>
+                <textarea
+                  id="sell-desc"
+                  className="w3-textarea"
+                  placeholder="Condition, expiry, why you’re selling…"
+                  value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
                 />
               </div>
-              <textarea
-                className="w3-textarea"
-                style={{ marginTop: 14 }}
-                placeholder="Description — condition, expiry, why you’re selling…"
-                value={form.description}
-                onChange={(e) => setForm({ ...form, description: e.target.value })}
-                aria-label="Description"
-              />
               <button
                 className="w3-btn"
                 style={{ marginTop: 14 }}
-                disabled={busy || form.title.trim().length < 4 || !(Number(form.priceWell) > 0) || !(Number(form.stock) >= 1)}
+                disabled={busy || !listingReady}
                 onClick={submitListing}
               >
                 Publish listing
@@ -466,15 +620,18 @@ export default function MarketplacePage() {
                 <div className="w3-table-wrap">
                   <table className="w3-table">
                     <thead>
-                      <tr><th>Title</th><th>Category</th><th>Price</th><th>Stock</th><th>Created</th></tr>
+                      <tr>
+                        <th>Title</th><th>Category</th><th className="num">Price</th>
+                        <th className="num">Stock</th><th>Created</th>
+                      </tr>
                     </thead>
                     <tbody>
                       {mine.map((l) => (
                         <tr key={l._id}>
-                          <td style={{ fontWeight: 600 }}>{l.title}</td>
+                          <td style={{ fontWeight: 700 }}>{l.title}</td>
                           <td><span className="w3-badge">{l.category}</span></td>
-                          <td>{fmtWell(l.priceWell)} WELL</td>
-                          <td>{l.stock}</td>
+                          <td className="num">{fmtWell(l.priceWell)} WELL</td>
+                          <td className="num">{l.stock}</td>
                           <td>{fmtDay(l.createdAt)}</td>
                         </tr>
                       ))}
@@ -489,11 +646,11 @@ export default function MarketplacePage() {
         {/* ── Disputes ───────────────────────────────────────────────── */}
         {tab === 'disputes' && (
           <div>
-            <div className="w3-card">
-              <div className="w3-row between">
+            <div className="w3-card accent">
+              <div className="w3-card-head">
                 <div>
                   <div className="w3-card-title">⚖️ Decentralized dispute resolution</div>
-                  <p className="w3-card-sub" style={{ marginBottom: 0 }}>
+                  <p className="w3-card-sub">
                     Jurors are chosen from staked WELL holders. Each resolved dispute pays jurors{' '}
                     {fmtWell(disputeData.jurorReward)} WELL for their service.
                   </p>
@@ -502,51 +659,76 @@ export default function MarketplacePage() {
             </div>
 
             {disputeData.disputes.length === 0 ? (
-              <Empty icon="⚖️">No disputes — trade confidently, but if something goes wrong it lands here.</Empty>
+              <Empty icon="⚖️" title="No open disputes">
+                Trade confidently — but if something goes wrong, the escrow stays locked and the
+                case lands here.
+              </Empty>
             ) : (
-              disputeData.disputes.map((d) => (
-                <div className="w3-card" key={d._id}>
-                  <div className="w3-row between">
-                    <div className="w3-card-title" style={{ marginBottom: 0 }}>
-                      {d.order.listingTitle}{' '}
-                      <span className={`w3-badge ${d.status === 'resolved' ? 'green' : 'amber'}`}>
-                        {d.status === 'resolved' ? `resolved → ${d.outcome}` : 'open'}
+              disputeData.disputes.map((d) => {
+                const needed = Math.max(1, d.progress?.needed || 1);
+                const cast = d.progress?.cast || 0;
+                const juryPct = Math.min(100, Math.round((cast / needed) * 100));
+                return (
+                  <article className="w3-card" key={d._id}>
+                    <div className="w3-card-head">
+                      <div>
+                        <h3 className="w3-card-title">
+                          {d.order.listingTitle}
+                          <span className={`w3-badge ${d.status === 'resolved' ? 'green' : 'amber'}`}>
+                            {d.status === 'resolved' ? `resolved → ${d.outcome}` : 'open'}
+                          </span>
+                        </h3>
+                        <p className="w3-card-sub">{d.reason}</p>
+                      </div>
+                      <span className="w3-badge red">{fmtWell(d.order.total)} WELL in escrow</span>
+                    </div>
+
+                    <div
+                      className="w3-progress"
+                      role="progressbar"
+                      aria-label="Jury votes cast"
+                      aria-valuemin={0}
+                      aria-valuemax={needed}
+                      aria-valuenow={Math.min(cast, needed)}
+                    >
+                      <div className="w3-progress-bar" style={{ width: `${juryPct}%` }} />
+                    </div>
+                    <div className="w3-vote-legend">
+                      <span>Jury progress</span>
+                      <span className={`quorum ${juryPct >= 100 ? 'met' : ''}`}>
+                        {cast}/{needed} votes cast
                       </span>
                     </div>
-                    <span className="w3-mono">{fmtWell(d.order.total)} WELL in escrow</span>
-                  </div>
-                  <p className="w3-card-sub" style={{ marginTop: 8 }}>{d.reason}</p>
 
-                  <div className="w3-row" style={{ gap: 8 }}>
-                    <span className="w3-badge blue">votes {d.progress.cast}/{d.progress.needed}</span>
-                    <span className="w3-badge">{d.votes.length} jurors participating</span>
-                    {d.votes.map((v) => (
-                      <span
-                        className={`w3-badge ${v.choice === 'buyer' ? 'green' : 'purple'}`}
-                        key={v.juror + v.at}
-                      >
-                        {v.choice} · w {fmtWell(v.weight)}
-                      </span>
-                    ))}
-                  </div>
-
-                  {d.canVote && (
-                    <div className="w3-row" style={{ marginTop: 14 }}>
-                      <button className="w3-btn" disabled={busy} onClick={() => vote(d._id, 'buyer')}>
-                        Vote for buyer
-                      </button>
-                      <button className="w3-btn ghost" disabled={busy} onClick={() => vote(d._id, 'seller')}>
-                        Vote for seller
-                      </button>
+                    <div className="w3-row" style={{ gap: 8, marginTop: 12 }}>
+                      {d.votes.map((v) => (
+                        <span
+                          className={`w3-badge ${v.choice === 'buyer' ? 'green' : 'purple'}`}
+                          key={v.juror + v.at}
+                        >
+                          {v.choice === 'buyer' ? '👤 buyer' : '🏪 seller'} · w {fmtWell(v.weight)}
+                        </span>
+                      ))}
                     </div>
-                  )}
-                  {d.hasVoted && d.status === 'open' && (
-                    <p className="w3-card-sub" style={{ marginTop: 12, marginBottom: 0 }}>
-                      ✓ You’ve voted — waiting for the remaining jurors.
-                    </p>
-                  )}
-                </div>
-              ))
+
+                    {d.canVote && (
+                      <div className="w3-row" style={{ marginTop: 14 }}>
+                        <button className="w3-btn" disabled={busy} onClick={() => vote(d._id, 'buyer')}>
+                          Vote for buyer
+                        </button>
+                        <button className="w3-btn accent" disabled={busy} onClick={() => vote(d._id, 'seller')}>
+                          Vote for seller
+                        </button>
+                      </div>
+                    )}
+                    {d.hasVoted && d.status === 'open' && (
+                      <p className="w3-card-sub" style={{ marginTop: 12, marginBottom: 0 }}>
+                        ✓ You’ve voted — waiting for the remaining jurors.
+                      </p>
+                    )}
+                  </article>
+                );
+              })
             )}
           </div>
         )}

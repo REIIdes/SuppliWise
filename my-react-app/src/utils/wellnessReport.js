@@ -1,10 +1,5 @@
 import jsPDFModule from 'jspdf';
 import autoTableModule from 'jspdf-autotable';
-
-const JsPDF = jsPDFModule?.jsPDF || jsPDFModule?.default || jsPDFModule;
-const renderAutoTable = typeof autoTableModule === 'function'
-  ? autoTableModule
-  : autoTableModule?.default || autoTableModule?.autoTable;
 import {
   REPORT_COLORS as C,
   REPORT_LAYOUT as L,
@@ -17,6 +12,23 @@ import {
   reportText,
   safeFilenamePart,
 } from './reportTheme.js';
+
+// Both libraries expose their API through different interop shapes depending on
+// whether the bundler hands us the ESM namespace or a CJS double-default.
+const JsPDF = jsPDFModule?.jsPDF || jsPDFModule?.default || jsPDFModule;
+const renderAutoTable = typeof autoTableModule === 'function'
+  ? autoTableModule
+  : autoTableModule?.default || autoTableModule?.autoTable;
+
+// `new JsPDF(...)` is the single most common way this renderer used to die with
+// an opaque "not a constructor" TypeError when interop picked the wrong branch.
+// Fail loudly at module load instead, while the message is still actionable.
+if (typeof JsPDF !== 'function') {
+  throw new Error('PDF export is unavailable: the jsPDF library failed to load.');
+}
+if (typeof renderAutoTable !== 'function') {
+  throw new Error('PDF export is unavailable: the jsPDF AutoTable plugin failed to load.');
+}
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
 const nonEmpty = (value) => value !== null && value !== undefined && String(value).trim() !== '';
@@ -168,9 +180,16 @@ export async function downloadWellnessReport({ results = {}, assessment = {}, us
   };
   const tableMargin = { top: L.continuationContentTop, bottom: L.footerHeight + 5, left: L.margin, right: L.margin };
   const runTable = (options) => {
+    // jspdf-autotable ships its own grid-line default of rgb(200,200,200) and
+    // only honours `lineColor` where a style object overrides it. Pin both the
+    // table frame and the head/body cells to the palette here, so a table that
+    // forgets an explicit lineColor can never leak a fourth ink into the PDF.
     renderAutoTable(doc, {
       margin: tableMargin,
+      tableLineColor: C.line,
       ...options,
+      headStyles: { lineColor: C.line, ...(options.headStyles || {}) },
+      bodyStyles: { lineColor: C.line, ...(options.bodyStyles || {}) },
       didDrawPage: drawTableHeader(doc, drawContinuationHeader),
     });
     const rawFinalY = doc.lastAutoTable?.finalY;
@@ -282,7 +301,7 @@ export async function downloadWellnessReport({ results = {}, assessment = {}, us
     head: [['Profile field', 'Snapshot']],
     body: profileRows.map(([label, value]) => [label, reportText(value, '—')]),
     theme: 'grid',
-    headStyles: { fillColor: C.navy, textColor: C.white, fontSize: 7.5, fontStyle: 'bold', cellPadding: 4 },
+    headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7.5, fontStyle: 'bold', cellPadding: 4 },
     bodyStyles: { fontSize: 8, textColor: C.ink, cellPadding: 3.5, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
     alternateRowStyles: { fillColor: C.slateLight },
     columnStyles: { 0: { cellWidth: 44, fontStyle: 'bold', textColor: C.indigo }, 1: { cellWidth: 'auto' } },
@@ -312,7 +331,7 @@ export async function downloadWellnessReport({ results = {}, assessment = {}, us
         cleanReportText(rec?.timing || 'Not specified'),
       ]),
       theme: 'grid',
-      headStyles: { fillColor: C.navy, textColor: C.white, fontSize: 7.2, fontStyle: 'bold', cellPadding: 3.5 },
+      headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7.2, fontStyle: 'bold', cellPadding: 3.5 },
       bodyStyles: { fontSize: 7.2, textColor: C.ink, cellPadding: 3.2, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
       alternateRowStyles: { fillColor: C.violetLight },
       columnStyles: {
@@ -356,7 +375,7 @@ export async function downloadWellnessReport({ results = {}, assessment = {}, us
         ].filter(Boolean).join(' | ') || 'No interactions identified.'),
       ]),
       theme: 'grid',
-      headStyles: { fillColor: C.deep, textColor: C.white, fontSize: 7.2, fontStyle: 'bold', cellPadding: 3.5 },
+      headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7.2, fontStyle: 'bold', cellPadding: 3.5 },
       bodyStyles: { fontSize: 7.1, textColor: C.ink, cellPadding: 3.2, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
       alternateRowStyles: { fillColor: C.tealLight },
       columnStyles: { 0: { cellWidth: 27, fontStyle: 'bold' }, 1: { cellWidth: 56 }, 2: { cellWidth: 45 }, 3: { cellWidth: 'auto' } },
@@ -379,7 +398,7 @@ export async function downloadWellnessReport({ results = {}, assessment = {}, us
         return [reportText(slot?.time, 'Anytime'), supplements.join('\n') || 'No item assigned'];
       }),
       theme: 'grid',
-      headStyles: { fillColor: C.navy, textColor: C.white, fontSize: 8, fontStyle: 'bold', cellPadding: 4 },
+      headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 8, fontStyle: 'bold', cellPadding: 4 },
       bodyStyles: { fontSize: 8, textColor: C.ink, cellPadding: 3.8, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
       alternateRowStyles: { fillColor: C.tealLight },
       columnStyles: { 0: { cellWidth: 42, fontStyle: 'bold', textColor: C.teal }, 1: { cellWidth: 'auto' } },
@@ -405,7 +424,7 @@ export async function downloadWellnessReport({ results = {}, assessment = {}, us
       head: [['Phase', 'Focus', 'Actions', 'Expected changes']],
       body: rows,
       theme: 'grid',
-      headStyles: { fillColor: C.navy, textColor: C.white, fontSize: 7.5, fontStyle: 'bold', cellPadding: 3.8 },
+      headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7.5, fontStyle: 'bold', cellPadding: 3.8 },
       bodyStyles: { fontSize: 7.5, textColor: C.ink, cellPadding: 3.5, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
       alternateRowStyles: { fillColor: C.amberLight },
       columnStyles: { 0: { cellWidth: 20, fontStyle: 'bold', textColor: C.amber }, 1: { cellWidth: 35 }, 2: { cellWidth: 67 }, 3: { cellWidth: 'auto' } },
@@ -426,7 +445,7 @@ export async function downloadWellnessReport({ results = {}, assessment = {}, us
       head: [['Area', 'Focus', 'Practical guidance']],
       body: rows,
       theme: 'grid',
-      headStyles: { fillColor: C.navy, textColor: C.white, fontSize: 7.5, fontStyle: 'bold', cellPadding: 3.8 },
+      headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7.5, fontStyle: 'bold', cellPadding: 3.8 },
       bodyStyles: { fontSize: 7.8, textColor: C.ink, cellPadding: 3.5, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
       alternateRowStyles: { fillColor: C.emeraldLight },
       columnStyles: { 0: { cellWidth: 27, fontStyle: 'bold', textColor: C.emerald }, 1: { cellWidth: 38 }, 2: { cellWidth: 'auto' } },
@@ -457,7 +476,7 @@ export async function downloadWellnessReport({ results = {}, assessment = {}, us
           [reportText(resource?.description, ''), reportText(resource?.url, '')].filter(Boolean).join('\n'),
         ]),
         theme: 'grid',
-        headStyles: { fillColor: C.navy, textColor: C.white, fontSize: 7.5, fontStyle: 'bold', cellPadding: 3.5 },
+        headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7.5, fontStyle: 'bold', cellPadding: 3.5 },
         bodyStyles: { fontSize: 7.5, textColor: C.ink, cellPadding: 3.5, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
         alternateRowStyles: { fillColor: C.roseLight },
         columnStyles: { 0: { cellWidth: 55, fontStyle: 'bold' }, 1: { cellWidth: 'auto' } },

@@ -1,194 +1,393 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   Assessment Management  (am- prefix)
-══════════════════════════════════════════════════════════════════════════ */
+   ASSESSMENT MANAGEMENT  (am- prefix)
+
+   Same four tones as the chat queue, the AI panel and the subscription queues,
+   so the console speaks one visual language:
+     emerald → active / has assessments / working
+     rose    → priority, or something needs a person
+     slate   → expired, or nothing to do
+     indigo  → information, counts, the default
+
+   Each is declared once here and every surface reads it, so the stat card, the
+   count pill, the status badge and the button for one state cannot drift apart.
+   ══════════════════════════════════════════════════════════════════════════ */
 
 .am-container {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-}
+  --am-ok: #10b981;
+  --am-ok-deep: #047857;
+  --am-ok-wash: #e7f8f1;
+  --am-down: #f43f5e;
+  --am-down-deep: #be123c;
+  --am-down-wash: #fdeaee;
+  --am-idle: #64748b;
+  --am-idle-deep: #475569;
+  --am-idle-wash: #eef1f5;
+  --am-primary: #4f6bed;
+  --am-primary-deep: #3730a3;
+  --am-primary-wash: #eef1fe;
+  --am-violet: #7c3aed;
 
-/* ── Empty / loading text ─────────────────────────────────────────────── */
-.am-empty {
-  padding: 20px 0;
-  color: #6b7280;
-  font-size: 0.9rem;
-}
+  --am-ink: #14211b;
+  --am-body: #3d4b44;
+  --am-muted: #7d8b84;
+  --am-line: #e2e9e4;
+  --am-line-soft: #eef2ef;
+  --am-paper: #ffffff;
+  --am-canvas: #f7faf8;
+  --am-radius: 16px;
+  --am-shadow: 0 1px 2px rgba(20, 33, 27, 0.04), 0 10px 28px -18px rgba(20, 33, 27, 0.35);
 
-/* ── User list ────────────────────────────────────────────────────────── */
-.am-user-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 16px;
+  color: var(--am-body);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
 }
 
-/* User card wrapper */
-.am-user-item {
-  background: #fff;
-  border: 1px solid #e5e7eb;
+/* ── Header ──────────────────────────────────────────────────────────── */
+.am-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.am-head__title {
+  margin: 0 0 6px;
+  color: var(--am-ink);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.am-head__sub {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--am-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.am-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 15px;
+  border: 1px solid var(--am-line);
   border-radius: 10px;
+  background: var(--am-paper);
+  color: var(--am-body);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: var(--am-shadow);
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+.am-refresh-btn:hover:not(:disabled) {
+  background: linear-gradient(125deg, var(--am-primary) 0%, var(--am-violet) 100%);
+  border-color: transparent;
+  color: #fff;
+}
+.am-refresh-btn:disabled { opacity: .6; cursor: not-allowed; }
+.am-refresh-btn--busy svg { animation: am-spin .9s linear infinite; }
+
+@keyframes am-spin { to { transform: rotate(360deg); } }
+
+/* ── Stat cards ──────────────────────────────────────────────────────── */
+.am-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.am-stat {
+  --t: var(--am-primary);
+  --t-deep: var(--am-primary-deep);
+  --t-wash: var(--am-primary-wash);
+
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 14px 15px;
+  border: 1px solid var(--am-line);
+  border-radius: var(--am-radius);
+  background: var(--t-wash);
   overflow: hidden;
-  transition: box-shadow 0.15s, border-color 0.15s;
+  box-shadow: 0 1px 2px rgba(20, 33, 27, 0.04);
+  transition: transform .16s ease, box-shadow .16s ease;
+}
+.am-stat::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: linear-gradient(180deg, var(--t), var(--t-deep));
+}
+.am-stat:hover { transform: translateY(-2px); box-shadow: 0 12px 24px -18px rgba(20, 33, 27, .5); }
+
+.am-stat--ok { --t: var(--am-ok); --t-deep: var(--am-ok-deep); --t-wash: var(--am-ok-wash); }
+.am-stat--down { --t: var(--am-down); --t-deep: var(--am-down-deep); --t-wash: var(--am-down-wash); }
+.am-stat--idle { --t: var(--am-idle); --t-deep: var(--am-idle-deep); --t-wash: var(--am-idle-wash); }
+.am-stat--primary { --t: var(--am-primary); --t-deep: var(--am-primary-deep); --t-wash: var(--am-primary-wash); }
+
+.am-stat__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 40px; height: 40px;
+  border-radius: 12px;
+  background: linear-gradient(140deg, var(--t) 0%, var(--t-deep) 100%);
+  color: #fff;
+  box-shadow: 0 8px 16px -10px color-mix(in srgb, var(--t) 95%, transparent);
+}
+.am-stat__icon svg { width: 19px; height: 19px; }
+
+.am-stat__body { display: flex; flex-direction: column; min-width: 0; }
+.am-stat__value {
+  color: var(--t-deep);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+.am-stat__label { color: var(--am-ink); font-size: 12.5px; font-weight: 700; }
+.am-stat__hint {
+  color: var(--am-muted);
+  font-size: 11.5px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── List toolbar ────────────────────────────────────────────────────── */
+.am-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.am-list-count {
+  padding: 5px 12px;
+  border: 1px solid var(--am-line);
+  border-radius: 999px;
+  background: #eef2f0;
+  color: var(--am-body);
+  font-size: 12.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.am-field { position: relative; display: inline-flex; align-items: center; }
+.am-field__icon { position: absolute; left: 11px; color: var(--am-muted); pointer-events: none; }
+
+.am-search {
+  min-width: 250px;
+  padding: 9px 12px 9px 33px;
+  border: 1px solid var(--am-line);
+  border-radius: 10px;
+  background: var(--am-paper);
+  color: var(--am-ink);
+  font-family: inherit;
+  font-size: 13px;
+  box-shadow: var(--am-shadow);
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.am-search:focus {
+  outline: none;
+  border-color: var(--am-primary);
+  box-shadow: 0 0 0 3px rgba(79, 107, 237, .16);
+}
+
+/* ── Member list ─────────────────────────────────────────────────────── */
+.am-user-list { display: flex; flex-direction: column; gap: 10px; }
+
+.am-user-item {
+  position: relative;
+  border: 1px solid var(--am-line);
+  border-radius: var(--am-radius);
+  background: var(--am-paper);
+  overflow: hidden;
+  box-shadow: var(--am-shadow);
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
 }
 .am-user-item:hover {
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.07);
-  border-color: #d1d5db;
-}
-.am-user-item--open {
-  border-color: #c4cfc8;
-  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.09);
+  transform: translateY(-2px);
+  border-color: #c6d4cb;
+  box-shadow: 0 14px 28px -20px rgba(20, 33, 27, .55);
 }
 
-/* ── User row (collapsed) ─────────────────────────────────────────────── */
+/* Rail: green when there is something to read, muted when there is not. The
+   two members in a list are then separable without reading either pill. */
+.am-user-item::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  background: linear-gradient(180deg, var(--am-ok), var(--am-ok-deep));
+  transition: width .18s ease;
+}
+.am-user-item:has(.am-count-pill--none)::before { background: linear-gradient(180deg, var(--am-idle), var(--am-idle-deep)); }
+.am-user-item--open { border-color: #b6cdc0; }
+.am-user-item--open::before { width: 7px; }
+
 .am-user-row {
-  width: 100%;
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 14px 18px;
-  background: none;
+  width: 100%;
+  padding: 14px 18px 14px 20px;
   border: none;
-  cursor: pointer;
+  background: none;
   text-align: left;
   font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: background .15s ease;
 }
-.am-user-row:focus-visible {
-  outline: 2px solid #4f46e5;
-  outline-offset: -2px;
-}
+.am-user-row:hover { background: var(--am-canvas); }
+.am-user-row:focus-visible { outline: 2px solid var(--am-primary); outline-offset: -2px; }
 
-/* Avatar */
 .am-avatar {
-  width: 44px;
-  height: 44px;
+  flex: 0 0 auto;
+  width: 44px; height: 44px;
   border-radius: 50%;
-  flex-shrink: 0;
   object-fit: cover;
-  border: 2px solid #e5e7eb;
+  border: 2px solid #fff;
+  box-shadow: 0 6px 14px -8px rgba(20, 33, 27, .6);
 }
 .am-avatar--initials {
   display: flex;
   align-items: center;
   justify-content: center;
-  font: 700 15px/1 Arial, sans-serif;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: .02em;
   color: #fff;
-  border: none;
   user-select: none;
 }
 
-/* Name block */
-.am-user-info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
+.am-user-info { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
 .am-user-name {
-  font: 700 15px/1.2 Arial, sans-serif;
-  color: #111827;
+  color: var(--am-ink);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 15.5px;
+  font-weight: 700;
+  line-height: 1.25;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .am-user-sub {
-  font: 13px Arial, sans-serif;
-  color: #6b7280;
-}
-
-/* Assessment count pill */
-.am-count-pill {
-  font: 13px Arial, sans-serif;
-  color: #555;
-  background: #f0f0f0;
-  padding: 5px 13px;
-  border-radius: 20px;
+  color: var(--am-muted);
+  font-size: 12.5px;
   white-space: nowrap;
-  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* Chevron */
+/* Count pill. Green = there is work here; slate = there is not. */
+.am-count-pill {
+  flex: 0 0 auto;
+  padding: 5px 13px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.am-count-pill--has { background: var(--am-ok-wash); color: var(--am-ok-deep); }
+.am-count-pill--none { background: #eef1f5; color: var(--am-idle); font-weight: 700; }
+
 .am-chevron {
-  font-size: 11px;
-  color: #9ca3af;
-  flex-shrink: 0;
-  transition: transform 0.2s ease;
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--am-muted);
+  transition: transform .2s ease, color .2s ease;
 }
-.am-chevron--open {
-  transform: rotate(180deg);
-}
+.am-chevron--open { transform: rotate(180deg); color: var(--am-primary); }
 
-/* ── Assessment list (expanded area) ──────────────────────────────────── */
+/* ── Assessment list (expanded) ──────────────────────────────────────── */
 .am-assessment-list {
-  border-top: 1px solid #e5e7eb;
-  background: #fafafa;
-  padding: 12px 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  padding: 14px 16px 16px 20px;
+  border-top: 1px solid var(--am-line-soft);
+  background: var(--am-canvas);
 }
 
-/* ── Assessment card ──────────────────────────────────────────────────── */
 .am-card {
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 16px 18px;
-  transition: background 0.12s;
+  padding: 15px 17px;
+  border: 1px solid var(--am-line);
+  border-radius: 13px;
+  background: var(--am-paper);
+  transition: border-color .16s ease, box-shadow .16s ease;
 }
-.am-card:hover {
-  background: #fafafa;
-}
+.am-card:hover { border-color: #c6d4cb; box-shadow: 0 10px 22px -18px rgba(20, 33, 27, .5); }
 
-/* Card header row: ACTIVE pill + timestamp */
 .am-card__header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
   margin-bottom: 10px;
 }
 
-.am-card__date {
-  font: 13px Arial, sans-serif;
-  color: #9ca3af;
+.am-card__date { margin-left: auto; color: var(--am-muted); font-size: 12px; }
+
+.am-card__symptoms { margin: 0 0 12px; color: var(--am-body); font-size: 13.5px; line-height: 1.55; }
+
+.am-card__flag-reasons {
+  margin: 0 0 10px;
+  padding: 9px 11px;
+  border: 1px solid #f8c9c9;
+  border-radius: 9px;
+  background: var(--am-down-wash);
+  color: var(--am-down-deep);
+  font-size: 12.5px;
+  line-height: 1.5;
 }
 
-/* Symptom summary text */
-.am-card__symptoms {
-  margin: 0 0 12px;
-  font: 14px/1.5 Arial, sans-serif;
-  color: #374151;
-}
-
-/* ── Tag pills ────────────────────────────────────────────────────────── */
-.am-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin-bottom: 16px;
-}
+/* ── Tag pills ───────────────────────────────────────────────────────── */
+.am-tags { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 14px; }
 
 .am-tag {
-  background: #f0f0f0;
-  color: #374151;
-  padding: 5px 13px;
-  border-radius: 20px;
-  font: 13px Arial, sans-serif;
+  padding: 4px 11px;
+  border-radius: 999px;
+  background: #eef2f0;
+  color: var(--am-body);
+  font-size: 11.5px;
+  font-weight: 700;
   white-space: nowrap;
 }
+.am-tag--green { background: var(--am-ok-wash); color: var(--am-ok-deep); }
+.am-tag--blue { background: var(--am-primary-wash); color: var(--am-primary-deep); font-weight: 800; }
 
-/* Green — symptom count (matches image) */
-.am-tag--green {
-  background: #d4edda;
-  color: #155724;
+/* ── Status badges ───────────────────────────────────────────────────── */
+.am-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
+.am-pill--active { background: var(--am-ok); color: #fff; }
+.am-pill--expired { background: #eef1f5; color: var(--am-idle-deep); border: 1px solid #dbe2e0; }
+.am-pill--priority { margin-left: 0; background: var(--am-down-wash); color: var(--am-down-deep); border: 1px solid #f8c9c9; }
 
-/* Blue — AI Analysis (matches image) */
-.am-tag--blue {
-  background: #cce5ff;
-  color: #004085;
-  font-weight: 500;
-}
-
-/* ── Card footer: expiry + actions ────────────────────────────────────── */
+/* ── Card footer ─────────────────────────────────────────────────────── */
 .am-card__footer {
   display: flex;
   align-items: center;
@@ -196,316 +395,238 @@
   gap: 12px;
   flex-wrap: wrap;
   padding-top: 12px;
-  border-top: 1px solid #f3f4f6;
+  border-top: 1px solid var(--am-line-soft);
 }
 
-.am-card__expiry {
-  font: 12px Arial, sans-serif;
-  color: #9ca3af;
-}
+.am-card__expiry { color: var(--am-muted); font-size: 11.5px; }
 
-/* Action buttons row */
-.am-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
+.am-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 .am-btn {
-  border: none;
-  padding: 9px 18px;
-  border-radius: 10px;
-  font: 700 13px Arial, sans-serif;
-  cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.15s ease;
-  white-space: nowrap;
-  color: #fff;
   position: relative;
   overflow: hidden;
+  padding: 8px 15px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: #fff;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform .15s ease, box-shadow .2s ease, filter .15s ease;
 }
 .am-btn::after {
   content: '';
   position: absolute;
-  top: 0;
-  left: -70%;
-  width: 45%;
-  height: 100%;
-  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+  top: 0; left: -70%;
+  width: 45%; height: 100%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, .38), transparent);
   transform: skewX(-18deg);
-  transition: left 0.45s ease;
+  transition: left .45s ease;
   pointer-events: none;
 }
 .am-btn:hover::after { left: 130%; }
-.am-btn:hover  { transform: translateY(-2px); }
-.am-btn:active { transform: scale(0.96); }
+.am-btn:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.06); }
+.am-btn:disabled { opacity: .55; cursor: not-allowed; transform: none; }
 
-.am-btn--grey {
-  background: linear-gradient(135deg, #9ca3af, #6b7280 60%, #4b5563);
-  box-shadow: 0 4px 12px rgba(107, 114, 128, 0.30);
-}
-.am-btn--grey:hover { box-shadow: 0 8px 18px rgba(107, 114, 128, 0.38); }
-.am-btn--blue {
-  background: linear-gradient(135deg, #60a5fa, #2563eb 60%, #1d4ed8);
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.32);
-}
-.am-btn--blue:hover { box-shadow: 0 8px 18px rgba(37, 99, 235, 0.42); }
+/* Three weights of action: view is neutral, work is primary, modify is quiet. */
+.am-btn--grey { background: var(--am-paper); border-color: var(--am-line); color: var(--am-body); }
+.am-btn--grey:hover:not(:disabled) { background: var(--am-canvas); }
+.am-btn--blue { background: linear-gradient(125deg, var(--am-primary) 0%, var(--am-primary-deep) 100%); box-shadow: 0 8px 16px -12px rgba(79, 107, 237, .95); }
+.am-btn--violet { background: linear-gradient(125deg, #8b5cf6 0%, #6d28d9 100%); box-shadow: 0 8px 16px -12px rgba(139, 92, 246, .95); }
+.am-btn--green { background: linear-gradient(125deg, var(--am-ok) 0%, var(--am-ok-deep) 100%); box-shadow: 0 8px 16px -12px rgba(16, 185, 129, .95); }
 
-/* ── ACTIVE status pill ───────────────────────────────────────────────── */
-.am-pill {
-  display: inline-block;
-  padding: 4px 12px;
-  border-radius: 20px;
-  font: 700 11px/1.4 Arial, sans-serif;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-.am-pill--active {
-  background: #28a745;
-  color: #fff;
-}
-
-/* ── Modals ───────────────────────────────────────────────────────────── */
-.am-modal {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+/* ── Empty / error / loading states ──────────────────────────────────── */
+.am-empty { padding: 20px 0; color: var(--am-muted); font-size: 13.5px; }
+.am-empty--state {
   display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 34px 22px;
+  border: 1px dashed var(--am-line);
+  border-radius: var(--am-radius);
+  background: var(--am-canvas);
+  text-align: center;
+}
+
+.am-empty__icon {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
-  padding: 20px;
+  width: 52px; height: 52px;
+  margin-bottom: 6px;
+  border-radius: 16px;
+  background: linear-gradient(140deg, var(--am-primary) 0%, var(--am-violet) 100%);
+  color: #fff;
+  box-shadow: 0 12px 24px -14px rgba(79, 107, 237, .9);
 }
-.am-modal__content {
-  background: #fff;
-  border-radius: 10px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-  width: min(92vw, 820px);
-  max-height: 90vh;
-  overflow-y: auto;
-  position: relative;
-  padding: 28px;
-}
-/* The read-only assessment is already a complete dialog box — when nested
-   here, drop the wrapper chrome (padding + frame) so the 860px card can't
-   overflow and clip sideways. */
-.am-modal__content:has(> .ro-box) {
-  padding: 0;
-  background: transparent;
-  box-shadow: none;
-  overflow: visible;
-  width: min(94vw, 860px);
-}
-/* Fallback for browsers without :has() — the card itself stays fluid */
-.am-modal__content > .ro-box { max-width: 100%; }
-.am-modal__close {
-  position: absolute;
-  top: 14px;
-  right: 18px;
-  background: none;
-  border: none;
-  font-size: 1.6rem;
-  line-height: 1;
-  color: #9ca3af;
-  cursor: pointer;
-}
-.am-modal__close:hover { color: #374151; }
+.am-empty__icon svg { width: 25px; height: 25px; }
+.am-empty__icon--error { background: linear-gradient(140deg, #fb7185 0%, var(--am-down-deep) 100%); box-shadow: 0 12px 24px -14px rgba(244, 63, 94, .9); }
 
-/* ── Responsive ───────────────────────────────────────────────────────── */
-@media (max-width: 640px) {
-  .am-card__footer {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-  .am-actions {
-    width: 100%;
-  }
-  .am-btn {
-    flex: 1;
-  }
-}
+.am-empty__title { margin: 0; color: var(--am-ink); font-family: Georgia, 'Times New Roman', serif; font-size: 16px; font-weight: 700; }
+.am-empty__text { margin: 0; max-width: 46ch; color: var(--am-muted); font-size: 13px; line-height: 1.5; }
 
-/* Retry button for failed user-list loads */
-.am-retry-btn{margin-top:10px;padding:8px 16px;background:#4f6bed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:.85rem}
-.am-retry-btn:hover:not(:disabled){background:#3d55c4}
-.am-retry-btn:disabled{opacity:.6;cursor:default}
+.am-skeletons { display: flex; flex-direction: column; gap: 10px; }
+.am-skeleton {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border: 1px solid var(--am-line);
+  border-radius: var(--am-radius);
+  background: var(--am-paper);
+}
+.am-skeleton__avatar { flex: 0 0 auto; width: 44px; height: 44px; border-radius: 50%; background: #e8efea; }
+.am-skeleton__lines { display: flex; flex-direction: column; gap: 7px; flex: 1 1 auto; }
+.am-skeleton__line { height: 9px; border-radius: 999px; background: #edf2ef; width: 80%; }
+.am-skeleton__line--sm { width: 38%; height: 11px; }
+.am-skeleton__pill { flex: 0 0 auto; width: 104px; height: 28px; border-radius: 999px; background: #f2f6f3; }
+.am-skeleton > * { animation: am-shimmer 1.35s ease-in-out infinite; }
 
-/* Priority flag badge on assessment cards */
-.am-pill--priority{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;font-weight:700;margin-left:8px}
-.am-card__flag-reasons{margin:8px 0 0;font-size:.8rem;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:8px 10px;line-height:1.45}
+@keyframes am-shimmer { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
 
-/* User list header with live refresh */
-.am-list-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:12px;flex-wrap:wrap}
-.am-list-count{font-size:.85rem;color:#6b7280;font-weight:700;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:999px;padding:5px 12px}
-.am-refresh-btn{background:#eef2ff;color:#4f6bed;border:1px solid #c7d2fe;border-radius:8px;padding:7px 14px;font-size:.82rem;font-weight:700;cursor:pointer;transition:background .15s}
-.am-refresh-btn:hover:not(:disabled){background:#e0e7ff}
-.am-refresh-btn:disabled{opacity:.6;cursor:default}
-
-.am-pill--expired{background:#f3f4f6;color:#6b7280;border:1px solid #d1d5db}
-
-/* ══ VIBRANT THEME REFRESH ══ */
-.am-user-item, .am-card {
-  border-radius: 16px !important;
-  box-shadow: 0 3px 12px rgba(6, 95, 70, 0.06);
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease !important;
-  /* `backwards` not `both`: a filled `to { transform }` outranks normal author
-     rules, which would permanently kill the :hover lift below. */
-  animation: am-rise 0.35s ease backwards;
-}
-.am-user-item { position: relative; overflow: hidden; }
-/* Colour rail shows an expanded card at a glance */
-.am-user-item::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 3px;
-  background: linear-gradient(90deg, #10b981, #4f6bed 55%, #8b5cf6);
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-.am-user-item--open::before { opacity: 1; }
-.am-user-item:hover, .am-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 26px rgba(6, 95, 70, 0.12) !important;
-  border-color: #a7f3d0;
-}
-@keyframes am-rise {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-.am-btn {
-  border-radius: 10px !important;
-  transition: transform 0.15s ease, box-shadow 0.2s ease !important;
-}
-.am-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.22);
-}
-
-/* Avatar: white ring so initials read as an identity, not a blob */
-.am-avatar--initials {
-  box-shadow: 0 3px 10px -3px rgba(16, 185, 129, 0.7);
-  outline: 2px solid #fff;
-  outline-offset: -2px;
-}
-
-/* Assessment count pill — emerald, echoing the member dashboard */
-.am-count-pill {
-  background: linear-gradient(135deg, #ecfdf5, #d1fae5) !important;
-  border: 1px solid #a7f3d0;
-  color: #047857 !important;
-  font-weight: 700;
-}
-
-/* Tag pills: distinct hues so age/diet/activity/AI don't look identical */
-.am-tag {
-  background: linear-gradient(135deg, #f8fafc, #f1f5f9);
-  border: 1px solid #e2e8f0;
-  color: #334155;
-  font-weight: 600;
-}
-.am-tag--green {
-  background: linear-gradient(135deg, #ecfdf5, #d1fae5);
-  border-color: #6ee7b7;
-  color: #065f46;
-}
-.am-tag--blue {
-  background: linear-gradient(135deg, #eef2ff, #e0e7ff);
-  border-color: #c7d2fe;
-  color: #3730a3;
-  font-weight: 700;
-}
-
-/* Status pills */
-.am-pill--active {
-  background: linear-gradient(135deg, #10b981, #0d9488) !important;
-  color: #fff !important;
-  box-shadow: 0 4px 10px -4px rgba(13, 148, 136, 0.9);
-}
-.am-pill--expired {
-  background: linear-gradient(135deg, #f8fafc, #e2e8f0) !important;
-  color: #64748b !important;
-  border: 1px solid #cbd5e1;
-}
-
-/* Action buttons: saturated gradients per intent */
-.am-btn--grey {
-  background: linear-gradient(135deg, #64748b, #475569 60%, #334155) !important;
-  box-shadow: 0 4px 12px rgba(51, 65, 85, 0.32);
-}
-.am-btn--blue {
-  background: linear-gradient(135deg, #6366f1, #4f46e5 55%, #4338ca) !important;
-  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.34);
-}
-.am-btn--blue:hover { box-shadow: 0 8px 18px rgba(79, 70, 229, 0.44); }
-
-/* Refresh control — pill that fills solid on hover */
-.am-refresh-btn {
-  background: linear-gradient(135deg, #eef2ff, #e0e7ff) !important;
-  color: #4338ca !important;
-  border: 1px solid #c7d2fe !important;
-  border-radius: 999px !important;
-  transition: background .15s, color .15s, transform .15s, box-shadow .15s;
-}
-.am-refresh-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #6366f1, #4f46e5) !important;
-  color: #fff !important;
-  transform: translateY(-1px);
-  box-shadow: 0 8px 18px -8px rgba(79, 70, 229, 0.9);
-}
-
-/* Card footer + expiry */
-.am-card__footer { border-top: 1px dashed #e2e8f0; }
-.am-card__expiry { color: #94a3b8; }
-
-@media (prefers-reduced-motion: reduce) {
-  .am-user-item, .am-card { animation: none; transition: none; }
-  .am-btn, .am-refresh-btn, .am-user-item::before { transition: none; }
-}
-
-/* PDF export feedback: failures are actionable, and an in-flight export cannot
-   be triggered twice from the same assessment list. */
+/* PDF error toast */
 .am-pdf-error {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin: 0 0 12px;
-  padding: 10px 12px;
-  color: #9f1239;
-  background: linear-gradient(135deg, #fff1f2, #ffe4e6);
-  border: 1px solid #fda4af;
-  border-left: 4px solid #f43f5e;
+  gap: 11px;
+  padding: 11px 15px;
+  border: 1px solid #f8c9c9;
   border-radius: 12px;
-  box-shadow: 0 8px 20px -16px rgba(190, 18, 60, .7);
+  background: linear-gradient(110deg, #fdecec 0%, #fff7f7 100%);
+  color: #a32121;
+  font-size: 13px;
+  font-weight: 600;
 }
 .am-pdf-error > span {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  flex: 0 0 22px;
-  color: #fff;
-  background: #e11d48;
+  flex: 0 0 auto;
+  width: 20px; height: 20px;
   border-radius: 50%;
-  font: 800 12px/1 Arial, sans-serif;
+  background: #f43f5e;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
 }
-.am-pdf-error p { flex: 1; margin: 0; font-size: .82rem; line-height: 1.45; }
+.am-pdf-error p { margin: 0; flex: 1 1 auto; }
 .am-pdf-error button {
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  color: #be123c;
-  background: rgba(255,255,255,.75);
-  border: 1px solid #fecdd3;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 1.15rem;
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 19px;
   line-height: 1;
-}
-.am-pdf-error button:hover { background: #fff; }
-.am-btn:disabled {
-  cursor: wait;
+  cursor: pointer;
   opacity: .7;
-  transform: none !important;
-  box-shadow: none !important;
+}
+.am-pdf-error button:hover { opacity: 1; }
+
+.am-retry-btn {
+  margin-top: 12px;
+  padding: 9px 17px;
+  border: none;
+  border-radius: 10px;
+  background: linear-gradient(125deg, var(--am-primary) 0%, var(--am-primary-deep) 100%);
+  color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 10px 20px -13px rgba(79, 107, 237, .95);
+}
+.am-retry-btn:hover:not(:disabled) { filter: brightness(1.06); }
+.am-retry-btn:disabled { opacity: .6; cursor: not-allowed; }
+
+/* ── Modals ──────────────────────────────────────────────────────────── */
+.am-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(6, 12, 8, .55);
+}
+.am-modal__content {
+  position: relative;
+  width: min(92vw, 820px);
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 28px;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, .2);
+}
+/* The read-only assessment is already a complete dialog box — when nested
+   here, drop the wrapper chrome (padding + frame) so the 860px card can't
+   overflow and clip sideways. */
+.am-modal__content:has(> .ro-box) {
+  width: min(94vw, 860px);
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+/* Fallback for browsers without :has() — the card itself stays fluid */
+.am-modal__content > .ro-box { max-width: 100%; }
+.am-modal__close {
+  position: absolute;
+  top: 14px; right: 18px;
+  border: none;
+  background: none;
+  color: var(--am-muted);
+  font-size: 1.6rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.am-modal__close:hover { color: var(--am-ink); }
+
+/* ── Focus ───────────────────────────────────────────────────────────── */
+.am-user-row:focus-visible,
+.am-refresh-btn:focus-visible,
+.am-btn:focus-visible,
+.am-search:focus-visible,
+.am-retry-btn:focus-visible { outline: 2px solid var(--am-primary); outline-offset: 2px; }
+
+/* ── Responsive ──────────────────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  .am-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 860px) {
+  .am-head { align-items: stretch; }
+  .am-refresh-btn { align-self: flex-start; }
+  .am-field { flex: 1 1 200px; }
+  .am-search { min-width: 0; width: 100%; }
+}
+
+@media (max-width: 640px) {
+  .am-card__footer { flex-direction: column; align-items: flex-start; }
+  .am-actions { width: 100%; }
+  .am-btn { flex: 1 1 auto; justify-content: center; }
+}
+
+@media (max-width: 560px) {
+  .am-stats { grid-template-columns: 1fr; gap: 9px; }
+  .am-stat { padding: 12px 14px; }
+  .am-stat__value { font-size: 23px; }
+  .am-user-row { padding-left: 16px; gap: 11px; }
+  .am-count-pill { display: none; }
+  .am-skeleton__pill { display: none; }
+}
+
+/* The only motion here is the refresh spinner, the skeleton shimmer and the
+   button sheen. Respect the OS setting. */
+@media (prefers-reduced-motion: reduce) {
+  .am *,
+  .am *::before,
+  .am *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
 }

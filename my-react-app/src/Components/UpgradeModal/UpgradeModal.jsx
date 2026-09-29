@@ -63,7 +63,8 @@ export default function UpgradeModal({ feature, requiredPlan, currentPlan, onClo
               <path d="M12 8h.01M11 12h1v4h1" />
             </svg>
             <span>
-              Ask an administrator to upgrade your plan and switch it on instantly — no re-login needed.
+              Compare every plan on the pricing page — an upgrade takes effect
+              immediately, with no re-login needed.
             </span>
           </p>
 
@@ -72,7 +73,7 @@ export default function UpgradeModal({ feature, requiredPlan, currentPlan, onClo
               Maybe later
             </button>
             <button type="button" ref={primaryRef} className="upgrade-btn upgrade-btn-primary" onClick={onViewPlans}>
-              View my plan
+              View plans
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M5 12h14M13 6l6 6-6 6" />
               </svg>

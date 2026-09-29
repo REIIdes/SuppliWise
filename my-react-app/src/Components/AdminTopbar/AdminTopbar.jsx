@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { pictureUrl } from '../../utils/pictureUrl';
 import './AdminTopbar.css';
 
 const MENU_ICONS = {
@@ -26,9 +27,25 @@ const MENU_ICONS = {
   ),
 };
 
+/* The menu, in one place, so the keyboard handler and the render can never
+   disagree about what is in it or in what order.
+   `hint` is kept short on purpose: at this panel width the text column is ~187px,
+   and "Password, authenticator & account details" wrapped to two lines while
+   "End this admin session" did not — so the three rows came out 69/69/54px and
+   the menu looked accidental. Both items jump to the profile tab; the hints say
+   what you land on, not what the screen contains. */
+const MENU_ITEMS = [
+  { key: 'account', label: 'Manage Account', hint: 'Password, authenticator, details', tone: 'ok' },
+  { key: 'edit', label: 'Edit Profile', hint: 'Picture, background, appearance', tone: 'primary' },
+  { key: 'signout', label: 'Sign out', hint: 'End this admin session', tone: 'down' },
+];
+
 function AdminAvatar({ profilePicture, initials, className }) {
-  if (profilePicture) {
-    return <img className={className} src={profilePicture} alt="" aria-hidden="true" />;
+  // Stored pictures arrive as a root-relative `/pictures/…` path; resolved
+  // against the API origin or the <img> would 404 against the SPA's origin.
+  const src = pictureUrl(profilePicture);
+  if (src) {
+    return <img className={className} src={src} alt="" aria-hidden="true" />;
   }
   return <span className={className}>{initials}</span>;
 }
@@ -49,6 +66,7 @@ function AdminTopbar({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
+  const profileRef = useRef(null);
 
   const initials = admin?.alias
     ? admin.alias.charAt(0).toUpperCase()
@@ -62,7 +80,32 @@ function AdminTopbar({
       if (!menuRef.current?.contains(event.target)) setMenuOpen(false);
     };
     const onKey = (event) => {
-      if (event.key === 'Escape') setMenuOpen(false);
+      if (event.key === 'Escape') {
+        setMenuOpen(false);
+        // Return focus to the pill that opened the panel, so a keyboard user is
+        // not dropped at the top of the document.
+        profileRef.current?.focus();
+        return;
+      }
+      // `role="menu"` promises arrow-key navigation. Without this the panel is a
+      // list of buttons a keyboard user has to Tab through, and the role is a
+      // promise the component does not keep.
+      const forward = ['ArrowDown', 'ArrowRight'];
+      const back = ['ArrowUp', 'ArrowLeft'];
+      if (!forward.includes(event.key) && !back.includes(event.key)
+        && event.key !== 'Home' && event.key !== 'End') return;
+      const items = Array.from(
+        menuRef.current?.querySelectorAll('[role="menuitem"]') || []
+      );
+      if (items.length === 0) return;
+      event.preventDefault();
+      const current = items.indexOf(document.activeElement);
+      let next;
+      if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = items.length - 1;
+      else if (current < 0) next = 0;
+      else next = (current + (forward.includes(event.key) ? 1 : -1) + items.length) % items.length;
+      items[next]?.focus();
     };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
@@ -131,6 +174,7 @@ function AdminTopbar({
           onPointerLeave={onBellPointerLeave}
         >
           <button
+            type="button"
             className={`admin-topbar__icon-btn${showNotifications ? ' is-open' : ''}`}
             aria-label="Open notifications"
             aria-expanded={showNotifications}
@@ -152,6 +196,8 @@ function AdminTopbar({
         {/* Profile pill — toggles the collapsible account menu */}
         <div className="admin-topbar__menu" ref={menuRef}>
           <button
+            ref={profileRef}
+            type="button"
             className={`admin-topbar__profile${menuOpen ? ' is-open' : ''}`}
             aria-label="Open account menu"
             aria-haspopup="menu"
@@ -176,7 +222,10 @@ function AdminTopbar({
           </button>
 
           {menuOpen && (
-            <div className="admin-topbar__dropdown" id="admin-profile-menu" role="menu">
+            <div className="admin-topbar__dropdown" id="admin-profile-menu" role="menu" aria-label="Account">
+              {/* Identity block. The role is a badge with a live dot rather than
+                  bare mint-coloured text, so it reads as a status instead of a
+                  stray word. */}
               <div className="admin-topbar__dropdown-head">
                 <AdminAvatar
                   profilePicture={profilePicture}
@@ -185,50 +234,45 @@ function AdminTopbar({
                 />
                 <span className="admin-topbar__dropdown-id">
                   <strong>{admin?.alias || 'Administrator'}</strong>
-                  <em>Administrator</em>
+                  <em className="admin-topbar__role">
+                    <i aria-hidden="true" />
+                    Administrator
+                  </em>
                 </span>
               </div>
 
-              <button
-                type="button"
-                role="menuitem"
-                className="admin-topbar__menu-item"
-                onClick={() => runItem(onManageAccount)}
-              >
-                <span className="admin-topbar__menu-icon" aria-hidden="true">{MENU_ICONS.account}</span>
-                <span className="admin-topbar__menu-text">
-                  <strong>Manage Account</strong>
-                  <em>Password, authenticator &amp; account details</em>
-                </span>
-              </button>
-
-              <button
-                type="button"
-                role="menuitem"
-                className="admin-topbar__menu-item"
-                onClick={() => runItem(onEditProfile)}
-              >
-                <span className="admin-topbar__menu-icon admin-topbar__menu-icon--accent" aria-hidden="true">{MENU_ICONS.edit}</span>
-                <span className="admin-topbar__menu-text">
-                  <strong>Edit Profile</strong>
-                  <em>Change picture, background picture, etc.</em>
-                </span>
-              </button>
-
-              <span className="admin-topbar__dropdown-sep" aria-hidden="true" />
-
-              <button
-                type="button"
-                role="menuitem"
-                className="admin-topbar__menu-item admin-topbar__menu-item--danger"
-                onClick={() => runItem(onSignOut)}
-              >
-                <span className="admin-topbar__menu-icon" aria-hidden="true">{MENU_ICONS.signout}</span>
-                <span className="admin-topbar__menu-text">
-                  <strong>Sign out</strong>
-                  <em>End this admin session</em>
-                </span>
-              </button>
+              <div className="admin-topbar__dropdown-list">
+                {MENU_ITEMS.map((item, index) => (
+                  <div key={item.key} className="admin-topbar__menu-row">
+                    {/* The rule before the last item is the one distinction this
+                        menu has to make: "these change your account" versus
+                        "this ends your session". */}
+                    {index === MENU_ITEMS.length - 1 && (
+                      <span className="admin-topbar__dropdown-sep" aria-hidden="true" />
+                    )}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={`admin-topbar__menu-item admin-topbar__menu-item--${item.tone}`}
+                      onClick={() => runItem(
+                        item.key === 'account' ? onManageAccount
+                          : item.key === 'edit' ? onEditProfile
+                            : onSignOut
+                      )}
+                    >
+                      <span className="admin-topbar__menu-icon" aria-hidden="true">{MENU_ICONS[item.key]}</span>
+                      <span className="admin-topbar__menu-text">
+                        <strong>{item.label}</strong>
+                        <em>{item.hint}</em>
+                      </span>
+                      <svg className="admin-topbar__menu-go" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                           stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <polyline points="9 6 15 12 9 18"/>
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>

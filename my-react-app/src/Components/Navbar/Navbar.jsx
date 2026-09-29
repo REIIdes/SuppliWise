@@ -5,6 +5,7 @@ import ProfileActionsMenu from '../ProfileActionsMenu/ProfileActionsMenu';
 import ConfirmLogoutModal from '../ConfirmLogoutModal/ConfirmLogoutModal';
 import useAuth from '../../hooks/useAuth';
 import useSubscription from '../../hooks/useSubscription';
+import useScrolledPast from '../../hooks/useScrolledPast';
 import { PLAN_LABELS } from '../../subscription/features';
 import { signOutCurrentAccount } from '../../api';
 import './Navbar.css';
@@ -123,6 +124,17 @@ function Navbar() {
   // and only a confirmed sign-out leaves the page.
   const [signOutPending, setSignOutPending] = useState(false);
 
+  // The bar stays pinned, but once the page has scrolled it stops being a
+  // surface: the background goes transparent and only the shadow is dropped, so
+  // the links, the wordmark and the Sign In pill keep exactly the colours they
+  // had at the top. Back at the top it returns to the original background.
+  //
+  // Why a class and not an inline style: the transition belongs in CSS, and a
+  // class keeps the change declarative — a page that needs a different
+  // treatment (the dark pricing page) can override the rule without this
+  // component knowing anything about it.
+  const scrolled = useScrolledPast(10);
+
   const confirmSignOut = async () => {
     setSignOutPending(false);
     // Revoke this account's token server-side and forget it here. This is the
@@ -134,7 +146,7 @@ function Navbar() {
   };
 
   return (
-    <nav className="navbar">
+    <nav className={`navbar${scrolled ? ' navbar--scrolled' : ''}`}>
       <div className="navbar-left">
         <div className="navbar-logo-box">
           <svg width="30" height="30" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -163,6 +175,28 @@ function Navbar() {
                 <polyline points="12 6 12 12 16 14" />
               </svg>
             </NavLink>
+            {/* Support — the human channel to the admin team. In the top bar as
+                well as the account menu because "where did I pay" is asked from
+                the pricing page, and a member mid-cancellation should not have
+                to go through the account menu to reach it. */}
+            <NavLink to="/support" className="navbar-nav-link" title="Support">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.9 8.9 0 0 1-4-.9L3 21l1.9-4.6A8.4 8.4 0 0 1 12 3.1a8.4 8.4 0 0 1 9 8.4z" />
+                <path d="M8.5 11h.01M12 11h.01M15.5 11h.01" />
+              </svg>
+            </NavLink>
+            {/* Plans — always visible, at every tier. It is not only an upgrade
+                page: it is where a subscriber checks what their plan costs, how
+                long they have left and whether a different plan suits them, so
+                leaving it out of the bar meant the only routes to it were a
+                locked-feature paywall and the account menu. */}
+            <NavLink to="/pricing" className="navbar-nav-link navbar-nav-link--plans" title="Plans & pricing">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M20.6 7.6 12 3 3.4 7.6v8.8L12 21l8.6-4.6z" />
+                <path d="M3.4 7.6 12 12.2l8.6-4.6M12 21v-8.8" />
+              </svg>
+              <span className="navbar-nav-text">Plans</span>
+            </NavLink>
             {/* Product navigation lives in the account menu now. It used to be
                 three more items in the top bar, which crowded the row on
                 phones and left no breathing room around the account pill. The
@@ -177,6 +211,11 @@ function Navbar() {
               onNavigate={(to) => navigate(to)}
               onEditProfile={() => goToProfile({ view: 'personal', edit: '1' })}
               onOpenView={(view) => goToProfile({ view })}
+              // "Manage billing" and the menu's Plans entry share a destination,
+              // so /pricing is the single source of truth for the plan name and
+              // the currency — a second copy on the profile page would drift.
+              onViewPlans={() => navigate('/pricing')}
+              onOpenSupport={() => navigate('/support')}
               onSignOut={() => setSignOutPending(true)}
             />
           </>
@@ -185,9 +224,20 @@ function Navbar() {
           // admin and user sessions stay separate, and the admin panel is
           // reached only via its own /admin routes. Route guards still send
           // an admin-holder who opens a protected user route back to /admin.
-          <NavLink to="/login" className="navbar-signin-btn">
-            Sign In
-          </NavLink>
+          <>
+            {/* Guests need the price list to decide whether to sign up at all —
+                it is the single most common reason someone lands on the site. */}
+            <NavLink to="/pricing" className="navbar-nav-link navbar-nav-link--plans" title="Plans & pricing">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M20.6 7.6 12 3 3.4 7.6v8.8L12 21l8.6-4.6z" />
+                <path d="M3.4 7.6 12 12.2l8.6-4.6M12 21v-8.8" />
+              </svg>
+              <span className="navbar-nav-text">Plans</span>
+            </NavLink>
+            <NavLink to="/login" className="navbar-signin-btn">
+              Sign In
+            </NavLink>
+          </>
         )}
       </div>
 

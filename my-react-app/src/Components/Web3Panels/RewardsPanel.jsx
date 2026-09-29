@@ -20,11 +20,15 @@ const NFT_EMOJI = {
 };
 
 // Deterministic gradient per token so every badge looks unique but stable.
+// The pair is deliberately dark-to-darker: the hue still varies wildly, but
+// the whole card now clears AA against its white label text at any hue
+// (a mid-lightness yellow is 1.9:1, a dark one is 6:1). The .w3-nft scrim
+// in Web3.css covers the rest of the spread.
 function nftGradient(seed, kind) {
   const base = [...String(seed || kind)].reduce((a, c) => a + c.charCodeAt(0), 0);
   const h1 = base % 360;
   const h2 = (h1 + 48) % 360;
-  return `linear-gradient(135deg, hsl(${h1} 70% 48%), hsl(${h2} 72% 38%))`;
+  return `linear-gradient(140deg, hsl(${h1} 62% 34%), hsl(${h2} 66% 22%))`;
 }
 
 export default function RewardsPanel() {

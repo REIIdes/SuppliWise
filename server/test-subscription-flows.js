@@ -1,11 +1,17 @@
-﻿require('dotenv').config();
+require('dotenv').config();
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
+const { connectTestDb, skipMessage } = require('./Test File/testDbGuard');
+const { ensureE2eAdmin } = require('./Test File/e2eAdmin');
+const { startTestServer } = require('./Test File/e2eServer');
 const User = require('./models/User');
 const AdminAccount = require('./models/AdminAccount');
 const { issueUserSession } = require('./utils/sessions');
 
-const BASE = 'http://localhost:5000';
+// Mutable: reassigned to the suite's own server once it boots. A developer's
+// server on :5000 reads the APPLICATION database, so the user this suite creates
+// in the throwaway one is invisible to it and every call 401s.
+let BASE = 'http://localhost:5000';
 const results = [];
 const check = (name, ok, detail = '') => { results.push({ name, ok }); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  -> ' + detail : ''}`); };
 
@@ -41,19 +47,30 @@ async function waitForEvent(events, pred, ms = 3000) {
 }
 
 (async () => {
-  await mongoose.connect(process.env.MONGO_URI);
+  // Tests write real User documents. Never let them reach the application's
+  // own database � see Test File/testDbGuard.js.
+  const db = await connectTestDb();
+  if (!db.connected) { console.log(skipMessage(db)); await mongoose.disconnect(); return; }
+
+  // The suite's own API, connected to the SAME throwaway database — see
+  // Test File/e2eServer.js for why the developer's server cannot be used.
+  const server = await startTestServer({ port: 5100 });
+  if (!server.ok) { console.log(`SKIPPED: ${server.reason}`); await mongoose.disconnect(); return; }
+  BASE = server.base;
+  console.log(`e2e API on ${server.base} (test database)\n`);
   const email = 'subflow-test@example.com';
   await User.deleteOne({ email });
   const user = await User.create({ firstName: 'Sub', lastName: 'Flow', email, password: 'TestPass123!', dateOfBirth: new Date('1995-06-15'), gender: 'Male' });
   // Refresh the admin's activity stamp: protect() idle-kills admin sessions
   // after 3.5 minutes, and this test picks an arbitrary enabled account that
-  // may have been idle for days — without this every admin call 401s.
-  const admin = await AdminAccount.findOneAndUpdate(
-    { enabled: true },
-    { $set: { lastActivityAt: new Date() } },
-    { new: true }
-  ).lean();
-  // User tokens must come from the session store (sid claim) — a raw
+  // may have been idle for days � without this every admin call 401s.
+  //
+  // ensureE2eAdmin also CREATES the account when the throwaway database has
+  // none, which it does not: the admins the server seeds at boot live in the
+  // application database, and borrowing them from there is exactly what the
+  // test-database guard exists to prevent. See Test File/e2eAdmin.js.
+  const admin = await ensureE2eAdmin();
+  // User tokens must come from the session store (sid claim) � a raw
   // sid-less JWT is rejected by protect() since the session system landed.
   const userToken = await issueUserSession(user._id);
   const adminToken = jwt.sign({ role: 'admin', adminId: admin._id, id: admin._id }, process.env.JWT_SECRET, { expiresIn: '15m' });
@@ -135,6 +152,7 @@ async function waitForEvent(events, pred, ms = 3000) {
   closeStream();
   await User.deleteOne({ _id: user._id });
   await mongoose.disconnect();
+  await server.stop();
   const failed = results.filter(x => !x.ok);
   console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
   process.exit(failed.length ? 1 : 0);

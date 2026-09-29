@@ -1,7 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
-import ReadOnlyAssessment from '../Components/ReadOnlyAssessment/ReadOnlyAssessment';
 import { getHistory, deleteAssessment, checkFeature, getToken } from '../api';
 import { exportResultsToPDF } from '../utils/exportPDF';
 import { PLAN_LABELS, historyLimitForStoredPlan } from '../utils/plan';
@@ -45,6 +44,89 @@ function isPlaceholderEvidence(text) {
 }
 
 const priorityColor = { High: '#16a34a', Medium: '#d97706', Low: '#374151' };
+
+const MS_PER_DAY = 86400000;
+
+// ── View helpers (module scope so the memos below have no unstable deps) ──
+
+function getExpirationDate(item) {
+  if (!item || item.priority === 'Priority') return null; // flagged items never expire
+  if (item.expiresAt) {
+    const stored = new Date(item.expiresAt);
+    if (!Number.isNaN(stored.getTime())) return stored;
+  }
+  const createdAt = new Date(item.createdAt);
+  if (Number.isNaN(createdAt.getTime())) return null;
+  // Fallback: exactly 5 calendar years from creation — the same advance the
+  // server's expiryFrom() writes, so both render the identical timestamp.
+  const expirationDate = new Date(createdAt);
+  expirationDate.setFullYear(expirationDate.getFullYear() + 5);
+  return expirationDate;
+}
+
+// Expired assessments stay readable but are retired from active views.
+// Priority assessments never expire while flagged.
+function isExpired(item, now) {
+  if (!item || item.priority === 'Priority') return false;
+  const exp = getExpirationDate(item);
+  if (!exp || Number.isNaN(exp.getTime())) return false;
+  const ref = now ? new Date(now).getTime() : Date.now();
+  return exp.getTime() <= ref;
+}
+
+function fmt(dateStr) {
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', {
+    year: 'numeric', month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+}
+
+// Whole days left before a record retires (null when it never expires).
+function daysLeft(item, now) {
+  const exp = getExpirationDate(item);
+  if (!exp) return null;
+  const ref = now ? new Date(now).getTime() : Date.now();
+  return Math.ceil((exp.getTime() - ref) / MS_PER_DAY);
+}
+
+function relativeTime(dateStr, now) {
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return '';
+  const ref = now ? new Date(now).getTime() : Date.now();
+  const diff = ref - d.getTime();
+  // A record dated in the future means clock skew, not a negative age.
+  if (diff < 0) return 'just now';
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(diff / MS_PER_DAY);
+  if (days === 1) return 'yesterday';
+  if (days < 7) return `${days} days ago`;
+  if (days < 30) {
+    const weeks = Math.floor(days / 7);
+    return weeks === 1 ? '1 week ago' : `${weeks} weeks ago`;
+  }
+  if (days < 365) {
+    const months = Math.floor(days / 30);
+    return months === 1 ? '1 month ago' : `${months} months ago`;
+  }
+  const years = Math.floor(days / 365);
+  return years === 1 ? '1 year ago' : `${years} years ago`;
+}
+
+// The one-line headline shown on a collapsed card.
+function cardTitle(item) {
+  if (item.symptoms?.length > 0 && !item.symptoms.includes('None')) {
+    return item.symptoms.slice(0, 2).join(', ')
+      + (item.symptoms.length > 2 ? ` +${item.symptoms.length - 2} more` : '');
+  }
+  if (item.healthGoals?.length > 0) return item.healthGoals.slice(0, 2).join(', ');
+  return 'General Wellness Assessment';
+}
 
 const ACTIVITY_LABELS = {
   Sedentary: 'Sedentary / No Exercise',
@@ -219,18 +301,28 @@ function enrichAiResults(aiResults) {
 
 
 function ConfirmModal({ title, body, confirmLabel = 'Yes, delete', cancelLabel = 'Keep it', onConfirm, onCancel, loading }) {
+  // Escape must always be able to back out of a destructive prompt, and the
+  // dialog has to announce itself to screen readers as a modal.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') onCancel();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
   return (
     <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal-box" onClick={e => e.stopPropagation()}>
-        <div className="modal-icon">🗑️</div>
-        <h3 className="modal-title">{title}</h3>
+      <div className="modal-box" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title" onClick={e => e.stopPropagation()}>
+        <div className="modal-icon" aria-hidden="true">🗑️</div>
+        <h3 className="modal-title" id="confirm-modal-title">{title}</h3>
         <p className="modal-body">{body}</p>
         <div className="modal-actions">
-          <button className="modal-btn-cancel" onClick={onCancel} disabled={loading}>
+          <button type="button" className="modal-btn-cancel" onClick={onCancel} disabled={loading}>
             {cancelLabel}
           </button>
-          <button className="modal-btn-confirm" onClick={onConfirm} disabled={loading}>
-            {loading ? 'Deleting...' : confirmLabel}
+          <button type="button" className="modal-btn-confirm" onClick={onConfirm} disabled={loading}>
+            {loading ? 'Deleting…' : confirmLabel}
           </button>
         </div>
       </div>
@@ -246,13 +338,17 @@ function HistoryPage() {
   const [expanded, setExpanded] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [serverTime, setServerTime] = useState(new Date());
-  const [answersTarget, setAnswersTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [activeTab, setActiveTab] = useState({});
   const [toast, setToast] = useState('');
   const [showAllSupplements, setShowAllSupplements] = useState({});
   const [upgradeInfo, setUpgradeInfo] = useState(null);
   const [historyMeta, setHistoryMeta] = useState({ planLimit: null, pagination: null, currentPlan: null });
+  // Local browse controls: a free-text needle plus a status lens. Both are
+  // pure client-side views over the already-loaded page, so switching either
+  // is instant and never costs a request.
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all'); // all | active | expired
   // Pagination: the server serves tier-capped pages (FREE 5 / DELUXE 10 /
   // PREMIUM+ 20) and gates page 2+ behind the `historyFull` entitlement —
   // so the "5-Year Record History" feature IS paging deeper, and without
@@ -268,27 +364,14 @@ function HistoryPage() {
   // History list re-loads so tier-capped page sizes update without a refresh.
   const livePlan = useSubscription();
 
-  const getExpirationDate = (item) => {
-    if (item.priority === 'Priority') return null; // flagged items never expire
-    if (item.expiresAt) return new Date(item.expiresAt);
-    const createdAt = new Date(item.createdAt);
-    if (Number.isNaN(createdAt.getTime())) return null;
-    // Fallback: exactly 5 calendar years from creation — the same advance the
-    // server's expiryFrom() writes, so both render the identical timestamp.
-    const expirationDate = new Date(createdAt);
-    expirationDate.setFullYear(expirationDate.getFullYear() + 5);
-    return expirationDate;
-  };
-
-  // Expired assessments stay readable but are retired from active views.
-  // Priority assessments never expire while flagged.
-  const isExpired = (item) => {
-    if (!item || item.priority === 'Priority') return false;
-    const exp = getExpirationDate(item);
-    if (!exp || Number.isNaN(exp.getTime())) return false;
-    const ref = serverTime ? new Date(serverTime).getTime() : new Date().getTime();
-    return exp.getTime() <= ref;
-  };
+  // `serverTime` is the clock every expiry comparison must use. The wrappers
+  // below are useCallback'd so their identity only changes when the clock
+  // does — otherwise the useMemo filters would rebuild on every render.
+  const now = serverTime;
+  const expiredOf = useCallback((item) => isExpired(item, now), [now]);
+  const expirationOf = getExpirationDate;
+  const leftOf = useCallback((item) => daysLeft(item, now), [now]);
+  const agoOf = useCallback((dateStr) => relativeTime(dateStr, now), [now]);
 
   const toggleShowAllSupplements = (assessmentId) => {
     setShowAllSupplements(prev => ({ ...prev, [assessmentId]: !prev[assessmentId] }));
@@ -374,12 +457,6 @@ function HistoryPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [livePlan.active, livePlan.plan, livePlan.rank, upgradeInfo]);
 
-  const fmt = (dateStr) =>
-    new Date(dateStr).toLocaleDateString('en-US', {
-      year: 'numeric', month: 'short', day: 'numeric',
-      hour: '2-digit', minute: '2-digit',
-    });
-
   const handleDeleteConfirm = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
@@ -407,6 +484,61 @@ function HistoryPage() {
   const getTab = (id) => activeTab[id] || 'assessment';
   const setTab = (id, tab) => setActiveTab(prev => ({ ...prev, [id]: tab }));
 
+  // ── Derived view model ───────────────────────────────────────────────
+  // The "active" record is the newest one still in force. The server defines
+  // it the same way (findActiveAssessment filters expired rows out before
+  // sorting), so the badge here can never disagree with the Dashboard.
+  const activeId = useMemo(() => {
+    const row = history.find(item => !expiredOf(item));
+    return row ? row._id : null;
+  }, [history, expiredOf]);
+
+  const counts = useMemo(() => {
+    let expired = 0; let priority = 0; let withAi = 0;
+    for (const item of history) {
+      if (expiredOf(item)) expired += 1;
+      if (item.priority === 'Priority') priority += 1;
+      if (item.aiResults) withAi += 1;
+    }
+    return { expired, priority, withAi, total: history.length };
+  }, [history, expiredOf]);
+
+  // The record that will retire soonest — surfaced so a user can act before
+  // data silently drops out of their active views.
+  const soonestExpiry = useMemo(() => {
+    let soonest = null;
+    for (const item of history) {
+      const left = leftOf(item);
+      if (left === null || left < 0) continue;
+      if (!soonest || left < soonest.left) soonest = { item, left };
+    }
+    return soonest;
+  }, [history, leftOf]);
+
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return history.filter(item => {
+      if (statusFilter === 'active' && item._id !== activeId) return false;
+      if (statusFilter === 'expired' && !expiredOf(item)) return false;
+      if (!needle) return true;
+      // Search the whole record, not just the headline, so a goal, symptom or
+      // diet typed into the box still finds the assessment it came from.
+      return [
+        fmt(item.createdAt),
+        cardTitle(item),
+        item.dietType,
+        item.age,
+        ACTIVITY_LABELS[item.activityLevel] || item.activityLevel,
+        ...(item.symptoms || []),
+        ...(item.healthGoals || []),
+        ...(item.medicalConditions || []),
+      ].some(v => v && String(v).toLowerCase().includes(needle));
+    });
+  }, [history, query, statusFilter, activeId, expiredOf]);
+
+  const isFiltering = query.trim().length > 0 || statusFilter !== 'all';
+  const clearFilters = () => { setQuery(''); setStatusFilter('all'); };
+
   return (
     <div className="history-wrapper">
       <Navbar />
@@ -425,26 +557,121 @@ function HistoryPage() {
       )}
 
       {/* Toast */}
-      {toast && <div className="history-toast">{toast}</div>}
+      {toast && <div className="history-toast" role="status" aria-live="polite">{toast}</div>}
 
       <div className="history-container">
         <div className="history-header">
-          <h2>Assessment History</h2>
+          <div className="history-header-text">
+            <span className="history-eyebrow">Your health timeline</span>
+            <h2>Assessment History</h2>
+            <p className="history-subtitle">
+              Every assessment you have completed, kept for 5 years. Open one to review your
+              answers, results and full plan.
+            </p>
+          </div>
           <div className="history-header-actions">
-            <button className="btn-primary" onClick={() => navigate('/assessment')}>
-              + New Assessment
+            <button className="btn-primary btn-primary-lg" onClick={() => navigate('/assessment')}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+              New Assessment
             </button>
           </div>
         </div>
 
+        {activeId && (
+          <div className="active-info-banner" role="status">
+            <span className="active-info-icon" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="16" x2="12" y2="12"/>
+                <line x1="12" y1="8" x2="12.01" y2="8"/>
+              </svg>
+            </span>
+            <span className="active-info-text">
+              <strong>Your latest assessment is active.</strong> It powers your Dashboard,
+              Track Intake and Insights. Complete a new assessment to update it.
+            </span>
+            <button className="active-info-action" onClick={() => navigate('/assessment')}>
+              Start new
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="9 18 15 12 9 6"/>
+              </svg>
+            </button>
+          </div>
+        )}
+
+        {/* Summary tiles — orientation before the list, so the shape of the
+            record is legible without opening anything. */}
         {history.length > 0 && (
-          <div className="active-info-banner">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10"/>
-              <line x1="12" y1="16" x2="12" y2="12"/>
-              <line x1="12" y1="8" x2="12.01" y2="8"/>
-            </svg>
-            <span>Your latest assessment is currently active and is used for your Dashboard, Track Intake, and Insights. Complete a new assessment to update your active assessment.</span>
+          <div className="history-stats">
+            <div className="history-stat history-stat-total">
+              <span className="history-stat-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                </svg>
+              </span>
+              <span className="history-stat-body">
+                <span className="history-stat-value">{counts.total}</span>
+                <span className="history-stat-label">Assessment{counts.total === 1 ? '' : 's'}</span>
+              </span>
+            </div>
+            <div className="history-stat history-stat-active">
+              <span className="history-stat-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                  <polyline points="22 4 12 14.01 9 11.01"/>
+                </svg>
+              </span>
+              <span className="history-stat-body">
+                <span className="history-stat-value">{activeId ? 'Live' : 'None'}</span>
+                <span className="history-stat-label">Active record</span>
+              </span>
+            </div>
+            <div className="history-stat history-stat-ai">
+              <span className="history-stat-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/>
+                  <circle cx="12" cy="12" r="3.2"/>
+                </svg>
+              </span>
+              <span className="history-stat-body">
+                <span className="history-stat-value">{counts.withAi}</span>
+                <span className="history-stat-label">With AI analysis</span>
+              </span>
+            </div>
+            {counts.priority > 0 && (
+              <div className="history-stat history-stat-priority">
+                <span className="history-stat-icon" aria-hidden="true">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>
+                    <line x1="4" y1="22" x2="20" y2="22"/>
+                  </svg>
+                </span>
+                <span className="history-stat-body">
+                  <span className="history-stat-value">{counts.priority}</span>
+                  <span className="history-stat-label">Flagged priority</span>
+                </span>
+              </div>
+            )}
+            {soonestExpiry && soonestExpiry.left <= 180 && (
+              <div className="history-stat history-stat-expiry">
+                <span className="history-stat-icon" aria-hidden="true">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10"/>
+                    <polyline points="12 6 12 12 16 14"/>
+                  </svg>
+                </span>
+                <span className="history-stat-body">
+                  <span className="history-stat-value">
+                    {soonestExpiry.left}d
+                  </span>
+                  <span className="history-stat-label">Until next expiry</span>
+                </span>
+              </div>
+            )}
           </div>
         )}
 
@@ -455,7 +682,7 @@ function HistoryPage() {
         )}
 
         {error && (
-          <div className="history-error-box">
+          <div className="history-error-box" role="alert">
             <div className="history-error-icon">⚠️</div>
             <p className="history-error-title">Could not load your history</p>
             <p className="history-error-msg">{error}</p>
@@ -463,54 +690,109 @@ function HistoryPage() {
           </div>
         )}
         {!loading && !error && history.length === 0 && (
-          <div style={{ 
-            maxWidth: '600px', 
-            margin: '40px auto',
-            background: 'white',
-            borderRadius: '16px',
-            border: '1px solid #e5e7eb',
-            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)',
-            padding: '60px 40px'
-          }}>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ 
-                width: '120px', 
-                height: '120px', 
-                margin: '0 auto 32px', 
-                background: 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)', 
-                borderRadius: '50%', 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'center',
-                boxShadow: '0 10px 25px rgba(16, 185, 129, 0.15)'
-              }}>
-                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                  <polyline points="14 2 14 8 20 8"/>
-                  <line x1="16" y1="13" x2="8" y2="13"/>
-                  <line x1="16" y1="17" x2="8" y2="17"/>
-                  <polyline points="10 9 9 9 8 9"/>
-                </svg>
-              </div>
-              <p style={{ color: '#6b7280', fontSize: '16px', lineHeight: '1.6', marginBottom: '0', maxWidth: '500px', margin: '0 auto' }}>
-                You haven't completed any assessments yet. Complete your first health assessment to start building your assessment history.
-              </p>
+          <div className="history-empty">
+            <div className="history-empty-icon" aria-hidden="true">
+              <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+                <line x1="16" y1="13" x2="8" y2="13"/>
+                <line x1="16" y1="17" x2="8" y2="17"/>
+                <polyline points="10 9 9 9 8 9"/>
+              </svg>
+            </div>
+            <h3 className="history-empty-title">No assessments yet</h3>
+            <p className="history-empty-body">
+              You haven't completed any assessments yet. Complete your first health assessment
+              to start building your assessment history.
+            </p>
+            <button className="btn-primary btn-primary-lg" onClick={() => navigate('/assessment')}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+              Start your first assessment
+            </button>
+          </div>
+        )}
+
+        {/* Search + status lens. Both are pure client-side views over the
+            loaded page, so they are instant and cost no request. */}
+        {history.length > 1 && (
+          <div className="history-toolbar">
+            <div className="history-search">
+              <svg className="history-search-icon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="11" cy="11" r="7"/>
+                <line x1="20" y1="20" x2="16.65" y2="16.65"/>
+              </svg>
+              <input
+                type="search"
+                className="history-search-input"
+                placeholder="Search symptoms, goals, diet…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                aria-label="Search your assessments"
+              />
+              {query && (
+                <button
+                  className="history-search-clear"
+                  onClick={() => setQuery('')}
+                  aria-label="Clear search"
+                  type="button"
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </button>
+              )}
+            </div>
+            <div className="history-filters" role="group" aria-label="Filter assessments by status">
+              {[
+                { key: 'all', label: 'All' },
+                { key: 'active', label: 'Active' },
+                { key: 'expired', label: 'Expired' },
+              ].map(opt => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  className={`history-filter ${statusFilter === opt.key ? 'active' : ''}`}
+                  aria-pressed={statusFilter === opt.key}
+                  onClick={() => setStatusFilter(opt.key)}
+                >
+                  {opt.label}
+                </button>
+              ))}
             </div>
           </div>
         )}
 
-        {answersTarget && (
-          <ReadOnlyAssessment assessment={answersTarget} inline onClose={() => setAnswersTarget(null)} />
+        {isFiltering && filtered.length === 0 && history.length > 0 && (
+          <div className="history-no-results">
+            <div className="history-no-results-icon" aria-hidden="true">🔍</div>
+            <h3 className="history-no-results-title">No matching assessments</h3>
+            <p className="history-no-results-body">
+              {query.trim()
+                ? `Nothing matches “${query.trim()}”. Try a different symptom, goal or diet.`
+                : 'No assessments in this state yet.'}
+            </p>
+            <button type="button" className="history-no-results-reset" onClick={clearFilters}>
+              Clear filters
+            </button>
+          </div>
         )}
 
         <div className="history-list">
-          {history.map((item, i) => (
-            <div key={item._id} className="history-card">
+          {filtered.map(item => {
+            const isActive = item._id === activeId;
+            const expired = expiredOf(item);
+            const days = leftOf(item);
+            return (
+            <div key={item._id} className={`history-card${isActive ? ' history-card-active' : ''}${expanded === item._id ? ' history-card-open' : ''}`}>
               {/* Card Header */}
               <div className="history-card-header" onClick={() => setExpanded(expanded === item._id ? null : item._id)}>
                 <div className="history-card-header-left">
                   <div className="date-with-badge">
-                    {i === 0 && !isExpired(item) && (
+                    {isActive && (
                       <span
                         className="active-badge"
                         title="This is your active assessment. Your Dashboard, Track Intake, and Insights use this data."
@@ -518,7 +800,7 @@ function HistoryPage() {
                         Active
                       </span>
                     )}
-                    {isExpired(item) && (
+                    {expired && (
                       <span
                         className="expired-badge"
                         title="This assessment has expired. Its record is kept below for reference."
@@ -527,14 +809,9 @@ function HistoryPage() {
                       </span>
                     )}
                     <span className="history-date">{fmt(item.createdAt)}</span>
+                    <span className="history-ago">{agoOf(item.createdAt)}</span>
                   </div>
-                  <div className="history-card-title">
-                    {item.symptoms?.length > 0 && !item.symptoms.includes('None')
-                      ? item.symptoms.slice(0, 2).join(', ') + (item.symptoms.length > 2 ? ` +${item.symptoms.length - 2} more` : '')
-                      : item.healthGoals?.length > 0
-                        ? item.healthGoals.slice(0, 2).join(', ')
-                        : 'General Wellness Assessment'}
-                  </div>
+                  <div className="history-card-title">{cardTitle(item)}</div>
                   <div className="history-tags">
                     {item.priority === 'Priority' && (
                       <span className="tag tag-priority" title={(item.flagReasons || []).join('; ') || 'Flagged for priority review'}>
@@ -549,15 +826,18 @@ function HistoryPage() {
                     )}
                     {item.aiResults && <span className="tag tag-green">✓ AI Analysis</span>}
                     {item.priority === 'Priority' ? (
-                      <span className="tag tag-gray" title="Flagged assessments never expire while under review">
+                      <span className="tag tag-flag" title="Flagged assessments never expire while under review">
                         No expiry — resolves on completion
                       </span>
-                    ) : isExpired(item) && getExpirationDate(item) ? (
-                      <span className="tag tag-expired">Expired {fmt(getExpirationDate(item))}</span>
+                    ) : expired ? (
+                      <span className="tag tag-expired">Expired {fmt(expirationOf(item))}</span>
+                    ) : days !== null && days <= 180 ? (
+                      // Amber once the retirement date is close enough to plan around.
+                      <span className="tag tag-warn" title={`Expires ${fmt(expirationOf(item))}`}>
+                        Expires in {days} day{days === 1 ? '' : 's'}
+                      </span>
                     ) : (
-                      getExpirationDate(item) && (
-                        <span className="tag tag-gray">Expires {fmt(getExpirationDate(item))}</span>
-                      )
+                      <span className="tag tag-gray">Expires {fmt(expirationOf(item))}</span>
                     )}
                   </div>
                 </div>
@@ -569,8 +849,9 @@ function HistoryPage() {
                       navigate('/assessment', { state: { assessment: item, readOnly: true } });
                     }}
                     title="View Assessment"
+                    aria-label="View assessment answers"
                   >
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                       <circle cx="12" cy="12" r="9" />
                       <circle cx="12" cy="9" r="3" />
                       <path d="M6 19c0-3.314 2.686-6 6-6s6 2.686 6 6" />
@@ -584,8 +865,9 @@ function HistoryPage() {
                         navigate('/results', { state: { recommendations: item.aiResults, assessment: item } });
                       }}
                       title="View Results"
+                      aria-label="View results and recommendations"
                     >
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                         <polyline points="14 2 14 8 20 8" />
                         <path d="M9 13l5-5 3 3-5 5H9v-3z" />
@@ -605,25 +887,31 @@ function HistoryPage() {
                         }
                         try {
                           await checkFeature('pdfExport');
-                          exportResultsToPDF(item.aiResults, item);
+                          // The call was never awaited, so a failed export
+                          // rejected as an unhandled promise and the button
+                          // looked like it did nothing at all.
+                          const generated = await exportResultsToPDF(item.aiResults, item);
+                          if (!generated) throw new Error('The report could not be generated. Please try again.');
                         } catch (err) {
                           if (err?.requiresPlan) {
                             setUpgradeInfo({ requiresPlan: err.requiresPlan, currentPlan: err.currentPlan || livePlan.plan, feature: 'PDF Report Export' });
                           } else {
                             console.error('PDF export blocked:', err);
+                            showToast('Could not generate the PDF. Please try again.');
                           }
                         }
                       }}
                       title="Download PDF report"
+                      aria-label="Download PDF report"
                     >
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                         <polyline points="7 10 12 15 17 10"/>
                         <line x1="12" y1="15" x2="12" y2="3"/>
                       </svg>
                     </button>
                   )}
-                  {isExpired(item) && (
+                  {expired && (
                     <button
                       className="btn-delete"
                       onClick={(e) => {
@@ -631,12 +919,45 @@ function HistoryPage() {
                         setDeleteTarget(item);
                       }}
                       title="Delete expired assessment record"
+                      aria-label="Delete expired assessment record"
                     >
-                      🗑
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <polyline points="3 6 5 6 21 6"/>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                      </svg>
                     </button>
                   )}
-                  
-                  <span className="history-toggle">{expanded === item._id ? '▲' : '▼'}</span>
+
+                  <span
+                    className="history-toggle"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={expanded === item._id ? 'Collapse details' : 'Expand details'}
+                    aria-expanded={expanded === item._id}
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setExpanded(expanded === item._id ? null : item._id);
+                      }
+                    }}
+                  >
+                    <svg
+                      className="history-toggle-caret"
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.4"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  </span>
                 </div>
               </div>
 
@@ -674,7 +995,7 @@ function HistoryPage() {
                         {item.weight && item.height && (() => {
                           const bmi = (item.weight / ((item.height / 100) ** 2)).toFixed(1);
                           const cat = bmi < 18.5 ? 'Underweight' : bmi < 25 ? 'Normal weight' : bmi < 30 ? 'Overweight' : 'Obese';
-                          return <div className="history-item"><span>BMI</span><strong>{bmi} <span style={{ fontWeight: 400, color: '#6b7280' }}>({cat})</span></strong></div>;
+                          return <div className="history-item"><span>BMI</span><strong>{bmi} <span className="history-item-note">({cat})</span></strong></div>;
                         })()}
                         {item.activityLevel && <div className="history-item"><span>Physical Activity Level</span><strong>{ACTIVITY_LABELS[item.activityLevel] || item.activityLevel}</strong></div>}
                         {item.dietType && <div className="history-item"><span>Diet</span><strong>{item.dietType}</strong></div>}
@@ -826,12 +1147,12 @@ function HistoryPage() {
                           </div>
                         );
                       })() : (
-                        <p style={{ color: '#6b7280', fontSize: '13px', padding: '8px 0' }}>No daily schedule recorded for this assessment.</p>
+                        <p className="history-muted">No daily schedule recorded for this assessment.</p>
                       )}
 
                       {/* Recovery Plan */}
                       {item.aiResults.actionPlan?.length > 0 && (
-                        <div className="history-recovery-plan" style={{ marginTop: item.aiResults.dailySchedule?.length > 0 ? '20px' : '0' }}>
+                        <div className={`history-recovery-plan${item.aiResults.dailySchedule?.length > 0 ? ' history-recovery-plan-spaced' : ''}`}>
                           {item.aiResults.actionPlan.map((phase, si) => {
                             if (typeof phase === 'string') {
                               return (
@@ -889,7 +1210,7 @@ function HistoryPage() {
                           </div>
                         ))
                       ) : (
-                        <p style={{ color: '#6b7280', fontSize: '13px', padding: '8px 0' }}>No lifestyle advice recorded for this assessment.</p>
+                        <p className="history-muted">No lifestyle advice recorded for this assessment.</p>
                       )}
                     </div>
                   )}
@@ -898,13 +1219,13 @@ function HistoryPage() {
                     <div className="tab-content">
                       {item.aiResults.mealRecommendations?.length > 0 ? (
                         item.aiResults.mealRecommendations.map((meal, mi) => (
-                          <div key={mi} className="history-lifestyle-card" style={{ borderColor: '#fed7aa', background: '#fff7ed' }}>
-                            <span className="lifestyle-category-badge" style={{ color: '#c2410c', background: '#ffedd5' }}>{meal.meal}</span>
+                          <div key={mi} className="history-lifestyle-card history-lifestyle-card-meal">
+                            <span className="lifestyle-category-badge">{meal.meal}</span>
                             <p>{meal.suggestion}</p>
                           </div>
                         ))
                       ) : (
-                        <p style={{ color: '#6b7280', fontSize: '13px', padding: '8px 0' }}>No meal recommendations recorded for this assessment.</p>
+                        <p className="history-muted">No meal recommendations recorded for this assessment.</p>
                       )}
                     </div>
                   )}
@@ -940,7 +1261,7 @@ function HistoryPage() {
                         </div>
                       )}
                       {!item.aiResults.warnings?.length && !item.aiResults.avoidList?.length && (
-                        <p style={{ color: '#6b7280', fontSize: '13px', padding: '8px 0' }}>No warnings or supplements to avoid for this assessment.</p>
+                        <p className="history-muted">No warnings or supplements to avoid for this assessment.</p>
                       )}
                       {item.aiResults.seekingSupport?.include && (
                         <div className="history-seeking-support">
@@ -965,7 +1286,8 @@ function HistoryPage() {
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
         {/* PREMIUM+ ("5-Year Record History"): keep paging through every record.
             This control is the feature itself — without it page 2+ of the
@@ -988,13 +1310,13 @@ function HistoryPage() {
           </div>
         )}
         {historyMeta.pagination?.hasMore && !livePlan.canAccess('historyFull') && (
-          <div className="plan-locked" style={{ marginTop: '24px' }}>
+          <div className="plan-locked plan-locked-inline">
             <div className="plan-locked__icon">🔒</div>
             <h3 className="plan-locked__title">More history is locked</h3>
             <p className="plan-locked__body">Full 5-year history requires <strong>{PLAN_LABELS.annual}</strong>. Your plan allows {historyMeta.planLimit || 5} per page.</p>
-            <p className="plan-locked__note">Contact an administrator to upgrade.</p>
+            <p className="plan-locked__note">Upgrade on the pricing page to unlock the full history.</p>
             <div className="plan-locked__actions">
-              <button type="button" className="upgrade-btn upgrade-btn-primary" onClick={() => navigate('/profile')}>View my plan</button>
+              <button type="button" className="upgrade-btn upgrade-btn-primary" onClick={() => navigate('/pricing')}>View plans</button>
             </div>
           </div>
         )}
@@ -1005,7 +1327,7 @@ function HistoryPage() {
           requiredPlan={upgradeInfo.requiresPlan}
           currentPlan={upgradeInfo.currentPlan}
           onClose={() => setUpgradeInfo(null)}
-          onViewPlans={() => navigate('/profile')}
+          onViewPlans={() => navigate('/pricing')}
         />
       )}
     </div>

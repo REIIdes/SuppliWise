@@ -135,14 +135,24 @@ function escrowSplit(total, feePct) {
 
 // ── Dispute resolution (feature 15) ───────────────────────────────────────
 // Majority of cast juror votes wins; ties keep funds in escrow (no payout
-// without a clear verdict).
+// without a clear verdict). A closed panel settles on a QUORUM (a clear
+// majority of the jurors appointed), never unanimity — see disputeOutcome.
+//
+// Minimum panel for an OPEN jury (no staked juror existed when the dispute was
+// filed). Resolving on a single vote let any freshly-created account — which
+// receives a welcome bonus and therefore a wallet — decide an escrow on its
+// own, collect a full refund for goods already received, AND pocket the juror
+// bounty. Three independent, stake-backed jurors is the smallest panel that
+// still guarantees a clear majority.
+const MIN_OPEN_JURY = 3;
+
 function disputeOutcome(votes, jurors = []) {
   let buyer = 0;
   let seller = 0;
   const seen = new Set();
   // Empty juror list = open jury (no staked juror existed when the dispute
   // was filed): any non-party wallet with a stake-backed voice may vote, and
-  // a single clear verdict resolves it.
+  // the verdict settles once MIN_OPEN_JURY of them agree.
   const openJury = !Array.isArray(jurors) || jurors.length === 0;
   for (const v of votes || []) {
     if (!v || !v.juror || seen.has(v.juror)) continue;
@@ -152,10 +162,29 @@ function disputeOutcome(votes, jurors = []) {
     else if (v.choice === 'seller') seller += 1;
   }
   const cast = buyer + seller;
-  const complete = openJury ? cast >= 1 : cast >= jurors.length;
-  if (buyer > seller) return { outcome: 'buyer', buyer, seller, cast, complete };
-  if (seller > buyer) return { outcome: 'seller', buyer, seller, cast, complete };
-  return { outcome: '', buyer, seller, cast, complete: complete && cast > 0 };
+  // QUORUM, NOT UNANIMITY.
+  //
+  // `selectJurors` draws up to 5 staked, non-party wallets and the rule then
+  // required EVERY one of them to vote. A single unresponsive juror (or one who
+  // simply never opened the app) therefore froze the buyer's escrowed WELL in
+  // the shared pool permanently — there is no expiry, no timeout and no
+  // substitute-juror path. Requiring a clear majority of the panel is both the
+  // standard rule and the one that cannot be gamed by a non-voting party: a
+  // majority of staked jurors still outvotes a single buyer or seller.
+  //
+  // The OPEN jury keeps a full MIN_OPEN_JURY panel, because there the pool is
+  // "anyone with an account" and the old single-vote rule let a throwaway
+  // wallet decide an escrow, take the refund and collect the bounty.
+  const panelSize = openJury ? MIN_OPEN_JURY : Math.max(1, jurors.length);
+  const needed = openJury ? MIN_OPEN_JURY : Math.max(1, Math.ceil(panelSize / 2));
+  // `complete` means "enough votes are in to decide" — deliberately independent
+  // of whether there IS a winner. A dead heat is complete but has no outcome,
+  // and tryResolve only settles when an outcome exists, so a tie leaves the
+  // dispute open instead of resolving it with no payout.
+  const complete = cast >= needed;
+  if (buyer > seller) return { outcome: 'buyer', buyer, seller, cast, needed, complete };
+  if (seller > buyer) return { outcome: 'seller', buyer, seller, cast, needed, complete };
+  return { outcome: '', buyer, seller, cast, needed, complete: complete && cast > 0 };
 }
 
 module.exports = {

@@ -1,10 +1,3 @@
-import jsPDFModule from 'jspdf';
-import autoTableModule from 'jspdf-autotable';
-
-const JsPDF = jsPDFModule?.jsPDF || jsPDFModule?.default || jsPDFModule;
-const renderAutoTable = typeof autoTableModule === 'function'
-  ? autoTableModule
-  : autoTableModule?.default || autoTableModule?.autoTable;
 import {
   REPORT_COLORS as C,
   REPORT_LAYOUT as L,
@@ -17,6 +10,36 @@ import {
   formatReportDate,
   reportText,
 } from './reportTheme.js';
+import { isStaleChunkError, markChunkReloadHealthy, reloadOnceForStaleChunk } from './chunkReload.js';
+
+// jsPDF (+ autotable) is ~350 KB of module code that this report needs only
+// when an admin actually exports. Statically importing it put the library in
+// the /admin route chunk, so the dashboard had to parse a PDF engine before
+// its first render. Loading it here keeps it out of the dashboard entirely.
+let pdfLibPromise;
+
+function loadPdfLib() {
+  if (!pdfLibPromise) {
+    pdfLibPromise = Promise.all([import('jspdf'), import('jspdf-autotable')])
+      .then(([jsPDFNS, autoTableNS]) => {
+        markChunkReloadHealthy();
+        // Mirror exactly what the old static `import x from '...'` bound, so
+        // both interop shapes (ESM default, CJS double-default) resolve the
+        // same way they did before the import became dynamic.
+        const jsPDFModule = jsPDFNS?.default;
+        const autoTableModule = autoTableNS?.default;
+        return {
+          JsPDF: jsPDFModule?.jsPDF || jsPDFModule?.default || jsPDFModule,
+          renderAutoTable: typeof autoTableModule === 'function'
+            ? autoTableModule
+            : autoTableModule?.default || autoTableModule?.autoTable,
+        };
+      });
+    // A failed chunk load must not poison every later attempt.
+    pdfLibPromise.catch(() => { pdfLibPromise = undefined; });
+  }
+  return pdfLibPromise;
+}
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
 
@@ -179,6 +202,17 @@ function drawRecommendationCard(doc, recommendation, index, y, ensureSpace) {
  * action without coupling the UI to jsPDF internals.
  */
 export async function downloadSecurityReport({ security = {}, overview = {}, request, save = true } = {}) {
+  let JsPDF;
+  let renderAutoTable;
+  try {
+    ({ JsPDF, renderAutoTable } = await loadPdfLib());
+  } catch (loadError) {
+    // A stale Vite dep hash is repaired by a reload, not by an error message.
+    if (isStaleChunkError(loadError) && reloadOnceForStaleChunk(loadError)) {
+      return null;
+    }
+    throw loadError;
+  }
   const doc = new JsPDF({ unit: 'mm', format: 'a4', compress: true });
   const now = new Date();
   const generatedAt = formatReportDate(now, true);
@@ -259,9 +293,14 @@ export async function downloadSecurityReport({ security = {}, overview = {}, req
   };
   const tableMargin = { top: L.continuationContentTop, bottom: L.footerHeight + 5, left: L.margin, right: L.margin };
   const runTable = (options) => {
+    // Same guard as the wellness report: autotable's built-in grid default is
+    // rgb(200,200,200), which is outside the green/black/white palette.
     renderAutoTable(doc, {
       margin: tableMargin,
+      tableLineColor: C.line,
       ...options,
+      headStyles: { lineColor: C.line, ...(options.headStyles || {}) },
+      bodyStyles: { lineColor: C.line, ...(options.bodyStyles || {}) },
       didDrawPage: () => {
         // autoTable numbers pages of THIS table (1, 2, 3 ...), not document
         // pages. setPage() with that index moved the cursor back to a page the
@@ -340,7 +379,7 @@ export async function downloadSecurityReport({ security = {}, overview = {}, req
     head: [['Status', 'Framework', 'Control', 'Recommended action']],
     body: controlBody,
     theme: 'grid',
-    headStyles: { fillColor: C.navy, textColor: C.white, fontSize: 7.5, fontStyle: 'bold', cellPadding: 4 },
+    headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7.5, fontStyle: 'bold', cellPadding: 4 },
     bodyStyles: { fontSize: 7.5, textColor: C.ink, cellPadding: 3.5, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
     alternateRowStyles: { fillColor: C.slateLight },
     columnStyles: {
@@ -375,7 +414,7 @@ export async function downloadSecurityReport({ security = {}, overview = {}, req
     head: [['Status', 'Monitor', 'Framework', 'Detail', 'Latency']],
     body: monitorBody,
     theme: 'grid',
-    headStyles: { fillColor: C.deep, textColor: C.white, fontSize: 7, fontStyle: 'bold', cellPadding: 3.5 },
+    headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7, fontStyle: 'bold', cellPadding: 3.5 },
     bodyStyles: { fontSize: 6.7, textColor: C.ink, cellPadding: 3, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
     alternateRowStyles: { fillColor: C.tealLight },
     columnStyles: {

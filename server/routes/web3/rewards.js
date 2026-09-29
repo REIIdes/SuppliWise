@@ -47,6 +47,12 @@ async function collectStats(userId, wallet) {
   return {
     userId,
     streak,
+    // rules.js reads the streak off the `checkinStreak` metric for the
+    // week-warrior / monthly-master / year-hero achievements. Only `streak` was
+    // published, so those three resolved to `undefined` → 0 and could never be
+    // earned at any streak length. Both names are emitted so the achievements
+    // and the existing UI keep working.
+    checkinStreak: streak,
     checkinDays: checkinRows.length,
     assessments,
     dataShares,
@@ -303,7 +309,9 @@ router.post('/stake', async (req, res) => {
       unlocks: stakingUnlocks(result.wallet.staked, cfg.params),
     });
   } catch (error) {
-    if (error.code) return res.status(400).json({ message: error.message, code: error.code });
+    if (error.code && typeof error.code === 'string') {
+      return res.status(400).json({ message: error.message, code: error.code });
+    }
     console.error('[web3 POST /stake]', error.message);
     res.status(500).json({ message: 'Could not stake tokens.' });
   }
@@ -321,7 +329,9 @@ router.post('/unstake', async (req, res) => {
       unlocks: stakingUnlocks(result.wallet.staked, cfg.params),
     });
   } catch (error) {
-    if (error.code) return res.status(400).json({ message: error.message, code: error.code });
+    if (error.code && typeof error.code === 'string') {
+      return res.status(400).json({ message: error.message, code: error.code });
+    }
     console.error('[web3 POST /unstake]', error.message);
     res.status(500).json({ message: 'Could not unstake tokens.' });
   }
@@ -375,7 +385,9 @@ router.post('/loyalty/redeem', async (req, res) => {
     const doc = await LoyaltyCode.create({ code, owner: req.user._id, valueWell: amount });
     res.status(201).json({ code: doc, txHash: tx.txHash, balance: tx.fromBalance });
   } catch (error) {
-    if (error.code) return res.status(400).json({ message: error.message, code: error.code });
+    if (error.code && typeof error.code === 'string') {
+      return res.status(400).json({ message: error.message, code: error.code });
+    }
     console.error('[web3 POST /loyalty/redeem]', error.message);
     res.status(500).json({ message: 'Could not create the loyalty code.' });
   }

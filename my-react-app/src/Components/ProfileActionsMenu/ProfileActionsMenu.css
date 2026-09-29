@@ -150,6 +150,31 @@
     0 28px 54px -24px rgba(15, 23, 42, 0.45),
     0 0 0 1px rgba(255, 255, 255, 0.7) inset;
   animation: pam-in 0.16s ease both;
+
+  /* The panel has no height limit, so on a short screen the tail of the list
+     (ACCOUNT → Support → the separator → Sign out) simply ran past the bottom
+     of the viewport with no way to reach it — Sign out was unreachable by
+     touch, keyboard, or wheel.
+
+     It is bounded to the space the sticky Navbar leaves below it, and the
+     remainder scrolls. The constant is the Navbar's height (≈64px: 10px
+     padding + 44px row + 10px padding) plus the 10px drop gap and a bottom
+     margin; the 96px figure keeps a comfortable gap rather than hugging the
+     edge.
+
+     This menu only ever mounts inside the sticky Navbar (its single call site
+     is Navbar.jsx), so the trigger is always pinned to the top of the
+     viewport and the offset is stable — which is what makes a fixed
+     subtraction correct here. If it is ever reused somewhere mid-page, this
+     wants measuring in JS instead. */
+  max-height: calc(100vh - 96px);
+  max-height: calc(100dvh - 96px);
+  /* Scrolling is contained: a rubber-band or wheel gesture that reaches the
+     top/bottom of this list must not start scrolling the page behind it, which
+     would yank the sticky Navbar — and the menu's own anchor — out from
+     under the pointer. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 @keyframes pam-in {
   from { opacity: 0; transform: translateY(-8px) scale(0.97); }
@@ -159,8 +184,19 @@
 /* ── Items ───────────────────────────────────────────────────────────── */
 /* Each entry is wrapped so the separator can sit between items without
    becoming a child of either button (which would put a non-interactive node
-   inside the menu item's hit area and pollute its accessible name). */
-.pam-slot { display: flex; flex-direction: column; gap: 3px; }
+   inside the menu item's hit area and pollute its accessible name).
+
+   `flex: 0 0 auto` is required: the panel is a flex column with a max-height
+   and `overflow-y: auto`, and a flex child's default is `flex-shrink: 1` — so
+   once the list exceeded the viewport every row would be compressed to make
+   room, crushing the icons and text instead of scrolling. Shrinking the
+   container must never shrink the rows. */
+.pam-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 0 0 auto;
+}
 
 .pam-sep {
   height: 1px;

@@ -38,10 +38,49 @@ function deviceFingerprint(req, ip) {
 }
 
 // Per-IP distinct-account failure tracking (credential-stuffing tripwire):
-// one IP failing DIFFERENT accounts hits the IP ladder fast.
-const IP_ACCOUNT_THRESHOLD = 3;
-const IP_ACCOUNT_WINDOW_MS = 15 * 60 * 1000;
+// one IP failing DIFFERENT accounts gets its own cooldown.
 const ipAccountHits = new Map(); // ip -> { emails: Set, firstAt }
+
+// How many DISTINCT accounts one IP may fail before it is treated as spraying.
+//
+// This was 3, which was not a credential-stuffing threshold at all — it was a
+// typo threshold. Three ordinary mistakes from one address locked that address
+// out of ALL authentication for 15 minutes:
+//
+//   • forgetting which of your two accounts you are signing into,
+//   • mistyping your own address twice in a row,
+//   • any two family/office members behind one NAT each getting it wrong once.
+//
+// The lock is a HARD pre-limiter stop (`lockoutCheck`), so it also refused
+// requests carrying the CORRECT password — the tripwire designed to protect
+// accounts was what locked legitimate users out of theirs, and nothing they
+// could do cleared it but waiting.
+//
+// 20 distinct accounts in 15 minutes cannot be human error, while a real
+// credential-stuffing run reaches it in seconds: the defence is unchanged
+// where it matters and unreachable by accident.
+const IP_ACCOUNT_THRESHOLD = 20;
+const IP_ACCOUNT_WINDOW_MS = 15 * 60 * 1000;
+
+/**
+ * Cooldown the tripwire imposes once it fires.
+ *
+ * Deliberately short, and deliberately NOT on the escalating ladder. The
+ * tripwire's job is to make spraying uneconomic, which it does by refusing each
+ * further FAILED attempt. It is not proof the address is an attacker, and a
+ * shared address is not a single person — so it must never become a multi-hour
+ * ban on everyone behind that NAT. The escalating ladder (15 min → 1 day) stays
+ * where it belongs: behind one ACCOUNT's repeated wrong passwords, which really
+ * is one person guessing one account.
+ */
+const STUFFING_COOLDOWN_MS = 5 * 60 * 1000;
+
+// Prefix for the tripwire's own bucket. Deliberately NOT `ip:`, so `lockoutCheck`
+// — which reads `ip:<addr>` and hard-stops the entire /api/auth surface — can
+// never see it. That separation is the point: the tripwire throttles FAILED
+// attempts; the IP ladder denies the address; only the latter is severe enough
+// to be worth refusing a correct password.
+const STUFFING_KEY_PREFIX = 'stuffing:';
 
 // key -> { offenses, lockedUntil, lastOffenseAt, ips: [], fps: [], agents: [] }
 const buckets = new Map();
@@ -83,13 +122,29 @@ function prune() {
   }
 }
 
-function ladderFor(offenses) {
-  return LADDER_MS[Math.min(Math.max(offenses - 1, 0), LADDER_MS.length - 1)];
+function ladderFor(offenses, capMs) {
+  const ms = LADDER_MS[Math.min(Math.max(offenses - 1, 0), LADDER_MS.length - 1)];
+  return capMs ? Math.min(ms, capMs) : ms;
 }
+
+// Hard ceiling for buckets that a party who has NOT proven control of the
+// account can drive: the OTP/2FA bucket.
+//
+// That bucket is reached from public, unauthenticated routes keyed on a
+// client-supplied userId. Anyone who knows a victim's email can request a reset
+// code (which is sent to the victim, not the attacker), then submit five wrong
+// codes to /verify-login-otp — which records an offense and walks this ladder.
+// Because one shared bucket gates /verify-login-otp, /login-2fa,
+// /verify-password-reset-otp, /reset-password, /verify-email-otp AND
+// /security/backup-codes/redeem, climbing it to the top rung removed a victim's
+// ability to log in, reset their password, change their email or use recovery
+// codes for a full day — repeatedly, since offenses only decay after 30 days.
+// One hour still throttles code-guessing to a crawl; a day is an outage.
+const OTP_LADDER_CAP_MS = 60 * 60 * 1000;
 
 // Record an offense; returns the new lockout expiry timestamp.
 // Optional meta binds evidence to the entry: { ip, fp, agent }.
-function recordOffense(rawKey, meta) {
+function recordOffense(rawKey, meta, capMs) {
   const key = normKey(rawKey);
   if (!key) return 0;
   const now = Date.now();
@@ -100,7 +155,7 @@ function recordOffense(rawKey, meta) {
   const carried = prev && !decayed(prev, now) ? prev.offenses : 0;
   const base = (prev && !decayed(prev, now)) ? prev : { ips: [], fps: [], agents: [] };
   const offenses = carried + 1;
-  const lockedUntil = now + ladderFor(offenses);
+  const lockedUntil = now + ladderFor(offenses, capMs);
   const push = (arr, value, max) => {
     const v = String(value || '').slice(0, 200);
     if (v && !arr.includes(v)) arr.push(v);
@@ -149,8 +204,11 @@ function lockInfo(rawKey) {
 }
 
 // Credential-stuffing tripwire: distinct accounts failing from ONE ip.
-// Call on every failed credential check; returns true the moment the IP
-// itself earns a ladder lock.
+//
+// Records into the tripwire's OWN bucket, not the escalating `ip:` bucket, so a
+// detected spray is slowed down without banning every other user behind the same
+// address. Call on every failed credential check; returns true the moment the
+// address earns a cooldown.
 function noteIpAccountFailure(ip, accountId) {
   const cleanIp = String(ip || '').trim();
   const cleanAcct = String(accountId || '').trim().toLowerCase();
@@ -163,8 +221,11 @@ function noteIpAccountFailure(ip, accountId) {
   hit.emails.add(cleanAcct);
   ipAccountHits.set(cleanIp, hit);
   if (hit.emails.size >= IP_ACCOUNT_THRESHOLD) {
+    // Start the cooldown from scratch: the counter has done its job, and
+    // keeping it would mean one early mistake keeps the address throttled for
+    // the rest of the window.
     ipAccountHits.delete(cleanIp);
-    recordOffense(`ip:${cleanIp}`, { ip: cleanIp });
+    recordOffense(stuffingKeyFor(cleanIp), { ip: cleanIp }, STUFFING_COOLDOWN_MS);
     return true;
   }
   if (ipAccountHits.size > MAX_ENTRIES) {
@@ -173,6 +234,30 @@ function noteIpAccountFailure(ip, accountId) {
     }
   }
   return false;
+}
+
+// Forget an address's distinct-account failure history.
+//
+// Called when a password is ACCEPTED. A correct password is proof a human is at
+// that address, so the tripwire forgets them — otherwise a shared address stays
+// one typo away from being throttled for the rest of the window, even though
+// someone on it just proved they are a legitimate user.
+//
+// It deliberately does NOT release an active cooldown. Doing so would let an
+// attacker with one valid account launder a spray by signing in with it between
+// bursts. Nothing is lost by letting the cooldown expire on its own: it is five
+// minutes, and it only ever refuses FAILED attempts, so it can never deny
+// someone who knows their own password.
+function clearIpAccountFailures(ip) {
+  const cleanIp = String(ip || '').trim();
+  if (cleanIp) ipAccountHits.delete(cleanIp);
+}
+
+/** Milliseconds left on the tripwire cooldown for this address, or 0. */
+function stuffingCooldownMs(ip) {
+  const cleanIp = String(ip || '').trim();
+  if (!cleanIp) return 0;
+  return lockRemainingMs(stuffingKeyFor(cleanIp));
 }
 
 // Milliseconds remaining, or 0 when not locked.
@@ -194,10 +279,21 @@ function lockRemainingMs(rawKey) {
   return left;
 }
 
+// OTP/2FA code exhaustion, with the ladder ceiling applied.
+//
+// Use this INSTEAD of recordOffense for every public, unauthenticated code
+// check (login OTP, 2FA, password-reset OTP, email OTP). It is deliberately
+// separate so the cap cannot be forgotten at a call site: the bare
+// recordOffense ladder is for credential failures, where the caller already
+// proved possession of something (a password), and for the IP bucket.
+function recordOtpOffense(rawKey, meta) {
+  return recordOffense(rawKey, meta, OTP_LADDER_CAP_MS);
+}
+
 // ── Account failure tracking (3-strike lockout) ──────────────────────────
 // Single failures (wrong password / bad TOTP) must NOT lock instantly —
 // an account locks only after 3 consecutive failures inside 15 minutes,
-// then climbs the ladder. OTP-code exhaustion calls recordOffense directly
+// then climbs the ladder. OTP-code exhaustion calls recordOtpOffense directly
 // (5 wrong codes already happened by then).
 const FAIL_WINDOW_MS = 15 * 60 * 1000;
 const FAILS_TO_LOCK = 3;
@@ -251,6 +347,12 @@ function clientIp(req) {
 const ipKey = (req) => `ip:${clientIp(req)}`;
 const accountKey = (kind, id) => `acct:${kind}:${String(id || '').trim().toLowerCase()}`;
 
+// The tripwire's bucket key. A function (not a const arrow) so it is hoisted and
+// usable from the tripwire regardless of declaration order in this file.
+function stuffingKeyFor(ip) {
+  return `${STUFFING_KEY_PREFIX}${normKey(ip)}`;
+}
+
 // Express middleware: hard-stop IPs sitting out an escalated lockout.
 function lockoutCheck(req, res, next) {
   const left = lockRemainingMs(ipKey(req));
@@ -285,14 +387,20 @@ function lockoutStats() {
   const now = Date.now();
   let ips = 0;
   let accounts = 0;
+  let stuffing = 0;
   for (const [key, entry] of buckets) {
     if (now > entry.lockedUntil) continue;
     if (key.startsWith('ip:')) ips += 1;
+    // The tripwire's bucket is neither a locked address nor a locked account —
+    // it is an address currently being throttled. Counted separately so the
+    // admin panel's "IPs locked / accounts locked" figures stay truthful.
+    else if (key.startsWith(STUFFING_KEY_PREFIX)) stuffing += 1;
     else accounts += 1;
   }
   return {
     ipsLocked: ips,
     accountsLocked: accounts,
+    addressesThrottled: stuffing,
     ladderMinutes: LADDER_MS.map(ms => Math.round(ms / 60000)),
   };
 }
@@ -369,8 +477,13 @@ module.exports = {
   LADDER_MS,
   FAILS_TO_LOCK,
   recordOffense,
+  recordOtpOffense,
   recordAccountFailure,
   noteIpAccountFailure,
+  clearIpAccountFailures,
+  stuffingCooldownMs,
+  IP_ACCOUNT_THRESHOLD,
+  STUFFING_COOLDOWN_MS,
   deviceFingerprint,
   lockInfo,
   lockEntry,

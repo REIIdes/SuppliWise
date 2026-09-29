@@ -17,37 +17,18 @@
  *
  * Expiry rule: a subscription whose subscriptionExpiresAt is in the past is
  * treated as FREE at read time (no cron needed — the check happens on every
- * request because the backend re-reads the user doc per request).
+ * request because the backend re-reads the user doc per request). A
+ * subscription flagged permanent never expires at all.
+ *
+ * Duration, source and the two layers come from utils/subscriptionState.js, which
+ * owns the paid-vs-admin-override model. The plan vocabulary is re-exported from
+ * there so there is exactly ONE definition of every plan id.
  */
 
-const PLAN_RANK = { free: 0, monthly: 1, annual: 2, custom: 3 };
+const subState = require('./subscriptionState');
 
-const PLAN_LABELS = {
-  free: 'FREE',
-  monthly: 'DELUXE',
-  annual: 'PREMIUM',
-  custom: 'ULTIMATE',
-};
-
-const PLAN_ORDER = ['free', 'monthly', 'annual', 'custom'];
-
-/**
- * Accepted spellings for a plan id (APIs, admin payloads, imports).
- * Storage ids stay free/monthly/annual/custom; everything funnels through
- * normalizePlanId() so no call site can invent a fifth plan.
- */
-const PLAN_ALIASES = {
-  free: 'free', basic: 'free',
-  monthly: 'monthly', deluxe: 'monthly',
-  annual: 'annual', premium: 'annual',
-  custom: 'custom', ultimate: 'custom',
-};
-
-/** Normalize any client-supplied plan name to a canonical id, or null if unknown. */
-function normalizePlanId(value) {
-  const key = String(value || '').trim().toLowerCase();
-  return Object.prototype.hasOwnProperty.call(PLAN_ALIASES, key) ? PLAN_ALIASES[key] : null;
-}
+const { PLAN_RANK, PLAN_LABELS, PLAN_ORDER, PLAN_ALIASES, normalizePlanId } = subState;
+const { STANDARD_PERIOD_DAYS, daysRemainingFrom, describeRecord, durationLabel } = subState;
 
 /**
  * Canonical feature registry. minTier is INCLUSIVE (that tier and everything
@@ -105,12 +86,24 @@ function resolveSubscription(user, now = Date.now()) {
     return {
       plan: 'free', rank: 0, status: 'missing',
       subscriptionActive: false, subscriptionStart: null, subscriptionEnd: null,
+      permanent: false, source: 'free', daysRemaining: null, remainingMs: null,
     };
   }
   const configuredPlan = rankOf(user.subscriptionPlan) > 0 ? user.subscriptionPlan : 'free';
   const flaggedActive = user.subscriptionActive === true;
   const start = toDateOrNull(user.subscriptionStartedAt);
-  const end = toDateOrNull(user.subscriptionExpiresAt);
+  // A permanent grant (an admin lifetime grant, or a lifetime purchase) has no
+  // end date at all. The stored expiry is ignored for it, so a stale date can
+  // never cut short a subscription that was explicitly sold as never expiring.
+  const permanent = user.subscriptionPermanent === true && configuredPlan !== 'free';
+  const end = permanent ? null : toDateOrNull(user.subscriptionExpiresAt);
+  // `subscriptionActive` is the PROJECTED effective state, written by
+  // subscriptionState.js on every mutation, so a null `subscriptionExpiresAt`
+  // alongside `subscriptionActive: true` is this codebase's normal
+  // representation of an active paid subscriber — NOT missing data. Do not
+  // fail closed here: `subscriptionPermanent` already expresses "never
+  // expires", and treating a null end date without it as expired revokes every
+  // legitimate active subscription.
   const expired = !!end && end.getTime() <= now;
 
   let status;
@@ -120,13 +113,23 @@ function resolveSubscription(user, now = Date.now()) {
   else status = 'free';
 
   const plan = status === 'active' ? configuredPlan : 'free';
+  const active = status === 'active';
+  const remainingMs = active && !permanent && end ? Math.max(0, end.getTime() - now) : null;
+
   return {
     plan,
     rank: PLAN_RANK[plan],
     status,
-    subscriptionActive: status === 'active',
+    subscriptionActive: active,
     subscriptionStart: start ? start.toISOString() : null,
     subscriptionEnd: end ? end.toISOString() : null,
+    permanent,
+    // 'admin' when an admin override is in force, 'payment' when the account is
+    // running on what the user bought, 'free' when nothing is granting access.
+    source: user.subscriptionSource === 'admin' ? 'admin'
+      : (user.subscriptionSource === 'payment' ? 'payment' : (plan === 'free' ? 'free' : 'payment')),
+    daysRemaining: active ? daysRemainingFrom(end, now) : null,
+    remainingMs,
   };
 }
 
@@ -155,12 +158,23 @@ function enabledFeatureList(user, now) {
   }));
 }
 
-/** Tier-shaped limits derived from entitlements (keep in sync with FEATURES). */
-function limitsFor(user, now) {
-  const { rank } = resolveSubscription(user, now);
+/**
+ * Tier-shaped limits for a given rank.
+ *
+ * Split out from `limitsFor` so the PRICING PAGE can state the same numbers the
+ * gate enforces. Writing "20 assessments per page" on a plan card while the gate
+ * used a different constant is how a sales page ends up promising something the
+ * product does not do — and the two copies would have no way to notice.
+ */
+function limitsForRank(rank) {
   return {
     historyPageSize: rank >= PLAN_RANK.annual ? 20 : rank >= PLAN_RANK.monthly ? 10 : 5,
   };
+}
+
+/** Tier-shaped limits derived from entitlements (keep in sync with FEATURES). */
+function limitsFor(user, now) {
+  return limitsForRank(resolveSubscription(user, now).rank);
 }
 
 /**
@@ -168,26 +182,80 @@ function limitsFor(user, now) {
  * /api/auth/me and /api/subscription and pushed over SSE, so every client
  * surface renders from the same object.
  */
-function describeSubscription(user, now = Date.now()) {
+/**
+ * The complete authoritative subscription state. Served verbatim by
+ * /api/auth/me and /api/subscription and pushed over SSE, so every client
+ * surface renders from the same object.
+ *
+ * Carries BOTH layers, kept apart on purpose:
+ *   - the top-level fields are the EFFECTIVE subscription (what the user gets
+ *     right now) — this is what every gate and every client renders;
+ *   - `subscriptionLayers` exposes what the user originally bought, what an admin
+ *     layered on top, and exactly what "Restore original subscription state"
+ *     would return to, so a temporary admin change is visibly temporary.
+ *
+ * `daysRemaining` is what the UI shows ("4 days remaining"); it is null for a
+ * permanent subscription, where `subscriptionPermanent` is true instead.
+ */
+function describeSubscription(user, now = Date.now(), options = {}) {
   const resolved = resolveSubscription(user, now);
+  // The full audit trail is admin-only by default: a user surface gets the
+  // summary plus the restore target, never the list of admin aliases.
+  const withHistory = options.history === true;
+  const detail = user ? describeRecord(user, now) : null;
+  const restoreTarget = detail ? detail.restoreTarget : null;
+
   return {
     currentPlan: resolved.plan,
     subscriptionStatus: resolved.status,
     subscriptionActive: resolved.subscriptionActive,
     subscriptionStart: resolved.subscriptionStart,
     subscriptionEnd: resolved.subscriptionEnd,
+    // ── Duration read-out ──────────────────────────────────────────────
+    subscriptionPermanent: resolved.permanent,
+    subscriptionSource: resolved.source,
+    // Seats covered by this subscription: 1 for an individual plan, N for a
+    // Team subscription. Team is the same tier as Premium shared across N
+    // people, so this never changes what is unlocked — only how many people
+    // share it, which is what the receipt and the billing screen need to show.
+    subscriptionSeats: detail ? detail.effective.seats : 1,
+    subscriptionIsTeam: detail ? detail.effective.isTeam === true : false,
+    subscriptionDuration: resolved.permanent
+      ? 'PERMANENT'
+      : (resolved.daysRemaining === null ? 'NONE' : `${resolved.daysRemaining} days`),
+    daysRemaining: resolved.daysRemaining,
+    remainingMs: resolved.remainingMs,
+    standardPeriodDays: STANDARD_PERIOD_DAYS,
     planRank: resolved.rank,
     planLabel: PLAN_LABELS[resolved.plan],
     enabledFeatures: enabledFeatureList(user, now),
     entitlements: entitlementsFor(user, now),
     limits: limitsFor(user, now),
+    subscriptionLayers: detail
+      ? {
+        effective: detail.effective,
+        paid: detail.paid,
+        override: detail.override,
+        canRestore: detail.canRestore,
+        restoreTarget,
+        history: withHistory ? detail.history : [],
+      }
+      : null,
     // Deterministic change signature: any entitlement-affecting mutation changes
     // it, letting clients apply state idempotently and skip redundant renders.
+    // Permanence and source are folded in because both change the state a client
+    // must repaint for, even when plan/status/start/end happen to match.
     version: [
       resolved.plan,
       resolved.status,
       resolved.subscriptionStart || '-',
       resolved.subscriptionEnd || '-',
+      resolved.permanent ? 'perm' : '-',
+      user?.subscriptionSource || '-',
+      // Seats are part of the state a client repaints for: a Team subscription
+      // going from 5 seats to 10 changes what the billing screen says, and the
+      // signature has to move or the re-render is skipped.
+      `s${detail ? detail.effective.seats : 1}`,
       user?.subscriptionUpdatedAt ? new Date(user.subscriptionUpdatedAt).getTime() : 0,
     ].join('|'),
   };
@@ -250,7 +318,10 @@ function historyLimitFor(user) { return limitsFor(user).historyPageSize; }
 module.exports = {
   PLAN_RANK, PLAN_LABELS, PLAN_ORDER, PLAN_ALIASES, FEATURES,
   hasFeature, getFeature,
-  normalizePlanId, rankOf, resolveSubscription, entitlementsFor, enabledFeatureList, limitsFor,
+  normalizePlanId, rankOf, resolveSubscription, entitlementsFor, enabledFeatureList, limitsFor, limitsForRank,
   describeSubscription, can, requireFeature, requirePlan,
   tierOf, tierRank, historyLimitFor,
+  // Re-exported so a route needs one import for the whole subscription surface.
+  STANDARD_PERIOD_DAYS, daysRemainingFrom, durationLabel, describeRecord,
+  subState,
 };

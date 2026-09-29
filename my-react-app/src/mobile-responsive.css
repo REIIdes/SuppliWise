@@ -69,10 +69,33 @@
     background: white !important;
   }
 
+  /* The scrolled state has to be re-asserted HERE, not only in Navbar.css.
+     The `background: white !important` above is a shorthand carrying the
+     important flag, and an important declaration beats an ordinary one
+     regardless of source order — so without this rule the bar would keep the
+     unscrolled shadow on a phone forever and the "lifted once scrolled"
+     affordance would be desktop-only.
+
+     Same `!important` convention as the rest of this block. The surface stays
+     solid `white`, exactly as at the top of the page: it was `transparent`
+     here, and on a sticky bar that lets the page scroll through the wordmark
+     and the icons. A translucent veil was tried and rejected — see the long
+     note at the top of Navbar.css. Only the divider and the lift change. */
+  .navbar.navbar--scrolled {
+    background: white !important;
+    box-shadow:
+      0 1px 0 rgba(16, 185, 129, 0.22),
+      0 10px 30px -18px rgba(6, 95, 70, 0.55) !important;
+  }
+
   .navbar-left {
     gap: 10px !important;
     flex-shrink: 1 !important;
     min-width: 0 !important;
+    /* Must be able to shrink: the wordmark is nowrap, so without this the left
+       cluster kept its full width and drew over the icons and the account
+       pill on a narrow phone. */
+    overflow: hidden !important;
   }
 
   .navbar-logo-box {
@@ -89,6 +112,10 @@
   .navbar-brand {
     font-size: 20px !important;
     white-space: nowrap !important;
+    /* Truncates instead of pushing the right-hand cluster off the bar. */
+    min-width: 0 !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
   }
 
   .navbar-right {

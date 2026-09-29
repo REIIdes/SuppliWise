@@ -1,10 +1,49 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { BASE_URL, parseJSON } from '../api';
 import { exportResultsToPDF } from '../utils/exportPDF';
+import { pictureUrl } from '../utils/pictureUrl';
+import { formatShortDate } from '../utils/dates';
 import './AssessmentManagement.css';
 import AssessmentResultsDisplay from '../Components/AssessmentResultsDisplay/AssessmentResultsDisplay';
 import ModifyAssessmentModal from '../Components/ModifyAssessmentModal/ModifyAssessmentModal';
 import ReadOnlyAssessment from '../Components/ReadOnlyAssessment/ReadOnlyAssessment';
+
+/* Avatar gradients. A stable hue per member means the same face keeps the same
+   colour everywhere in the console, which is what makes a list scannable. The
+   previous version picked a FLAT colour from a palette, so a long list came out
+   looking like the same blue dot repeated. */
+const AVATAR_GRADIENTS = [
+  'linear-gradient(135deg, #f97316 0%, #e11d48 100%)',
+  'linear-gradient(135deg, #4f6bed 0%, #7c3aed 100%)',
+  'linear-gradient(135deg, #10b981 0%, #0d9488 100%)',
+  'linear-gradient(135deg, #8b5cf6 0%, #d946ef 100%)',
+  'linear-gradient(135deg, #f43f5e 0%, #f59e0b 100%)',
+  'linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%)',
+];
+
+/** Hashed off the id when there is one, so a renamed member keeps their colour. */
+function avatarGradient(user) {
+  const seed = String(user?._id || user?.email || user?.firstName || 'x');
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) hash = (hash * 31 + seed.charCodeAt(i)) % 100000;
+  return AVATAR_GRADIENTS[hash % AVATAR_GRADIENTS.length];
+}
+
+const ICONS = {
+  users: <><circle cx="9" cy="8" r="3.4" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0" /><path d="M16 4.6a3.4 3.4 0 0 1 0 6.6" /><path d="M18 14.2A6.5 6.5 0 0 1 21.5 20" /></>,
+  check: <path d="M20 6 9 17l-5-5" />,
+  clipboard: <><rect x="8" y="3" width="8" height="4" rx="1.4" /><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2" /><path d="M8.5 12h7M8.5 16h4" /></>,
+  chart: <><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></>,
+  empty: <><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.6-3.6" /></>,
+};
+
+function StatIcon({ name }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {ICONS[name]}
+    </svg>
+  );
+}
 
 const AssessmentManagement = ({ users: propUsers = [] }) => {
   const [users, setUsers] = useState(propUsers);
@@ -18,6 +57,22 @@ const AssessmentManagement = ({ users: propUsers = [] }) => {
   const [listError, setListError] = useState('');
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
   const [pdfError, setPdfError] = useState('');
+  // Client-side filter over the list the parent already fetched. There was no
+  // search here at all, which makes the tab unusable at any real member count —
+  // an administrator had to scroll and expand every row to find one person.
+  const [search, setSearch] = useState('');
+  // Ids whose picture failed to load, so the initials fallback is driven by
+  // state rather than by reaching into `nextSibling` from an onError handler.
+  const [brokenPictures, setBrokenPictures] = useState(() => new Set());
+
+  const markPictureBroken = useCallback((id) => {
+    setBrokenPictures((previous) => {
+      if (previous.has(id)) return previous;
+      const next = new Set(previous);
+      next.add(id);
+      return next;
+    });
+  }, []);
 
   // Hits /api/assessment/... directly with the admin token
   const assessmentRequest = async (path) => {
@@ -155,6 +210,34 @@ const AssessmentManagement = ({ users: propUsers = [] }) => {
     setSelectedAssessment(assessment);
   };
 
+  // ── Derived ─────────────────────────────────────────────────────────────
+  // The counts an administrator opens this tab to answer: how many members are
+  // there, how many have actually been assessed, and how much there is to read.
+  // The old header said only "2 users", which answers none of those.
+  const stats = useMemo(() => {
+    const total = users?.length || 0;
+    const withAssessments = (users || []).filter((u) => Number(u.assessmentCount) > 0).length;
+    const totalAssessments = (users || []).reduce((sum, u) => sum + (Number(u.assessmentCount) || 0), 0);
+    const avg = withAssessments > 0 ? (totalAssessments / withAssessments) : 0;
+    return { total, withAssessments, totalAssessments, avg: avg.toFixed(1) };
+  }, [users]);
+
+  const visibleUsers = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return users || [];
+    return (users || []).filter((user) => {
+      const name = `${user.firstName || ''} ${user.lastName || ''}`.trim().toLowerCase();
+      return name.includes(term) || String(user.email || '').toLowerCase().includes(term);
+    });
+  }, [users, search]);
+
+  const statCards = [
+    { tone: 'all', icon: 'users', label: 'Members', value: stats.total, hint: 'On this account' },
+    { tone: 'ok', icon: 'check', label: 'Assessed', value: stats.withAssessments, hint: 'Have at least one' },
+    { tone: 'primary', icon: 'clipboard', label: 'Assessments', value: stats.totalAssessments, hint: 'Total on record' },
+    { tone: 'down', icon: 'chart', label: 'Average', value: stats.avg, hint: 'Per assessed member' },
+  ];
+
   const deleteAssessment = async (assessmentId) => {
     // Remove from local state immediately (modal already confirmed + called API)
     setAssessments(prev => prev.filter(a => a._id !== assessmentId));
@@ -171,19 +254,58 @@ const AssessmentManagement = ({ users: propUsers = [] }) => {
 
   return (
     <div className="am-container">
-      <div className="am-list-header">
-        <span className="am-list-count">
-          {users.length} {users.length === 1 ? 'user' : 'users'}
-        </span>
+      <header className="am-head">
+        <div>
+          <h3 className="am-head__title">Assessment Management</h3>
+          <p className="am-head__sub">
+            Every member&rsquo;s assessments, newest first. Open a member to read results,
+            export a report, or correct what was recorded.
+          </p>
+        </div>
         <button
           type="button"
-          className="am-refresh-btn"
+          className={`am-refresh-btn${isLoading ? ' am-refresh-btn--busy' : ''}`}
           onClick={loadUsers}
           disabled={isLoading}
-          title="Reload the user list"
+          title="Reload the member list"
         >
-          {isLoading ? 'Loading…' : '↻ Refresh'}
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M21 12a9 9 0 1 1-2.64-6.36" /><polyline points="21 3 21 9 15 9" />
+          </svg>
+          {isLoading ? 'Loading…' : 'Refresh'}
         </button>
+      </header>
+
+      <div className="am-stats" role="group" aria-label="Assessment totals">
+        {statCards.map((card) => (
+          <div className={`am-stat am-stat--${card.tone}`} key={card.tone}>
+            <span className="am-stat__icon" aria-hidden="true"><StatIcon name={card.icon} /></span>
+            <span className="am-stat__body">
+              <span className="am-stat__value">{card.value}</span>
+              <span className="am-stat__label">{card.label}</span>
+              <span className="am-stat__hint">{card.hint}</span>
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div className="am-list-header">
+        <span className="am-list-count">
+          {visibleUsers.length} of {stats.total} {stats.total === 1 ? 'member' : 'members'}
+        </span>
+        <div className="am-field">
+          <svg className="am-field__icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" /><path d="M20 20l-3.6-3.6" />
+          </svg>
+          <input
+            type="search"
+            className="am-search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name or email…"
+            aria-label="Filter members by name or email"
+          />
+        </div>
       </div>
       {pdfError && (
         <div className="am-pdf-error" role="alert">
@@ -194,18 +316,30 @@ const AssessmentManagement = ({ users: propUsers = [] }) => {
       )}
       <div className="am-user-list">
         {isLoading ? (
-          <p className="am-empty">Loading users…</p>
-        ) : users && users.length > 0 ? (
-          users.map((user) => {
+          <div className="am-skeletons" aria-hidden="true">
+            {[0, 1, 2, 3].map((n) => (
+              <div className="am-skeleton" key={n}>
+                <span className="am-skeleton__avatar" />
+                <span className="am-skeleton__lines">
+                  <span className="am-skeleton__line am-skeleton__line--sm" />
+                  <span className="am-skeleton__line" />
+                </span>
+                <span className="am-skeleton__pill" />
+              </div>
+            ))}
+          </div>
+        ) : visibleUsers.length > 0 ? (
+          visibleUsers.map((user) => {
             const fullName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Unknown';
             const initials = fullName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
             const isOpen = expandedUser === user._id;
+            const count = Number(user.assessmentCount) || 0;
 
-            // Deterministic avatar colour from name
-            const palette = ['#0891b2','#4f6bed','#2e9e6b','#d46b35','#7c4ddb','#e85d75','#b45309','#be185d'];
-            let hash = 0;
-            for (let i = 0; i < fullName.length; i++) hash = fullName.charCodeAt(i) + ((hash << 5) - hash);
-            const avatarBg = palette[Math.abs(hash) % palette.length];
+            // Stored pictures are root-relative paths; resolved against the API
+            // origin or the <img> would request them from the SPA's own origin
+            // and 404 into the initials fallback.
+            const avatarSrc = pictureUrl(user.profilePicture);
+            const showPicture = Boolean(avatarSrc) && !brokenPictures.has(user._id);
 
             return (
               <div key={user._id} className={`am-user-item${isOpen ? ' am-user-item--open' : ''}`}>
@@ -215,18 +349,21 @@ const AssessmentManagement = ({ users: propUsers = [] }) => {
                   onClick={() => handleUserToggle(user._id)}
                   aria-expanded={isOpen}
                 >
-                  {/* Avatar */}
-                  {user.profilePicture ? (
+                  {/* Avatar. A broken or absent picture falls back to the
+                      initials, which is what a state flag decides now — the old
+                      onError reached into `nextSibling` and would throw if the
+                      DOM order ever changed. */}
+                  {showPicture ? (
                     <img
                       className="am-avatar"
-                      src={user.profilePicture}
+                      src={avatarSrc}
                       alt={fullName}
-                      onError={e => { e.currentTarget.style.display = 'none'; e.currentTarget.nextSibling.style.display = 'flex'; }}
+                      onError={() => markPictureBroken(user._id)}
                     />
                   ) : null}
                   <span
                     className="am-avatar am-avatar--initials"
-                    style={{ background: avatarBg, display: user.profilePicture ? 'none' : 'flex' }}
+                    style={{ backgroundImage: avatarGradient(user), display: showPicture ? 'none' : 'flex' }}
                     aria-hidden="true"
                   >
                     {initials}
@@ -235,16 +372,27 @@ const AssessmentManagement = ({ users: propUsers = [] }) => {
                   {/* Name + joined */}
                   <span className="am-user-info">
                     <span className="am-user-name">{fullName}</span>
-                    <span className="am-user-sub">Joined: {new Date(user.createdAt).toLocaleDateString()}</span>
+                    <span className="am-user-sub">
+                      {/* formatShortDate, not a bare toLocaleDateString: rows
+                          imported without a createdAt used to print the literal
+                          string "Invalid Date" in the admin console. */}
+                      {user.email ? `${user.email} · ` : ''}Joined {formatShortDate(user.createdAt)}
+                    </span>
                   </span>
 
-                  {/* Assessment count pill */}
-                  <span className="am-count-pill">
-                    {user.assessmentCount ?? 0} {(user.assessmentCount ?? 0) === 1 ? 'assessment' : 'assessments'}
+                  {/* Assessment count pill — green when there is something to
+                      read, muted when there is not, so the members who need
+                      attention stand out instead of the empty ones. */}
+                  <span className={`am-count-pill${count > 0 ? ' am-count-pill--has' : ' am-count-pill--none'}`}>
+                    {count} {count === 1 ? 'assessment' : 'assessments'}
                   </span>
 
                   {/* Chevron */}
-                  <span className={`am-chevron${isOpen ? ' am-chevron--open' : ''}`} aria-hidden="true">▼</span>
+                  <span className={`am-chevron${isOpen ? ' am-chevron--open' : ''}`} aria-hidden="true">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  </span>
                 </button>
 
                 {/* ── Assessment cards ───────────────────────────── */}
@@ -341,7 +489,7 @@ const AssessmentManagement = ({ users: propUsers = [] }) => {
                                 <button className="am-btn am-btn--grey"   onClick={() => handleViewAssessment(assessment)}>View</button>
                                 <button className="am-btn am-btn--blue"   onClick={() => handleViewResults(assessment._id)}>Results</button>
                                 <button
-                                  className="am-btn am-btn--blue"
+                                  className="am-btn am-btn--green"
                                   onClick={() => generatePDF(assessment)}
                                   disabled={Boolean(pdfLoadingId)}
                                   aria-busy={pdfLoadingId === assessment._id}
@@ -349,7 +497,7 @@ const AssessmentManagement = ({ users: propUsers = [] }) => {
                                 >
                                   {pdfLoadingId === assessment._id ? 'Preparing…' : 'PDF'}
                                 </button>
-                                <button className="am-btn am-btn--blue"   onClick={() => setModifiedAssessment(assessment)}>Modify</button>
+                                <button className="am-btn am-btn--violet"   onClick={() => setModifiedAssessment(assessment)}>Modify</button>
                               </div>
                             </div>
                           </div>
@@ -362,14 +510,33 @@ const AssessmentManagement = ({ users: propUsers = [] }) => {
             );
           })
         ) : listError ? (
-          <div className="am-empty">
-            <p>{listError}</p>
+          <div className="am-empty am-empty--state">
+            <span className="am-empty__icon am-empty__icon--error" aria-hidden="true">
+              <svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="9" /><path d="M12 8v5" /><path d="M12 16h.01" />
+              </svg>
+            </span>
+            <p className="am-empty__title">Could not load members</p>
+            <p className="am-empty__text">{listError}</p>
             <button type="button" className="am-retry-btn" onClick={loadUsers} disabled={isLoading}>
-              {isLoading ? 'Retrying…' : 'Retry'}
+              {isLoading ? 'Retrying…' : 'Try again'}
+            </button>
+          </div>
+        ) : search.trim() ? (
+          <div className="am-empty am-empty--state">
+            <span className="am-empty__icon" aria-hidden="true"><StatIcon name="empty" /></span>
+            <p className="am-empty__title">No members match</p>
+            <p className="am-empty__text">Nothing matches “{search.trim()}”.</p>
+            <button type="button" className="am-retry-btn" onClick={() => setSearch('')}>
+              Clear search
             </button>
           </div>
         ) : (
-          <p className="am-empty">No users found.</p>
+          <div className="am-empty am-empty--state">
+            <span className="am-empty__icon" aria-hidden="true"><StatIcon name="users" /></span>
+            <p className="am-empty__title">No members yet</p>
+            <p className="am-empty__text">Members appear here as soon as they register.</p>
+          </div>
         )}
       </div>
 

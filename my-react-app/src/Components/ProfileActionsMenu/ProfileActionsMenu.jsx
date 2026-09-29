@@ -25,7 +25,11 @@
  */
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import ProfileAvatarImage from '../ProfileAvatar/ProfileAvatarImage';
+import { setOverlayOpen } from '../../utils/overlayRegistry';
 import './ProfileActionsMenu.css';
+
+/** Registry id for this menu. The AI edge tab watches for it. */
+const OVERLAY_NAME = 'profile-actions-menu';
 
 const ICONS = {
   edit: (
@@ -49,6 +53,15 @@ const ICONS = {
       <circle cx="12" cy="7" r="4" />
     </svg>
   ),
+  // A price tag: reads as "what this costs" where a box icon would read as
+  // "packages" or "inventory".
+  plans: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20.6 13.4 12 22l-9-9V3h10l7.6 7.6a2 2 0 0 1 0 2.8z" />
+      <circle cx="7.5" cy="7.5" r="1.3" />
+    </svg>
+  ),
   accounts: (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
          strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -56,6 +69,15 @@ const ICONS = {
       <circle cx="9.5" cy="7" r="4" />
       <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
       <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  ),
+  // Speech bubble — a conversation with a person, deliberately NOT the sparkle
+  // used for the AI assistant, so the two are never confused.
+  support: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.9 8.9 0 0 1-4-.9L3 21l1.9-4.6A8.4 8.4 0 0 1 12 3.1a8.4 8.4 0 0 1 9 8.4z" />
+      <path d="M8.5 11h.01M12 11h.01M15.5 11h.01" />
     </svg>
   ),
   signout: (
@@ -77,6 +99,8 @@ export default function ProfileActionsMenu({
   onNavigate,
   onEditProfile,
   onOpenView,
+  onViewPlans,
+  onOpenSupport,
   onSignOut,
   editLabel = 'Edit Profile',
   personalLabel = 'Personal Info',
@@ -112,6 +136,15 @@ export default function ProfileActionsMenu({
       group: n.group || 'Explore',
       onSelect: () => onNavigate?.(n.to),
     })),
+    {
+      key: 'plans',
+      label: 'Plans & pricing',
+      hint: 'Compare plans, change or cancel',
+      icon: ICONS.plans,
+      tone: 'plans',
+      group: 'Account',
+      onSelect: () => onViewPlans?.(),
+    },
     {
       key: 'personal',
       label: personalLabel,
@@ -149,6 +182,15 @@ export default function ProfileActionsMenu({
       onSelect: () => onOpenView?.('accounts'),
     },
     {
+      key: 'support',
+      label: 'Support',
+      hint: 'Ask an administrator a question',
+      icon: ICONS.support,
+      tone: 'support',
+      group: 'Account',
+      onSelect: () => onOpenSupport?.(),
+    },
+    {
       key: 'signout',
       label: 'Sign out',
       hint: 'End this session',
@@ -163,8 +205,18 @@ export default function ProfileActionsMenu({
   const close = useCallback(({ restoreFocus = false } = {}) => {
     setOpen(false);
     setActiveIndex(-1);
+    setOverlayOpen(OVERLAY_NAME, false);
     if (restoreFocus) triggerRef.current?.focus();
   }, []);
+
+  // Announce the open/closed state so the floating AI edge tab can stand down.
+  // The cleanup covers every way the panel can go away — selecting an item,
+  // outside-click, Escape, and unmount (navigating while it is open) — so the
+  // tab can never be left hidden with no menu to explain its absence.
+  useEffect(() => {
+    setOverlayOpen(OVERLAY_NAME, open);
+    return () => setOverlayOpen(OVERLAY_NAME, false);
+  }, [open]);
 
   // Outside click + Escape. The trigger and the panel are separate nodes, so
   // containment is checked against the wrapper, not the button.

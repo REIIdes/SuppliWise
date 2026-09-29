@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, useLocation, Navigate } from 'react-router-dom';
 import { Component, lazy, Suspense, useEffect, useState } from 'react';
+import { reloadOnceForStaleChunk } from './utils/chunkReload.js';
 
 import HomePage from './Pages/HomePage';
 
@@ -10,14 +11,26 @@ const TrackIntakePage = lazy(() => import('./Pages/TrackIntakePage'));
 const InsightsPage = lazy(() => import('./Pages/InsightsPage'));
 const LogIn = lazy(() => import('./Pages/LogIn'));
 const SignIn = lazy(() => import('./Pages/SignIn'));
+// Password recovery. Standalone pages, not a modal on the sign-in form: the
+// link is followed from an email client, usually in a new tab and possibly
+// hours later, so it needs an address of its own to land on.
+const ForgotPassword = lazy(() => import('./Pages/ForgotPassword'));
+const ResetPassword = lazy(() => import('./Pages/ResetPassword'));
 const AssessmentPage = lazy(() => import('./Pages/AssessmentPage'));
 const ResultsPage = lazy(() => import('./Pages/ResultsPage'));
 const HistoryPage = lazy(() => import('./Pages/HistoryPage'));
 const ProfilePage = lazy(() => import('./Pages/ProfilePage'));
 const ChatAssistant = lazy(() => import('./Pages/ChatAssistant'));
+// Human support channel (the "where did I pay" conversation with an admin).
+// Separate from ChatAssistant, which is the stateless AI assistant.
+const SupportChatPage = lazy(() => import('./Pages/SupportChatPage'));
 const AdminLogin = lazy(() => import('./Pages/AdminLogin'));
+const AdminChangePassword = lazy(() => import('./Pages/AdminChangePassword'));
 const AdminDashboard = lazy(() => import('./Pages/AdminDashboard'));
 const AssessmentManagement = lazy(() => import('./Pages/AssessmentManagement'));
+// Plan catalogue / checkout. Public — a visitor must be able to compare plans
+// before creating an account.
+const PricingPage = lazy(() => import('./Pages/PricingPage'));
 
 // Web3 / blockchain layer (wallet, rewards, marketplace, DAO, verification)
 const Web3HubPage = lazy(() => import('./Pages/Web3HubPage'));
@@ -56,6 +69,10 @@ class ErrorBoundary extends Component {
   }
 
   componentDidCatch(error, info) {
+    // A stale dynamic-import hash is a recoverable, self-inflicted condition:
+    // reloading picks up the current module URLs, so recover silently instead
+    // of parking the user on the "Something went wrong" screen.
+    if (reloadOnceForStaleChunk(error)) return;
     // Log internally — never shown to the user
     console.error('[ErrorBoundary] Uncaught error:', error, info);
   }
@@ -95,7 +112,7 @@ class ErrorBoundary extends Component {
 }
 
 // Routes where the chat assistant should NOT appear
-const CHAT_HIDDEN_ROUTES = ['/login', '/signup', '/admin/login', '/admin'];
+const CHAT_HIDDEN_ROUTES = ['/login', '/signup', '/admin/login', '/admin/change-password', '/admin'];
 
 function isAdminJwt(token) {
   try {
@@ -122,6 +139,8 @@ function DocumentTitle() {
   useEffect(() => {
     if (location.pathname === '/admin/login') {
       document.title = 'SuppliWise Admin';
+    } else if (location.pathname === '/admin/change-password') {
+      document.title = 'Set your password · SuppliWise Admin';
     } else if (location.pathname === '/admin') {
       document.title = 'SuppliWise Control Panel';
     } else {
@@ -137,7 +156,14 @@ function GlobalChat() {
   // The assistant is a USER-app feature: never on auth pages and never
   // anywhere in the admin area — the pill must not leak onto /admin/*
   // subpages (the exact-match list below used to let them slip past).
-  if (location.pathname.startsWith('/admin') || CHAT_HIDDEN_ROUTES.includes(location.pathname)) return null;
+  //
+  // Also hidden on /support. There are two chat-looking surfaces there and they
+  // answer very different questions: the pill is a stateless AI that can only
+  // read the documentation, while /support is a stored conversation with a
+  // person. Floating an AI chat button over the page whose entire purpose is
+  // talking to support makes it look like the AI is the thing answering them.
+  if (location.pathname.startsWith('/admin') || location.pathname === '/support') return null;
+  if (CHAT_HIDDEN_ROUTES.includes(location.pathname)) return null;
   return (
     <Suspense fallback={null}>
       <ChatAssistant />
@@ -320,10 +346,26 @@ function App() {
           {/* Auth routes - logged-in users are sent to the dashboard instead */}
           <Route path="/login" element={<PublicOnlyRoute><LogIn /></PublicOnlyRoute>} />
           <Route path="/signup" element={<PublicOnlyRoute><SignIn /></PublicOnlyRoute>} />
+          {/* Password recovery. /forgot-password asks for an address; the link
+              in the email points at /reset-password?token=…
+              /reset-password is deliberately NOT wrapped in PublicOnlyRoute:
+              a signed-in user can still be locked out and need to reset, and
+              the token in the URL — not the session — is what authorises it.
+              Redeeming it revokes every session including this tab's, which the
+              reset screen reports rather than silently bouncing. */}
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/admin/login" element={<AdminLogin />} />
           
           {/* Admin routes - protected */}
           <Route element={<AdminProtectedRoute />}>
+            {/* Inside AdminProtectedRoute, but NOT behind the
+                mustChangePassword redirect: that guard sends every other admin
+                route here, so nesting this one under it too would make the
+                change page redirect to itself and lock the account out for
+                good. The server enforces the same rule for real - this route is
+                in the middleware allowlist. */}
+            <Route path="/admin/change-password" element={<AdminChangePassword />} />
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/admin/assessment-management" element={<AssessmentManagement />} />
           </Route>
@@ -333,6 +375,17 @@ function App() {
           <Route path="/results" element={<ProtectedRoute><ResultsPage /></ProtectedRoute>} />
           <Route path="/history" element={<ProtectedRoute><HistoryPage /></ProtectedRoute>} />
           <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+          {/* Support — the member's own conversations with the admin team.
+              Requires a session: a guest has no account for an admin to reply
+              to, and the server refuses anonymous threads outright. */}
+          <Route path="/support" element={<ProtectedRoute><SupportChatPage /></ProtectedRoute>} />
+
+          {/* Plans & pricing — deliberately PUBLIC: a prospective user has to be
+              able to compare plans before signing up, and a signed-in user
+              reaches the same page to upgrade. Purchasing itself requires a
+              session (POST /api/subscription/purchase is behind protect()). */}
+          <Route path="/pricing" element={<PricingPage />} />
+          <Route path="/plans" element={<Navigate to="/pricing" replace />} />
 
           {/* Web3 layer - requires a user session AND the ULTIMATE plan.
               The gate renders instead of the page (not over it), so a

@@ -57,8 +57,11 @@ const AdminAccount = require('./models/AdminAccount');
     data.monitors.every(m => m.label && m.detail != null);
   console.log(ok ? 'VERIFICATION PASSED' : 'VERIFICATION FAILED');
   await mongoose.disconnect();
-  process.exit(ok ? 0 : 2);
+  // Set the code instead of calling process.exit(): forcing an exit while the
+  // driver still has closing libuv handles trips a libuv assertion on Windows
+  // and kills the process with a negative code, turning a pass into a crash.
+  process.exitCode = ok ? 0 : 2;
 })().catch((err) => {
   console.error(err);
-  process.exit(1);
+  process.exitCode = 1;
 });

@@ -131,6 +131,25 @@ router.post('/', protect, async (req, res) => {
     // that locked them out of new assessments forever — a premium restriction
     // they no longer had. The flag itself is kept (history badge, admin view).
     const priorityEntitled = can(req.user, 'priorityAssessment');
+
+    // HEAL BEFORE ASKING. This route used to query for an open review and never
+    // run the repair, while GET /priority-status and GET /dashboard both healed
+    // first — so a user whose plan was already finished could be told "not
+    // blocked" on two screens and then refused with 403 on the one that
+    // mattered, with no way to tell which was right.
+    if (priorityEntitled) {
+      try {
+        const healed = await selfHealOpenPriority(req.user._id);
+        if (healed.released.length) {
+          console.warn(`[assessment POST /] released ${healed.released.length} completed flag(s) for user ${req.user._id}`);
+        }
+      } catch (healError) {
+        // A failed repair must not block a legitimate submit; fall through to
+        // the check below, which is the conservative outcome.
+        console.error('[assessment POST /] self-heal failed:', healError.message);
+      }
+    }
+
     const blockingPriority = priorityEntitled
       ? await Assessment.findOne({ user: req.user._id, priority: 'Priority' })
         .select('_id createdAt flagReasons flaggedAt')
@@ -304,18 +323,27 @@ router.get('/history', protect, async (req, res) => {
     const light = req.query.fields === 'recommendations';
     const projection = light ? 'aiResults.recommendations createdAt' : null;
 
-    const historyQuery = Assessment.find({ user: req.user._id })
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      // Lean: skip Mongoose hydration (aiResults docs can be ~500 KB)
-      .lean();
-    if (projection) historyQuery.select(projection);
+    // Single aggregation pipeline: fetch paginated results + total count in
+    // one round-trip instead of two separate queries (was a bottleneck for
+    // users with many assessments).
+    const pipeline = [
+      { $match: { user: req.user._id } },
+      { $sort: { createdAt: -1 } },
+      {
+        $facet: {
+          data: [
+            ...(projection ? [{ $project: projection }] : []),
+            { $skip: skip },
+            { $limit: limit },
+          ],
+          total: [{ $count: 'count' }],
+        },
+      },
+    ];
 
-    const [assessments, total] = await Promise.all([
-      historyQuery,
-      Assessment.countDocuments({ user: req.user._id }),
-    ]);
+    const [result] = await Assessment.aggregate(pipeline);
+    const assessments = result.data;
+    const total = result.total[0]?.count || 0;
 
     res.json({
       serverTime: new Date().toISOString(),
@@ -482,15 +510,63 @@ router.patch('/:id/priority', protect, async (req, res) => {
     // Priority suspends expiration; resolving restores the standard 5-year
     // window counted from CREATION — never "5 years from now", which used to
     // push an old record's expiry far into the future.
+    //
+    // Releasing a record that is ALREADY Standard is a no-op. It used to stamp
+    // resolvedAt + "admin-resolved" onto a document nobody had flagged — and
+    // because the intake-undo path only re-flags rows whose reason is
+    // "intake-complete", that silently disarmed the safety reinstatement for
+    // the record. A real admin decision must outrank the automatic reason, so
+    // only overwrite it when a flag is genuinely being cleared.
+    const wasPriority = existing.priority === 'Priority';
     const update = priority === 'Priority'
       ? { priority, flaggedAt: new Date(), expiresAt: null, resolvedAt: null, resolvedReason: '' }
-      : { priority, expiresAt: expiryFromCreatedAt(existing.createdAt), resolvedAt: new Date(), resolvedReason: 'admin-resolved' };
+      : wasPriority
+        ? { priority, expiresAt: expiryFromCreatedAt(existing.createdAt), resolvedAt: new Date(), resolvedReason: 'admin-resolved' }
+        : { priority };
     const assessment = await Assessment.findByIdAndUpdate(
       req.params.id,
       update,
       { new: true }
     );
     if (!assessment) return res.status(404).json({ message: 'Assessment not found.' });
+
+    // Tell the user, and leave an audit trail.
+    //
+    // Every other path that moves this flag notifies. A silent override is
+    // exactly how a user meets "New Assessments Paused" with no idea an admin
+    // acted — or, on release, how the pause vanishes with no explanation.
+    // Both are best-effort: the write above already stands, and a broken
+    // notification/audit store must not be reported as a failed override.
+    const nowRaised = priority === 'Priority';
+    const changed = nowRaised ? !wasPriority : wasPriority;
+    if (changed) {
+      const title = nowRaised
+        ? 'Your assessment was paused for priority review'
+        : 'Your priority review was released';
+      const detail = nowRaised
+        ? 'An administrator flagged this assessment for priority review, so new assessments are paused until it is resolved. You can review it at any time.'
+        : 'Your priority review was released. You can start a new assessment at any time.';
+      await UserNotification.create({
+        user: existing.user,
+        type: nowRaised ? 'severe-flag' : 'resolved',
+        title,
+        detail,
+        assessmentId: existing._id,
+      }).catch((err) => {
+        console.error('[assessment PATCH /:id/priority] notification failed:', err.message);
+      });
+      await AdminEvent.create({
+        type: nowRaised ? 'severe-flag' : 'resolved',
+        title: nowRaised ? 'Assessment flagged as Priority' : 'Assessment priority released',
+        detail: `Assessment ${existing._id} — ${detail}`,
+        user: existing.user,
+        assessmentId: existing._id,
+        linkUserId: existing.user,
+      }).catch((err) => {
+        console.error('[assessment PATCH /:id/priority] audit failed:', err.message);
+      });
+    }
+
     res.json({ message: `Assessment set to ${priority}.`, assessment });
   } catch (error) {
     console.error('[assessment PATCH /:id/priority]', error.message);
@@ -511,6 +587,21 @@ router.delete('/:id', protect, async (req, res) => {
     const filter = req.user.role === 'admin'
       ? { _id: req.params.id }
       : { _id: req.params.id, user: req.user._id };
+
+    // A user must not be able to delete their own OPEN review. DELETE was the
+    // way around the entire gate: remove the document and the block goes with
+    // it, taking the severe case out of the admin panel and every intake record
+    // attached to it, with no audit entry. The flag can only be cleared by an
+    // admin releasing it, or by the self-heal on a finished plan.
+    if (req.user.role !== 'admin') {
+      const open = await Assessment.findOne({ ...filter, priority: 'Priority' }).select('_id').lean();
+      if (open) {
+        return res.status(409).json({
+          message: 'This assessment is open for priority review and cannot be deleted. An administrator must release it first.',
+          code: 'priority-open',
+        });
+      }
+    }
 
     const assessment = await Assessment.findOneAndDelete(filter);
     if (!assessment) return res.status(404).json({ message: 'Assessment not found.' });

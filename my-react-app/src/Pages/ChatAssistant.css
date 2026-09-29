@@ -27,6 +27,21 @@
   box-shadow: -3px 0 14px rgba(6, 95, 70, 0.22);
   transition: width 0.15s ease, background 0.15s ease, box-shadow 0.2s ease;
 }
+/* While another overlay owns the right edge (the account menu drops from the
+   Navbar, whose z-index 100 stacking context traps the panel below this tab's
+   1000), the tab steps out of the way.
+
+   `visibility` rather than `display: none` so `transition` still runs, and
+   `pointer-events: none` so the tab is inert — it must not intercept a click
+   aimed at the menu row underneath it. `visibility` also removes it from the
+   tab order, so keyboard focus cannot land on an invisible control. */
+.chat-edge-toggle[data-stand-down='true'] {
+  visibility: hidden;
+  pointer-events: none;
+  transition: width 0.15s ease, background 0.15s ease, box-shadow 0.2s ease,
+    visibility 0s linear 0.15s;
+}
+
 .chat-edge-toggle svg { width: 18px; height: 18px; }
 .chat-edge-toggle:hover {
   width: 32px;

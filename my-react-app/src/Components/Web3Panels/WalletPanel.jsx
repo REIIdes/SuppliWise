@@ -46,48 +46,65 @@ export default function WalletPanel() {
       <Alert alert={alert} onClear={clear} />
 
       <div className="w3-card accent">
-        <div className="w3-row between">
+        <div className="w3-card-head">
           <div>
             <div className="w3-card-title">🪪 Your Decentralized Identity</div>
             <p className="w3-card-sub">
               One self-owned identity for rewards, records, marketplace and governance.
             </p>
           </div>
-          <button className="w3-btn ghost small" onClick={load} disabled={loading}>Refresh</button>
+          <button className="w3-btn ghost small" onClick={load} disabled={loading}>
+            {loading ? 'Refreshing…' : '↻ Refresh'}
+          </button>
         </div>
 
         <div className="w3-grid">
-          <Stat value={fmtWell(wallet?.balance)} label="Free balance (WELL)" tone="green" />
-          <Stat value={fmtWell(wallet?.staked)} label="Staked (WELL)" tone="amber" />
-          <Stat value={fmtWell(wallet?.earnedTotal)} label="Total earned" />
-          <Stat value={fmtWell(wallet?.spentTotal)} label="Total spent" />
+          <Stat icon="💰" tone="green" value={fmtWell(wallet?.balance)} unit="WELL" label="Free balance" />
+          <Stat icon="🔒" tone="amber" value={fmtWell(wallet?.staked)} unit="WELL" label="Staked" hint="Locked, earns APY" />
+          <Stat icon="📈" tone="sky" value={fmtWell(wallet?.earnedTotal)} unit="WELL" label="Total earned" />
+          <Stat icon="🛒" tone="rose" value={fmtWell(wallet?.spentTotal)} unit="WELL" label="Total spent" />
         </div>
 
-        <div style={{ marginTop: 18 }}>
-          <div className="w3-label">Decentralized Identifier (DID)</div>
-          <CopyChip value={wallet?.did} label={wallet?.did} />
+        {/* The identifiers are the point of a self-owned identity, so they get
+            their own panel: a term/definition list reads faster than a stack
+            of loose "label above chip" rows, and the long keys get a place to
+            wrap instead of pushing the card wide. */}
+        <div className="w3-ident">
+          <div className="w3-ident-head">🔗 On-chain identity — click any value to copy</div>
+          <dl className="w3-ident-list">
+            <div className="w3-ident-row">
+              <dt>Decentralized Identifier (DID)</dt>
+              <dd><CopyChip value={wallet?.did} label={wallet?.did} /></dd>
+            </div>
+            <div className="w3-ident-row">
+              <dt>Wallet address</dt>
+              <dd><CopyChip value={wallet?.address} label={wallet?.address} /></dd>
+            </div>
+            <div className="w3-ident-row">
+              <dt>Public key (ed25519)</dt>
+              <dd>
+                <div className="w3-mono w3-ident-key">{wallet?.publicKey || '—'}</div>
+              </dd>
+            </div>
+          </dl>
+          {wallet?.welcomeBonusAt ? (
+            <p className="w3-card-sub" style={{ marginTop: 12, marginBottom: 0 }}>
+              🎁 Welcome airdrop claimed {fmtTime(wallet.welcomeBonusAt)}.
+            </p>
+          ) : null}
         </div>
-        <div style={{ marginTop: 10 }}>
-          <div className="w3-label">Wallet address</div>
-          <CopyChip value={wallet?.address} label={wallet?.address} />
-        </div>
-        <div style={{ marginTop: 10 }}>
-          <div className="w3-label">Public key (ed25519)</div>
-          <div className="w3-mono" style={{ maxHeight: 60, overflow: 'auto' }}>{wallet?.publicKey || '—'}</div>
-        </div>
-        {wallet?.welcomeBonusAt ? (
-          <p className="w3-card-sub" style={{ marginTop: 12, marginBottom: 0 }}>
-            Welcome airdrop claimed {fmtTime(wallet.welcomeBonusAt)}.
-          </p>
-        ) : null}
       </div>
 
       <div className="w3-card">
-        <div className="w3-card-title">🔐 Signing key export</div>
-        <p className="w3-card-sub">
-          Your private key is stored encrypted (AES-256-GCM) and never leaves the server unencrypted
-          except right now, for you. Anyone holding it controls the wallet.
-        </p>
+        <div className="w3-card-head">
+          <div>
+            <div className="w3-card-title">🔐 Signing key export</div>
+            <p className="w3-card-sub">
+              Your private key is stored encrypted (AES-256-GCM) and never leaves the server
+              unencrypted except right now, for you. Anyone holding it controls the wallet.
+            </p>
+          </div>
+        </div>
         <button className="w3-btn ghost" onClick={revealKey} disabled={loading}>
           Reveal my private key
         </button>
@@ -95,7 +112,7 @@ export default function WalletPanel() {
           <div style={{ marginTop: 14 }}>
             <Alert alert={{ kind: 'info', message: key.warning }} />
             <div className="w3-label">Private key (PKCS#8, ed25519)</div>
-            <div className="w3-mono" style={{ maxHeight: 90, overflow: 'auto', background: '#f9fafb', padding: 10, borderRadius: 8 }}>
+            <div className="w3-ident-key" style={{ maxHeight: 90, background: '#f7faf9' }}>
               {key.privateKey}
             </div>
           </div>
@@ -104,16 +121,21 @@ export default function WalletPanel() {
 
       {config && (
         <div className="w3-card">
-          <div className="w3-card-title">⚙️ Protocol parameters (DAO-governed)</div>
-          <p className="w3-card-sub">
-            These numbers are enforced by the smart-contract layer and can only change through a
-            passed governance proposal.
-          </p>
-          <div className="w3-grid">
+          <div className="w3-card-head">
+            <div>
+              <div className="w3-card-title">⚙️ Protocol parameters (DAO-governed)</div>
+              <p className="w3-card-sub">
+                These numbers are enforced by the smart-contract layer and can only change through
+                a passed governance proposal.
+              </p>
+            </div>
+            <span className="w3-badge purple">read-only</span>
+          </div>
+          <div className="w3-grid compact">
             {Object.entries(config).map(([k, v]) => (
-              <div className="w3-stat" key={k}>
-                <div className="w3-stat-value" style={{ fontSize: 18 }}>{String(v)}</div>
-                <div className="w3-stat-label">{k}</div>
+              <div className="w3-mini" key={k}>
+                <div className="w3-mini-label">{k}</div>
+                <div className="w3-mini-value">{String(v)}</div>
               </div>
             ))}
           </div>

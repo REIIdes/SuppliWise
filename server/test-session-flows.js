@@ -22,6 +22,7 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 const jwt = require('jsonwebtoken');
 const speakeasy = require('speakeasy');
 const mongoose = require('mongoose');
+const { connectTestDb, skipMessage } = require('./Test File/testDbGuard');
 const User = require('./models/User');
 const Session = require('./models/Session');
 const { issueUserSession } = require('./utils/sessions');
@@ -80,10 +81,15 @@ const solveCaptcha = async () => {
 
 async function registerAccount(stamp, tag) {
   const captcha = await solveCaptcha();
+  // The name rule (utils/nameValidation.js) allows letters, spaces, hyphens,
+  // apostrophes and periods — digits and symbols are rejected. The uniqueness
+  // suffix used to be the last 4 DIGITS of the stamp, so every account was
+  // refused with a 400 before this script reached a single assertion.
+  const suffix = String(stamp).slice(-4).replace(/[0-9]/g, (d) => String.fromCharCode(65 + Number(d)));
   const res = await call('POST', '/auth/register', {
     body: {
       firstName: tag.first,
-      lastName: `${tag.last}${String(stamp).slice(-4)}`,
+      lastName: `${tag.last}${suffix}`,
       email: tag.email,
       password: 'SessionTest123',
       dateOfBirth: '1995-05-05',
@@ -97,7 +103,10 @@ async function registerAccount(stamp, tag) {
 }
 
 async function main() {
-  await mongoose.connect(process.env.MONGO_URI);
+  // Tests write real User/Session documents. Never let them reach the
+  // application's own database — see Test File/testDbGuard.js.
+  const db = await connectTestDb();
+  if (!db.connected) { console.log(skipMessage(db)); return; }
   const stamp = Date.now();
   const emailA = `session-a-${stamp}@example.com`;
   const emailB = `session-b-${stamp}@example.com`;

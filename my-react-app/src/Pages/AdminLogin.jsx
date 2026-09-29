@@ -78,8 +78,15 @@ function AdminLogin() {
         }
       } catch { /* ignore */ }
       localStorage.setItem('adminToken', data.token);
-      localStorage.setItem('admin', JSON.stringify({ role: 'admin', alias: data.alias }));
-      navigate('/admin');
+      // `mustChangePassword` is stored with the session because it is a property
+      // of THIS sign-in, not of the immutable JWT: once the password is changed
+      // the token is still valid but the flag is false, and the client has to be
+      // able to tell the difference without another round trip.
+      localStorage.setItem('admin', JSON.stringify({ role: 'admin', alias: data.alias, mustChangePassword: !!data.mustChangePassword }));
+      // Land on the password screen when the server says the account is still
+      // using a temporary password. This is a convenience, not the enforcement:
+      // the server refuses every other admin route until the flag clears.
+      navigate(data.mustChangePassword ? '/admin/change-password' : '/admin');
     } catch (err) {
       setError(err.message);
     } finally {

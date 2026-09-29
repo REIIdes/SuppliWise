@@ -74,7 +74,11 @@ const DIET_INFO = {
 function DietTooltip({ diet, openDiet, onToggle }) {
   const visible = openDiet === diet;
   return (
-    <span className="diet-tooltip-wrap" onClick={(e) => e.stopPropagation()}>
+    // `--card` matters most here: in the 3-column diet grid a 260px panel
+    // anchored to the trigger of a third-column option ran ~150px past the card
+    // and gave the page a horizontal scrollbar. Opening leftwards, capped to the
+    // option's own width, cannot overflow at any column.
+    <span className="diet-tooltip-wrap diet-tooltip-wrap--card" onClick={(e) => e.stopPropagation()}>
       <button
         type="button"
         className="diet-info-btn"
@@ -103,7 +107,7 @@ function DietTooltip({ diet, openDiet, onToggle }) {
 function InfoTooltip({ id, text, openId, onToggle }) {
   const visible = openId === id;
   return (
-    <span className="diet-tooltip-wrap" onClick={(e) => e.stopPropagation()}>
+    <span className="diet-tooltip-wrap diet-tooltip-wrap--card" onClick={(e) => e.stopPropagation()}>
       <button
         type="button"
         className="diet-info-btn"
@@ -157,7 +161,7 @@ function ConditionTooltip({ condition, openCondition, onToggle }) {
   const visible = openCondition === condition;
   if (!CONDITION_INFO[condition]) return null;
   return (
-    <span className="diet-tooltip-wrap" onClick={(e) => e.stopPropagation()}>
+    <span className="diet-tooltip-wrap diet-tooltip-wrap--card" onClick={(e) => e.stopPropagation()}>
       <button
         type="button"
         className="diet-info-btn"

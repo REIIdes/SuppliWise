@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import {
   getDaoConfig,
@@ -16,9 +15,12 @@ import {
   Stat,
   CopyChip,
   Empty,
+  Hero,
+  AreaNav,
   TabBar,
   fmtWell,
   fmtDay,
+  timeLeft,
   usePanelState,
 } from '../Components/Web3Panels/w3ui';
 import './Web3.css';
@@ -37,6 +39,29 @@ const POST_TYPES = [
   ['research', '🔬 Research finding'],
   ['story', '💬 Success story'],
 ];
+
+// One vocabulary for proposal state, used by the card rail, the badge and the
+// vote affordances. Previously the same three states were spelled out inline
+// in three different nested ternaries, which is how "passed" ended up red on
+// one screen and green on another.
+const STATUS = {
+  active: { label: 'Open for voting', badge: 'blue' },
+  passed: { label: 'Passed', badge: 'green' },
+  rejected: { label: 'Rejected', badge: 'red' },
+  executed: { label: 'Executed', badge: 'purple' },
+};
+
+const statusOf = (p) => STATUS[p.status] || { label: p.status || 'Unknown', badge: '' };
+
+// Share of the cast weight that voted in favour. A proposal with no votes yet
+// reads as an even bar rather than a full green one, which used to imply
+// unanimous support before anyone had voted.
+const forShare = (p) => {
+  const forW = p.tally.forWeight || 0;
+  const againstW = p.tally.againstWeight || 0;
+  const total = forW + againstW;
+  return total > 0 ? Math.round((forW / total) * 100) : 0;
+};
 
 export default function GovernancePage() {
   const { loading, setLoading, alert, ok, fail, clear, info } = usePanelState();
@@ -119,29 +144,40 @@ export default function GovernancePage() {
       }
     );
 
-  if (loading && !config) return <Spinner />;
+  // The Navbar is kept while the first load is in flight. Returning a bare
+  // spinner replaced the whole page, so the bar blinked out and back in on
+  // every cold start of the route.
+  if (loading && !config) {
+    return (
+      <div className="w3-page">
+        <Navbar />
+        <div className="w3-container">
+          <Spinner />
+        </div>
+      </div>
+    );
+  }
 
-  const tallyPct = (p) => {
-    const total = (p.tally.forWeight || 0) + (p.tally.againstWeight || 0);
-    return total > 0 ? Math.round((p.tally.forWeight / total) * 100) : 50;
-  };
+  const activeCount = proposals.filter((p) => p.status === 'active').length;
+  const canPropose = myWeight > 0;
+  const proposalReady =
+    pForm.title.trim().length >= 6 &&
+    pForm.description.trim().length >= 10 &&
+    (!pForm.param || String(pForm.value).trim() !== '');
 
   return (
     <div className="w3-page">
       <Navbar />
       <div className="w3-container">
-        <header className="w3-header">
-          <h1 className="w3-title">🏛️ SuppliWise DAO</h1>
-          <p className="w3-subtitle">
-            Token holders govern the protocol: voting weight equals your WELL balance plus stake,
-            and passed proposals change the platform’s actual parameters.
-          </p>
-        </header>
+        <Hero
+          variant="violet"
+          mark="🏛️"
+          eyebrow="On-chain governance"
+          title="SuppliWise DAO"
+          subtitle="Token holders govern the protocol: voting weight equals your WELL balance plus stake, and passed proposals change the platform’s actual parameters."
+        />
 
-        <div className="w3-subnav">
-          <Link className="w3-btn ghost small" to="/web3">← Web3 Hub</Link>
-          <Link className="w3-btn ghost small" to="/marketplace">🛒 Marketplace</Link>
-        </div>
+        <AreaNav />
 
         <TabBar
           tabs={TABS}
@@ -162,11 +198,45 @@ export default function GovernancePage() {
 
         {config && (
           <div className="w3-card accent">
+            <div className="w3-card-head">
+              <div>
+                <div className="w3-card-title">🗳️ Governance at a glance</div>
+                <p className="w3-card-sub">
+                  Weight is your free WELL balance plus anything you have staked — one number,
+                  applied to every vote.
+                </p>
+              </div>
+              <span className="w3-badge purple">settled on-chain</span>
+            </div>
             <div className="w3-grid">
-              <Stat value={fmtWell(myWeight)} label="Your voting weight (WELL)" tone="green" />
-              <Stat value={`${config.votingDays} days`} label="Voting period" />
-              <Stat value={fmtWell(config.quorum)} label="Quorum weight" tone="amber" />
-              <Stat value={proposals.filter((p) => p.status === 'active').length} label="Active proposals" />
+              <Stat
+                icon="⚖️"
+                tone="green"
+                value={fmtWell(myWeight)}
+                unit="WELL"
+                label="Your voting weight"
+                hint={canPropose ? 'You can propose and vote' : 'Stake WELL to take part'}
+              />
+              <Stat
+                icon="⏳"
+                tone="amber"
+                value={config.votingDays}
+                unit="days"
+                label="Voting period"
+              />
+              <Stat
+                icon="🎯"
+                tone="violet"
+                value={fmtWell(config.quorum)}
+                unit="WELL"
+                label="Quorum weight"
+              />
+              <Stat
+                icon="📌"
+                tone="sky"
+                value={activeCount}
+                label="Active proposals"
+              />
             </div>
           </div>
         )}
@@ -175,80 +245,110 @@ export default function GovernancePage() {
         {tab === 'proposals' && (
           <div>
             {proposals.length === 0 ? (
-              <Empty icon="🗳️">No proposals yet — start the first one in the “New Proposal” tab.</Empty>
+              <Empty
+                icon="🗳️"
+                title="No proposals yet"
+                action={
+                  <button className="w3-btn" onClick={() => setTab('new')}>
+                    ✍️ Draft the first proposal
+                  </button>
+                }
+              >
+                Every parameter on this platform is DAO-governed. Open the first proposal and set
+                the rules yourself.
+              </Empty>
             ) : (
-              proposals.map((p) => (
-                <div className="w3-card" key={p._id}>
-                  <div className="w3-row between">
-                    <div className="w3-card-title" style={{ marginBottom: 0 }}>
-                      {p.title}{' '}
-                      <span className={`w3-badge ${p.status === 'passed' ? 'green' : p.status === 'rejected' ? 'red' : 'blue'}`}>
-                        {p.status}
-                      </span>
-                      {p.param ? <span className="w3-badge purple" style={{ marginLeft: 6 }}>{p.param} → {String(p.value)}</span> : null}
+              proposals.map((p) => {
+                const status = statusOf(p);
+                const share = forShare(p);
+                const closed = p.status !== 'active';
+                return (
+                  <article className={`w3-card w3-proposal status-${p.status || 'active'}`} key={p._id}>
+                    <div className="w3-card-head">
+                      <div>
+                        <h3 className="w3-card-title">
+                          {p.title}
+                          <span className={`w3-badge ${status.badge}`}>{status.label}</span>
+                        </h3>
+                        <p className="w3-card-sub" style={{ whiteSpace: 'pre-wrap' }}>
+                          {p.description}
+                        </p>
+                      </div>
+                      {/* Deadline and turnout as separate meta chips — they used
+                          to be one mono string ending in "2 voter(s)", which read
+                          as debug output rather than a deadline. */}
+                      <div className="w3-row" style={{ gap: 8 }}>
+                        <span className={`w3-badge ${closed ? '' : 'amber'}`}>
+                          ⏳ {closed ? fmtDay(p.endsAt) : timeLeft(p.endsAt)}
+                        </span>
+                        <span className="w3-badge blue">
+                          {p.voterCount} voter{p.voterCount === 1 ? '' : 's'}
+                        </span>
+                      </div>
                     </div>
-                    {/* Deadline + turnout as proper meta chips. These were one
-                        mono string ending in "2 voter(s)", which read as debug
-                        output rather than a deadline. */}
-                    <span className="w3-row" style={{ gap: 8 }}>
-                      <span className="w3-badge amber">⏳ ends {fmtDay(p.endsAt)}</span>
-                      <span className="w3-badge blue">
-                        {p.voterCount} voter{p.voterCount === 1 ? '' : 's'}
-                      </span>
-                    </span>
-                  </div>
-                  <p className="w3-card-sub" style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>{p.description}</p>
 
-                  <div className="w3-tally">
-                    <div className="w3-tally-for" style={{ width: `${tallyPct(p)}%` }} />
-                  </div>
-                  <div className="w3-tally-labels">
-                    <span style={{ color: '#15803d', fontWeight: 700 }}>
-                      For {fmtWell(p.tally.forWeight)}
-                    </span>
-                    <span className={p.tally.quorumReached ? '' : ''}>
-                      quorum {fmtWell(p.tally.quorum)} {p.tally.quorumReached ? '✓' : '—'}
-                    </span>
-                    <span style={{ color: '#b91c1c', fontWeight: 700 }}>
-                      Against {fmtWell(p.tally.againstWeight)}
-                    </span>
-                  </div>
-
-                  <div className="w3-row" style={{ marginTop: 14 }}>
-                    {p.myVote ? (
-                      <span className="w3-badge green">
-                        You voted “{p.myVote.choice}” with {fmtWell(p.myVote.weight)} WELL
-                      </span>
-                    ) : p.canVote ? (
-                      <>
-                        <button
-                          className="w3-btn small"
-                          disabled={busy}
-                          onClick={() => run(
-                            () => voteProposal(p._id, 'for'),
-                            (r) => ok(`Vote “for” cast with ${fmtWell(r.weight)} WELL — tx ${String(r.txHash).slice(0, 12)}…`)
-                          )}
-                        >
-                          Vote For
-                        </button>
-                        <button
-                          className="w3-btn ghost small"
-                          disabled={busy}
-                          onClick={() => run(
-                            () => voteProposal(p._id, 'against'),
-                            (r) => ok(`Vote “against” cast with ${fmtWell(r.weight)} WELL — tx ${String(r.txHash).slice(0, 12)}…`)
-                          )}
-                        >
-                          Vote Against
-                        </button>
-                      </>
-                    ) : (
-                      <span className="w3-badge">{p.status === 'active' ? 'Voting closed for you' : 'Voting ended'}</span>
+                    {p.param && (
+                      <div className="w3-param">
+                        <span>Rewrites</span>
+                        <b>{p.param}</b>
+                        <i>→</i>
+                        <b>{String(p.value)}</b>
+                      </div>
                     )}
-                    {p.executedTx ? <CopyChip value={p.executedTx} label="executed ✓" /> : null}
-                  </div>
-                </div>
-              ))
+
+                    <div
+                      className="w3-vote-bar"
+                      role="img"
+                      aria-label={`${share}% of cast weight voted in favour`}
+                    >
+                      <div className="w3-vote-for" style={{ width: `${share}%` }} />
+                    </div>
+                    <div className="w3-vote-legend">
+                      <span className="for">▲ For · {fmtWell(p.tally.forWeight)}</span>
+                      <span className={`quorum ${p.tally.quorumReached ? 'met' : ''}`}>
+                        Quorum {fmtWell(p.tally.quorum)} {p.tally.quorumReached ? '✓ reached' : '— not met'}
+                      </span>
+                      <span className="against">▼ Against · {fmtWell(p.tally.againstWeight)}</span>
+                    </div>
+
+                    <div className="w3-row" style={{ marginTop: 16 }}>
+                      {p.myVote ? (
+                        <span className="w3-badge green">
+                          ✓ You voted “{p.myVote.choice}” with {fmtWell(p.myVote.weight)} WELL
+                        </span>
+                      ) : p.canVote ? (
+                        <>
+                          <button
+                            className="w3-btn small"
+                            disabled={busy}
+                            onClick={() => run(
+                              () => voteProposal(p._id, 'for'),
+                              (r) => ok(`Vote “for” cast with ${fmtWell(r.weight)} WELL — tx ${String(r.txHash).slice(0, 12)}…`)
+                            )}
+                          >
+                            👍 Vote For
+                          </button>
+                          <button
+                            className="w3-btn ghost small"
+                            disabled={busy}
+                            onClick={() => run(
+                              () => voteProposal(p._id, 'against'),
+                              (r) => ok(`Vote “against” cast with ${fmtWell(r.weight)} WELL — tx ${String(r.txHash).slice(0, 12)}…`)
+                            )}
+                          >
+                            👎 Vote Against
+                          </button>
+                        </>
+                      ) : (
+                        <span className="w3-badge">
+                          {closed ? 'Voting ended' : 'Voting closed for you'}
+                        </span>
+                      )}
+                      {p.executedTx ? <CopyChip value={p.executedTx} label="executed on-chain ✓" /> : null}
+                    </div>
+                  </article>
+                );
+              })
             )}
           </div>
         )}
@@ -256,12 +356,20 @@ export default function GovernancePage() {
         {/* ── New proposal ───────────────────────────────────────────── */}
         {tab === 'new' && (
           <div className="w3-card accent">
-            <div className="w3-card-title">✍️ Draft a proposal</div>
-            <p className="w3-card-sub">
-              Pick a protocol parameter to change (or leave it blank for a discussion-only
-              proposal). Your own vote is cast automatically on creation — you need a balance or
-              a stake to propose.
-            </p>
+            <div className="w3-card-head">
+              <div>
+                <div className="w3-card-title">✍️ Draft a proposal</div>
+                <p className="w3-card-sub">
+                  Pick a protocol parameter to change, or leave it blank for a discussion-only
+                  proposal. Your own vote is cast automatically on creation — you need a balance or
+                  a stake to propose.
+                </p>
+              </div>
+              <span className={`w3-badge ${canPropose ? 'green' : 'red'}`}>
+                {canPropose ? '✓ eligible to propose' : '⚠ needs WELL to propose'}
+              </span>
+            </div>
+
             <div className="w3-field">
               <label className="w3-label" htmlFor="prop-title">Title</label>
               <input
@@ -271,7 +379,9 @@ export default function GovernancePage() {
                 value={pForm.title}
                 onChange={(e) => setPForm({ ...pForm, title: e.target.value })}
               />
+              <p className="w3-hint">At least 6 characters.</p>
             </div>
+
             <div className="w3-field">
               <label className="w3-label" htmlFor="prop-desc">Description</label>
               <textarea
@@ -281,7 +391,9 @@ export default function GovernancePage() {
                 value={pForm.description}
                 onChange={(e) => setPForm({ ...pForm, description: e.target.value })}
               />
+              <p className="w3-hint">At least 10 characters. Say what changes and who it helps.</p>
             </div>
+
             <div className="w3-row" style={{ alignItems: 'flex-end' }}>
               <div style={{ flex: 1, minWidth: 240 }}>
                 <label className="w3-label" htmlFor="prop-param">Parameter (optional)</label>
@@ -313,7 +425,7 @@ export default function GovernancePage() {
               )}
               <button
                 className="w3-btn"
-                disabled={busy || pForm.title.trim().length < 6 || pForm.description.trim().length < 10 || (!!pForm.param && String(pForm.value).trim() === '')}
+                disabled={busy || !proposalReady}
                 onClick={submitProposal}
               >
                 Open proposal
@@ -326,16 +438,20 @@ export default function GovernancePage() {
         {tab === 'knowledge' && (
           <div>
             <div className="w3-card accent">
-              <div className="w3-card-title">✍️ Share with the community</div>
-              <p className="w3-card-sub">
-                Posts are anchored on-chain and rewarded:
-                {knowledge.rewards ? (
-                  <> +{knowledge.rewards.post} WELL per post, +{knowledge.rewards.upvote} WELL to the
-                  author per upvote (capped), +{knowledge.rewards.curator} WELL to curators.</>
-                ) : (
-                  ' earn WELL for useful contributions.'
-                )}
-              </p>
+              <div className="w3-card-head">
+                <div>
+                  <div className="w3-card-title">✍️ Share with the community</div>
+                  <p className="w3-card-sub">
+                    Posts are anchored on-chain and rewarded:
+                    {knowledge.rewards ? (
+                      <> +{knowledge.rewards.post} WELL per post, +{knowledge.rewards.upvote} WELL to the
+                      author per upvote (capped), +{knowledge.rewards.curator} WELL to curators.</>
+                    ) : (
+                      ' earn WELL for useful contributions.'
+                    )}
+                  </p>
+                </div>
+              </div>
               <div className="w3-row" style={{ alignItems: 'flex-end' }}>
                 <div style={{ minWidth: 200 }}>
                   <label className="w3-label" htmlFor="kb-type">Type</label>
@@ -359,14 +475,16 @@ export default function GovernancePage() {
                   />
                 </div>
               </div>
-              <textarea
-                className="w3-textarea"
-                style={{ marginTop: 14 }}
-                placeholder="Share the details… (min 20 characters)"
-                value={kForm.body}
-                onChange={(e) => setKForm({ ...kForm, body: e.target.value })}
-                aria-label="Post body"
-              />
+              <div className="w3-field" style={{ marginTop: 14, marginBottom: 0 }}>
+                <label className="w3-label" htmlFor="kb-body">Details</label>
+                <textarea
+                  id="kb-body"
+                  className="w3-textarea"
+                  placeholder="Share the details… (min 20 characters)"
+                  value={kForm.body}
+                  onChange={(e) => setKForm({ ...kForm, body: e.target.value })}
+                />
+              </div>
               <button
                 className="w3-btn"
                 style={{ marginTop: 14 }}
@@ -378,21 +496,25 @@ export default function GovernancePage() {
             </div>
 
             {knowledge.posts.length === 0 ? (
-              <Empty icon="📚">No posts yet — be the first contributor.</Empty>
+              <Empty icon="📚" title="No posts yet">
+                Be the first contributor — reviews, research and success stories all earn WELL.
+              </Empty>
             ) : (
               knowledge.posts.map((p) => (
-                <div className="w3-card" key={p._id}>
-                  <div className="w3-row between">
-                    <div className="w3-card-title" style={{ marginBottom: 0 }}>
-                      {p.title}{' '}
-                      <span className="w3-badge blue">
-                        {POST_TYPES.find(([k]) => k === p.type)?.[1] || p.type}
-                      </span>
-                      {p.mine ? <span className="w3-badge green" style={{ marginLeft: 6 }}>Yours</span> : null}
+                <article className="w3-card" key={p._id}>
+                  <div className="w3-card-head">
+                    <div>
+                      <h3 className="w3-card-title">
+                        {p.title}
+                        <span className="w3-badge blue">
+                          {POST_TYPES.find(([k]) => k === p.type)?.[1] || p.type}
+                        </span>
+                        {p.mine ? <span className="w3-badge green">Yours</span> : null}
+                      </h3>
+                      <p className="w3-card-sub" style={{ whiteSpace: 'pre-wrap' }}>{p.body}</p>
                     </div>
                     <span className="w3-mono" style={{ fontSize: 12 }}>{fmtDay(p.createdAt)}</span>
                   </div>
-                  <p className="w3-card-sub" style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>{p.body}</p>
                   <div className="w3-row between">
                     <span className="w3-row" style={{ gap: 8 }}>
                       <span className="w3-badge amber">▲ {p.upvotes || 0} upvotes</span>
@@ -412,7 +534,7 @@ export default function GovernancePage() {
                       </button>
                     )}
                   </div>
-                </div>
+                </article>
               ))
             )}
           </div>

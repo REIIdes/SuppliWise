@@ -78,20 +78,46 @@ export const emitAuthChanged = () => {
   } catch { /* SSR / no window — nothing to notify */ }
 };
 
-// Current snapshot of this tab's session. Parsing is cheap but not free, so
-// callers that just need presence checks can use `hasSession()`.
+// Current snapshot of this tab's session.
+//
+// Storage is re-read on EVERY call — profile/plan edits write these keys
+// directly without emitting AUTH_CHANGED_EVENT (see useAuth), so a cache that
+// trusted the event alone would hand back a stale profile. What is skipped is
+// the PARSE: the cached profile can carry multi-megabyte base64 pictures, and
+// useAuth() runs on every render of every guard, the navbar and the chat
+// widget, so re-parsing that blob 4-6x per render pass was tens of
+// milliseconds each time. Comparing the raw text is a memcmp against the same
+// bytes — orders of magnitude cheaper, and still exact: if the text differs at
+// all, we re-parse.
+//
+// The returned outer object is fresh per call (callers may keep it), but the
+// `user` object is shared between calls that saw identical text — so nothing
+// that merely reads it can tell the difference, and effects keyed on it fire
+// less often for free.
+let snapshotCache = { raw: null, token: null, user: null };
+
 export const readAuthSnapshot = () => {
   let token;
-  let user;
+  let raw;
   try {
     token = sessionStorage.getItem(TAB_TOKEN_KEY);
-    const raw = sessionStorage.getItem(TAB_USER_KEY);
-    user = raw ? JSON.parse(raw) : null;
+    raw = sessionStorage.getItem(TAB_USER_KEY);
   } catch {
     token = null;
+    raw = null;
+  }
+  const nextToken = token ?? null;
+  if (raw === snapshotCache.raw && nextToken === snapshotCache.token) {
+    return { token: nextToken, user: snapshotCache.user };
+  }
+  let user;
+  try {
+    user = raw ? JSON.parse(raw) : null;
+  } catch {
     user = null;
   }
-  return { token: token ?? null, user: user ?? null };
+  snapshotCache = { raw, token: nextToken, user };
+  return { token: nextToken, user };
 };
 
 export const hasSession = () => {

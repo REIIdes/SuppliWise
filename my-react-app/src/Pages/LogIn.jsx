@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { NavLink, useNavigate, useLocation } from 'react-router-dom';
+import { NavLink, Link, useNavigate, useLocation } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
-import { BASE_URL, saveAssessment, getRecommendations, saveAssessmentResults, parseJSON, startSession, takeAuthNotice, getToken } from '../api';
+import { BASE_URL, saveAssessment, getRecommendations, saveAssessmentResults, parseJSON, startSession, takeAuthNotice, getToken, redeemBackupCode } from '../api';
 import { beginAuthTransition, endAuthTransition } from '../auth/authState';
 import { safeRedirectPath } from '../utils/safeUrl';
 import './LogIn.css';
@@ -59,18 +59,11 @@ function LogIn() {
   const [otpTimeLeft, setOtpTimeLeft] = useState(600); // 10 minutes in seconds
   const [otpExpiryTimer, setOtpExpiryTimer] = useState(null);
   const [requiresTwoFactor, setRequiresTwoFactor] = useState(false);
-  
-  // Forgot password states
-  const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
-  const [forgotPasswordEmail, setForgotPasswordEmail] = useState('');
-  const [forgotPasswordStep, setForgotPasswordStep] = useState('email'); // 'email', 'otp', 'password'
-  const [resetOtp, setResetOtp] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmNewPassword, setConfirmNewPassword] = useState('');
-  const [showNewPassword, setShowNewPassword] = useState(false);
-  const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false);
-  const [resetUserId, setResetUserId] = useState('');
-  const [, setOtpVerified] = useState(false); // write-only flag: reset once verified
+  // Whether the second-factor box is collecting a live authenticator code or a
+  // printed recovery code. They are the same 11 characters with a hyphen in the
+  // middle, typed by someone who may be locked out, so the field has to accept
+  // letters and digits — not just the digits a TOTP is made of.
+  const [useRecoveryCode, setUseRecoveryCode] = useState(false);
   
   const navigate = useNavigate();
   const location = useLocation();
@@ -258,6 +251,10 @@ function LogIn() {
         setRequiresTwoFactor(true);
         setPendingUserId(data.userId);
         setOtp('');
+        // Never carry the choice across attempts: the next sign-in may be for
+        // an account whose second factor is an emailed code, which has no
+        // recovery codes to offer.
+        setUseRecoveryCode(false);
         setShowOtpModal(true);
         setLoading(false);
         return;
@@ -287,9 +284,22 @@ function LogIn() {
     }
   };
 
+  /**
+   * Is what is in the box a complete second factor? Recovery codes are
+   * XXXXX-XXXXX; the separator is optional because people retype from paper
+   * and inconsistently include it.
+   */
+  const secondFactorComplete = () => (
+    useRecoveryCode
+      ? /^[A-Za-z0-9]{5}-?[A-Za-z0-9]{5}$/.test(otp.trim())
+      : otp.trim().length === 6
+  );
+
   const handleOtpSubmit = async () => {
-    if (otp.trim().length !== 6) {
-      setError('Please enter a valid 6-digit code.');
+    if (!secondFactorComplete()) {
+      setError(useRecoveryCode
+        ? 'Enter one of your recovery codes, like A1B2C-D3E4F.'
+        : 'Please enter a valid 6-digit code.');
       return;
     }
 
@@ -297,26 +307,35 @@ function LogIn() {
     setError('');
 
     try {
-      const response = await fetch(`${BASE_URL}/auth/${requiresTwoFactor ? 'login-2fa' : 'verify-login-otp'}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: pendingUserId, otp: otp.trim(), remember }),
-      });
+      let data;
+      if (useRecoveryCode) {
+        // The recovery route is reached before there is a session, so it is
+        // unauthenticated — see redeemBackupCode in api.js.
+        data = await redeemBackupCode(pendingUserId, otp.trim(), remember);
+      } else {
+        const response = await fetch(`${BASE_URL}/auth/${requiresTwoFactor ? 'login-2fa' : 'verify-login-otp'}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: pendingUserId, otp: otp.trim(), remember }),
+        });
 
-      const data = await parseJSON(response);
+        data = await parseJSON(response);
 
-      if (!response.ok) {
-        throw new Error(data.message || 'Invalid verification code');
+        if (!response.ok) {
+          throw new Error(data.message || 'Invalid verification code');
+        }
       }
 
-      // OTP verified - complete login
+      // Second factor verified - complete login
       setShowOtpModal(false);
       setOtp('');
       await completeLogin(data);
     } catch (err) {
-      const message = err.message?.includes('Invalid verification code')
-        ? 'That code is no longer valid. Please use the newest verification code sent to your email.'
-        : err.message || 'Invalid verification code. Please try again.';
+      const message = useRecoveryCode
+        ? (err.message || 'That recovery code is not valid. Each code works only once.')
+        : (err.message?.includes('Invalid verification code')
+          ? 'That code is no longer valid. Please use the newest verification code sent to your email.'
+          : err.message || 'Invalid verification code. Please try again.');
       setError(message);
     } finally {
       setOtpLoading(false);
@@ -404,6 +423,7 @@ function LogIn() {
   const handleCancelOtp = () => {
     setShowOtpModal(false);
     setRequiresTwoFactor(false);
+    setUseRecoveryCode(false);
     setOtp('');
     setPendingUserId('');
     setError('');
@@ -415,208 +435,13 @@ function LogIn() {
     setLoading(false);
   };
 
-  // ============== FORGOT PASSWORD HANDLERS ==============
-  
-  const handleForgotPasswordClick = () => {
-    setShowForgotPasswordModal(true);
-    setForgotPasswordStep('email');
-    setForgotPasswordEmail(email); // Pre-fill if email is already entered
-    setError('');
-    setSuccess('');
-  };
-
-  const handleCloseForgotPassword = () => {
-    setShowForgotPasswordModal(false);
-    setForgotPasswordStep('email');
-    setForgotPasswordEmail('');
-    setResetOtp('');
-    setNewPassword('');
-    setConfirmNewPassword('');
-    setResetUserId('');
-    setOtpVerified(false);
-    setError('');
-    setSuccess('');
-    setResendCooldown(0);
-    setOtpTimeLeft(600);
-    if (resendTimer) clearInterval(resendTimer);
-    if (otpExpiryTimer) clearInterval(otpExpiryTimer);
-  };
-
-  const handleForgotPasswordSubmitEmail = async (e) => {
-    e.preventDefault();
-    setError('');
-    
-    const emailErr = validateEmail(forgotPasswordEmail);
-    if (emailErr) {
-      setError(emailErr);
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const response = await fetch(`${BASE_URL}/auth/forgot-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: forgotPasswordEmail }),
-      });
-
-      const data = await parseJSON(response);
-
-      if (!response.ok) {
-        if (response.status === 429 && data.remainingSeconds) {
-          startResendCooldown(data.remainingSeconds);
-        }
-        throw new Error(data.message || 'Failed to send verification code');
-      }
-
-      // Anti-enumeration: the server reports success even for unknown emails,
-      // but only returns a userId when an account actually exists. Stay on the
-      // email step unless we can proceed to verification.
-      if (!data.userId) {
-        setSuccess('If an account exists with this email, a verification code has been sent. Please check your inbox (and spam folder).');
-        setTimeout(() => setSuccess(''), 6000);
-        return;
-      }
-
-      setResetUserId(data.userId);
-      setForgotPasswordStep('otp');
-      startResendCooldown(30);
-      startOtpExpiryTimer();
-      setSuccess('Verification code sent to your email!');
-      setTimeout(() => setSuccess(''), 3000);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleVerifyResetOtp = async () => {
-    if (resetOtp.trim().length !== 6) {
-      setError('Please enter a valid 6-digit code.');
-      return;
-    }
-
-    setOtpLoading(true);
-    setError('');
-
-    try {
-      const response = await fetch(`${BASE_URL}/auth/verify-password-reset-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: resetUserId, otp: resetOtp.trim() }),
-      });
-
-      const data = await parseJSON(response);
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Invalid verification code');
-      }
-
-      setOtpVerified(true);
-      setForgotPasswordStep('password');
-      setSuccess('Code verified! Now set your new password.');
-      setTimeout(() => setSuccess(''), 3000);
-    } catch (err) {
-      const message = err.message?.includes('Invalid verification code')
-        ? 'That code is no longer valid. Please use the newest verification code sent to your email.'
-        : err.message || 'Invalid verification code. Please try again.';
-      setError(message);
-    } finally {
-      setOtpLoading(false);
-    }
-  };
-
-  const handleResetPassword = async (e) => {
-    e.preventDefault();
-    setError('');
-
-    // Validate passwords
-    const passwordErr = validatePassword(newPassword);
-    if (passwordErr) {
-      setError(passwordErr);
-      return;
-    }
-
-    if (newPassword !== confirmNewPassword) {
-      setError('Passwords do not match.');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const response = await fetch(`${BASE_URL}/auth/reset-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          userId: resetUserId, 
-          otp: resetOtp.trim(), 
-          newPassword 
-        }),
-      });
-
-      const data = await parseJSON(response);
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Failed to reset password');
-      }
-
-      setSuccess('Password reset successfully! You can now sign in.');
-      setTimeout(() => {
-        handleCloseForgotPassword();
-        // Pre-fill the email in login form
-        setEmail(forgotPasswordEmail);
-      }, 2000);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleResendResetOtp = async () => {
-    if (resendCooldown > 0) return;
-    
-    setResetOtp('');
-    setError('');
-    setSuccess('');
-    setOtpLoading(true);
-
-    try {
-      const response = await fetch(`${BASE_URL}/auth/resend-password-reset-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: resetUserId }),
-      });
-
-      const data = await parseJSON(response);
-
-      if (!response.ok) {
-        if (response.status === 429 && data.remainingSeconds) {
-          startResendCooldown(data.remainingSeconds);
-        }
-        throw new Error(data.message || 'Failed to resend code');
-      }
-
-      startResendCooldown(30);
-      startOtpExpiryTimer();
-      setSuccess('Verification code sent again!');
-      setTimeout(() => setSuccess(''), 3000);
-    } catch (err) {
-      setError(err.message || 'Failed to resend code. Please try again.');
-    } finally {
-      setOtpLoading(false);
-    }
-  };
-
-  function validatePassword(password) {
-    if (!password) return 'Please enter a password.';
-    if (password.length < 8) return 'Your password is too short — please use at least 8 characters.';
-    if (!/[A-Z]/.test(password)) return 'Add at least one capital letter to make your password stronger.';
-    if (!/[0-9]/.test(password)) return 'Add at least one number to make your password stronger.';
-    return '';
-  }
-
+  // Password recovery was a three-step modal on this page (email → 6-digit
+  // code → new password). It now lives on /forgot-password and
+  // /reset-password, because the flow ends in a link clicked out of an email
+  // — usually in a new tab, sometimes hours later. A modal that only exists
+  // while this component is mounted cannot survive that, and the back button
+  // walked out of the flow while it silently kept its state.
+  // See the link below.
   return (
     <div className="page-wrapper">
       <Navbar />
@@ -715,14 +540,21 @@ function LogIn() {
             {loading ? 'Signing in...' : 'Sign In'}
           </button>
 
+          {/* Password recovery lives on its own page now — /forgot-password,
+              reached from the link in the email. It used to be a three-step
+              modal on this form, which could not work: the reset was completed
+              by clicking a link in an email, usually in a new tab, so the flow
+              needed an address of its own to land on rather than a modal that
+              only exists while this component is mounted. The address is
+              carried across as ?email= so a user who mistyped it here can fix
+              it there instead of starting over. */}
           <div className="auth-forgot-password">
-            <button 
-              type="button" 
-              className="auth-forgot-password-link" 
-              onClick={handleForgotPasswordClick}
+            <Link
+              className="auth-forgot-password-link"
+              to={`/forgot-password?email=${encodeURIComponent(email.trim())}`}
             >
-              Forgot Password?
-            </button>
+              Forgot your password?
+            </Link>
           </div>
 
           <p className="auth-switch">
@@ -751,13 +583,24 @@ function LogIn() {
         >
           <div className="profile-modal" onClick={(e) => e.stopPropagation()}>
             <h2 id="login-otp-title">Login Verification</h2>
-            <p>{requiresTwoFactor ? 'Enter the current code from Google Authenticator.' : "For your security, we've sent a 6-digit verification code to:"}</p>
-            {!requiresTwoFactor && <p className="profile-modal-email">{email}</p>}
-            <p className="profile-modal-note">Please enter the code to complete your login.</p>
+            <p>
+              {useRecoveryCode
+                ? 'Enter one of your recovery codes.'
+                : requiresTwoFactor
+                  ? 'Enter the current code from Google Authenticator.'
+                  : "For your security, we've sent a 6-digit verification code to:"}
+            </p>
+            {!requiresTwoFactor && !useRecoveryCode && <p className="profile-modal-email">{email}</p>}
+            <p className="profile-modal-note">
+              {useRecoveryCode
+                ? 'Each code works once. Using one signs you in and burns it.'
+                : 'Please enter the code to complete your login.'}
+            </p>
             
             {/* Email-OTP expiry timer — hidden for Google Authenticator
-                (TOTP codes rotate every 30s in the app itself) */}
-            {!requiresTwoFactor && (
+                (TOTP codes rotate every 30s in the app itself) and for a
+                recovery code, which does not expire. */}
+            {!requiresTwoFactor && !useRecoveryCode && (
             <div className="otp-expiry-timer">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <circle cx="12" cy="12" r="10"/>
@@ -768,21 +611,27 @@ function LogIn() {
               </span>
             </div>
             )}
-            
+
             <input
               type="text"
-              className="profile-otp-input"
-              placeholder="Enter 6-digit code"
+              className={`profile-otp-input${useRecoveryCode ? ' profile-otp-input--code' : ''}`}
+              placeholder={useRecoveryCode ? 'A1B2C-D3E4F' : 'Enter 6-digit code'}
               value={otp}
               onChange={(e) => {
-                const value = e.target.value.replace(/\D/g, '').slice(0, 6);
+                // A recovery code is letters and digits; a TOTP is digits only.
+                // Stripping the wrong set would silently eat the user's input.
+                const value = useRecoveryCode
+                  ? e.target.value.replace(/[^A-Za-z0-9-]/g, '').slice(0, 11)
+                  : e.target.value.replace(/\D/g, '').slice(0, 6);
                 setOtp(value);
                 setError('');
               }}
-              maxLength="6"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              disabled={otpLoading || (!requiresTwoFactor && otpTimeLeft === 0)}
+              maxLength={useRecoveryCode ? 11 : 6}
+              inputMode={useRecoveryCode ? 'text' : 'numeric'}
+              autoComplete={useRecoveryCode ? 'off' : 'one-time-code'}
+              autoCapitalize="characters"
+              spellCheck={false}
+              disabled={otpLoading || (!requiresTwoFactor && !useRecoveryCode && otpTimeLeft === 0)}
               autoFocus
             />
 
@@ -824,241 +673,28 @@ function LogIn() {
                 type="button"
                 className="profile-modal-btn profile-modal-btn-primary"
                 onClick={handleOtpSubmit}
-                disabled={otpLoading || otp.length !== 6 || (!requiresTwoFactor && otpTimeLeft === 0)}
+                disabled={otpLoading || !secondFactorComplete() || (!requiresTwoFactor && !useRecoveryCode && otpTimeLeft === 0)}
               >
                 {otpLoading ? 'Verifying...' : 'Verify & Sign In'}
               </button>
             </div>
-          </div>
-        </div>
-      )}
 
-      {/* Forgot Password Modal */}
-      {showForgotPasswordModal && (
-        <div className="profile-modal-overlay" onClick={() => !loading && !otpLoading && handleCloseForgotPassword()}>
-          <div className="profile-modal" onClick={(e) => e.stopPropagation()}>
-            {forgotPasswordStep === 'email' && (
-              <>
-                <h2>Reset Your Password</h2>
-                <p>Enter your email address and we'll send you a verification code.</p>
-                
-                <form onSubmit={handleForgotPasswordSubmitEmail}>
-                  <div className="auth-field">
-                    <label>Email</label>
-                    <input
-                      type="email"
-                      className="profile-otp-input"
-                      placeholder="your.email@example.com"
-                      value={forgotPasswordEmail}
-                      onChange={(e) => {
-                        setForgotPasswordEmail(e.target.value);
-                        setError('');
-                      }}
-                      disabled={loading}
-                      autoFocus
-                      required
-                    />
-                  </div>
-
-                  {error && (
-                    <div className="profile-modal-error">
-                      {error}
-                    </div>
-                  )}
-
-                  {success && (
-                    <div className="profile-modal-success">
-                      {success}
-                    </div>
-                  )}
-
-                  <div className="profile-modal-actions">
-                    <button
-                      type="button"
-                      className="profile-modal-btn profile-modal-btn-secondary"
-                      onClick={handleCloseForgotPassword}
-                      disabled={loading}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className="profile-modal-btn profile-modal-btn-primary"
-                      disabled={loading || resendCooldown > 0}
-                    >
-                      {loading ? 'Sending...' : resendCooldown > 0 ? `Wait ${resendCooldown}s` : 'Send Code'}
-                    </button>
-                  </div>
-                </form>
-              </>
-            )}
-
-            {forgotPasswordStep === 'otp' && (
-              <>
-                <h2>Verify Your Email</h2>
-                <p>We've sent a 6-digit verification code to:</p>
-                <p className="profile-modal-email">{forgotPasswordEmail}</p>
-                <p className="profile-modal-note">Enter the code to continue.</p>
-                
-                {/* OTP Expiry Timer */}
-                <div className="otp-expiry-timer">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="12" cy="12" r="10"/>
-                    <polyline points="12 6 12 12 16 14"/>
-                  </svg>
-                  <span className={otpTimeLeft <= 60 ? 'expiring-soon' : ''}>
-                    Code expires in {formatTimeLeft(otpTimeLeft)}
-                  </span>
-                </div>
-                
-                <input
-                  type="text"
-                  className="profile-otp-input"
-                  placeholder="Enter 6-digit code"
-                  value={resetOtp}
-                  onChange={(e) => {
-                    const value = e.target.value.replace(/\D/g, '').slice(0, 6);
-                    setResetOtp(value);
-                    setError('');
-                  }}
-                  maxLength="6"
-                  disabled={otpLoading || otpTimeLeft === 0}
-                  autoFocus
-                />
-
-                {error && (
-                  <div className="profile-modal-error">
-                    {error}
-                  </div>
-                )}
-
-                {success && (
-                  <div className="profile-modal-success">
-                    {success}
-                  </div>
-                )}
-
-                <div className="profile-modal-resend">
-                  <button
-                    type="button"
-                    className="profile-modal-resend-btn"
-                    onClick={handleResendResetOtp}
-                    disabled={resendCooldown > 0 || otpLoading}
-                  >
-                    {resendCooldown > 0 
-                      ? `Send Again (${resendCooldown}s)` 
-                      : 'Send Again'}
-                  </button>
-                </div>
-
-                <div className="profile-modal-actions">
-                  <button
-                    type="button"
-                    className="profile-modal-btn profile-modal-btn-secondary"
-                    onClick={handleCloseForgotPassword}
-                    disabled={otpLoading}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className="profile-modal-btn profile-modal-btn-primary"
-                    onClick={handleVerifyResetOtp}
-                    disabled={otpLoading || resetOtp.length !== 6 || otpTimeLeft === 0}
-                  >
-                    {otpLoading ? 'Verifying...' : 'Verify Code'}
-                  </button>
-                </div>
-              </>
-            )}
-
-            {forgotPasswordStep === 'password' && (
-              <>
-                <h2>Create New Password</h2>
-                <p>Enter a strong password for your account.</p>
-                
-                <form onSubmit={handleResetPassword}>
-                  <div className="auth-field">
-                    <label>New Password</label>
-                    <div className="auth-input-wrap">
-                      <input
-                        type={showNewPassword ? 'text' : 'password'}
-                        className="profile-otp-input"
-                        placeholder="Create a strong password"
-                        value={newPassword}
-                        onChange={(e) => {
-                          setNewPassword(e.target.value);
-                          setError('');
-                        }}
-                        disabled={loading}
-                        required
-                      />
-                      <button type="button" className="eye-btn" onClick={() => setShowNewPassword(s => !s)} aria-label="Toggle password visibility">
-                        {showNewPassword ? (
-                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-                        ) : (
-                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="auth-field">
-                    <label>Confirm New Password</label>
-                    <div className="auth-input-wrap">
-                      <input
-                        type={showConfirmNewPassword ? 'text' : 'password'}
-                        className="profile-otp-input"
-                        placeholder="Confirm your password"
-                        value={confirmNewPassword}
-                        onChange={(e) => {
-                          setConfirmNewPassword(e.target.value);
-                          setError('');
-                        }}
-                        disabled={loading}
-                        required
-                      />
-                      <button type="button" className="eye-btn" onClick={() => setShowConfirmNewPassword(s => !s)} aria-label="Toggle confirm password visibility">
-                        {showConfirmNewPassword ? (
-                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-                        ) : (
-                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-
-                  {error && (
-                    <div className="profile-modal-error">
-                      {error}
-                    </div>
-                  )}
-
-                  {success && (
-                    <div className="profile-modal-success">
-                      {success}
-                    </div>
-                  )}
-
-                  <div className="profile-modal-actions">
-                    <button
-                      type="button"
-                      className="profile-modal-btn profile-modal-btn-secondary"
-                      onClick={handleCloseForgotPassword}
-                      disabled={loading}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className="profile-modal-btn profile-modal-btn-primary"
-                      disabled={loading}
-                    >
-                      {loading ? 'Resetting...' : 'Reset Password'}
-                    </button>
-                  </div>
-                </form>
-              </>
+            {/* The way back in when the phone is gone. Only offered for the
+                authenticator method — on the email method the emailed code is
+                already the second factor and there is no recovery code to use. */}
+            {requiresTwoFactor && (
+              <div className="profile-modal-resend">
+                <button
+                  type="button"
+                  className="profile-modal-resend-btn"
+                  onClick={() => { setUseRecoveryCode((v) => !v); setOtp(''); setError(''); setSuccess(''); }}
+                  disabled={otpLoading}
+                >
+                  {useRecoveryCode
+                    ? 'Use my authenticator instead'
+                    : 'Lost your phone? Use a recovery code'}
+                </button>
+              </div>
             )}
           </div>
         </div>

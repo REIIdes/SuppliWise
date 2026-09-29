@@ -5,10 +5,23 @@ import AccountSwitcher from '../Components/AccountSwitcher/AccountSwitcher';
 import { BASE_URL, getMyProfile, getNotifications, markNotificationRead, isSecurityNotification, getToken, getStoredUser, setStoredUser } from '../api';
 import ProfileSecurityControls from '../Components/ProfileSecurityControls/ProfileSecurityControls';
 import ProfileAvatarImage from '../Components/ProfileAvatar/ProfileAvatarImage';
+import MyPlanRequests from '../Components/MyPlanRequests/MyPlanRequests';
+import MyPlanCancels from '../Components/MyPlanRequests/MyPlanCancels';
 import { useSubscription, SUBSCRIPTION_EVENT } from '../hooks/useSubscription';
-import { PLAN_LABELS, planFromUser } from '../utils/plan';
+import { PLAN_LABELS, planFromUser, daysLeftFrom } from '../utils/plan';
+import { planDisplayName } from '../subscription/catalogue';
 import { sanitizeNameInput, NAME_MAX, NAME_PATTERN_SOURCE, NAME_CHARS_HINT } from '../utils/nameValidation';
+import { pictureUrl } from '../utils/pictureUrl';
 import './ProfilePage.css';
+
+// A single, readable date for the billing read-out. Invalid input renders as an
+// em dash rather than "Invalid Date", which is what new Date() would print.
+function formatDay(value) {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (!Number.isFinite(d.getTime())) return '—';
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
 
 // Relative time for the security activity feed
 function secTimeAgo(iso) {
@@ -95,7 +108,16 @@ function ProfilePage() {
   // syncs live + from server). Subscribing here means upgrades/downgrades by
   // admin, expiry, or another tab update the card + feature list instantly —
   // no reopen needed.
-  const { active: liveActive, plan: livePlan, entitlements: liveEntitlements, refresh: refreshLivePlan, applyFresh } = useSubscription();
+  const {
+    active: liveActive, plan: livePlan, entitlements: liveEntitlements,
+    refresh: refreshLivePlan, applyFresh,
+    // The billing card renders from the LIVE store, not the trimmed local
+    // `subscription` mirror below. That mirror predates the duration fields and
+    // only carries active/plan/entitlements, so reading it here showed a real
+    // Premium subscriber as "FREE · 0 days". One source of truth, always current.
+    end: liveEnd, start: liveStart, permanent: livePermanent,
+    source: liveSource, status: liveStatus, layers: liveLayers, seats: liveSeats,
+  } = useSubscription();
   const [subscription, setSubscription] = useState(() => {
     const resolved = planFromUser(storedUser);
     return {
@@ -260,7 +282,12 @@ function ProfilePage() {
   // shared owner; a query param needs no lifted state or global event, and it
   // survives reload, so the deep link is shareable and Back behaves.
   const urlView = searchParams.get('view') || searchParams.get('section');
-  const view = urlView === 'security' || urlView === 'accounts' ? urlView : 'personal';
+  // Allow-listed, so a typo or a stale bookmark lands on Personal Info instead
+  // of rendering nothing. 'billing' is the target of "Manage billing" on the
+  // pricing page, and it was missing from this list — which silently sent every
+  // one of those links to an empty page.
+  const PROFILE_VIEWS = ['security', 'accounts', 'billing'];
+  const view = PROFILE_VIEWS.includes(urlView) ? urlView : 'personal';
 
   // The Security card still flashes when it is opened from a notification,
   // because that is the one case where its contents changed underneath the
@@ -862,6 +889,13 @@ function ProfilePage() {
     return age;
   };
 
+  // A saved banner is a root-relative `/pictures/…` path; an unsaved pick is
+  // still a data: URL. `pictureUrl` handles both, so the cover renders
+  // identically before and after a save. Resolving here means the raw stored
+  // value is what gets compared and sent back to the server, and only the
+  // browser-facing string is transformed.
+  const bannerUrl = pictureUrl(bannerPicturePreview);
+
   // Sign-out is NOT handled here. It used to be reached by navigating to
   // /profile?action=signout, which meant choosing "Sign out" dragged the user
   // to this page just to show a prompt. The confirmation now lives in the
@@ -877,8 +911,8 @@ function ProfilePage() {
               so a very wide photo is never cropped just to fit a name. ── */}
           <div
             className="profile-cover"
-            style={bannerPicturePreview ? {
-              backgroundImage: `url(${bannerPicturePreview})`,
+            style={bannerUrl ? {
+              backgroundImage: `url(${bannerUrl})`,
               backgroundSize: 'cover',
               backgroundPosition: 'center',
             } : undefined}
@@ -972,9 +1006,11 @@ function ProfilePage() {
               )}
               <span className={`profile-plan-chip${subscription.active ? ' profile-plan-chip--active' : ''}`}>
                 <span className="profile-plan-chip__dot" aria-hidden="true" />
+                {/* Customer-facing name (Free/Deluxe/Premium/Ultimate), not the
+                    internal tier key — this chip is read by the account holder. */}
                 {subscription.active
-                  ? (PLAN_LABELS[subscription.plan] || PLAN_LABELS.free)
-                  : PLAN_LABELS.free}
+                  ? (planDisplayName(subscription.plan) || PLAN_LABELS.free)
+                  : 'Free'}
               </span>
             </div>
           </div>
@@ -1240,6 +1276,137 @@ function ProfilePage() {
                 Accounts signed in on this browser. Switch instantly — every account keeps its own session, so the others stay signed in.
               </p>
               <AccountSwitcher />
+            </div>
+            )}
+
+            {/* Billing: where "Manage billing" on the pricing page lands. It
+                answers the three questions a subscriber actually has — which
+                plan, how long is left, and what it renews at — then hands over
+                to /pricing for the change itself. */}
+            {view === 'billing' && (
+            <div className="profile-section profile-section--billing" id="profile-billing">
+              <h2 className="profile-section-title">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M20.6 13.4 12 22l-9-9V3h10l7.6 7.6a2 2 0 0 1 0 2.8z" />
+                  <circle cx="7.5" cy="7.5" r="1.3" />
+                </svg>
+                Plan &amp; billing
+              </h2>
+              <p className="profile-section-subtitle">
+                What you are on, how much time is left, and where to change or cancel it.
+              </p>
+
+              <div className="billing-card">
+                <div className="billing-card__head">
+                  <div>
+                    <span className="billing-card__label">Current plan</span>
+                    <span className="billing-card__plan">
+                      {liveActive
+                        ? (planDisplayName(livePlan) || PLAN_LABELS.free)
+                        : PLAN_LABELS.free}
+                    </span>
+                  </div>
+                  <span className={`billing-source billing-source--${liveSource === 'admin' ? 'admin' : (liveSource === 'payment' ? 'paid' : 'free')}`}>
+                    {liveSource === 'admin'
+                      ? 'ADMIN GRANT'
+                      : (liveSource === 'payment' ? 'PAID' : 'FREE')}
+                  </span>
+                </div>
+
+                {/* Seats only matter when there is more than one, so a solo
+                    subscriber is not shown a row they cannot act on. */}
+                {liveActive && Number(liveSeats) > 1 && (
+                  <div className="billing-row">
+                    <dt>Seats</dt>
+                    <dd>
+                      {liveSeats} × Premium
+                      {' '}
+                      <button
+                        type="button"
+                        className="billing-link"
+                        onClick={() => navigate('/pricing')}
+                      >
+                        change
+                      </button>
+                    </dd>
+                  </div>
+                )}
+
+                <dl className="billing-rows">
+                  <div className="billing-row">
+                    <dt>Time remaining</dt>
+                    <dd>
+                      {livePermanent
+                        ? 'Permanent — never expires'
+                        : (liveActive
+                          ? `${daysLeftFrom(liveEnd) ?? 0} days`
+                          : (liveStatus === 'expired' ? 'Expired' : 'No active subscription'))}
+                    </dd>
+                  </div>
+                  <div className="billing-row">
+                    <dt>{livePermanent ? 'Expiry' : 'Renews / expires'}</dt>
+                    <dd>
+                      {livePermanent
+                        ? 'Never'
+                        : (liveEnd ? formatDay(liveEnd) : '—')}
+                    </dd>
+                  </div>
+                  <div className="billing-row">
+                    <dt>Started</dt>
+                    <dd>{liveStart ? formatDay(liveStart) : '—'}</dd>
+                  </div>
+                </dl>
+
+                {/* An admin override is a temporary, visible change. Saying so is
+                    what stops a subscriber thinking their plan silently changed,
+                    and tells them it can be put back. */}
+                {liveLayers?.override?.active && (
+                  <div className="billing-note">
+                    <strong>An administrator changed this plan.</strong>{' '}
+                    {liveLayers.canRestore && liveLayers.restoreTarget
+                      ? `It sits on top of your own paid plan, which is untouched: ${liveLayers.restoreTarget.label}`
+                        + (liveLayers.restoreTarget.permanent
+                          ? ' (permanent)'
+                          : (Number.isFinite(liveLayers.restoreTarget.capturedDaysRemaining)
+                            ? `, ${liveLayers.restoreTarget.capturedDaysRemaining} days remaining at the time`
+                            : ''))
+                        + '. An administrator can restore it exactly.'
+                      : 'Contact an administrator if you would like your original plan back.'}
+                  </div>
+                )}
+
+                <div className="billing-actions">
+                  <button
+                    type="button"
+                    className="profile-chip-btn"
+                    onClick={() => navigate('/pricing')}
+                  >
+                    {/* Not "Change or cancel plan": there is no user-facing
+                        cancel to go to. /pricing can change the plan, and the
+                        only cancel that exists is an administrator's, which ends
+                        access immediately. Offering a cancel here would send
+                        someone looking for a button that is not there. */}
+                    {liveActive ? 'Change plan' : 'View plans'}
+                  </button>
+                </div>
+
+                <p className="billing-footnote">
+                  A plan runs for the number of days shown above and does not renew
+                  on its own — nothing is charged unless you choose it. Buying again
+                  adds to the days you have left rather than restarting them.
+                </p>
+
+                {/* The proof-of-payment requests this account has sent. It
+                    renders nothing when there are none, so the billing page is
+                    unchanged for somebody who has never used the manual route. */}
+                <MyPlanRequests />
+
+                {/* Cancellations, same rule. Separate from the list above
+                    because "waiting to be turned on" and "waiting to be turned
+                    off" are opposite things, and a member should never have to
+                    work out which one a row means from its wording. */}
+                <MyPlanCancels />
+              </div>
             </div>
             )}
 

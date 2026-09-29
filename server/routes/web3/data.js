@@ -340,6 +340,12 @@ router.post('/data/shares', async (req, res) => {
       amount: cfg.params.dataShareReward,
       public: { share: String(share._id), scope },
     });
+    // Persist the amount actually paid. The field has always existed on the
+    // schema but was never written, so every share reported a lifetime
+    // `totalRewards` of 0 while the WELL was really in the wallet.
+    share.reward = reward.amount;
+    share.rewardTx = reward.txHash || '';
+    await share.save();
 
     res.status(201).json({ share, reward: reward.amount, anonymizedDataset: anonymized });
   } catch (error) {

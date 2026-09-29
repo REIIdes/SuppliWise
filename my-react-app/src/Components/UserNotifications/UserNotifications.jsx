@@ -5,9 +5,11 @@ import {
   markNotificationRead,
   markAllNotificationsRead,
   deleteNotification,
+  deleteAllReadNotifications,
   isSecurityNotification,
   getToken,
 } from '../../api';
+import ConfirmModal from '../ConfirmModal/ConfirmModal';
 import './UserNotifications.css';
 
 function timeAgo(iso) {
@@ -30,6 +32,9 @@ export default function UserNotifications() {
   const [unread, setUnread] = useState(0);
   const [loading, setLoading] = useState(false);
   const [actionId, setActionId] = useState(null);
+  // Destructive-action guard for "Delete all read" — see handleClearRead.
+  const [confirmingClearRead, setConfirmingClearRead] = useState(false);
+  const readCount = items.filter(n => n.read).length;
   const wrapRef = useRef(null);
   const panelRef = useRef(null);
   const closeTimerRef = useRef(0);
@@ -213,6 +218,32 @@ export default function UserNotifications() {
     }
   };
 
+  // Clears the read history in one shot. Guarded because it is the only
+  // destructive action in the panel and there is no undo. No count in the
+  // prompt: the panel only renders a page of the inbox, while the endpoint
+  // clears every read row, so any number here would understate it.
+  //
+  // This only RAISES the dialog — window.confirm() is silently swallowed by the
+  // Android/Capacitor webview (the button looked dead) and a native dialog
+  // cannot be styled. See confirmClearRead below for the actual work.
+  const handleClearRead = () => {
+    setConfirmingClearRead(true);
+  };
+
+  const confirmClearRead = async () => {
+    setConfirmingClearRead(false);
+    if (actionId) return;
+    try {
+      setActionId('clear');
+      await deleteAllReadNotifications();
+      setItems(prev => prev.filter(n => !n.read));
+    } catch {
+      // Non-blocking
+    } finally {
+      setActionId(null);
+    }
+  };
+
   const handleDelete = async (e, item) => {
     e.stopPropagation();
     try {
@@ -253,17 +284,32 @@ export default function UserNotifications() {
       {open && (
         <div className="user-notif__panel" ref={panelRef} role="dialog" aria-label="Notifications">
           <div className="user-notif__header">
-            <strong>Notifications</strong>
-            {unread > 0 && (
-              <button
-                type="button"
-                className="user-notif__action"
-                onClick={handleMarkAll}
-                disabled={actionId === 'all'}
-              >
-                {actionId === 'all' ? 'Marking…' : 'Mark all as read'}
-              </button>
-            )}
+            <strong className="user-notif__heading">Notifications</strong>
+            {/* Both actions wrap onto their own row on narrow panels instead
+                of squeezing the title — the title is the first thing to lose
+                space, not the labels. */}
+            <div className="user-notif__actions">
+              {unread > 0 && (
+                <button
+                  type="button"
+                  className="user-notif__action"
+                  onClick={handleMarkAll}
+                  disabled={actionId !== null}
+                >
+                  {actionId === 'all' ? 'Marking…' : 'Mark all as read'}
+                </button>
+              )}
+              {readCount > 0 && (
+                <button
+                  type="button"
+                  className="user-notif__action user-notif__action--danger"
+                  onClick={handleClearRead}
+                  disabled={actionId !== null}
+                >
+                  {actionId === 'clear' ? 'Clearing…' : 'Delete all read'}
+                </button>
+              )}
+            </div>
           </div>
           <div className="user-notif__list">
             {loading && items.length === 0 && (
@@ -305,6 +351,22 @@ export default function UserNotifications() {
             ))}
           </div>
         </div>
+      )}
+
+      {/* Rendered as a SIBLING of the dropdown, not inside it: opening the
+          dialog must not unmount the panel that raised it, or the panel's own
+          close-on-outside-click handler tears the button out from under the
+          confirmation. */}
+      {confirmingClearRead && (
+        <ConfirmModal
+          type="danger"
+          title="Delete all read notifications?"
+          message="This clears your read history. Unread notifications are kept. This cannot be undone."
+          confirmText="Delete read notifications"
+          cancelText="Keep them"
+          onConfirm={confirmClearRead}
+          onCancel={() => setConfirmingClearRead(false)}
+        />
       )}
     </div>
   );

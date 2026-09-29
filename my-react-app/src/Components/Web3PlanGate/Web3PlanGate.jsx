@@ -79,19 +79,11 @@ export default function Web3PlanGate({ area, children }) {
           requiresPlan="monthly"
           currentPlan={plan}
           benefits={gate.benefits}
-          onViewPlans={() => navigate('/profile')}
+          onViewPlans={() => navigate('/pricing')}
           onBack={() => navigate('/dashboard')}
-          footnote="The blockchain layer is part of the DELUXE plan. Contact an administrator to upgrade and unlock it instantly."
+          footnote="The blockchain layer is part of the Pro (DELUXE) plan. Upgrade on the pricing page to unlock it instantly."
         />
         <p className="w3gate-note">{gate.blurb}</p>
-        <div className="w3gate-actions">
-          <button type="button" className="w3-btn ghost" onClick={() => navigate('/dashboard')}>
-            ← Back to Dashboard
-          </button>
-          <button type="button" className="w3-btn" onClick={() => navigate('/profile')}>
-            View my plan
-          </button>
-        </div>
       </div>
     </div>
   );

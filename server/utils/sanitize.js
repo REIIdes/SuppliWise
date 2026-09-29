@@ -264,10 +264,27 @@ function stripTags(text) {
 // ($-leading) and dotted keys: both are illegal as field names (dotted keys
 // crash the write with a 500) and must never reach an update document.
 // Mutates nothing outside `value`.
-function scrubKeys(value, depth = 0) {
-  if (depth > 10 || value === null || typeof value !== 'object') return value;
+//
+// The depth guard is applied to VALUES, never used as an early return for the
+// node being examined. The old `if (depth > 10 || ...) return value` bailed out
+// on the whole subtree, so a `$`-prefixed or dotted key nested 11+ levels deep
+// was returned UNscrubbed and persisted — reintroducing exactly the
+// operator-injection hazard this function exists to remove. A 1 MB request body
+// reaches that depth easily. Now the walk continues to a depth that a 1 MB body
+// cannot meaningfully exceed, and cycles are tracked so a self-referential
+// object cannot spin forever.
+const SCRUB_MAX_DEPTH = 512;
+function scrubKeys(value, depth = 0, seen = new WeakSet()) {
+  if (value === null || typeof value !== 'object') return value;
+  if (depth > SCRUB_MAX_DEPTH) {
+    // Too deep to be legitimate data inside a 1 MB body. Drop rather than
+    // return unscrubbed.
+    return null;
+  }
+  if (seen.has(value)) return null; // cycle
+  seen.add(value);
   if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) value[i] = scrubKeys(value[i], depth + 1);
+    for (let i = 0; i < value.length; i++) value[i] = scrubKeys(value[i], depth + 1, seen);
     return value;
   }
   for (const key of Object.keys(value)) {
@@ -275,7 +292,7 @@ function scrubKeys(value, depth = 0) {
         key.startsWith('$') || key.includes('.')) {
       delete value[key];
     } else {
-      value[key] = scrubKeys(value[key], depth + 1);
+      value[key] = scrubKeys(value[key], depth + 1, seen);
     }
   }
   return value;

@@ -26,6 +26,8 @@ const { issueUserSession, attachRememberToken, markSessionTrusted } = require('.
 const { describeDevice } = require('../utils/device');
 const { describeSubscription } = require('../utils/entitlements');
 const { sendStatusEmail } = require('../utils/email');
+// Keeps a not-yet-migrated inline picture from being shipped in this response.
+const { safePictureValue } = require('../utils/pictures');
 const {
   accountKey, lockRemainingMs, recordAccountFailure, clearOffenses, lockMeta,
 } = require('../utils/lockout');
@@ -125,7 +127,7 @@ module.exports = function registerSecurityRedeem(router, { sensitiveLimiter }) {
         dateOfBirth: user.dateOfBirth,
         age: user.age,
         gender: user.gender,
-        profilePicture: user.profilePicture,
+        profilePicture: safePictureValue(user.profilePicture),
         twoFactorEnabled: user.twoFactorEnabled,
         twoFactorMethod: user.twoFactorMethod,
         subscriptionActive: user.subscriptionActive,
