@@ -217,7 +217,14 @@ const SECURITY_AUDIT = {
       id: 'I3',
       severity: 'informational',
       title: 'No CI pipeline, containerisation or automated dependency updates',
-      note: 'Nothing runs the test suite or `npm audit` on push. Adding CI is the cheapest way to keep this audit honest.',
+      note: 'Nothing runs the test suite or `npm audit` on push.',
+      status:
+        'ADDRESSED 2026-10-01 — .github/workflows/ci.yml now runs, on every push and PR: server syntax, the full server '
+        + 'test suite (against a real MongoDB service, so the database suites execute instead of silently skipping), '
+        + 'client lint / unit tests / production build, `npm audit --omit=dev` in BOTH scopes, and a secret sweep. '
+        + 'The audit step is the one that matters: it would have caught the nodemailer advisories in F1 below on the '
+        + 'day they were published. I3 is otherwise only half-closed — there is still no container and no automated '
+        + 'dependency-update bot.',
     },
     {
       id: 'I4',
@@ -226,6 +233,203 @@ const SECURITY_AUDIT = {
       note: 'Both are low risk. speakeasy is only used for TOTP math; consider otplib or a maintained RFC-6238 lib.',
     },
   ],
+
+  // ── Follow-up pass, 2026-10-01 ───────────────────────────────────────────
+  //
+  // Recorded here for the same reason as everything above: a claim in this file
+  // that has not been re-checked decays into a false statement of fact. The
+  // `verification` block below had already started to be wrong — it asserted
+  // "0 vulnerabilities" as a standing fact, which is how the nodemailer
+  // advisories sat unnoticed for days after they were published.
+  followUp: {
+    date: '2026-10-01',
+    method:
+      'Adversarial re-run of every existing suite plus live-browser verification, rather than a fresh code read. The '
+      + 'point was to find out whether the system as SHIPPED still passes what the audit claimed, months later.',
+    findings: [
+      {
+        id: 'F1',
+        severity: 'high',
+        title: 'nodemailer shipped 5 advisories the audit had already declared clear',
+        detail:
+          'The record above stated "npm audit: 0 vulnerabilities". On 2026-10-01 the same command reported 1 high: '
+          + 'nodemailer 9.1.1 sat under GHSA-v53p-9fqp-m79j and GHSA-prgh-xp8r-p3m5 (both ReDoS / O(n^2) remote DoS, '
+          + 'CVSS 7.5) plus three moderate advisories. Nothing had regressed — the audit\'s measurement was simply '
+          + 'from 2026-09-23 and advisories are published against an installed version forever.',
+        fix:
+          'Upgraded to nodemailer ^10.0.13 (>= 10.0.9 is the first non-vulnerable range). This is a MAJOR bump, so it '
+          + 'was checked rather than assumed: the codebase only uses createTransport / sendMail / verify, all stable '
+          + 'across 9 -> 10, and the four email suites that stub the transport were re-run green afterwards. A DOMPurify '
+          + 'advisory inherited through jspdf was patched in the same pass (3.4.15 -> 3.4.16). Both scopes now report 0.',
+        status: 'fixed',
+      },
+      {
+        id: 'F2',
+        severity: 'medium',
+        title: 'The SMTP connection pool was leaked on every send failure',
+        detail:
+          'utils/email.js cached a transporter built with `pool: true, maxConnections: 3`. All three send-error paths '
+          + 'recovered with a bare `transporter = null`, which drops the reference without closing anything — so each '
+          + 'failure left a live socket pool attached to a process that had already forgotten it. Pools whose sockets '
+          + 'are open are never collected.',
+        fix:
+          'Added `closeTransporter()`, which closes and nulls, used at all three sites and exported for graceful '
+          + 'shutdown and tests. This was not theoretical: it is why Test File/password-reset-db.test.js hung forever '
+          + 'instead of exiting (see F3).',
+        status: 'fixed',
+      },
+      {
+        id: 'F3',
+        severity: 'medium',
+        title: 'A cleanup-path bug made `npm test` hang indefinitely instead of failing',
+        detail:
+          'Test File/password-reset-db.test.js closed with `const { User } = require(\'../models/User\')`, but that module '
+          + 'ends with `module.exports = mongoose.model(...)` — it exports the model itself, so the destructure yielded '
+          + '`undefined` and the next line threw. Because the throw happened BEFORE `mongoose.disconnect()`, the '
+          + 'connection pool kept the event loop alive and the process never exited. It only reproduced with '
+          + 'MONGO_TEST_URI set; with no test database the whole block was skipped, which is why `npm test` was green '
+          + 'and the suite simply hung for anyone who did configure a database.',
+        fix:
+          'Corrected the import and wrapped cleanup in try/finally so a failure inside it can never again strand the '
+          + 'connection. Suite now passes 10/10 and exits cleanly. This is the general lesson: a suite whose suites '
+          + 'SKIP is not a suite that passes.',
+        status: 'fixed',
+      },
+      {
+        id: 'F4',
+        severity: 'low',
+        title: 'The adversarial probes had drifted behind the product and could no longer run',
+        detail:
+          'glitch-hunt.js could not create its own accounts: register began enforcing utils/passwordRules.js (a symbol '
+          + 'is required) while the probe still sent a bare literal, so it aborted before a single assertion ran. '
+          + 'test-session-flows.js had drifted further — it wrote the TOTP secret straight into the user document '
+          + '(secrets are now stored encrypted) and called /auth/login-2fa without the mfaTransaction that route now '
+          + 'requires, so every 2FA assertion failed. Both scripts were also wired to connectTestDb(), which points '
+          + 'them at a TEST database while the API creates their accounts on the APPLICATION database — two different '
+          + 'databases, so the scripts asserted against state they could not see. test-web3-flows.js reported a silent '
+          + '"0 passed, 0 failed" for the same reason.',
+        fix:
+          'Passwords hoisted to a single shared constant per script; 2FA now enrolled and driven through the real '
+          + 'setup-2fa / verify-2fa / login / login-2fa endpoints; the three API-provisioned suites connect to the '
+          + 'application database the way every other live suite does, documented as deliberately scoped to accounts '
+          + 'they create and delete themselves. Two stale hard-coded expectations in test-web3-flows.js were also '
+          + 'corrected: the marketplace fee is a DAO-governed parameter (it had moved 3% -> 2%) and the balance check '
+          + 'needed an epsilon, since balances are IEEE-754 doubles.',
+        status: 'fixed — 122/122, 133/133, 81/81 and all session checks now pass',
+      },
+      {
+        id: 'F5',
+        severity: 'low',
+        title: 'glitch-hunt.js asserted against the session cache instead of the session rule',
+        detail:
+          'The "a replaced session is rejected" probe called issueUserSession() inside the probe process, so the '
+          + 'SERVER\'s 30-second validation cache was never invalidated — revocations are announced in-process. The '
+          + 'probe therefore measured the cache, not the invariant, and reported a failure while the rule was in fact '
+          + 'holding (test-session-flows.js proves the same rule through the real sign-in path, where the announcement '
+          + 'does fire).',
+        fix:
+          'Split into two assertions: the instant ground truth (the displaced Session row is stamped revoked and the '
+          + 'account pointer has moved), then the API answer after the cache TTL has elapsed.',
+        status: 'fixed',
+      },
+      {
+        id: 'F6',
+        severity: 'informational',
+        title: 'The Content-Security-Policy had never been observed enforcing',
+        detail:
+          'H8 was recorded as "mitigated — pending live browser verification (browser tooling was disconnected)". The '
+          + 'policy had been written conservatively but never seen working.',
+        fix:
+          'Verified in a real browser: the app renders, /dashboard and /assessment correctly redirect to /login with '
+          + 'no session, and an injected `script src="https://attacker.example.invalid/x.js"` is refused — the browser '
+          + 'logs a real violation against `script-src \'self\' \'unsafe-inline\'`. The only console error on the page '
+          + 'is that blocked injection. No application errors.',
+        status: 'verified — H8 is no longer pending',
+      },
+      {
+        id: 'F7',
+        severity: 'low',
+        title: 'The client origin had no framing protection at all',
+        detail:
+          'Manual action 8 was correct that `frame-ancestors` cannot be delivered in a <meta> tag — it is ignored '
+          + 'there. Helmet sets it for the API origin, so until now the APP origin could be iframed by any site '
+          + '(clickjacking), and the closest thing to production — `vite preview` — had no headers either.',
+        fix:
+          'vite.config.js now sends X-Frame-Options: DENY, Content-Security-Policy: frame-ancestors \'none\', '
+          + 'X-Content-Type-Options: nosniff and Referrer-Policy on both `vite dev` and `vite preview`. Confirmed '
+          + 'present on a live response. CSP policies are enforced as an intersection, so the header adds exactly this '
+          + 'one restriction and cannot loosen the existing meta policy.',
+        status: 'fixed for dev and preview — a production static host must send the same headers',
+      },
+      {
+        id: 'F8',
+        severity: 'informational',
+        title: 'Line endings were unnormalised, which can silently break CI',
+        detail:
+          'There was no .gitattributes, so line endings depended on whichever machine last touched a file. This only '
+          + 'matters now that CI exists: GitHub Actions runs `run:` blocks through bash on Linux, and under CRLF a '
+          + 'trailing backslash escapes a carriage return instead of continuing the line, so a multi-line command fails '
+          + 'with a syntax error that looks like a workflow bug.',
+        fix: 'Added .gitattributes pinning LF for source, config and workflow files, and marking binaries binary.',
+        status: 'fixed',
+      },
+      {
+        id: 'F9',
+        severity: 'low',
+        title: 'The load-shedding guard — and the syntax gate — had no automated coverage',
+        detail:
+          'utils/floodGuard.js decides whether a request is served, refused as too large, or shed as "busy". It had zero automated tests: bodyBudget() and rejectOversized() were reachable only via test-ddos-resilience.js, which needs a live API and a 320 MB flood. A regression there could not fail anything until the server was genuinely under attack. Separately, `npm run check` was a hand-written list of 47 `node --check` invocations, and the list had drifted: floodGuard.js, dailyScheduleSlots.js and securityAudit.js were all absent, so a syntax error in any of them would have reached a review.',
+        fix:
+          'Added Test File/flood-guard.test.js: budget shedding with 503 + Retry-After, reservation release on both '
+          + '\'finish\' and \'close\' (an aborted upload must not permanently drain the budget and self-inflict a DoS), '
+          + '413 from Content-Length without reading the body, and the full-response-delivery regression. Replaced the '
+          + 'check script with server/scripts/check-syntax.js, which walks the tree — 201 files now, versus 47 — so the '
+          + 'gate cannot go stale again. Verified it genuinely fails: it was run against a deliberately broken file and '
+          + 'reported the file, the error and exit 1.',
+        status: 'fixed',
+      },
+      {
+        id: 'F10',
+        severity: 'informational',
+        title: 'A fix that measurement did not support was removed rather than kept',
+        detail:
+          'The flood suite intermittently counted ECONNRESETs, and the existing code comment claimed the refusal was '
+          + 'being swallowed because the refused request body was never drained. Acting on that, sendAndClose() was '
+          + 'changed to resume the socket. An A/B then showed the change did nothing: with and without it, a client '
+          + 'pushing a 4 MB body against a 64 KB cap received a byte-for-byte IDENTICAL, complete 218-byte 413, followed '
+          + 'by an ECONNRESET in both cases. The reset is the server correctly refusing the rest of a stream it has '
+          + 'already answered; draining it would mean performing the upload work the guard exists to prevent.',
+        fix:
+          'Reverted. The drain bought nothing and cost an unbounded read of a rejected body. The regression test now '
+          + 'pins the real invariant instead — that the complete response, matching its own declared Content-Length, '
+          + 'reaches the client — and the module carries a note recording the measurement so the wrong theory is not '
+          + 're-derived later.',
+        status: 'corrected — the proposed fix was wrong and was backed out',
+      },
+    ],
+    reVerification: {
+      serverUnitTests: 'PASS — 990/990, 0 skipped, exits cleanly (originally 796 with 40 silently skipped)',
+      syntaxCheck: 'PASS — npm run check: 201 source files, and proven to fail on a deliberately broken file',
+      clientUnitTests: 'PASS — 299/299',
+      glitchHunt: 'PASS — 122/122',
+      glitchHuntWeb3: 'PASS — 133/133',
+      web3Flows: 'PASS — 81/81',
+      sessionFlows: 'PASS — all checks',
+      subscriptionFlows: 'PASS — exit 0',
+      subscriptionAdmin: 'PASS — 66/66',
+      subscriptionTeams: 'PASS — 54/54',
+      ddosResilience: 'PASS — 3432 requests, 0 5xx, 0 connection errors, 0 timeouts, recovered unaided',
+      adminUserIsolation: 'PASS — 13/13',
+      supportChat: 'PASS — 74/74',
+      blockchainMonitor: 'PASS — all subsystems HEALTHY',
+      syntaxCheck: 'PASS — npm run check',
+      lint: 'PASS — eslint: 0 errors',
+      productionBuild: 'PASS — vite build, PWA service worker generated',
+      dependencyAudit: 'PASS — npm audit: 0 vulnerabilities (server and client, prod + dev)',
+      liveBrowser: 'PASS — app renders, routes guard correctly, CSP observed enforcing, no app console errors',
+      secretSweep: 'PASS — no hash or TOTP-seed shaped values in tracked docs; server/.env is untracked',
+    },
+  },
 
   verification: {
     unitTests: 'PASS — node --test "Test File/*.test.js"',
@@ -244,9 +448,8 @@ const SECURITY_AUDIT = {
     'Purge secrets from git history (history rewrite) — or assume they are known, since the remote is public.',
     'Decide whether this repository should be public at all.',
     'OPERATIONAL: if this API runs behind a reverse proxy or load balancer, set TRUST_PROXY=true — otherwise every client resolves to the proxy address and IP lockouts bucket all users together.',
-    'Serve frame-ancestors / X-Frame-Options as HTTP headers for the client origin (a <meta> tag cannot carry them).',
-    'Verify the new Content-Security-Policy in a live browser (browser tooling was unavailable during this audit).',
-    'Re-run the 30-item audit after rotation and after CI is in place.',
+    'OPERATIONAL: the hardened response headers now cover `vite dev` and `vite preview` only. Whoever serves the production dist/ must send X-Frame-Options and Content-Security-Policy: frame-ancestors \'none\' as real headers — there is no host config in this repository to do it.',
+    'Keep the new CI green. `npm audit` is now a gate, which is the only reason the nodemailer advisories were caught at all; do not let it be skipped or made non-blocking.',
   ],
 
   disclaimer:

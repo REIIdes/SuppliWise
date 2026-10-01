@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
-import { saveAssessment, getRecommendations, saveAssessmentResults, getPriorityStatus, getToken, getStoredUser } from '../api';
+import { saveAssessment, getRecommendations, saveAssessmentResults, getPriorityStatus, getCurrentSupplements, getToken, getStoredUser } from '../api';
+import { prefillSupplements } from '../utils/supplementPrefill.js';
+import { isDeadHour, countdownTo, DEAD_HOURS } from '../utils/slotSchedule.js';
+import useNow from '../hooks/useNow';
 import { useSubscription, SUBSCRIPTION_EVENT } from '../hooks/useSubscription';
 import './AssessmentPage.css';
 
@@ -1508,7 +1511,7 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
 }
 
 // ── Step 4: Lifestyle & Medical Information ───────────────────────────────
-function Step4Lifestyle({ data, onChange, errors, isReadOnly = false }) {
+function Step4Lifestyle({ data, onChange, errors, isReadOnly = false, supplementsAutoFilled = false }) {
   const toggleLifestyle = (habit) => {
     const current = data.lifestyleHabits || [];
     if (habit === 'None') {
@@ -1674,6 +1677,14 @@ function Step4Lifestyle({ data, onChange, errors, isReadOnly = false }) {
             </label>
           ))}
         </div>
+        {/* Explains an answer the user did not type, so a pre-selected "Yes"
+            never looks like a stuck form or a default nobody can clear. */}
+        {supplementsAutoFilled && data.takingSupplements === 'Yes' && (
+          <p className="field-hint-text">
+            Pre-filled from your current supplement plan. Edit the list below or
+            choose “No” if you have stopped taking them.
+          </p>
+        )}
         {/* Conditional input - If Yes */}
         {data.takingSupplements === 'Yes' && (
           <textarea
@@ -2105,6 +2116,105 @@ function AssessmentPage() {
 
   const [isReadOnly] = useState(routeReadOnly);
 
+  /* ── The assessment is closed during the dead hours ──────────────────────
+     Between midnight and 4:00 AM the whole form is locked, not just its submit
+     button. Deliberately separate from `isReadOnly`, which means "history view"
+     and swaps the footer button for "Back to History" — the wrong control
+     entirely for someone part-way through their own assessment.
+
+     The draft is NOT touched: the existing sessionStorage draft stays exactly as
+     it was, so a user who starts an assessment at 11 PM and comes back at 4 AM
+     finds their answers intact. That matters more than it sounds — a four-hour
+     block is long enough to lose someone's place otherwise.
+
+     Client-side only, per the decision: this is a guard rail, not a security
+     boundary. The server still accepts the write, because the server has no
+     timezone and would lock out users whose local night is the server's day. */
+  const now = useNow();
+  const deadHours = isDeadHour(now);
+  const deadHoursCountdown = countdownTo(DEAD_HOURS.end, now);
+
+  useEffect(() => {
+    if (!deadHours) return undefined;
+
+    // Same approach as the read-only view: disable the real controls rather
+    // than layering an overlay, so a keyboard user cannot tab into a field that
+    // silently ignores what they type.
+    const container = document.querySelector('.assessment-container');
+    if (!container) return undefined;
+
+    const controls = container.querySelectorAll('input, select, textarea');
+    const previousDisabled = Array.from(controls).map((c) => c.disabled);
+    controls.forEach((c) => { c.disabled = true; c.setAttribute('aria-disabled', 'true'); });
+
+    const editable = container.querySelectorAll('[contenteditable]');
+    const previousContentEditable = Array.from(editable).map((c) => c.getAttribute('contenteditable'));
+    editable.forEach((c) => c.setAttribute('contenteditable', 'false'));
+
+    // Step navigation, so they cannot walk to another step either.
+    const navButtons = container.querySelectorAll('.step-body button');
+    const previousNavDisabled = Array.from(navButtons).map((b) => b.disabled);
+    navButtons.forEach((b) => { b.disabled = true; });
+
+    return () => {
+      controls.forEach((c, i) => {
+        c.disabled = previousDisabled[i];
+        c.removeAttribute('aria-disabled');
+      });
+      navButtons.forEach((b, i) => { b.disabled = previousNavDisabled[i]; });
+      editable.forEach((c, i) => {
+        const previous = previousContentEditable[i];
+        if (previous == null) c.removeAttribute('contenteditable');
+        else c.setAttribute('contenteditable', previous);
+      });
+    };
+  }, [deadHours]);
+
+  /* ── Pre-fill "Currently Taking Supplements?" ──────────────────────────
+     A returning user is already on a plan built from a previous assessment, and
+     asking them to retype it invites a contradiction: answer "No" here while
+     their tracker shows five morning supplements, and the new recommendations
+     are generated as though they were starting from nothing.
+
+     Three rules, all of which matter:
+       1. Only ever upgrades an UNANSWERED question to "Yes" — a draft that
+          already says "No" (they may have stopped) is never overwritten, or
+          the pre-fill would undo the user's own earlier correction.
+       2. Never on a read-only history view, and never when viewing a past
+          assessment: those render someone else's saved answers.
+       3. Best-effort. A failed fetch leaves the question exactly as it was;
+          an unanswered question is recoverable, a thrown render is not. */
+  const [supplementsAutoFilled, setSupplementsAutoFilled] = useState(false);
+  // Guards the one-shot pre-fill. A ref, not state: the effect below must run
+  // exactly once per mount, and a state write here would re-trigger it.
+  const autoFillCheckedRef = useRef(false);
+  useEffect(() => {
+    if (routeReadOnly || routeAssessment) return undefined;
+    if (autoFillCheckedRef.current) return undefined;
+    if (!getToken()) return undefined;
+
+    autoFillCheckedRef.current = true;
+    let cancelled = false;
+
+    getCurrentSupplements()
+      .then(data => {
+        if (cancelled) return;
+        setFormData(prev => {
+          const patch = prefillSupplements(prev.takingSupplements, data);
+          if (patch.takingSupplements) setSupplementsAutoFilled(true);
+          // Object.keys is empty when the pre-fill declined (already answered,
+          // or nothing detected) — returning `prev` keeps the object identity
+          // stable so this cannot loop.
+          return Object.keys(patch).length > 0 ? { ...prev, ...patch } : prev;
+        });
+      })
+      .catch(() => {
+        // Silent by design: the question stays blank and the user answers it.
+      });
+
+    return () => { cancelled = true; };
+  }, [routeReadOnly, routeAssessment]);
+
   // Priority gate — a new assessment is blocked while a Priority review is open
   // (read-only history views are never blocked). Re-checks instantly when the
   // subscription changes: Premium upgrade lifts the "no flag" state for the
@@ -2308,6 +2418,17 @@ function AssessmentPage() {
 
   const handleSubmit = async () => {
     setSubmitError('');
+
+    // Belt and braces behind the disabled button: a disabled control can still
+    // be activated programmatically, and the clock is re-read here rather than
+    // trusting whatever the render saw. Cheap, and it closes the gap where the
+    // page sat open across midnight.
+    if (isDeadHour(new Date())) {
+      setSubmitError(`Assessments reopen at ${DEAD_HOURS.endsAt}. Your answers are saved — come back then.`);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
     const stepErrors = validateStep(step, formData);
     if (Object.keys(stepErrors).length > 0) {
       setErrors(stepErrors);
@@ -2483,7 +2604,15 @@ function AssessmentPage() {
           {step === 1 && <Step1 data={formData} onChange={handleChange} errors={errors} />}
           {step === 2 && <Step2 data={formData} onChange={handleChange} errors={errors} />}
           {step === 3 && <Step3Combined data={formData} onChange={handleChange} errors={errors} symptomRowRefs={symptomRowRefs} />}
-          {step === 4 && <Step4Lifestyle data={formData} onChange={handleChange} errors={errors} isReadOnly={isReadOnly} />}
+          {step === 4 && (
+            <Step4Lifestyle
+              data={formData}
+              onChange={handleChange}
+              errors={errors}
+              isReadOnly={isReadOnly}
+              supplementsAutoFilled={supplementsAutoFilled}
+            />
+          )}
 
           <div className="assessment-footer">
             <button className="btn-cancel" onClick={handleBack}>
@@ -2500,9 +2629,22 @@ function AssessmentPage() {
                   Back to History
                 </button>
               ) : (
-                <button className="btn-next" onClick={handleSubmit} disabled={submitting}>
-                  Get Recommendations →
-                </button>
+                deadHours ? (
+                  <div className="assessment-snoozed">
+                    <button className="btn-next" type="button" disabled>
+                      Reopens at {DEAD_HOURS.endsAt}
+                    </button>
+                    <p className="assessment-snoozed__note">
+                      Assessments are closed between midnight and {DEAD_HOURS.endsAt}.
+                      {!deadHoursCountdown.isDue && ` Back in ${deadHoursCountdown.text}.`}
+                      {' '}Your answers are saved.
+                    </p>
+                  </div>
+                ) : (
+                  <button className="btn-next" onClick={handleSubmit} disabled={submitting}>
+                    Get Recommendations →
+                  </button>
+                )
               )
             )}
           </div>

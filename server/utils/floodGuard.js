@@ -135,6 +135,15 @@ function sendAndClose(res, status, payload) {
   res.set('Content-Length', Buffer.byteLength(body));
   res.set('Connection', 'close');
   res.write(body);
+  // NOTE: an earlier revision of this comment claimed the close also needed the
+  // refused request's unread bytes DRAINED (`res.req.socket.resume()`) so the
+  // socket would close with FIN rather than RST. That was measured and it is not
+  // true: with the drain and without it, a client pushing a 4 MB body against a
+  // 64 KB cap received an IDENTICAL, COMPLETE 413 in both cases — and an
+  // ECONNRESET afterwards in both cases. That reset is the server correctly
+  // refusing the rest of a stream it has already answered; draining it would mean
+  // performing the upload work this guard exists to avoid. Removed deliberately,
+  // and Test File/flood-guard.test.js now pins the real invariant.
   const timer = setTimeout(() => res.end(), CLOSE_GRACE_MS);
   // If the peer goes away first, stop holding the timer open.
   res.on('close', () => clearTimeout(timer));

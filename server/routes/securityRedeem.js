@@ -165,6 +165,10 @@ module.exports = function registerSecurityRedeem(router, { sensitiveLimiter }) {
         age: user.age,
         gender: user.gender,
         profilePicture: safePictureValue(user.profilePicture),
+        // Sent for the same reason, and it used to be missing here while every
+        // other sign-in path sent it: an omitted field is indistinguishable
+        // from "none" once the client caches this response as its profile.
+        bannerPicture: safePictureValue(user.bannerPicture),
         twoFactorEnabled: user.twoFactorEnabled,
         twoFactorMethod: user.twoFactorMethod,
         subscriptionActive: user.subscriptionActive,

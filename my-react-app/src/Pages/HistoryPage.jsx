@@ -6,6 +6,8 @@ import { exportResultsToPDF } from '../utils/exportPDF';
 import { PLAN_LABELS, historyLimitForStoredPlan } from '../utils/plan';
 import { safeUrl } from '../utils/safeUrl';
 import { useSubscription, SUBSCRIPTION_EVENT } from '../hooks/useSubscription';
+import { isDeadHour, DEAD_HOURS } from '../utils/slotSchedule.js';
+import useNow from '../hooks/useNow';
 import UpgradeModal from '../Components/UpgradeModal/UpgradeModal';
 import './HistoryPage.css';
 
@@ -484,6 +486,13 @@ function HistoryPage() {
   const getTab = (id) => activeTab[id] || 'assessment';
   const setTab = (id, tab) => setActiveTab(prev => ({ ...prev, [id]: tab }));
 
+  // "Start new" leads to the assessment form, which is closed between midnight
+  // and 4:00 AM. Derived here rather than passed in, so the History page cannot
+  // be the one route that ignores the rule. Named `clock` because this component
+  // already keeps a `now` for the server's clock offset (above).
+  const clock = useNow();
+  const deadHours = isDeadHour(clock);
+
   // ── Derived view model ───────────────────────────────────────────────
   // The "active" record is the newest one still in force. The server defines
   // it the same way (findActiveAssessment filters expired rows out before
@@ -569,15 +578,6 @@ function HistoryPage() {
               answers, results and full plan.
             </p>
           </div>
-          <div className="history-header-actions">
-            <button className="btn-primary btn-primary-lg" onClick={() => navigate('/assessment')}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <line x1="12" y1="5" x2="12" y2="19"/>
-                <line x1="5" y1="12" x2="19" y2="12"/>
-              </svg>
-              New Assessment
-            </button>
-          </div>
         </div>
 
         {activeId && (
@@ -593,8 +593,17 @@ function HistoryPage() {
               <strong>Your latest assessment is active.</strong> It powers your Dashboard,
               Track Intake and Insights. Complete a new assessment to update it.
             </span>
-            <button className="active-info-action" onClick={() => navigate('/assessment')}>
-              Start new
+            <button
+              className="active-info-action"
+              onClick={() => { if (!deadHours) navigate('/assessment'); }}
+              // Assessments are closed between midnight and 4:00 AM, and this
+              // button leads straight to the form. Disabling it here keeps the
+              // rule consistent with the dashboard card and the form itself,
+              // rather than letting this one route through.
+              disabled={deadHours}
+              title={deadHours ? `Closed between midnight and ${DEAD_HOURS.endsAt}` : undefined}
+            >
+              {deadHours ? `Closed until ${DEAD_HOURS.endsAt}` : 'Start new'}
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <polyline points="9 18 15 12 9 6"/>
               </svg>

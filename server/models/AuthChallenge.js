@@ -26,9 +26,11 @@ const mongoose = require('mongoose');
  *
  * WHAT IS BOUND
  * -------------
- *   flow  — 'register' | 'login'. A registration challenge can never be spent
- *           on an assertion, or an attacker could mint a credential for an
- *           account they merely asked about.
+ *   flow  — 'register' | 'login' | 'reset'. A registration challenge can never be
+ *           spent on an assertion, or an attacker could mint a credential for an
+ *           account they merely asked about. A sign-in challenge can never be
+ *           spent on a password reset, or a captured sign-in assertion would
+ *           become a password change — so the reset path mints its own.
  *   user  — the account the challenge was issued FOR, on the registration path.
  *           Without it, a challenge handed to Account A could be completed and
  *           stored against whoever answered it.
@@ -57,7 +59,12 @@ const challengeSchema = new mongoose.Schema(
     },
     flow: {
       type: String,
-      enum: ['register', 'login'],
+      // 'reset' was added when password recovery gained a passkey path. It is
+      // NOT optional: the flow is part of the challenge's filter, so a challenge
+      // minted for sign-in cannot be spent on a password change and vice versa.
+      // Without the separation, an attacker who captured a login assertion could
+      // redeem it here and change the password it authenticated.
+      enum: ['register', 'login', 'reset'],
       required: true,
     },
     // Set for 'register' only. Null on the login path BY DESIGN.

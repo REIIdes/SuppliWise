@@ -4,11 +4,12 @@ const router = express.Router();
 const Assessment = require('../models/Assessment');
 const { protect } = require('../middleware/auth');
 const { requireFeature } = require('../utils/entitlements');
+const { completeWithFallback } = require('../utils/aiRouter');
 const {
   ChatInputError,
   normalizeChatRequest,
   buildRecommendationContext,
-  extractAssistantReply,
+  MAX_REPLY_LENGTH,
 } = require('../utils/chatSafety');
 
 // Chat consumes a paid provider quota, so it gets its own account-scoped
@@ -206,46 +207,40 @@ router.post('/', protect, requireFeature('chat'), chatLimiter, async (req, res) 
       { role: 'user', content: q },
     ];
 
-    // ── OpenRouter (DeepSeek V4 Flash) ─────────────────────────────────────
-    const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-    if (OPENROUTER_API_KEY && OPENROUTER_API_KEY !== 'your_openrouter_api_key_here') {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15000);
-      try {
-        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: 'deepseek/deepseek-v4-flash',
-            messages,
-            max_tokens: 700,
-            temperature: 0.7,
-            stream: false,
-            reasoning: { effort: 'none' },
-          }),
-          signal: controller.signal,
-        });
-        if (response.ok) {
-          const data = await response.json();
-          const reply = extractAssistantReply(data.choices?.[0]?.message);
-          if (reply) return res.json({ reply, source: 'openrouter' });
-        } else {
-          const errText = await response.text();
-          console.error('[chat] OpenRouter error:', response.status, errText.substring(0, 200));
-        }
-      } catch (error) {
-        console.error('[chat] OpenRouter failed:', error.name, error.message);
-      } finally {
-        // Keep the abort timer alive through response.json()/text(); clearing
-        // it as soon as fetch resolves leaves a stalled provider body hanging.
-        clearTimeout(timeout);
-      }
+    // ── Chat AI, walking the routing table's provider chain ───────────────
+    // The routing table names the provider, the model AND the fallback, and
+    // this route no longer knows any vendor. That is the point: it used to
+    // hard-code `deepseek/deepseek-v4-flash` while the admin panel reported
+    // `deepseek/deepseek-v4-flash-0731` for the same key, with nothing to catch
+    // the disagreement.
+    //
+    // The fallback is not a nicety. A provider key can be valid and still
+    // unable to serve a single completion (Anthropic answers an exhausted
+    // balance as a 400), so chat walks to the next provider before it gives up.
+    // Only when the whole chain is exhausted does the canned reply run.
+    const result = await completeWithFallback('chat', {
+      messages,
+      maxTokens: 700,
+      temperature: 0.7,
+      timeoutMs: 15000,
+      // Preserved from the hand-written body this route used to send. It is an
+      // OpenRouter-GATEWAY field, so it is scoped by provider key rather than
+      // applied to every OpenAI-shaped wire — Anthropic rejects it as unknown,
+      // and so would any other OpenAI-compatible vendor.
+      extraBody: (target) => (target.provider === 'openrouter'
+        ? { reasoning: { effort: 'none' } }
+        : null),
+    });
+
+    if (result.ok && result.text) {
+      // `source` names the provider that ACTUALLY answered, so a client cannot
+      // be told "anthropic" by a reply that OpenRouter produced.
+      return res.json({ reply: result.text.slice(0, MAX_REPLY_LENGTH), source: result.provider });
     }
 
-    // ── Fallback — only if OpenRouter is completely unreachable ───────────
+    // Every provider failed. Log WHICH ones and why — a silent fall-through to
+    // the canned reply is how an expired key goes unnoticed for weeks.
+    console.error('[chat] no provider answered:', JSON.stringify(result.attempts || []));
     return res.json({ reply: offlineFallback(q), source: 'fallback' });
 
   } catch (error) {

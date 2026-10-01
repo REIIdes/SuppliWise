@@ -2,82 +2,41 @@ import { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import { exportResultsToPDF } from '../utils/exportPDF';
-import { getSupplementDetail, checkFeature, getStoredUser } from '../api';
+import { checkFeature } from '../api';
 import { safeUrl } from '../utils/safeUrl';
 import { useSubscription, SUBSCRIPTION_EVENT } from '../hooks/useSubscription';
 import UpgradeModal from '../Components/UpgradeModal/UpgradeModal';
+import { EvidenceInfoModal, SupplementDetailModal } from '../Components/SupplementDetail/SupplementDetail';
+import {
+  DETAIL_MODE_KEY,
+  cleanTriggeredBy,
+  confidenceOf,
+  displayEvidence,
+  displayReason,
+  fixChars,
+  foodPills,
+  hasInteractions,
+  supplementIcon,
+} from '../utils/recommendationView';
 import './ResultsPage.css';
 
-// Normalize special characters that may render as ? in some environments
-function fixChars(str) {
-  if (!str) return str;
-  return String(str)
-    // Fix corrupted em/en dash stored as literal '?' in DB (e.g. "Week 1 ? Build", "Hotline ? Call")
-    .replace(/([a-zA-Z0-9])\s?\?\s?([a-zA-Z0-9])/g, '$1 - $2')
-    // Standard Unicode em/en dash
-    .replace(/[\u2013\u2014]/g, ' - ')
-    // Smart quotes
-    .replace(/[\u2018\u2019]/g, "'")
-    .replace(/[\u201C\u201D]/g, '"')
-    // Ellipsis
-    .replace(/\u2026/g, '...')
-    // Strip remaining non-ASCII (keep tab/LF/CR + printable Latin-1)
-    // eslint-disable-next-line no-control-regex -- character class intentionally covers control range
-    .replace(/[^\x09\x0A\x0D\x20-\xFF]/g, '');
-}
+/* The reading of a recommendation — priority casing, name identity, mojibake
+   repair, citation filtering, food splitting, the detail-mode preference —
+   used to be written out three times across this file, HistoryPage and
+   RecommendationsPage. Three copies of one question is three answers waiting
+   to disagree, which is how the same supplement sorted as High here and Medium
+   on the plan. It is all in utils/recommendationView.js now; the card below is
+   presentation only. */
 
-// Detect placeholder/template evidence text the AI failed to fill in
-function isPlaceholderEvidence(text) {
-  if (!text) return true;
-  const t = String(text).toLowerCase();
-  return (
-    t.includes('author et al') ||
-    t.includes('(year)') ||
-    t.includes('xxxxxxx') ||
-    t.includes('source 2 if applicable') ||
-    t.includes('brief finding') ||
-    t.includes('journal name') ||
-    t.includes('cite 1-2') ||
-    t.length < 15
-  );
-}
-
-// Sanitize triggeredBy — normalize severity labels in parentheses to only Mild/Moderate/Severe
-function cleanTriggeredBy(str) {
-  if (!str) return str;
-  // Replace any parenthetical severity that isn't Mild/Moderate/Severe with just the word
-  return fixChars(str).replace(/\(([^)]+)\)/g, (match, inner) => {
-    const normalized = inner.trim();
-    if (/^(Mild|Moderate|Severe)$/i.test(normalized)) return `(${normalized})`;
-    // Map common AI paraphrases back to proper labels
-    if (/significant|severe|critical|extreme/i.test(normalized)) return '(Severe)';
-    if (/moderate|medium|notable|marked/i.test(normalized)) return '(Moderate)';
-    if (/mild|slight|minor|low/i.test(normalized)) return '(Mild)';
-    // If not a severity label, keep as-is but run fixChars
-    return `(${fixChars(normalized)})`;
-  });
-}
-const priorityColor = { High: '#16a34a', Medium: '#d97706', Low: '#374151' };const priorityIcon = { High: '🔴', Medium: '🟡', Low: '🟢' };
-
-const SUPPLEMENT_ICONS = {
-  magnesium: '🧲', 'vitamin d': '☀️', 'vitamin b': '💉', 'b12': '💉',
-  omega: '🐟', 'fish oil': '🐟', iron: '🔴', zinc: '🛡️',
-  'vitamin c': '🍊', calcium: '🦴', coq10: '❤️', probiotic: '🦠',
-  ashwagandha: '🌿', "lion's mane": '🍄', curcumin: '🟡', berberine: '🌱',
-  selenium: '⚡', collagen: '💪', creatine: '💪', melatonin: '🌙',
-  'vitamin k': '🥦', riboflavin: '🟠', theanine: '🍵', glucosamine: '🦴',
-};
-
-function getSupplementIcon(name) {
-  const n = String(name || '').toLowerCase();
-  for (const [key, icon] of Object.entries(SUPPLEMENT_ICONS)) {
-    if (n.includes(key)) return icon;
-  }
-  return '💊';
-}
+// The priority chip reads the canonical capitalization, so a card cannot
+// claim High while the plan records Medium.
+const priorityColor = { High: '#16a34a', Medium: '#d97706', Low: '#374151' };
+const priorityIcon = { High: '🔴', Medium: '🟡', Low: '🟢' };
 
 function ConfidenceBar({ score, delay = 0 }) {
-  const numericScore = Math.max(0, Math.min(100, Number(score) || 0));
+  // Clamped by the shared reader, so an out-of-range or non-numeric score
+  // can never reach the CSS width below as `width: NaN%`.
+  const numericScore = confidenceOf({ confidenceScore: score }) ?? 0;
   const [width, setWidth] = useState(0);
   const [displayed, setDisplayed] = useState(0);
   const rafRef = useRef(null);
@@ -125,82 +84,12 @@ function ConfidenceBar({ score, delay = 0 }) {
   );
 }
 
-// Map generic food category words to specific examples
-const FOOD_SPECIFICS = {
-  'fatty fish':       'fatty fish (salmon, tuna, sardines, mackerel)',
-  'leafy greens':     'leafy greens (spinach, kale, Swiss chard)',
-  'leafy green':      'leafy greens (spinach, kale, Swiss chard)',
-  'nuts':             'nuts (almonds, cashews, walnuts, pumpkin seeds)',
-  'dairy':            'dairy (Greek yogurt, cheddar cheese, whole milk)',
-  'dairy products':   'dairy (Greek yogurt, cheddar cheese, whole milk)',
-  'citrus':           'citrus (oranges, grapefruit, kiwi)',
-  'citrus fruits':    'citrus (oranges, grapefruit, kiwi)',
-  'legumes':          'legumes (lentils, chickpeas, black beans)',
-  'whole grains':     'whole grains (oats, brown rice, quinoa)',
-  'lean meats':       'lean meats (chicken breast, turkey, lean beef)',
-  'lean meat':        'lean meats (chicken breast, turkey, lean beef)',
-  'red meat':         'red meat (beef, lamb, bison)',
-  'shellfish':        'shellfish (oysters, clams, crab, shrimp)',
-  'seeds':            'seeds (pumpkin seeds, sunflower seeds, chia seeds)',
-  'berries':          'berries (blueberries, strawberries, raspberries)',
-  'cruciferous vegetables': 'cruciferous vegetables (broccoli, Brussels sprouts, cauliflower)',
-  'organ meats':      'organ meats (beef liver, chicken liver)',
-  'fermented foods':  'fermented foods (kefir, kimchi, sauerkraut, miso)',
-};
-
-function expandFoodItem(item) {
-  const text = String(item || '');
-  const lower = text.toLowerCase().trim();
-  // If already expanded (has parentheses with examples), don't double-expand
-  if (text.includes('(') && text.includes(')')) return text;
-  for (const [key, expanded] of Object.entries(FOOD_SPECIFICS)) {
-    if (lower === key || lower.startsWith(key + ' ') || lower.endsWith(' ' + key)) {
-      // Preserve original casing of first letter
-      return expanded.charAt(0).toUpperCase() + expanded.slice(1);
-    }
-  }
-  return text;
-}
-
-// Strip sentence-like fragments from food strings (AI sometimes returns prose)
-function sanitizeFoods(str) {
-  if (!str) return '';
-  const source = String(str);
-  // Remove trailing sentence fragments that start with connective words
-  // e.g. ", such as salmon and sardines, are naturally rich in omega-3 fatty acids"
-  const cleaned = source
-    .replace(/,?\s*(such as|which are|are naturally|naturally rich|found in|including)[^,;]*/gi, '')
-    .replace(/,?\s*are\s+[a-z].*$/gi, '')
-    .trim()
-    .replace(/,\s*$/, ''); // remove trailing comma
-  return cleaned || source;
-}
-
-// Split food string on commas/semicolons that are NOT inside parentheses
-function splitFoods(str) {
-  const items = [];
-  let current = '';
-  let depth = 0;
-  for (const ch of String(str || '')) {
-    if (ch === '(') { depth++; current += ch; }
-    else if (ch === ')') { depth = Math.max(0, depth - 1); current += ch; }
-    else if ((ch === ',' || ch === ';') && depth === 0) {
-      if (current.trim()) items.push(current.trim());
-      current = '';
-    } else {
-      current += ch;
-    }
-  }
-  if (current.trim()) items.push(current.trim());
-  return items;
-}
-
-// Parse food string into individual examples for display
+/* Food sources as pills, so four foods read as four things to buy. The
+   splitting rules — parentheses, trailing rationale, category expansion,
+   duplicate collapse — all live in the shared helper now. */
 function FoodExamples({ foods }) {
-  if (!foods) return null;
-  const cleaned = sanitizeFoods(foods);
-  const items = splitFoods(cleaned).map(f => expandFoodItem(f)).filter(Boolean);
-  const display = items.length > 0 ? items : [expandFoodItem(cleaned)];
+  const display = foodPills(foods);
+  if (display.length === 0) return null;
   return (
     <div className="food-examples">
       {display.map((item, i) => (
@@ -210,264 +99,16 @@ function FoodExamples({ foods }) {
   );
 }
 
-// ── Evidence Info Modal ──────────────────────────────────────────────────
-function EvidenceInfoModal({ onClose }) {
-  const overlayRef = useRef(null);
-
-  // Close on overlay click
-  const handleOverlayClick = (e) => {
-    if (e.target === overlayRef.current) onClose();
-  };
-
-  // Close on Escape key
-  useEffect(() => {
-    const handler = (e) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [onClose]);
-
-  // Prevent body scroll while modal is open
-  useEffect(() => {
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = ''; };
-  }, []);
-
-  return (
-    <div className="evidence-info-overlay" ref={overlayRef} onClick={handleOverlayClick}>
-      <div className="evidence-info-panel" role="dialog" aria-modal="true" aria-label="Evidence & References">
-        <div className="evidence-info-header">
-          <h3 className="evidence-info-title">Evidence & References</h3>
-          <button className="evidence-info-close" onClick={onClose} aria-label="Close">✕</button>
-        </div>
-
-        <div className="evidence-info-body">
-          <p className="evidence-info-intro">
-            To provide reliable and up-to-date recommendations, this system prioritizes:
-          </p>
-
-          <div className="evidence-info-checklist">
-            <div className="evidence-info-item">
-              <span className="evidence-info-check">✅</span>
-              <span>Priority: Peer-reviewed research from the last 2 years</span>
-            </div>
-            <div className="evidence-info-item">
-              <span className="evidence-info-check">✅</span>
-              <span>If unavailable: Supporting evidence from last 5 years when clinically relevant</span>
-            </div>
-            <div className="evidence-info-item">
-              <span className="evidence-info-check">✅</span>
-              <span>Before citing older landmark studies: Search for recent systematic reviews or meta-analyses that build upon them</span>
-            </div>
-            <div className="evidence-info-item">
-              <span className="evidence-info-check">✅</span>
-              <span>If no recent synthesis exists: Landmark studies or clinical guidelines still widely accepted (clearly labeled)</span>
-            </div>
-            <div className="evidence-info-item">
-              <span className="evidence-info-check">✅</span>
-              <span>Quality hierarchy: systematic reviews & meta-analyses, clinical guidelines, RCTs, observational studies</span>
-            </div>
-            <div className="evidence-info-item">
-              <span className="evidence-info-check">✅</span>
-              <span>APA-formatted references with PMID from PubMed, NIH, WHO, and recognized medical organizations</span>
-            </div>
-          </div>
-
-          <div className="evidence-info-disclaimer">
-            <span className="evidence-info-warning-icon">⚠️</span>
-            <p>
-              <strong>Important:</strong> Recommendations are AI-assisted and intended for informational purposes only. 
-              They should not replace professional medical advice, diagnosis, or treatment. Always consult a qualified 
-              healthcare professional before starting, stopping, or changing any supplement regimen.
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Supplement Detail Modal ──────────────────────────────────────────────
-// 30-day cache TTL shared by the in-memory + localStorage detail cache.
-const SDM_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-
-// Helpers: read/write localStorage with expiry (module scope — pure w.r.t. render)
-function readSdmCache(key) {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return null;
-    const { data, expiresAt } = JSON.parse(raw);
-    if (Date.now() > expiresAt) { localStorage.removeItem(key); return null; } // expired
-    return data;
-  } catch { return null; }
-}
-
-function writeSdmCache(key, data) {
-  try {
-    localStorage.setItem(key, JSON.stringify({ data, expiresAt: Date.now() + SDM_CACHE_TTL_MS }));
-  } catch { /* storage full — skip silently */ }
-}
-
-function SupplementDetailModal({ supplementName, assessmentId, context, cache, onClose }) {
-  // localStorage key — scoped to assessment ID so new assessments always fetch fresh from Groq
-  const storageKey = `sdm_${assessmentId}_${String(supplementName || 'supplement').toLowerCase().trim()}`;
-
-  // Resolve cache hits during init so cached details render instantly (no loading flash).
-  // Note: the shared in-memory session cache lives in a parent-owned ref on purpose.
-  const getCachedDetail = () => {
-    if (cache.current[storageKey]) return cache.current[storageKey];
-    const stored = readSdmCache(storageKey);
-    // eslint-disable-next-line react-hooks/immutability -- intentional shared session-cache warm on read
-    if (stored) cache.current[storageKey] = stored; // warm in-memory cache too
-    return stored;
-  };
-  const [detail, setDetail] = useState(getCachedDetail);
-  const [loading, setLoading] = useState(() => cache.current[storageKey] == null);
-  const [error, setError] = useState('');
-  const overlayRef = useRef(null);
-
-  useEffect(() => {
-    if (detail) return; // cache hit — nothing to fetch
-    let cancelled = false;
-
-    // Cache miss — call Groq
-    getSupplementDetail(supplementName, context)
-      .then(data => {
-        if (!cancelled) {
-          cache.current[storageKey] = data;
-          writeSdmCache(storageKey, data);
-          setDetail(data);
-          setLoading(false);
-        }
-      })
-      .catch(err => {
-        if (!cancelled) {
-          setError(err.message || 'Could not load details.');
-          setLoading(false);
-        }
-      });
-    return () => { cancelled = true; };
-  }, [supplementName, assessmentId, storageKey, context, cache, detail]);
-
-  // Close on overlay click
-  const handleOverlayClick = (e) => {
-    if (e.target === overlayRef.current) onClose();
-  };
-
-  // Close on Escape key
-  useEffect(() => {
-    const handler = (e) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [onClose]);
-
-  // Prevent body scroll while modal is open
-  useEffect(() => {
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = ''; };
-  }, []);
-
-  return (
-    <div className="sdm-overlay" ref={overlayRef} onClick={handleOverlayClick}>
-      <div className="sdm-panel" role="dialog" aria-modal="true" aria-label={`Details for ${supplementName}`}>
-        {/* Header */}
-        <div className="sdm-header">
-          <div className="sdm-header-left">
-            <span className="sdm-header-icon">{getSupplementIcon(supplementName)}</span>
-            <h2 className="sdm-title">{detail?.name || supplementName}</h2>
-          </div>
-          <button className="sdm-close" onClick={onClose} aria-label="Close">✕</button>
-        </div>
-
-        <div className="sdm-body">
-          {loading && (
-            <div className="sdm-loading">
-              <div className="sdm-spinner" />
-              <p>Loading supplement details…</p>
-            </div>
-          )}
-
-          {error && !loading && (
-            <div className="sdm-error">
-              <span>⚠️</span>
-              <p>{error}</p>
-            </div>
-          )}
-
-          {detail && !loading && (
-            <>
-              {/* Overview */}
-              {detail.overview && (
-                <p className="sdm-overview">{detail.overview}</p>
-              )}
-
-              {/* Key Benefits */}
-              {Array.isArray(detail.keyBenefits) && detail.keyBenefits.length > 0 && (
-                <div className="sdm-section">
-                  <h3 className="sdm-section-title">Key Benefits &amp; Use Cases</h3>
-                  <div className="sdm-benefits">
-                    {detail.keyBenefits.map((b, i) => (
-                      <div key={i} className="sdm-benefit-item">
-                        <span className="sdm-benefit-title">{b?.title || 'Benefit'}</span>
-                        <p className="sdm-benefit-desc">{b?.description || ''}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* How to Take */}
-              {Array.isArray(detail.howToTake) && detail.howToTake.length > 0 && (
-                <div className="sdm-section">
-                  <h3 className="sdm-section-title">How to Take It</h3>
-                  <div className="sdm-howtotake">
-                    {detail.howToTake.map((h, i) => (
-                      <div key={i} className="sdm-howtotake-item">
-                        <span className="sdm-howtotake-label">{h?.title || 'Instructions'}</span>
-                        <p className="sdm-howtotake-desc">{h?.description || ''}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Considerations & Safety */}
-              {Array.isArray(detail.considerations) && detail.considerations.length > 0 && (
-                <div className="sdm-section">
-                  <h3 className="sdm-section-title">Considerations &amp; Safety</h3>
-                  <ul className="sdm-considerations">
-                    {detail.considerations.map((c, i) => (
-                      <li key={i}>{c}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Availability */}
-              {detail.availability && (
-                <div className="sdm-section sdm-availability">
-                  <h3 className="sdm-section-title">Availability</h3>
-                  <p>{detail.availability}</p>
-                </div>
-              )}
-
-              {/* Disclaimer */}
-              <p className="sdm-disclaimer">{detail.disclaimer}</p>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function SupplementCard({ rec, index = 0, expanded, onToggle, onOpenDetail, detailMode = 'simplified', setShowEvidenceInfo }) {
-  const icon = getSupplementIcon(rec.name);
+  const icon = supplementIcon(rec.name);
   const pColor = priorityColor[rec.priority] || '#6b7280';
   const pIcon = priorityIcon[rec.priority] || '⚪';
 
-  // Choose which version of the text to display based on mode
-  const displayReason = detailMode === 'detailed' ? rec.reason : (rec.simplifiedReason || rec.reason);
-  const displayEvidence = detailMode === 'detailed' ? rec.evidence : (rec.simplifiedEvidence || rec.evidence);
+  // Which of the two explanations to show, and whether the citation is a real
+  // one or a template the model never filled in. Both decided by the shared
+  // reader, so this page and the recommendations page cannot disagree.
+  const reason = displayReason(rec, detailMode);
+  const evidence = displayEvidence(rec, detailMode);
 
   // Simplified mode: cleaner, bigger, friendlier UI
   if (detailMode === 'simplified') {
@@ -480,7 +121,7 @@ function SupplementCard({ rec, index = 0, expanded, onToggle, onOpenDetail, deta
         <h3 className="rec-simple-name">{rec.name}</h3>
         
         {/* What it does - large, easy to read */}
-        <p className="rec-simple-benefit">{fixChars(displayReason)}</p>
+        <p className="rec-simple-benefit">{reason}</p>
         
         {/* Dosage - simplified display */}
         <div className="rec-simple-dosage">
@@ -567,7 +208,7 @@ function SupplementCard({ rec, index = 0, expanded, onToggle, onOpenDetail, deta
         </div>
       )}
 
-      <p className="rec-reason">{fixChars(displayReason)}</p>
+      <p className="rec-reason">{reason}</p>
 
       <div className="rec-details">
         <div className="rec-detail">
@@ -585,7 +226,7 @@ function SupplementCard({ rec, index = 0, expanded, onToggle, onOpenDetail, deta
             <span>{rec.duration}</span>
           </div>
         )}
-        {rec.interactions && rec.interactions !== 'None identified' && (
+        {hasInteractions(rec.interactions) && (
           <div className="rec-detail rec-interaction">
             <span className="rec-detail-label">⚠ Interactions</span>
             <span>{rec.interactions}</span>
@@ -599,7 +240,7 @@ function SupplementCard({ rec, index = 0, expanded, onToggle, onOpenDetail, deta
 
       {expanded && (
         <div className="rec-expanded">
-          {displayEvidence && !isPlaceholderEvidence(displayEvidence) && (
+          {evidence && (
             <div className={`rec-expanded-section ${detailMode === 'simplified' ? 'rec-expanded-simple-evidence' : 'rec-expanded-evidence'}`}>
               <span className="rec-expanded-label">
                 {detailMode === 'simplified' ? '✓ Backed by Research' : '📚 Evidence & References'}
@@ -617,7 +258,7 @@ function SupplementCard({ rec, index = 0, expanded, onToggle, onOpenDetail, deta
                   </button>
                 )}
               </span>
-              <p>{fixChars(displayEvidence)}</p>
+              <p>{evidence}</p>
             </div>
           )}
           {rec.foods && (
@@ -650,18 +291,15 @@ function ResultsPage() {
     window.scrollTo({ top: 0, behavior: 'instant' });
   }, []);
 
-  // Get current user email from localStorage for cache scoping (unique per account)
-  const currentUserId = (() => {
-    try { return getStoredUser()?.email || 'guest'; } catch { return 'guest'; }
-  })();
+  // The supplement-detail panel scopes its own cache by account, so two
+  // accounts on one device never read each other's guides. Only the
+  // assessment is the caller's business here.
   const assessmentId = assessment?._id || assessment?.id || 'unknown';
-  // Cache key includes userId so different accounts never share cached details
-  const cacheScope = `${currentUserId}_${assessmentId}`;
   
   // Detail mode toggle: 'detailed' (technical/medical) or 'simplified' (friendly)
   const [detailMode, setDetailMode] = useState(() => {
     try {
-      return localStorage.getItem('suppliwise_detail_mode') || 'simplified';
+      return localStorage.getItem(DETAIL_MODE_KEY) || 'simplified';
     } catch {
       return 'simplified';
     }
@@ -701,7 +339,7 @@ function ResultsPage() {
   // Save preference to localStorage when changed
   useEffect(() => {
     try {
-      localStorage.setItem('suppliwise_detail_mode', detailMode);
+      localStorage.setItem(DETAIL_MODE_KEY, detailMode);
     } catch {
       // Storage full — skip silently
     }
@@ -833,7 +471,7 @@ function ResultsPage() {
         {detailSupplement && (
           <SupplementDetailModal
             supplementName={detailSupplement.name}
-            assessmentId={cacheScope}
+            assessmentId={assessmentId}
             context={detailSupplement.context}
             cache={detailCache}
             onClose={() => setDetailSupplement(null)}

@@ -521,6 +521,47 @@
   margin-top: -4px;
 }
 
+/* Says where a pre-filled answer came from, so it reads as a starting point
+   rather than a locked-in value the user has to fight. */
+.field-hint-text {
+  margin: 10px 0 0;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #065f46;
+}
+
+/* ── The dead-hours lock on the assessment ─────────────────────────────────
+   Cool and quiet, deliberately unlike the red error treatment: nothing is
+   wrong, the form is simply asleep. The note is the important half — a disabled
+   button with no explanation is the commonest way a user concludes the app has
+   broken. */
+.assessment-snoozed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.assessment-snoozed .btn-next:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.assessment-snoozed__note {
+  margin: 0;
+  text-align: center;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #64748b;
+  max-width: 42ch;
+}
+
 /* Flex-wrap radio group */
 .radio-group.flex-wrap {
   flex-wrap: wrap;

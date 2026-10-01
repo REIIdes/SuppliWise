@@ -51,7 +51,7 @@ const SecurityEvent = require('../models/SecurityEvent');
 const BackupCode = require('../models/BackupCode');
 const webauthn = require('../utils/webauthn');
 const { deviceLabelOf, platformOf } = require('../utils/device');
-const { AUTH_METHODS, publicUser, completeSignIn, recordFailure } = require('../utils/authFlow');
+const { AUTH_METHODS, publicUser, publicPictures, completeSignIn, recordFailure } = require('../utils/authFlow');
 
 const router = express.Router();
 const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v));
@@ -645,6 +645,9 @@ router.post('/login/verify', verifyLimiter, async (req, res) => {
   };
 
   let credential = null;
+  // Set the moment the assertion has been accepted, so the catch below can tell
+  // "this passkey was refused" from "we failed after accepting it".
+  let verifiedAccount = false;
   try {
     const challenge = safeParseClientDataChallenge(response.response && response.response.clientDataJSON);
     if (!challenge) return refuse('unreadable');
@@ -770,6 +773,20 @@ router.post('/login/verify', verifyLimiter, async (req, res) => {
 
     clearOffenses(accountLock);
 
+    // Past this line the passkey has been PROVEN: the credential verified, the
+    // counter advanced and the account is usable. Only the hand-off is left.
+    //
+    // The flag matters because this handler's `catch` is the ceremony's
+    // catch — it answers "that passkey could not be verified" and counts an
+    // offense against the account. Applying that to a failure AFTER the
+    // assertion was accepted (a database hiccup while minting the session) told
+    // a legitimate owner their passkey had been refused, wrote a false
+    // `passkey-login-failed` into their security history, and escalated the
+    // lockout ladder against someone who had just proved themselves — while
+    // `issueUserSession` had already displaced their previous session, so the
+    // message was wrong in the one direction that costs the most.
+    verifiedAccount = true;
+
     const remember = req.body && (req.body.remember === true || req.body.remember === 'true');
     const { token, rememberToken } = await completeSignIn({
       user,
@@ -790,12 +807,27 @@ router.post('/login/verify', verifyLimiter, async (req, res) => {
 
     return res.json({
       ...publicUser(user),
+      // Read separately from the document above, which projects the picture
+      // fields out. Without this the response claimed the account had no
+      // avatar, the client wrote that into its cached profile, and every
+      // passwordless sign-in wiped the profile picture and banner a person had
+      // set. See publicPictures in utils/authFlow.js.
+      ...(await publicPictures(user)),
       token,
       authMethod: AUTH_METHODS.PASSKEY,
       mfaVerified: true,
       ...(rememberToken ? { rememberToken } : {}),
     });
   } catch (error) {
+    // A failure AFTER the account was resolved and cleared is ours, not the
+    // caller's: the passkey was accepted, so it is neither refused nor an
+    // attack. Answer 503 and record no offense — see `verifiedAccount`.
+    if (verifiedAccount) {
+      console.error('[passkeys/login/verify] the passkey was accepted but sign-in could not be completed:', error.message);
+      return res.status(503).json({
+        message: 'We could not complete your sign-in just now. Please try again.',
+      });
+    }
     // Includes every rejection @simplewebauthn/server throws: wrong origin,
     // wrong RP ID, signature mismatch, UV not performed, malformed
     // authenticatorData. None of the detail is echoed — which check failed is

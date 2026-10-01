@@ -122,6 +122,17 @@
   animation: sw-rise 0.5s var(--sw-ease, cubic-bezier(0.16, 1, 0.3, 1)) both;
 }
 
+/* Title on the left, detail-mode toggle on the right. The toggle was absent
+   here entirely, so a reader who chose Simplified on the results page was
+   shown clinical prose on this one and the setting looked broken. */
+.recommendations-header-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
 .recommendations-title {
   font-size: 34px;
   font-weight: 800;
@@ -144,6 +155,149 @@
   color: var(--sw-ink-soft, #58736a);
   margin: 0;
   max-width: 64ch;
+}
+
+/* Detail mode — the same two-button control and the same storage key the
+   results page uses, so the preference follows the reader between the two. */
+.detail-mode-toggle {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 3px;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid var(--sw-line, #e2f1ea);
+  border-radius: var(--sw-radius-md, 14px);
+}
+
+.detail-mode-btn {
+  padding: 8px 16px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--sw-ink-soft, #58736a);
+  background: transparent;
+  border: 0;
+  border-radius: var(--sw-radius-sm, 10px);
+  cursor: pointer;
+  transition: color var(--sw-dur, 0.24s) ease, background var(--sw-dur, 0.24s) ease;
+}
+.detail-mode-btn:hover:not(.active) { color: #5b21b6; background: rgba(139, 92, 246, 0.1); }
+.detail-mode-btn.active {
+  color: #fff;
+  background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+  box-shadow: 0 6px 14px -8px rgba(99, 102, 241, 0.9);
+}
+.detail-mode-btn:focus-visible { outline: 3px solid var(--sw-indigo, #6366f1); outline-offset: 2px; }
+
+/* Three numbers, so the reader knows whether the list below is worth scrolling
+   before they scroll it. */
+.recommendations-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.recommendations-summary__item {
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--sw-ink-soft, #58736a);
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid var(--sw-line, #e2f1ea);
+  border-radius: var(--sw-radius-pill, 999px);
+}
+.recommendations-summary__item strong {
+  margin-right: 4px;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--sw-ink, #0d2b23);
+}
+.recommendations-summary__item--high {
+  color: #047857;
+  background: #ecfdf5;
+  border-color: #6ee7b7;
+}
+.recommendations-summary__item--high strong { color: #047857; }
+
+/* ── Consult-doctor banner ──────────────────────────────────────────────
+   The one instruction in the plan that must not be skimmable, so it is a
+   banner above the filters rather than a note buried inside a card. */
+.rec-consult {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 18px;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, #fff1f2, #ffe4e6);
+  border: 1px solid #fda4af;
+  border-left: 4px solid var(--sw-rose, #f43f5e);
+  border-radius: var(--sw-radius-lg, 20px);
+}
+.rec-consult__icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  font-size: 16px;
+  color: #fff;
+  background: var(--sw-rose, #f43f5e);
+  border-radius: 50%;
+}
+.rec-consult strong { display: block; margin-bottom: 4px; font-size: 15px; color: #9f1239; }
+.rec-consult p { margin: 0; font-size: 13px; line-height: 1.6; color: #7f1d1d; }
+
+/* ── Toolbar: filters + search ─────────────────────────────────────────── */
+
+.rec-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.rec-search { flex: 1 1 200px; max-width: 300px; min-width: 0; }
+
+.rec-search input {
+  width: 100%;
+  padding: 10px 16px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--sw-ink, #0d2b23);
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid var(--sw-line-strong, #cbe7da);
+  border-radius: var(--sw-radius-pill, 999px);
+  transition: border-color var(--sw-dur, 0.24s) ease, box-shadow var(--sw-dur, 0.24s) ease;
+}
+.rec-search input::placeholder { color: var(--sw-ink-faint, #8aa39a); }
+.rec-search input:focus {
+  outline: none;
+  border-color: var(--sw-indigo, #6366f1);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+}
+
+/* Screen-reader-only. The label exists for assistive tech, not the layout. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.rec-result-count {
+  margin: 0 0 16px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--sw-ink-faint, #8aa39a);
 }
 
 /* ── Disclaimer ────────────────────────────────────────────────────────
@@ -254,6 +408,25 @@
   box-shadow: 0 8px 18px -10px rgba(99, 102, 241, 0.9);
 }
 
+/* The count on each tab. It is the reader's only warning that a filter will
+   come back empty, and it is computed from the same normalizer the filter
+   uses — a count that disagreed with the list would be worse than none. */
+.filter-tab__count {
+  display: inline-block;
+  margin-left: 7px;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.6;
+  color: var(--sw-ink-soft, #58736a);
+  background: rgba(15, 42, 35, 0.07);
+  border-radius: var(--sw-radius-pill, 999px);
+}
+.filter-tab.active .filter-tab__count {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.24);
+}
+
 .filter-tab:focus-visible {
   outline: 3px solid var(--sw-indigo, #6366f1);
   outline-offset: 2px;
@@ -330,11 +503,13 @@
 .recommendation-title-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
   flex: 1;
   min-width: 0;
 }
+
+.recommendation-icon { font-size: 24px; flex-shrink: 0; }
 
 .recommendation-name {
   font-size: 21px;
@@ -342,7 +517,112 @@
   letter-spacing: -0.02em;
   color: var(--sw-ink, #0d2b23);
   margin: 0;
+  min-width: 0;
 }
+
+/* The name is the affordance for the detail panel, so it has to LOOK like one
+   and behave like a button for a keyboard. */
+.recommendation-name-btn {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0;
+  font: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.recommendation-name-btn:hover { color: #5b21b6; }
+.recommendation-name-btn:focus-visible { outline: 3px solid var(--sw-indigo, #6366f1); outline-offset: 3px; border-radius: 4px; }
+
+.recommendation-name-hint {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--sw-emerald, #10b981);
+  opacity: 0;
+  transition: opacity var(--sw-dur, 0.24s) ease;
+}
+.recommendation-name-btn:hover .recommendation-name-hint,
+.recommendation-name-btn:focus-visible .recommendation-name-hint { opacity: 1; }
+
+/* Severity sits beside priority, not instead of it: priority is "how soon",
+   severity is "how bad is the thing driving it". */
+.severity-badge {
+  padding: 4px 10px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--sw-ink-soft, #58736a);
+  background: #f1f5f9;
+  border-radius: var(--sw-radius-pill, 999px);
+  box-shadow: inset 0 0 0 1px rgba(15, 42, 35, 0.07);
+}
+.severity-badge--high { color: #be123c; background: #fff1f2; }
+.severity-badge--medium { color: #b45309; background: #fffbeb; }
+.severity-badge--low { color: #0369a1; background: #f0f9ff; }
+.severity-badge--preventive { color: #15803d; background: #f0fdf4; }
+.severity-badge--none { display: none; }
+
+/* ── Confidence ──────────────────────────────────────────────────────────
+   The score decides the order within a priority band, so it is shown rather
+   than hidden. `role="meter"` is set in the markup; the fill width is
+   clamped in recommendationView so it is always a real percentage. */
+.rec-confidence {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 148px;
+}
+
+.rec-confidence__track {
+  flex: 1;
+  height: 8px;
+  overflow: hidden;
+  background: rgba(15, 42, 35, 0.09);
+  border-radius: var(--sw-radius-pill, 999px);
+}
+
+.rec-confidence__fill {
+  height: 100%;
+  border-radius: var(--sw-radius-pill, 999px);
+  background: #94a3b8;
+  transition: width 0.7s var(--sw-ease, cubic-bezier(0.16, 1, 0.3, 1));
+}
+.rec-confidence[data-tone='high'] .rec-confidence__fill { background: linear-gradient(90deg, #34d399, #059669); }
+.rec-confidence[data-tone='medium'] .rec-confidence__fill { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
+.rec-confidence[data-tone='low'] .rec-confidence__fill { background: linear-gradient(90deg, #cbd5e1, #94a3b8); }
+
+.rec-confidence__label {
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--sw-ink-soft, #58736a);
+}
+
+.recommendation-confidence {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* "Recommended for" — what in the assessment drove this specific suggestion. */
+.recommendation-triggered {
+  margin: -4px 0 14px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--sw-ink-soft, #58736a);
+}
+.recommendation-triggered-label { font-weight: 700; color: var(--sw-ink, #0d2b23); }
 
 /* Priority as a labelled chip. The old badge was `text-transform: lowercase`
    on an already-lowercase string and a 6px radius, so "high priority" and
@@ -369,55 +649,183 @@
   vertical-align: middle;
   background: var(--rec-accent, #94a3b8);
 }
-.priority-badge-high { color: #047857; }
-.priority-badge-medium { color: #b45309; }
-.priority-badge-low { color: #64748b; }
+.priority-badge--high { color: #047857; }
+.priority-badge--medium { color: #b45309; }
+.priority-badge--low { color: #64748b; }
 
-.recommendation-confidence {
+/* ── Dosage ──────────────────────────────────────────────────────────────
+   A definition list, not two paragraphs. Dose and timing are facts ABOUT the
+   supplement, and pairing them as label/value keeps them scannable when a
+   screen holds fifteen of them. */
+.recommendation-dosage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+.dosage-item {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
+  gap: 2px;
+  flex: 1 1 150px;
+  min-width: 0;
+  padding: 10px 13px;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border: 1px solid var(--sw-line, #e2f1ea);
+  border-radius: var(--sw-radius-md, 14px);
 }
 
-.confidence-value {
-  font-size: 26px;
-  font-weight: 800;
-  letter-spacing: -0.03em;
-  color: #6d28d9;
-  background: linear-gradient(140deg, #7c3aed, #2563eb);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: #6d28d9;
-}
-@supports ((-webkit-background-clip: text) or (background-clip: text)) {
-  .confidence-value { color: transparent; }
-}
-
-.confidence-label {
+.dosage-item dt {
   font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--sw-ink-faint, #8aa39a);
+}
+
+.dosage-item dd {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--sw-ink, #0d2b23);
+}
+
+/* Condition context — the 2-3 patient factors the AI tied together. */
+.recommendation-context {
+  margin: 0 0 16px;
+  padding: 11px 14px;
+  font-size: 13px;
+  font-style: italic;
+  line-height: 1.65;
+  color: #15803d;
+  background: #f0fdf4;
+  border-left: 3px solid #22c55e;
+  border-radius: 0 var(--sw-radius-sm, 10px) var(--sw-radius-sm, 10px) 0;
+}
+
+/* Interactions — always styled as a caution. This string is a claim about a
+   medication list the AI may not have had in full, so it must not read as
+   reassurance. A "None identified" from the model means "I found nothing",
+   not "you are safe". */
+.recommendation-interaction {
+  margin: 0 0 16px;
+  padding: 11px 14px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: #92400e;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: var(--sw-radius-md, 14px);
+}
+.recommendation-interaction-label {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #c2410c;
+}
+
+/* ── Expanded detail blocks ──────────────────────────────────────────────
+   Three kinds of supporting information, each in its own tint so a reader can
+   tell a citation from a shopping list at a glance. */
+.rec-expand {
+  margin-bottom: 16px;
+  padding: 7px 14px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--sw-ink-soft, #58736a);
+  background: transparent;
+  border: 1px solid var(--sw-line-strong, #cbe7da);
+  border-radius: var(--sw-radius-pill, 999px);
+  cursor: pointer;
+  transition: color var(--sw-dur, 0.24s) ease, border-color var(--sw-dur, 0.24s) ease;
+}
+.rec-expand:hover { color: #5b21b6; border-color: var(--sw-indigo, #6366f1); }
+.rec-expand:focus-visible { outline: 3px solid var(--sw-indigo, #6366f1); outline-offset: 2px; }
+
+.recommendation-details {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.detail-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: var(--sw-radius-md, 14px);
+}
+
+.detail-block__label {
+  display: flex;
+  align-items: center;
+  font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 
-/* ── Dosage ──────────────────────────────────────────────────────────── */
-
-.recommendation-dosage { margin-bottom: 16px; }
-
-.dosage-text {
-  font-size: 15.5px;
-  font-weight: 700;
-  color: var(--sw-ink, #0d2b23);
-  margin: 0 0 3px;
-}
-
-.timing-text {
-  font-size: 13.5px;
-  color: var(--sw-ink-soft, #58736a);
+.detail-block p {
   margin: 0;
+  font-size: 12.5px;
+  line-height: 1.65;
 }
+
+.detail-block--evidence { background: #eff6ff; border: 1px solid #bfdbfe; }
+.detail-block--evidence .detail-block__label { color: #1d4ed8; }
+.detail-block--evidence p { color: #1e40af; }
+
+.detail-block--foods { background: #f0fdf4; border: 1px solid #bbf7d0; }
+.detail-block--foods .detail-block__label { color: #15803d; }
+
+.detail-block--side-effects { background: #fff7ed; border: 1px solid #fed7aa; }
+.detail-block--side-effects .detail-block__label { color: #c2410c; }
+.detail-block--side-effects p { color: #92400e; }
+
+/* Food sources as pills, so four foods read as four things to buy. */
+.rec-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rec-pill {
+  padding: 4px 11px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #15803d;
+  background: #fff;
+  border: 1px solid #bbf7d0;
+  border-radius: var(--sw-radius-pill, 999px);
+}
+
+.evidence-info-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  padding: 0;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--sw-emerald-deep, #059669);
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.15s ease, color 0.15s ease;
+}
+.evidence-info-btn:hover { color: var(--sw-emerald, #10b981); transform: scale(1.15); }
+.evidence-info-btn:focus-visible { outline: 3px solid var(--sw-teal, #0d9488); outline-offset: 2px; }
 
 /* ── Reason ────────────────────────────────────────────────────────────
    Tinted to match the card's own tone, so the explanation sits inside the
@@ -446,63 +854,20 @@
   margin: 0;
 }
 
-/* ── Benefits ────────────────────────────────────────────────────────── */
-
-.recommendation-benefits { margin-bottom: 18px; }
-
-.benefits-title {
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--sw-ink-faint, #8aa39a);
-  margin: 0 0 10px;
-}
-
-.benefits-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-}
-
-.benefits-list li {
-  font-size: 13.5px;
-  color: var(--sw-ink-soft, #58736a);
-  padding-left: 24px;
-  position: relative;
-  line-height: 1.55;
-}
-
-/* A tick, not a bullet. `content: '•'` rendered as a lone dot with no box,
-   which read as a stray character rather than as a list marker. */
-.benefits-list li::before {
-  content: '';
-  position: absolute;
-  left: 4px;
-  top: 5px;
-  width: 11px;
-  height: 11px;
-  border-radius: 50%;
-  background: var(--sw-emerald, #10b981);
-  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9);
-}
-
-/* ── Actions ─────────────────────────────────────────────────────────── */
-
+/* ── Actions ──────────────────────────────────────────────────────────────
+   The plan toggle is the point of this page, so it leads and the secondary
+   action sits beside it rather than competing. */
 .recommendation-actions {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  align-items: center;
   padding-top: 14px;
   border-top: 1px solid var(--sw-line, #e2f1ea);
 }
 
 .btn-add-plan,
-.btn-find-products,
+.btn-ghost,
 .btn-added {
   display: inline-flex;
   align-items: center;
@@ -530,8 +895,9 @@
 }
 .btn-add-plan:disabled { opacity: 0.6; cursor: not-allowed; }
 
-/* "Added" is a confirmed state, not a disabled button. It is styled as a
-   quiet confirmation with a tick, so it does not look like a broken CTA. */
+/* "In your plan" is a confirmed state, not a disabled button. Styled as a
+   quiet confirmation so it does not look like a broken CTA — and it stays
+   clickable, because the reader needs a way back out. */
 .btn-added {
   border: 1.5px solid #6ee7b7;
   background: #ecfdf5;
@@ -543,16 +909,36 @@
 }
 .btn-added:disabled { opacity: 0.6; cursor: not-allowed; }
 
-.btn-find-products {
+.btn-ghost {
   border: 1.5px solid var(--sw-line-strong, #cbe7da);
   background: #fff;
   color: var(--sw-ink-soft, #58736a);
 }
-.btn-find-products:hover {
-  border-color: var(--sw-indigo, #6366f1);
-  background: #eef2ff;
-  color: #4338ca;
+.btn-ghost:hover {
+  border-color: var(--sw-emerald, #10b981);
+  background: var(--sw-surface-sunk, #f4fbf7);
+  color: var(--sw-emerald-deep, #059669);
 }
+
+/* Show more / less — the list is capped at six so a fifteen-item plan does
+   not open as a wall. */
+.btn-show-more {
+  display: block;
+  width: fit-content;
+  margin: 22px auto 0;
+  padding: 10px 24px;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--sw-ink-soft, #58736a);
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid var(--sw-line-strong, #cbe7da);
+  border-radius: var(--sw-radius-pill, 999px);
+  cursor: pointer;
+  transition: color var(--sw-dur, 0.24s) ease, border-color var(--sw-dur, 0.24s) ease;
+}
+.btn-show-more:hover { color: #5b21b6; border-color: var(--sw-indigo, #6366f1); }
+.btn-show-more:focus-visible { outline: 3px solid var(--sw-indigo, #6366f1); outline-offset: 2px; }
 
 .btn-add-plan:focus-visible,
 .btn-added:focus-visible,
@@ -637,29 +1023,47 @@
 .recommendations-list > .recommendation-card:nth-child(4) { animation-delay: 0.18s; }
 .recommendations-list > .recommendation-card:nth-child(5) { animation-delay: 0.24s; }
 
-/* ── Responsive ──────────────────────────────────────────────────────── */
+/* ── Responsive ───────────────────────────────────────────────────────────
+   The card stacks rather than shrinking: a dose and a confidence bar sharing
+   one 280px row is how the label stops being readable. */
 
 @media (max-width: 768px) {
   .recommendations-container { padding: 24px 16px 56px; }
   .recommendations-header { margin-bottom: 22px; }
   .recommendations-title { font-size: 26px; }
   .recommendations-subtitle { font-size: 14.5px; }
-  .recommendation-header { flex-direction: column; }
-  .recommendation-confidence { align-items: flex-start; }
+
+  /* The toggle goes full width rather than sitting beside a wrapped title. */
+  .detail-mode-toggle { width: 100%; }
+  .detail-mode-btn { flex: 1; }
+
+  .rec-toolbar { flex-direction: column; align-items: stretch; }
+  .rec-search { max-width: none; }
+
+  .recommendation-header { flex-direction: column; align-items: flex-start; }
+  .recommendation-confidence { align-items: flex-start; width: 100%; }
+  .rec-confidence { width: 100%; min-width: 0; }
   .recommendation-name { font-size: 18px; }
-  .confidence-value { font-size: 22px; }
-  .recommendation-actions { flex-direction: column; }
+
+  .recommendation-dosage { flex-direction: column; }
+  .dosage-item { flex: 1 1 auto; }
+
+  .recommendation-actions { flex-direction: column; align-items: stretch; }
   .btn-add-plan,
-  .btn-find-products,
+  .btn-ghost,
   .btn-added { width: 100%; }
+
   .rec-empty { padding: 36px 22px; }
+  .rec-consult { flex-direction: column; }
 }
 
 @media (max-width: 480px) {
   .recommendations-title { font-size: 23px; }
   .recommendations-subtitle { font-size: 13.5px; }
   .filter-tab { padding: 8px 15px; font-size: 13px; }
+  .filter-tab__count { margin-left: 5px; padding: 1px 5px; font-size: 10px; }
   .rec-empty__icon { width: 92px; height: 92px; }
+  .recommendation-summary__item { padding: 6px 11px; font-size: 12px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -671,7 +1075,12 @@
   .recommendation-card,
   .btn-add-plan,
   .btn-added,
+  .btn-ghost,
   .filter-tab,
+  .detail-mode-btn,
+  .rec-expand,
+  .btn-show-more,
+  .rec-confidence__fill,
   .btn-primary {
     transition: none;
   }

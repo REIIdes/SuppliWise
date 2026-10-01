@@ -13,6 +13,7 @@
  */
 
 const listeners = new Map(); // userId -> Set<fn>
+const publishListeners = new Set(); // global observers (e.g. auth cache invalidation)
 const lastPublished = new Map(); // userId -> { state, at }
 
 const keyOf = (userId) => String(userId || '').trim();
@@ -30,11 +31,32 @@ function subscribe(userId, fn) {
   };
 }
 
+// Observe every authoritative subscription change, regardless of which
+// publisher produced it. The auth middleware uses this to drop any cached
+// session snapshot before the next request reads the new plan.
+function onPublish(listener) {
+  if (typeof listener !== 'function') return () => {};
+  publishListeners.add(listener);
+  return () => publishListeners.delete(listener);
+}
+
 // Fan out a resolved state (see utils/entitlements.js -> describeSubscription).
 function publish(userId, state) {
   const key = keyOf(userId);
   if (!key || !state) return 0;
   lastPublished.set(key, { state, at: Date.now() });
+
+  // Notify global observers first. A cached user document must never outlive
+  // the change that makes its entitlement fields wrong.
+  for (const listener of [...publishListeners]) {
+    try {
+      listener(key, state);
+    } catch (error) {
+      // An observer is auxiliary; a failure here must not break the publisher.
+      console.error('[subscription-bus] publish observer failed:', error.message);
+    }
+  }
+
   const set = listeners.get(key);
   if (!set || set.size === 0) return 0;
   let delivered = 0;
@@ -61,4 +83,4 @@ function listenerCount(userId) {
   return set ? set.size : 0;
 }
 
-module.exports = { subscribe, publish, lastState, listenerCount };
+module.exports = { subscribe, onPublish, publish, lastState, listenerCount };

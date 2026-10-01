@@ -753,5 +753,92 @@ The probe assumes a live server and throws the entire glitch catalog at it:
 
 ---
 
-*Report generated 2026-09-23 as part of audit `SEC-AUDIT-2026-09-23`. The machine-readable record is
-`server/utils/securityAudit.js`; this document is referenced from the admin Live Status Monitoring widget.*
+## 9C. Addendum — Adversarial Re-Verification Pass (2026-10-01)
+
+This pass did something the original audit deliberately did not: instead of reading the code again, it **ran every
+suite that exists** and **checked the claims in §6 against reality**. The point was to find out whether the system as
+actually shipped still passes what this report said it passes.
+
+That framing mattered, because it immediately produced a finding of a kind code review cannot produce: **§6's claim
+that `npm audit` reported *0 vulnerabilities* had already stopped being true.**
+
+### New findings and fixes (F-series)
+
+| ID | Sev | Finding | Fix |
+|---|---|---|---|
+| **F1** | **High** | `nodemailer` 9.1.1 shipped **5 advisories** — `GHSA-v53p-9fqp-m79j` and `GHSA-prgh-xp8r-p3m5` (both remote DoS via ReDoS / O(n²), CVSS 7.5) plus three moderate — while §6 still asserted *0 vulnerabilities*. | Upgraded to **nodemailer ^10.0.13** (`>= 10.0.9` is the first non-vulnerable range). This is a **major** bump, so it was checked, not assumed: the codebase uses only `createTransport` / `sendMail` / `verify`, all stable across 9 → 10, and the four email suites that stub the transport were re-run green. Also patched `dompurify` 3.4.15 → 3.4.16 (`GHSA-p98j-92pf-mc4p`, inherited via `jspdf`). **Both scopes now report 0.** |
+| **F2** | Med | The SMTP transporter is pooled (`pool: true, maxConnections: 3`), and all three send-error paths recovered with a bare `transporter = null` — dropping the reference without closing anything. Each failure leaked a live socket pool. | Added `closeTransporter()` (close + null), used at all three sites, exported for graceful shutdown and tests. |
+| **F3** | Med | `Test File/password-reset-db.test.js` closed with `const { User } = require('../models/User')`, but that module ends with `module.exports = mongoose.model(...)` — it exports the model *itself*, so the destructure was `undefined` and the next line threw. The throw happened **before** `mongoose.disconnect()`, so the pool held the event loop open and **the process never exited**. | Corrected the import; wrapped cleanup in `try/finally` so a failure inside it can never again strand the connection. Now 10/10 and exits cleanly. |
+| **F4** | Low | The adversarial probes had drifted behind the product and **could no longer run at all**: `glitch-hunt.js` couldn't create accounts once register began enforcing `passwordRules.js`; `test-session-flows.js` wrote the TOTP secret into the document (secrets are encrypted now) and called `/auth/login-2fa` without the `mfaTransaction` it now requires; and three API-provisioned suites were wired to `connectTestDb()`, pointing them at a *test* database while the API created their accounts on the *application* database. `test-web3-flows.js` reported a silent `0 passed, 0 failed`. | Passwords hoisted to one shared constant per script; 2FA driven through the real `setup-2fa` / `verify-2fa` / `login` / `login-2fa` flow; the three suites connect to the application database like every other live suite (documented as scoped to accounts they create and delete). Also corrected two stale expectations: the marketplace fee is **DAO-governed** (it had moved 3% → 2%), and the balance assertion needed an epsilon — balances are IEEE-754 doubles. |
+| **F5** | Low | `glitch-hunt.js`'s "a replaced session is rejected" probe called `issueUserSession()` *in the probe process*, so the **server's** 30-second validation cache was never invalidated — revocations are announced in-process. It measured the cache, not the invariant, and failed while the rule was in fact holding. | Split into two assertions: instant ground truth (row stamped `revokedAt`, pointer moved), then the API answer after the cache TTL. |
+| **F6** | Info | H8 was recorded as *"pending live browser verification — browser tooling was disconnected"*. The CSP had never been seen enforcing. | **Verified in a real browser.** The app renders, `/dashboard` and `/assessment` correctly redirect to `/login` with no session, and an injected `script src="https://attacker.example.invalid/x.js"` is refused — the browser logs a genuine violation against `script-src 'self' 'unsafe-inline'`. The only console error on the page is that blocked injection. |
+| **F7** | Low | Manual action 8 was right that `frame-ancestors` is **ignored in a `<meta>` tag**. Helmet covers the API origin, so the **app** origin had no framing protection at all, and `vite preview` — the closest thing to production — had no headers either. | `vite.config.js` now sends `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'`, `X-Content-Type-Options: nosniff` and `Referrer-Policy` on **both** `vite dev` and `vite preview`. Confirmed on a live response. CSP policies are enforced as an *intersection*, so this adds exactly one restriction and cannot loosen the existing meta policy. |
+| **F8** | Info | No `.gitattributes`, so line endings depended on whichever machine last touched a file. This only started to matter once CI existed: Actions runs `run:` blocks through bash on Linux, and under CRLF a trailing `\` escapes a carriage return instead of continuing the line — a multi-line command then fails with a syntax error that reads like a workflow bug. | Added `.gitattributes` pinning LF for source/config/workflow files and marking binaries. |
+| **F9** | Low | **The load-shedding guard had zero automated coverage**, and the syntax gate had drifted. `utils/floodGuard.js` decides whether a request is served, refused as too large, or shed as *"busy"* — and `bodyBudget()` / `rejectOversized()` were reachable only through `test-ddos-resilience.js`, which needs a live API and a 320 MB flood. A regression there could not fail anything until the server was genuinely under attack. Separately, `npm run check` was a hand-written list of **47** `node --check` invocations that had fallen behind the tree: `floodGuard.js`, `dailyScheduleSlots.js` and `securityAudit.js` were all absent. | Added `Test File/flood-guard.test.js` — budget shedding with 503 + `Retry-After`, reservation release on both `finish` and `close` (an aborted upload must not permanently drain the budget and self-inflict a DoS), 413 from `Content-Length` without reading the body, and the full-response-delivery regression. Replaced the check script with `server/scripts/check-syntax.js`, which walks the tree: **201 files** now, versus 47, and it cannot go stale again. Verified it genuinely fails — run against a deliberately broken file it reported the file, the error and exit 1. |
+| **F10** | Info | **A fix that measurement did not support was removed rather than kept.** The flood suite intermittently counted `ECONNRESET`s, and the existing code comment claimed the refusal was being swallowed because the refused request body was never drained. Acting on that, `sendAndClose()` was changed to resume the socket. An A/B then showed the change did **nothing**: with and without it, a client pushing a 4 MB body against a 64 KB cap received a byte-for-byte **identical, complete 218-byte 413**, followed by an `ECONNRESET` in both cases. | Reverted. The drain bought nothing and cost an unbounded read of a rejected body. The regression test now pins the real invariant — that the complete response, matching its own declared `Content-Length`, reaches the client — and `floodGuard.js` carries a note recording the measurement so the wrong theory is not re-derived later. The `ECONNRESET` is the server correctly refusing the rest of a stream it has already answered. |
+
+### The lesson in F1 — and why CI was the fix
+
+The original audit's *"0 vulnerabilities"* was **true on 2026-09-23 and is not a property of the system**. Advisories
+are published *against an installed version*, forever, without any code change on our side. A one-time measurement
+cannot stay true. That is precisely finding **I3**, and it is why this pass treated "the audit says 0 vulnerabilities"
+as a claim to re-test rather than a fact to repeat.
+
+`.github/workflows/ci.yml` now runs on every push and PR: server syntax, the **full** server suite against a real
+MongoDB service (so the ~40 database suites execute instead of silently skipping — a skipped test is not a passing
+test), client lint / tests / production build, `npm audit --omit=dev` in **both scopes**, and a secret sweep. That
+`npm audit` gate is the step that would have caught F1 on the day the advisories were published.
+
+The secret sweep's patterns deliberately require the real base64/base32 alphabet. A looser `\$argon2id\$` matches the
+*documented placeholder* in `server/.env.example` and `README.md` (`…$your_salt$your_hash`) and would fail every push
+over a template. Verified: the patterns match nothing in the tree today and still catch a genuine credential.
+
+### Re-verification — all green
+
+| Check | Result |
+|---|---|
+| Server unit tests | ✅ **990/990**, 0 skipped, exits cleanly (was **796 with 40 silently skipped**) |
+| Client unit tests | ✅ **299/299** |
+| `glitch-hunt.js` | ✅ **122/122** |
+| `glitch-hunt-web3.js` | ✅ **133/133** |
+| `test-web3-flows.js` | ✅ **81/81** |
+| `test-session-flows.js` | ✅ all checks |
+| `test-subscription-flows.js` | ✅ exit 0 |
+| `test-subscription-admin.js` | ✅ **66/66** |
+| `test-subscription-teams.js` | ✅ **54/54** |
+| `test-ddos-resilience.js` | ✅ 3432 requests, 0 5xx, 0 conn errors, 0 timeouts, recovered unaided |
+| `verifyAdminUserIsolation.mjs` | ✅ **13/13** |
+| `support-chat.e2e.js` | ✅ **74/74** |
+| `verify-bc-monitor.js` | ✅ all subsystems HEALTHY |
+| `npm run check` · `npx eslint .` · `npx vite build` | ✅ 201 files · 0 errors · PWA worker generated |
+| `npm audit` | ✅ **0 vulnerabilities** — both scopes, prod + dev |
+| Live browser | ✅ app renders, routes guard, **CSP observed enforcing**, no app console errors |
+| Secret sweep | ✅ no hash/TOTP-shaped values in tracked docs; `server/.env` untracked |
+
+The test count moved from 796 to 990 purely because the database suites now *run*. They were skipping, and a skipped
+test is indistinguishable from a passing one in a green build — which is how F3 hid for as long as it did.
+
+### One caveat, stated rather than smoothed over
+
+`Test File/support-chat.e2e.js` failed **once** during this pass and could not be reproduced in three subsequent runs,
+including the exact ordering that preceded the failure. It provisions against the remote database, so a transient
+there is the most likely cause. It is recorded here rather than quietly dropped, because a result that only sometimes
+holds is worth naming.
+
+### Still open after this pass
+
+Nothing in this section reduces the largest risk in §9. **The credentials committed to the public remote are still
+valid until a human rotates them**; no code change can close that. Also still open: `localStorage` admin token (L3),
+the `forgot-password` `userId` (L5), the provisioning email (L6), the 10 MB JSON limit (L7), and in-memory rate
+limiting. Two new operational notes:
+
+- The hardened headers cover `vite dev` and `vite preview` only. **Whoever serves the production `dist/` must send
+  `X-Frame-Options` and `Content-Security-Policy: frame-ancestors 'none'` as real headers** — there is no host config
+  in this repository to do it.
+- `TRUST_PROXY` stays **off** by default and must only be enabled when a proxy is genuinely in front of the API.
+  Turning it on without one hands `X-Forwarded-For` control straight back to the caller and reinstates H3.
+
+---
+
+*Addendum recorded 2026-10-01. The machine-readable record in `server/utils/securityAudit.js` carries the same
+findings under `followUp`, so the admin Live Status Monitoring widget shows them alongside the original 30.*

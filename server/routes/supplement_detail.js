@@ -3,8 +3,7 @@ const router = express.Router();
 const { protect } = require('../middleware/auth');
 const SupplementDetail = require('../models/SupplementDetail');
 const { get, set, dedupe } = require('../utils/cache');
-
-const OPENROUTER_MODEL = 'deepseek/deepseek-v4-flash-0731';
+const { completeWithFallback } = require('../utils/aiRouter');
 
 router.post('/', protect, async (req, res) => {
   const { supplementName, context } = req.body;
@@ -133,49 +132,35 @@ Rules:
   const cacheKey = `supplement-ai:${nameKey}`;
   try {
     const detail = await dedupe(cacheKey, async () => {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 20000);
-
-      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: OPENROUTER_MODEL,
-          messages: [
-            {
-              role: 'system',
-              content: 'You are an expert clinical nutritionist. Always respond with valid JSON only — no markdown, no code fences, no extra text.',
-            },
-            { role: 'user', content: prompt },
-          ],
-          max_tokens: 2000,
-          temperature: 0.3,
-          stream: false,
-        }),
-        signal: controller.signal,
+      // Provider, model, key AND fallback all come from the routing table. This
+      // used to resolve a single target and hand-roll its own `fetch`, so a
+      // provider that could not answer failed the whole request instead of
+      // trying the next one in the chain — and it re-implemented the JSON
+      // extraction the router already owns.
+      const completion = await completeWithFallback('supplementDetail', {
+        system:
+          'You are an expert clinical nutritionist. Always respond with valid JSON only — '
+          + 'no markdown, no code fences, no extra text.',
+        user: prompt,
+        maxTokens: 2000,
+        temperature: 0.3,
+        timeoutMs: 20000,
+        json: true,
       });
-      clearTimeout(timeout);
 
-      if (!response.ok) {
-        const errText = await response.text();
-        console.error('[supplement_detail] OpenRouter error:', response.status, errText.substring(0, 500));
+      if (!completion.ok) {
+        // Name every provider tried and why. "AI service error" on its own is
+        // what let a dead key look like a flaky one.
+        console.error(
+          `[supplement_detail] no provider answered: ${JSON.stringify(completion.attempts || [])}`,
+        );
         throw new Error('AI service unavailable');
       }
 
-      const data = await response.json();
-      const choice = data.choices?.[0]?.message;
-      const raw = (choice?.content || choice?.reasoning || '').trim();
-      const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-
-      if (!jsonMatch) {
+      const detail = completion.data;
+      if (!detail || typeof detail !== 'object') {
         throw new Error('Could not parse supplement details');
       }
-
-      const detail = JSON.parse(jsonMatch[0]);
 
       // Populate the cache for future non-personalized requests (best-effort)
       if (!isPersonalized) {

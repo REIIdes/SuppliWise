@@ -38,7 +38,7 @@ const SecurityEvent = require('../models/SecurityEvent');
 const UserNotification = require('../models/UserNotification');
 const MfaTransaction = require('../models/MfaTransaction');
 const mfa = require('../utils/mfaTransaction');
-const { AUTH_METHODS, publicUser, completeSignIn } = require('../utils/authFlow');
+const { AUTH_METHODS, publicUser, publicPictures, completeSignIn } = require('../utils/authFlow');
 const {
   accountKey, lockRemainingMs, recordAccountFailure, clearOffenses, lockMeta,
 } = require('../utils/lockout');
@@ -267,6 +267,11 @@ router.post('/verify', redeemLimiter, async (req, res) => {
 
   return res.json({
     ...publicUser(user),
+    // `loadUser` projects the picture fields out, so they are read separately
+    // rather than reported as absent — otherwise redeeming a recovery code
+    // blanks the avatar in the client's cached profile. See publicPictures in
+    // utils/authFlow.js.
+    ...(await publicPictures(user)),
     token: sessionToken,
     authMethod: AUTH_METHODS.BACKUP_CODE,
     mfaVerified: true,

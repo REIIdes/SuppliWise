@@ -8,7 +8,9 @@ const AdminEvent = require('../models/AdminEvent');
 const { protect } = require('../middleware/auth');
 const { sanitizeTextField, sanitizeShortField, scrubKeys } = require('../utils/sanitize');
 const { historyLimitFor, tierOf, can, PLAN_LABELS, resolveSubscription } = require('../utils/plan');
-const { analyzeSeverity } = require('../utils/severity');
+// Severity is reached through the flagging layer, which runs the rule engine
+// (utils/severity.js) as its authoritative floor and can only escalate on top.
+const { analyzePriorityFlagging } = require('../utils/priorityFlagging');
 const { expiryDateFromNow, expiryFromCreatedAt } = require('../utils/assessments');
 const { guardRaisePriority, selfHealOpenPriority } = require('../utils/priorityGate');
 
@@ -196,7 +198,17 @@ router.post('/', protect, async (req, res) => {
     // Priority Assessment is a PREMIUM+ entitlement: lower tiers save
     // as Standard with no flag, no notifications, and no new-assessment block.
     // (A manual admin Priority flag still applies to any tier.)
-    const severity = analyzeSeverity(req.body);
+    //
+    // The rule engine is the authoritative floor; the Anthropic second opinion
+    // can only add a flag, never remove one. If the AI is unavailable the rule
+    // verdict stands unchanged — a failed call must not silently unflag
+    // something the rules caught.
+    const severity = await analyzePriorityFlagging(req.body);
+    if (severity.aiEscalated) {
+      console.log(`[assessment] AI escalated to Priority at ${severity.confidence}% confidence`);
+    } else if (severity.aiError) {
+      console.log(`[assessment] AI second opinion unavailable, rules only: ${severity.aiError}`);
+    }
     let severityFlag = { flagged: false, reasons: [] };
     if (severity.flagged && can(req.user, 'priorityAssessment')) {
       const outcome = await flagSevereAssessment(assessment, severity.reasons, req.user.email);
@@ -328,8 +340,35 @@ router.get('/history', protect, async (req, res) => {
     // health assessment" to members who already had one — the lightweight fetch
     // it uses to avoid pulling the ~500 KB aiResults blob per assessment was
     // failing, the client swallowed it and rendered its empty state.
+    //
+    // The consult-doctor fields are here because the page renders that trigger
+    // as a banner. It is the one instruction in the plan that must not be
+    // skimmable, and a projection that omitted it made the banner permanently
+    // unreachable — the code looked correct and never fired.
+    //
+    // The profile fields are here because the page opens a personalized
+    // supplement guide, and the server personalizes that guide from the
+    // patient's own age, symptoms, conditions, diet and allergies. Without
+    // them the panel silently produced a generic guide while still claiming to
+    // be written for this patient. They are small strings and arrays, not the
+    // ~500 KB aiResults blob this projection exists to avoid.
     const projection = light
-      ? { createdAt: 1, 'aiResults.recommendations': 1 }
+      ? {
+          _id: 1,
+          createdAt: 1,
+          age: 1,
+          gender: 1,
+          dietType: 1,
+          healthGoals: 1,
+          symptoms: 1,
+          medicalConditions: 1,
+          allergies: 1,
+          lifestyleHabits: 1,
+          pregnancyStatus: 1,
+          'aiResults.recommendations': 1,
+          'aiResults.consultDoctor': 1,
+          'aiResults.consultReason': 1,
+        }
       : null;
 
     // Single aggregation pipeline: fetch paginated results + total count in
@@ -461,10 +500,15 @@ router.patch('/:id/results', protect, async (req, res) => {
     // the owner holds PREMIUM+ (Priority Assessment is tier-gated).
     let severityFlag = { flagged: false, reasons: [] };
     if (assessment.priority !== 'Priority' && can(req.user, 'priorityAssessment')) {
-      const severity = analyzeSeverity(
+      const severity = await analyzePriorityFlagging(
         assessment.toObject ? assessment.toObject() : assessment,
         req.body
       );
+      if (severity.aiEscalated) {
+        console.log(`[assessment] AI escalated re-save to Priority at ${severity.confidence}% confidence`);
+      } else if (severity.aiError) {
+        console.log(`[assessment] AI second opinion unavailable, rules only: ${severity.aiError}`);
+      }
       if (severity.flagged) {
         const outcome = await flagSevereAssessment(assessment, severity.reasons, assessment.userEmail);
         severityFlag = outcome.flagged

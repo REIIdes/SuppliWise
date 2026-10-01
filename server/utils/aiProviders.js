@@ -32,9 +32,11 @@ const AI_CHECK_TTL_MS = 30 * 1000;
 const AI_PROBE_TIMEOUT_MS = 5000;
 
 /**
- * `usedBy` is null for a provider no route in this server consumes. Saying so
- * is the honest half of "Configured": a key can be present and do nothing.
- * The OpenRouter entry mirrors the model each of its call sites hard-codes.
+ * `usedBy` is DERIVED from the routing table rather than written beside the
+ * provider. See `providerUsage()` below for why that matters: the old version
+ * was a hand-maintained string, and a card that says "no route in this server
+ * calls it yet" while routes to that provider exist is worse than no card at
+ * all — it sends the operator to edit a file when nothing is wrong.
  *
  * `defaultModel` is the model a provider is actually called with when the env
  * override is absent. It must be a real, currently-served model id — a card
@@ -53,6 +55,15 @@ const AI_PROBE_TIMEOUT_MS = 5000;
  * AI_PROBE_TIMEOUT_MS, so the probe would abort and the card would report
  * "Unreachable" for a provider that is perfectly healthy. Its model is pinned
  * in three call sites anyway, so there is nothing to verify.
+ *
+ * `chatUrl` / `chatCompatible` / `wire` are what aiRouter.js dispatches
+ * completions with. All three are declared EXPLICITLY on every provider rather
+ * than inferred or defaulted: the router requires `chatCompatible === true`, so
+ * a missing flag reads as "cannot be routed to" and not "can", and `wire` picks
+ * the request/response shape. Relying on an implicit `'openai'` default left
+ * three providers whose shape was a guess — and Anthropic's Messages API is
+ * genuinely different (a top-level `system`, no `role: 'system'` message), so
+ * guessing it wrong is a 400 that reads like a payload bug.
  */
 const AI_PROVIDERS = [
   {
@@ -62,8 +73,10 @@ const AI_PROVIDERS = [
     modelEnv: 'OPENROUTER_MODEL',
     defaultModel: 'deepseek/deepseek-v4-flash-0731',
     url: 'https://openrouter.ai/api/v1/models',
+    chatUrl: 'https://openrouter.ai/api/v1/chat/completions',
+    chatCompatible: true,
+    wire: 'openai',
     auth: 'bearer',
-    usedBy: 'Assessment results, AI chat, detail mode, text polish',
     verifyModel: false,
   },
   {
@@ -71,10 +84,22 @@ const AI_PROVIDERS = [
     label: 'Groq',
     envKey: 'GROQ_API_KEY',
     modelEnv: 'GROQ_MODEL',
-    defaultModel: null,
+    // Pinned against the key's OWN model list, which was read live rather than
+    // assumed: it serves 11 models and llama-3.3-70b-versatile — the model this
+    // slot was originally specified for — is NOT among them. gpt-oss-120b is the
+    // strongest model the key can actually reach, returns clean JSON under
+    // `response_format: json_object` (verified, ~1.1 s), and the probe verifies
+    // the resolved id on every check, so a future removal surfaces as
+    // "Model unavailable" in 30 s instead of failing the first real prediction.
+    // The other candidates on this key: openai/gpt-oss-20b, qwen/qwen3.8-27b,
+    // and the meta-llama/llama-prompt-guard-2-* pair, which are injection
+    // classifiers rather than general reasoners.
+    defaultModel: 'openai/gpt-oss-120b',
     url: 'https://api.groq.com/openai/v1/models',
+    chatUrl: 'https://api.groq.com/openai/v1/chat/completions',
+    chatCompatible: true,
+    wire: 'openai',
     auth: 'bearer',
-    usedBy: null,
     verifyModel: true,
   },
   {
@@ -89,8 +114,10 @@ const AI_PROVIDERS = [
     // the first real completion.
     defaultModel: 'gpt-5.4-nano',
     url: 'https://api.openai.com/v1/models',
+    chatUrl: 'https://api.openai.com/v1/chat/completions',
+    chatCompatible: true,
+    wire: 'openai',
     auth: 'bearer',
-    usedBy: null,
     verifyModel: true,
   },
   {
@@ -98,13 +125,145 @@ const AI_PROVIDERS = [
     label: 'Anthropic',
     envKey: 'ANTHROPIC_API_KEY',
     modelEnv: 'ANTHROPIC_MODEL',
-    defaultModel: null,
+    // Pinned against the key's OWN model list, read live rather than assumed: it
+    // serves 13 models (claude-fable-5, the claude-haiku/sonnet/opus families).
+    // Haiku 4.5 is the right tier here — chat is the product's only genuinely
+    // conversational feature, and priority flagging is a short classification of
+    // a few hundred tokens that runs on every assessment submit and must never be
+    // the expensive call in the request path.
+    defaultModel: 'claude-haiku-4-5-20251001',
     url: 'https://api.anthropic.com/v1/models',
+    chatUrl: 'https://api.anthropic.com/v1/messages',
+    chatCompatible: true,
+    // NOT OpenAI-shaped. The Messages API takes `system` as a top-level field
+    // and has no `role: 'system'` message, so the router builds a different
+    // body and reads a different response shape for this provider.
+    wire: 'anthropic',
     auth: 'x-api-key',
-    usedBy: null,
+    verifyModel: true,
+  },
+  {
+    key: 'llama',
+    label: 'Llama (self-hosted gateway)',
+    envKey: 'LLAMA_API_KEY',
+    modelEnv: 'LLAMA_MODEL',
+    // A self-hosted gateway has no public hostname to hard-code — it is
+    // whatever machine serves it, on whatever port. So the base URL comes from
+    // the environment, and both endpoints are derived from it. Guessing a host
+    // here would send a real credential somewhere unverified on every poll.
+    baseUrlEnv: 'LLAMA_BASE_URL',
+    // No default: which model a self-hosted gateway serves is a property of how
+    // that deployment was set up, and there is no honest way to guess it. The
+    // panel says "No model selected" and the router refuses to dispatch until
+    // one is chosen — which is the same rule every other provider follows.
+    defaultModel: null,
+    auth: 'bearer',
+    // LiteLLM, Ollama, vLLM and friends all speak the OpenAI wire format.
+    chatCompatible: true,
+    wire: 'openai',
     verifyModel: true,
   },
 ];
+
+/**
+ * The purposes a provider actually serves, read from the ROUTING TABLE.
+ *
+ * WHY THIS IS DERIVED AND NOT DECLARED
+ * ------------------------------------
+ * `usedBy` used to be a string written by hand next to each provider, and the
+ * two halves were free to disagree. They did: `polish` and `assessment` were
+ * both dispatched to OpenRouter while its `usedBy` still listed the OLD four
+ * call sites, so the card described work that no longer happened while the
+ * real assignment was invisible. It is the same class of bug as two call sites
+ * disagreeing about a model id — a fact stated in two places that nothing
+ * compares — and the fix is the same one aiRouter.js was written for: say it
+ * once.
+ *
+ * So the routing table is the ONLY place an assignment is declared, and this
+ * reads it. A card can no longer claim "no route in this server calls it yet"
+ * while a route to it exists, and adding a purpose to AI_ROUTES updates every
+ * card at once with no second edit to remember.
+ *
+ * NULL is meaningful and is not softened into a friendly string: a provider
+ * nothing routes to really is spendable by no feature, and the panel says so.
+ * The self-hosted gateway is the shipped example — probed for health, carrying
+ * a valid key, and genuinely called by nothing until an operator both points
+ * LLAMA_BASE_URL at their box and picks a model it serves.
+ *
+ * The require is lazy and guarded because the two modules require each other:
+ * aiRouter needs the provider REGISTRY to resolve a route, so this module is
+ * fully loaded before aiRouter's is. Deferring the read to call time (rather
+ * than module time) is what makes that ordering safe, and the try/catch keeps a
+ * circular-require failure from taking the health panel down — it degrades to
+ * "no purposes known", which is the old hand-written state, not a crash.
+ *
+ * @param {{key: string}|string} provider a registry entry, or its key
+ * @returns {string|null} the routing labels, or null when nothing routes to it
+ */
+function providerUsage(provider) {
+  const key = typeof provider === 'string' ? provider : (provider && provider.key);
+  if (!key) return null;
+
+  let routes;
+  try {
+    ({ AI_ROUTES: routes } = require('./aiRouter'));
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(routes)) return null;
+
+  const labels = routes
+    .filter((route) => route && route.provider === key)
+    .map((route) => String(route.label || route.purpose || '').trim())
+    .filter(Boolean);
+  return labels.length ? labels.join(' · ') : null;
+}
+
+/**
+ * The two endpoints for a provider, resolving a self-hosted base URL when the
+ * provider declares one.
+ *
+ * Split out because the URL is no longer a constant in the registry for every
+ * entry, and two very different consumers need it: the health probe (which
+ * fetches the model list) and the router (which POSTs completions). If each
+ * built its own URL they would drift — the exact class of bug the routing table
+ * exists to prevent.
+ *
+ * A base URL is normalised rather than trusted: trimmed, given a scheme if it
+ * was pasted bare, and stripped of a trailing slash, so `http://host:8080`,
+ * `http://host:8080/` and `http://host:8080/v1` all behave.
+ *
+ * @param {object} provider
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {{url: string|null, chatUrl: string|null, baseUrl: string|null, error: string|null}}
+ */
+function resolveEndpoints(provider, env = process.env) {
+  if (!provider.baseUrlEnv) {
+    return {
+      url: provider.url || null,
+      chatUrl: provider.chatUrl || null,
+      baseUrl: null,
+      error: null,
+    };
+  }
+
+  const raw = String(env[provider.baseUrlEnv] == null ? '' : env[provider.baseUrlEnv]).trim();
+  if (!raw) {
+    return {
+      url: null, chatUrl: null, baseUrl: null,
+      error: `No gateway address — set ${provider.baseUrlEnv} to the base URL of your `
+        + 'self-hosted gateway (for example http://localhost:4000).',
+    };
+  }
+
+  const withScheme = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`;
+  const trimmed = withScheme.replace(/\/+$/, '');
+  // Tolerate a base that already ends in /v1, which is how most of these
+  // gateways document theirs — appending another would give /v1/v1/models.
+  const root = /\/v\d+$/i.test(trimmed) ? trimmed : `${trimmed}/v1`;
+
+  return { url: `${root}/models`, chatUrl: `${root}/chat/completions`, baseUrl: trimmed, error: null };
+}
 
 /**
  * The shipped .env.example fills every key with `your_..._api_key_here`.
@@ -148,7 +307,15 @@ function result(provider, fields) {
   return {
     key: provider.key,
     label: provider.label,
-    usedBy: provider.usedBy || null,
+    // The NAME of the variable this provider is configured with. Not a
+    // credential — the value never leaves the process — but the panel needs it
+    // so the "no keys are set" state can tell the operator exactly which line to
+    // add instead of saying "configure something".
+    envKey: provider.envKey,
+    // Derived from the routing table rather than declared here — see
+    // `providerUsage()`. Resolved on every exit path so a card cannot describe
+    // work that no longer happens, or hide work that does.
+    usedBy: providerUsage(provider),
     model: null,
     // null = "not determined" (no key, no model, verification off, or a body we
     // could not parse). Only true/false ever asserts something about the key.
@@ -159,6 +326,12 @@ function result(provider, fields) {
     reachable: false,
     latencyMs: null,
     detail: '',
+    // The address a self-hosted provider is dialled at, or null for a public
+    // SaaS. Resolved HERE rather than in each caller so every exit path carries
+    // it — an operator debugging a local gateway needs to see the host, not
+    // infer it, and "Unreachable" without the address sends them looking at the
+    // network instead of at one .env value.
+    baseUrl: resolveEndpoints(provider).baseUrl,
     checkedAt: new Date().toISOString(),
     ...fields,
   };
@@ -227,12 +400,27 @@ function describeModels(model, ids, modelEnv) {
 async function checkAiProvider(provider) {
   const key = resolveKey(provider.envKey);
   const model = resolveModel(provider);
+  // Resolved up front so the address can be reported on every exit path below,
+  // including the ones that never make a request.
+  const endpoints = resolveEndpoints(provider);
 
   if (!key) {
     return result(provider, {
       model,
       status: 'unconfigured',
       detail: `No key set — add ${provider.envKey} to activate this provider.`,
+    });
+  }
+
+  // A self-hosted provider has no URL in the registry; it comes from the
+  // environment. Checked AFTER the key, so "no key" stays the first thing an
+  // operator is told — that is the thing they have to fix first.
+  if (!endpoints.url) {
+    return result(provider, {
+      model,
+      configured: true,
+      status: 'unconfigured',
+      detail: endpoints.error,
     });
   }
 
@@ -247,7 +435,7 @@ async function checkAiProvider(provider) {
       ? { 'x-api-key': key, 'anthropic-version': '2023-06-01' }
       : { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
 
-    const response = await fetch(provider.url, {
+    const response = await fetch(endpoints.url, {
       method: 'GET',
       headers,
       signal: controller.signal,
@@ -297,7 +485,11 @@ async function checkAiProvider(provider) {
       : ((error && error.message) || 'network error');
     return result(provider, {
       model, configured: true, status: 'unreachable', reachable: false, latencyMs,
-      detail: `Unreachable — ${reason}.`,
+      // For a self-hosted provider the ADDRESS is the most likely thing to be
+      // wrong, so it is named. "fetch failed" on its own sends an operator
+      // looking at the network, when the fix is one character in a .env value.
+      // A public provider has no such knob, so it is left unsaid.
+      detail: `Unreachable — ${reason}.${endpoints.baseUrl ? ` (tried ${endpoints.baseUrl})` : ''}`,
     });
   } finally {
     clearTimeout(timer);
@@ -413,6 +605,8 @@ module.exports = {
   isPlaceholderKey,
   resolveKey,
   resolveModel,
+  resolveEndpoints,
+  providerUsage,
   readModelIds,
   describeModels,
   checkAiProvider,

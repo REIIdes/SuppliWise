@@ -22,12 +22,16 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 const jwt = require('jsonwebtoken');
 const speakeasy = require('speakeasy');
 const mongoose = require('mongoose');
-const { connectTestDb, skipMessage } = require('./Test File/testDbGuard');
 const User = require('./models/User');
 const Session = require('./models/Session');
 const { issueUserSession } = require('./utils/sessions');
 
 const BASE = `http://127.0.0.1:${process.env.PORT || 5000}/api`;
+
+// Declared once and reused by register + every later sign-in for these
+// accounts. As a bare literal it fell behind utils/passwordRules.js, and the
+// suite could not create its throwaway accounts at all.
+const PROBE_PASSWORD = 'QuartzMeadow!47';
 
 let failures = 0;
 const check = (label, condition, detail = '') => {
@@ -53,6 +57,56 @@ const call = async (method, urlPath, { token, body } = {}) => {
 
 // 200 = session is live; 401 + code = definitively rejected.
 const me = (token) => call('GET', '/auth/me', { token });
+
+// ── Real 2FA sign-in helpers ────────────────────────────────────────────────
+//
+// These exist because this script drifted behind the server twice, and both
+// drifts produced a 401 rather than a useful error.
+//
+//   1. It enabled 2FA by writing `twoFactorSecret` straight into the user
+//      document. Secrets are now stored ENCRYPTED (utils/totpSecret
+//      .writeSecret, read back by readSecret), so the server could not read a
+//      secret back and every code was rejected.
+//   2. It then called /auth/login-2fa with a bare `userId`. That route now
+//      requires the live MfaTransaction minted by the password step, and
+//      answered 401 "That sign-in attempt has expired." — a message that reads
+//      like a clock problem when it is really a missing-parameter problem.
+//
+// Both are fixed by driving the genuine flow: enable 2FA through
+// /auth/setup-2fa + /auth/verify-2fa, and sign in through /auth/login +
+// /auth/login-2fa carrying the transaction the login returned.
+const enableAuthenticator = async (token) => {
+  const setup = await call('POST', '/auth/setup-2fa', { token });
+  if (setup.status !== 200 || !setup.data?.secret) {
+    throw new Error(`setup-2fa failed: ${setup.status} ${JSON.stringify(setup.data)}`);
+  }
+  const base32 = setup.data.secret;
+  const verified = await call('POST', '/auth/verify-2fa', {
+    token,
+    body: { otp: await freshTotp(base32) },
+  });
+  if (verified.status !== 200) {
+    throw new Error(`verify-2fa failed: ${verified.status} ${JSON.stringify(verified.data)}`);
+  }
+  return base32;
+};
+
+/** Password step → second factor. Returns the raw login-2fa response. */
+const signInWithAuthenticator = async (email, base32, remember = false) => {
+  const start = await call('POST', '/auth/login', {
+    body: { email, password: PROBE_PASSWORD },
+  });
+  if (start.status !== 200 || !start.data?.mfaTransaction) {
+    throw new Error(`login did not open an MFA transaction: ${start.status} ${JSON.stringify(start.data)}`);
+  }
+  return call('POST', '/auth/login-2fa', {
+    body: {
+      mfaTransaction: start.data.mfaTransaction,
+      otp: await freshTotp(base32),
+      remember,
+    },
+  });
+};
 
 // TOTP codes are single-use (verifyTotpOnce): wait until the wall-clock code
 // differs from every code already consumed in this run, then reserve it.
@@ -91,7 +145,7 @@ async function registerAccount(stamp, tag) {
       firstName: tag.first,
       lastName: `${tag.last}${suffix}`,
       email: tag.email,
-      password: 'SessionTest123',
+      password: PROBE_PASSWORD,
       dateOfBirth: '1995-05-05',
       gender: 'Male',
       captchaId: captcha.id,
@@ -103,15 +157,35 @@ async function registerAccount(stamp, tag) {
 }
 
 async function main() {
-  // Tests write real User/Session documents. Never let them reach the
-  // application's own database — see Test File/testDbGuard.js.
-  const db = await connectTestDb();
-  if (!db.connected) { console.log(skipMessage(db)); return; }
+  // These checks are inherently LIVE-database checks, and that is not a choice:
+  // the accounts are created THROUGH the running API (so the server mints the
+  // sessions and the tokens) and then asserted on directly.
+  //
+  // That makes a separate MONGO_TEST_URI unusable here. It used to connect via
+  // connectTestDb(), which put this script's reads and writes on the TEST
+  // database while the API created every account on the APPLICATION database —
+  // two different databases, so `pointer: undefined` and
+  // "Unable to start session: account not found" on nearly every assertion.
+  // A guard that points a suite away from the very data it must observe is
+  // worse than no guard.
+  //
+  // So this script connects to the application's own database, the same way the
+  // other live suites do (glitch-hunt.js, glitch-hunt-web3.js, test-web3-flows.js).
+  // That is safe because it is strictly scoped: it creates only
+  // `session-{a,b,c}-<timestamp>@example.com` accounts of its own, and the
+  // finally block below deletes both their sessions and the accounts. Nothing
+  // pre-existing is ever read or written.
+  //
+  // testDbGuard still guards the `npm test` unit suites, which is where the
+  // accidental-production-write risk actually came from.
+  await mongoose.connect(process.env.MONGO_URI);
   const stamp = Date.now();
   const emailA = `session-a-${stamp}@example.com`;
   const emailB = `session-b-${stamp}@example.com`;
   const emailC = `session-c-${stamp}@example.com`;
-  const secret = speakeasy.generateSecret({ name: `SuppliWise Session Test (${emailA})` });
+  // The authenticator secret is NOT generated here. It comes from the server,
+  // via /auth/setup-2fa, so the account is enrolled exactly the way a real
+  // member enrolls — see enableAuthenticator.
   const created = [];
 
   try {
@@ -147,13 +221,13 @@ async function main() {
       `A=${aStill1.status} B=${bStill1.status} C=${cLive.status}`);
 
     // ── Test 2/5 — same account signs in again ("another browser") ───────
-    await User.updateOne({ _id: A.id }, { twoFactorEnabled: true, twoFactorSecret: secret.base32 });
+    // 2FA is enabled through the real API, not by writing the secret into the
+    // document (see enableAuthenticator). A.token is still live at this point.
+    const totpSecretBase32 = await enableAuthenticator(A.token);
 
     // Single 2FA sign-in: the freshly generated code has never been used
     // (TOTP codes are single-use server-side, so no waiting is required).
-    const loginA2 = await call('POST', '/auth/login-2fa', {
-      body: { userId: A.id, otp: await freshTotp(secret.base32) },
-    });
+    const loginA2 = await signInWithAuthenticator(emailA, totpSecretBase32);
     check('Account A signs in again → new session issued',
       loginA2.status === 200 && !!loginA2.data?.token, `status ${loginA2.status} ${JSON.stringify(loginA2.data)}`);
     const A2 = loginA2.data?.token;
@@ -270,9 +344,7 @@ async function main() {
 
     // ── OPT-IN saved login ("Save my login on this browser") ─────────────
     // Fresh sign-in WITH remember → a remember credential comes back.
-    const remLogin = await call('POST', '/auth/login-2fa', {
-      body: { userId: A.id, otp: await freshTotp(secret.base32), remember: true },
-    });
+    const remLogin = await signInWithAuthenticator(emailA, totpSecretBase32, true);
     check('Sign-in with remember returns a remember credential',
       remLogin.status === 200 && typeof remLogin.data?.rememberToken === 'string'
         && remLogin.data.rememberToken.length >= 20,
@@ -314,9 +386,7 @@ async function main() {
       mintAfterOut.status === 401, `status ${mintAfterOut.status} ${JSON.stringify(mintAfterOut.data)}`);
 
     // A newer sign-in (Rule: newest wins) also invalidates an old saved login.
-    const remLogin2 = await call('POST', '/auth/login-2fa', {
-      body: { userId: A.id, otp: await freshTotp(secret.base32), remember: true },
-    });
+    const remLogin2 = await signInWithAuthenticator(emailA, totpSecretBase32, true);
     check('Re-sign-in with remember issues a NEW credential',
       remLogin2.status === 200 && !!remLogin2.data?.rememberToken,
       `status ${remLogin2.status} ${JSON.stringify(remLogin2.data)}`);

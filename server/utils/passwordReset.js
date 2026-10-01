@@ -56,6 +56,147 @@ const INVALID_LINK_MESSAGE =
   'This reset link is no longer valid. It may have expired, or it may already have been used. '
   + 'Request a new one and try again.';
 
+/**
+ * Mint a grant for an account that has ALREADY proved itself some other way.
+ *
+ * This is the seam that lets a recovery method be added without touching the
+ * redemption path. A verified backup code, an authenticator code, a passkey
+ * assertion and an emailed link are four different proofs of the same claim —
+ * "this person controls this account" — so they all end here, and every one of
+ * them produces the SAME single-use, TTL-bound PasswordResetToken row that
+ * `completeWithToken` already knows how to redeem.
+ *
+ * That is the whole design. It means the expensive, security-critical part of a
+ * reset (single-use claim, session revocation, "password changed" mail,
+ * invalidating every other outstanding grant) is written once, and a new
+ * recovery method cannot get any of it subtly wrong.
+ *
+ * Deliberately NOT used by `requestReset`, which must send the mail BEFORE
+ * storing (an undelivered link must never validate) and so cannot return the
+ * token to a caller.
+ *
+ * @returns {Promise<{ok: true, token: string, expiresAt: Date} | {ok: false}>}
+ */
+async function mintResetGrant(user, { method, req } = {}) {
+  const userId = str(user?._id);
+  if (!userId) return { ok: false };
+
+  // Same cap as the emailed path: a burst of verified recoveries must not pile
+  // up live rows. Best-effort — a count failure must not block a legitimate
+  // recovery that has already proved itself.
+  try {
+    const active = await PasswordResetToken.countActiveForUser(userId);
+    if (active >= PASSWORD_RESET_MAX_ACTIVE_PER_USER) {
+      await PasswordResetToken.dropOldestActiveForUser(userId);
+    }
+  } catch (error) {
+    console.error('[password-reset] could not count live grants:', error.message);
+  }
+
+  const { token, code } = PasswordResetToken.generateSecrets();
+  const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_MS);
+
+  try {
+    await PasswordResetToken.store({
+      userId,
+      token,
+      code,
+      ttlMs: PASSWORD_RESET_TTL_MS,
+      ip: normalizeIp(req?.ip),
+      userAgent: req?.get?.('user-agent'),
+    });
+    rememberSent(userId, Date.now());
+  } catch (error) {
+    // Unlike the emailed path there is no mail already in flight, so this is a
+    // clean failure and the caller can honestly report it.
+    console.error('[password-reset] could not store the grant:', error.message);
+    return { ok: false };
+  }
+
+  SecurityEvent.write({
+    user: userId,
+    type: 'password-reset-code-verified',
+    reason: `Reset grant issued via ${method}`,
+    meta: { factor: method, outcome: 'grant-issued' },
+    ip: normalizeIp(req?.ip),
+    userAgent: req?.get?.('user-agent'),
+  }).catch(() => {});
+
+  console.log(
+    `[password-reset] grant issued to ${maskEmail(user.email)} via ${method} `
+    + `(expires in ${PASSWORD_RESET_TTL_MINUTES}m)`
+  );
+  return { ok: true, token, expiresAt, code };
+}
+
+/**
+ * Generate → send → store, for any grant that reaches the user BY EMAIL.
+ *
+ * The order is the security property, and it is not interchangeable: the row is
+ * written only after the mail has been accepted, so a link that was never
+ * delivered can never validate. Issuing the other way round would leave a live
+ * credential in the database that nobody holds — and, worse, one an attacker who
+ * can read the collection could still not use, but a user who re-requests could
+ * collide with.
+ *
+ * Shared by `requestReset` (to the account address) and the recovery-email path
+ * (to a verified secondary address) so that invariant lives in exactly one place.
+ *
+ * @returns {Promise<{delivered: boolean, reason?: string}>}
+ */
+async function issueGrantByEmail({ user, recipient, req }) {
+  const userId = str(user?._id);
+  const address = normalizeEmail(recipient);
+  if (!userId || !address) return { delivered: false, reason: 'invalid' };
+
+  // Cap live grants. Best-effort: a count failure must not block a recovery.
+  try {
+    const active = await PasswordResetToken.countActiveForUser(userId);
+    if (active >= PASSWORD_RESET_MAX_ACTIVE_PER_USER) {
+      await PasswordResetToken.dropOldestActiveForUser(userId);
+    }
+  } catch (error) {
+    console.error('[password-reset] could not count live grants:', error.message);
+  }
+
+  const { token, code } = PasswordResetToken.generateSecrets();
+  const resetUrl = buildResetUrl(resolveWebOrigin(req), token);
+
+  const sent = await sendPasswordResetEmail(address, {
+    resetUrl,
+    code,
+    expiresInMinutes: PASSWORD_RESET_TTL_MINUTES,
+  });
+
+  if (!sent) {
+    console.error(
+      `[password-reset] delivery FAILED for ${maskEmail(address)} — the user was told to check their inbox. `
+      + 'Check the SMTP configuration (server log above has the underlying error).'
+    );
+    return { delivered: false, reason: 'delivery' };
+  }
+
+  try {
+    await PasswordResetToken.store({
+      userId,
+      token,
+      code,
+      ttlMs: PASSWORD_RESET_TTL_MS,
+      ip: normalizeIp(req?.ip),
+      userAgent: req?.get?.('user-agent'),
+    });
+    rememberSent(userId, Date.now());
+  } catch (error) {
+    // The mail is already out, so this must not fail the request — but the
+    // link the user now holds is worthless, and saying so to them would be
+    // indistinguishable from the enumeration oracle below. Log it loudly.
+    console.error('[password-reset] could not store the grant:', error.message);
+    return { delivered: false, reason: 'store' };
+  }
+
+  return { delivered: true };
+}
+
 /** Last successful send per account, for the resend cooldown. */
 const lastSentAt = new Map();
 
@@ -186,51 +327,8 @@ async function requestReset({ email, req } = {}) {
     return { status: 200, message: GENERIC_REQUEST_MESSAGE, sent: false, cooldown: true };
   }
 
-  try {
-    const active = await PasswordResetToken.countActiveForUser(user._id);
-    if (active >= PASSWORD_RESET_MAX_ACTIVE_PER_USER) {
-      await PasswordResetToken.dropOldestActiveForUser(user._id);
-    }
-  } catch (error) {
-    console.error('[password-reset] could not count live grants:', error.message);
-  }
-
-  // Secrets are generated before the send so the mail can be built, but the row
-  // is only written after the mail is accepted — a link that was never delivered
-  // must never be a link that validates.
-  const { token, code } = PasswordResetToken.generateSecrets();
-  const webOrigin = resolveWebOrigin(req);
-  const resetUrl = buildResetUrl(webOrigin, token);
-
-  const sent = await sendPasswordResetEmail(normalized, {
-    resetUrl,
-    code,
-    expiresInMinutes: PASSWORD_RESET_TTL_MINUTES,
-  });
-
-  if (!sent) {
-    console.error(
-      `[password-reset] delivery FAILED for ${maskEmail(normalized)} — the user was told to check their inbox. `
-      + 'Check the SMTP configuration (server log above has the underlying error).'
-    );
-    return { status: 200, message: GENERIC_REQUEST_MESSAGE, sent: false };
-  }
-
-  try {
-    await PasswordResetToken.store({
-      userId: user._id,
-      token,
-      code,
-      ttlMs: PASSWORD_RESET_TTL_MS,
-      ip: normalizeIp(req?.ip),
-      userAgent: req?.get?.('user-agent'),
-    });
-    rememberSent(userId, Date.now());
-  } catch (error) {
-    // The mail is already out, so this must not fail the request — but the
-    // link the user now holds is worthless, and saying so to them would be
-    // indistinguishable from the enumeration oracle above. Log it loudly.
-    console.error('[password-reset] could not store the grant:', error.message);
+  const outcome = await issueGrantByEmail({ user, recipient: normalized, req });
+  if (!outcome.delivered) {
     return { status: 200, message: GENERIC_REQUEST_MESSAGE, sent: false };
   }
 
@@ -479,6 +577,8 @@ module.exports = {
   INVALID_LINK_MESSAGE,
   resolveWebOrigin,
   buildResetUrl,
+  mintResetGrant,
+  issueGrantByEmail,
   requestReset,
   resendForUser,
   validateToken,

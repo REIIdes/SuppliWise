@@ -230,15 +230,73 @@ function safePictureValue(value) {
   return trimmed;
 }
 
+/**
+ * A `find` filter that matches ONLY documents whose picture values are small
+ * enough to be safe to put in an auth response.
+ *
+ * ── Why the cap cannot live only in `safePictureValue` ──────────────────────
+ *
+ * `safePictureValue` caps what goes into a RESPONSE. It says nothing about the
+ * READ that produced it, and the read is where the multi-megabyte failure
+ * actually happens: a document `scripts/migrate-pictures-to-disk.js` has not
+ * reached still holds its image inline, so projecting `profilePicture` onto a
+ * sign-in path ships megabytes over the wire before any JavaScript cap gets a
+ * chance to run. That transfer is the outage described at the top of this file
+ * (~30 s each way over Atlas, client timeout, "we could not reach our servers"),
+ * and `Test File/login-picture-footprint.test.js` exists to stop it returning.
+ *
+ * So the size is decided SERVER-SIDE, in the query. Only then is the field
+ * projected, and a value that comes back is one `safePictureValue` would have
+ * passed through anyway. The cap and the read agree by construction instead of
+ * by discipline.
+ *
+ * Both fields are measured as one SUM, deliberately: it is a single `$expr` in
+ * a single round trip. The consequence is that an account still carrying an
+ * un-migrated megabyte banner reports no avatar either — both values are
+ * suppressed rather than one. That is the right way round: the alternative is
+ * reading the blob to find out whether it was safe to send.
+ *
+ * `$convert`/`$ifNull` wrap each field so a missing, null or non-string value
+ * measures as `''` rather than raising `$strLenCP`: the schema types these
+ * fields, but a value written by a script must not be able to turn a sign-in
+ * into a 500. Mongoose never casts `$expr` (it is one of the operators it
+ * passes straight through), so the expression reaches the server verbatim.
+ *
+ * @param {string[]} [paths] the field paths to measure
+ * @returns {object} a `$expr` fragment for a `find` filter
+ */
+function boundedPictureFilter(paths = ['$profilePicture', '$bannerPicture']) {
+  const asString = (path) => ({
+    $convert: { input: { $ifNull: [path, ''] }, to: 'string', onError: '', onNull: '' },
+  });
+  return {
+    $expr: {
+      $lte: [
+        { $add: paths.map((path) => ({ $strLenCP: asString(path) })) },
+        INLINE_BLOB_CHARS,
+      ],
+    },
+  };
+}
+
+/**
+ * The two picture fields and nothing else — the whole point of pairing this
+ * with `boundedPictureFilter` is that the read is a handful of bytes even for
+ * an account whose images are stored as URLs.
+ */
+const PICTURE_PROJECTION = 'profilePicture bannerPicture';
+
 module.exports = {
   PICTURE_DIR,
   PUBLIC_PATH,
   MAX_AVATAR_BYTES,
   MAX_BANNER_BYTES,
   INLINE_BLOB_CHARS,
+  PICTURE_PROJECTION,
   isDataUrl,
   isStoredPath,
   parseDataUrl,
   storePicture,
   safePictureValue,
+  boundedPictureFilter,
 };

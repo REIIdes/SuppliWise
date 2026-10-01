@@ -14,9 +14,10 @@
  */
 const { issueUserSession, attachRememberToken, markSessionTrusted } = require('./sessions');
 const SecurityEvent = require('../models/SecurityEvent');
+const User = require('../models/User');
 const { describeDevice } = require('./device');
 const { describeSubscription } = require('./entitlements');
-const { safePictureValue } = require('./pictures');
+const { safePictureValue, boundedPictureFilter, PICTURE_PROJECTION } = require('./pictures');
 const { platformOf } = require('./device');
 
 /** How a second factor should be described in the audit trail and the session. */
@@ -55,6 +56,63 @@ function publicUser(user) {
     subscriptionActive: user.subscriptionActive,
     subscriptionPlan: user.subscriptionPlan,
     subscription: describeSubscription(user),
+  };
+}
+
+/**
+ * The two picture values a sign-in response has to carry, read separately from
+ * the document the response is otherwise built from.
+ *
+ * ── THE BUG THIS EXISTS FOR ────────────────────────────────────────────────
+ *
+ * Sign-in reads deliberately project `profilePicture` / `bannerPicture` OUT —
+ * see `Test File/login-picture-footprint.test.js` and the header of
+ * `utils/pictures.js` for the multi-megabyte outage that projection avoids.
+ *
+ * Three sign-in routes handed that projected document straight to
+ * `publicUser()`. A field that was never read is `undefined`,
+ * `safePictureValue(undefined)` is `''`, and the response asserted something it
+ * had no way of knowing: that the account has no avatar.
+ *
+ * That is not cosmetic, and it is not self-correcting. The client stores the
+ * sign-in response as this tab's cached profile, and nothing re-reads the
+ * pictures afterwards, so a passwordless sign-in replaced a real avatar and
+ * banner with empty strings and left them that way for the life of the
+ * session — reported as "signing in with a passkey resets my profile".
+ *
+ * ── Why this is a second read rather than a wider projection ───────────────
+ *
+ * Putting the fields back on the sign-in read would re-open the exact failure
+ * the projection exists to close, because an account the disk migration has not
+ * reached still holds its image inline. `boundedPictureFilter` decides the size
+ * in the QUERY, so the projection below can only ever return a value that is
+ * already safe to send.
+ *
+ * Never fails a sign-in: a database problem here degrades to "no pictures in
+ * this one response" (the old behaviour) rather than to a rejected sign-in the
+ * person has already proved themselves for.
+ *
+ * @param {object} user a signed-in user's document (need only its `_id`)
+ * @returns {Promise<{profilePicture: string, bannerPicture: string}>}
+ */
+async function publicPictures(user) {
+  const none = { profilePicture: '', bannerPicture: '' };
+  if (!user || !user._id) return none;
+
+  let row = null;
+  try {
+    row = await User.findOne(
+      { _id: user._id, ...boundedPictureFilter() },
+      PICTURE_PROJECTION,
+    ).lean();
+  } catch {
+    return none;
+  }
+  if (!row) return none;
+
+  return {
+    profilePicture: safePictureValue(row.profilePicture),
+    bannerPicture: safePictureValue(row.bannerPicture),
   };
 }
 
@@ -177,6 +235,7 @@ async function recordFailure({ user, req, reason, type = 'login-failure', authMe
 module.exports = {
   AUTH_METHODS,
   publicUser,
+  publicPictures,
   completeSignIn,
   recordFailure,
 };

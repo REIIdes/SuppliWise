@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { NavLink, Link, useNavigate, useLocation } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
-import { BASE_URL, saveAssessment, getRecommendations, saveAssessmentResults, parseJSON, startSession, takeAuthNotice, getToken, redeemBackupCode } from '../api';
+import { BASE_URL, saveAssessment, getRecommendations, saveAssessmentResults, parseJSON, startSession, takeAuthNotice, getToken, redeemBackupCode, accountIdOf, getActiveAccountId, getStoredUser } from '../api';
 import { beginAuthTransition, endAuthTransition } from '../auth/authState';
 // Passkey sign-in: two server calls with a browser gesture between them.
 // The client never names the account - the assertion does.
@@ -401,6 +401,30 @@ function LogIn() {
     // /login → /dashboard before the pending-assessment flow reaches /results.
     beginAuthTransition();
     try {
+    // Pictures are kept unless this response actually spoke about them.
+    //
+    // This cached profile is the ONLY copy the app renders an avatar or banner
+    // from, and a field missing from a sign-in response means "the server did
+    // not read it" — not "you have none". Defaulting a missing field to ''
+    // therefore made a passwordless (passkey) sign-in wipe a real profile
+    // picture and banner for the rest of the session.
+    //
+    // The carry-over is scoped by ACCOUNT, so switching accounts can never hand
+    // one person's avatar to another; and it only applies when the key is
+    // absent, so a server that really does send '' (the picture was removed)
+    // still clears it.
+    const sameAccount = (() => {
+      const incoming = accountIdOf(data.token);
+      if (!incoming) return false;
+      const previous = getActiveAccountId();
+      return !!previous && previous === incoming;
+    })();
+    const cached = sameAccount ? getStoredUser() : null;
+    const picture = (field) => {
+      if (Object.prototype.hasOwnProperty.call(data, field)) return data[field] || '';
+      return (cached && cached[field]) || '';
+    };
+
     // Store this account under its OWN session keys and make it active —
     // any account already signed in on this browser stays signed in.
     const switchedFrom = startSession(data.token, {
@@ -412,8 +436,8 @@ function LogIn() {
       dateOfBirth: data.dateOfBirth,
       age: data.age,
       twoFactorEnabled: data.twoFactorEnabled === true,
-      profilePicture: data.profilePicture || '',
-      bannerPicture: data.bannerPicture || '',
+      profilePicture: picture('profilePicture'),
+      bannerPicture: picture('bannerPicture'),
       subscriptionActive: data.subscriptionActive === true,
       subscriptionPlan: data.subscriptionPlan || 'free',
       // Resolved snapshot (expiry-aware) — the plan store renders from this.

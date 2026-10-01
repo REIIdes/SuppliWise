@@ -5,6 +5,8 @@ const Assessment = require('../models/Assessment');
 const AdminAccount = require('../models/AdminAccount');
 const AdminEvent = require('../models/AdminEvent');
 const Session = require('../models/Session');
+const Passkey = require('../models/Passkey');
+const { describeFactor } = require('../utils/strongestFactor');
 const UserNotification = require('../models/UserNotification');
 const SubscriptionRequest = require('../models/SubscriptionRequest');
 const SubscriptionCancelRequest = require('../models/SubscriptionCancelRequest');
@@ -15,7 +17,24 @@ const ChatMessage = require('../models/ChatMessage');
 const { isArgon2id, isBcrypt } = require('../utils/password');
 const { SECURITY_AUDIT } = require('../utils/securityAudit');
 const { getAiProviders, oldestCheck, isEnvStale, checkAiProvider, AI_PROVIDERS } = require('../utils/aiProviders');
+const { describeRouting } = require('../utils/aiRouter');
+const { detectSystemThreats } = require('../utils/systemDetection');
+const { getLastOutcome } = require('../utils/priorityFlagging');
 const { reloadFromDisk } = require('../utils/envFile');
+const {
+  TREND_BUCKET_DAYS,
+  dailyBucketPipeline,
+  engagementPipeline,
+  engagementFrom,
+  profilePipeline,
+  profileFrom,
+  runwayPipeline,
+  runwayFrom,
+  reviewPipeline,
+  reviewFrom,
+  listValueMonthly,
+  activationOf,
+} = require('../utils/overviewAnalytics');
 const speakeasy = require('speakeasy');
 const { protect, adminOnly } = require('../middleware/auth');
 const { verifyTotpOnce } = require('../utils/totp');
@@ -75,7 +94,10 @@ const safeUserProjection = {
   lastLoginIp: 0,
   lastLoginUserAgent: 0,
 };
-const adminUserFields = 'firstName lastName email createdAt subscriptionActive subscriptionPlan subscriptionStartedAt subscriptionExpiresAt subscriptionPermanent subscriptionSource subscriptionUpdatedAt subscriptionRecord twoFactorEnabled lastLoginAt lastLoginIp lastLoginLocation lastLoginUserAgent accountRole accountStatus profilePicture';
+// twoFactorMethod travels WITH twoFactorEnabled: the boolean says a second step
+// exists, the method says which one. Without both, the admin grid had to guess,
+// and it guessed wrong for every account on email codes.
+const adminUserFields = 'firstName lastName email createdAt subscriptionActive subscriptionPlan subscriptionStartedAt subscriptionExpiresAt subscriptionPermanent subscriptionSource subscriptionUpdatedAt subscriptionRecord twoFactorEnabled twoFactorMethod lastLoginAt lastLoginIp lastLoginLocation lastLoginUserAgent accountRole accountStatus profilePicture';
 // Same rows for the overview preview, minus the avatar: that table never
 // draws one, and large fields are the dominant cost of reading from Atlas
 // (measured ~10 ms/KB — the avatar alone was 668 ms of a 783 ms endpoint).
@@ -206,12 +228,40 @@ function securityChecks() {
   });
 }
 
+// ============================================================================
+// OVERVIEW ANALYTICS
+//
+// The original /overview answered "how much is there" (four counters) and "how
+// fast is it arriving" (one 14-day bucket list). Everything else on the Overview
+// tab was derived client-side from those, which capped what the panel could
+// honestly claim.
+//
+// The second tier - acquisition, activation, engagement depth, renewal runway, the
+// health profile members submit, and the review backlog - is built here. The
+// shaping helpers and the aggregation pipelines live in utils/overviewAnalytics.js
+// so they can be unit tested against the malformed shapes a real database
+// actually produces (a null count, an empty $facet stage, a trend that never
+// sorted) instead of only when a panel happens to render.
+//
+// COST NOTE. Every step below is ONE query, and every one of them touches only
+// small narrow fields (`user`, `createdAt`, `subscriptionExpiresAt`). None of them
+// reads a document back, so the ~500 KB `aiResults` blob that once made this
+// endpoint 783 ms stays out of it. They all run inside the SAME Promise.all as
+// the existing counts, so wall-clock latency is that of the slowest query rather
+// than the sum of all of them.
+// ============================================================================
+
+
 router.get('/overview', async (req, res) => {
   try {
     const now = new Date();
     const day7 = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     const day30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    const [users, assessments, activeSubscriptions, recentUsers, assessmentTrend, signups7d, signups30d, planRows, twoFactorEnabled] = await Promise.all([
+    const [
+      users, assessments, activeSubscriptions, recentUsers, assessmentTrend,
+      signups7d, signups30d, planRows, twoFactorEnabled,
+      signupSeries, engagementRows, profileRows, runwayRows, reviewRows,
+    ] = await Promise.all([
       User.countDocuments(),
       Assessment.countDocuments(),
       // A "live" subscription is one that grants access RIGHT NOW: the flag is
@@ -234,12 +284,11 @@ router.get('/overview', async (req, res) => {
       // from Atlas. The authoritative /users list (which does draw avatars)
       // keeps it.
       User.find().select(adminOverviewUserFields).sort({ createdAt: -1 }).limit(8).lean(),
-      Assessment.aggregate([
-        { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, count: { $sum: 1 } } },
-        { $sort: { _id: -1 } },
-        { $limit: 14 },
-        { $sort: { _id: 1 } },
-      ]),
+      // 30 daily buckets, not 14: the client windows this down to 7 / 14 / 30 for
+      // the range toggle, so widening the range costs no extra query — and three
+      // separate aggregations over the same documents would be three chances for
+      // the two charts to disagree.
+      Assessment.aggregate(dailyBucketPipeline()),
       // Analytics (cheap indexed counts, same round-trip)
       User.countDocuments({ createdAt: { $gte: day7 } }),
       User.countDocuments({ createdAt: { $gte: day30 } }),
@@ -261,6 +310,15 @@ router.get('/overview', async (req, res) => {
         { $group: { _id: '$subscriptionPlan', count: { $sum: 1 } } },
       ]),
       User.countDocuments({ twoFactorEnabled: true }),
+      // ── Second tier (see the OVERVIEW ANALYTICS block above) ──
+      // Acquisition: the same daily buckets, over registrations rather than
+      // assessments. Same helper, so the two series are bucketed identically and
+      // a signup can never be dated to a different day than an assessment.
+      User.aggregate(dailyBucketPipeline()),
+      Assessment.aggregate(engagementPipeline(day7, day30)),
+      Assessment.aggregate(profilePipeline()),
+      User.aggregate(runwayPipeline(now, day7, day30)),
+      Assessment.aggregate(reviewPipeline()),
     ]);
     const planBreakdown = { free: 0, monthly: 0, annual: 0, custom: 0 };
     for (const row of planRows || []) {
@@ -277,13 +335,48 @@ router.get('/overview', async (req, res) => {
     // payload (no lockout field) would overwrite the authoritative /users
     // list with "Clear" rows while login still enforces a 429.
     const recentWithLockout = attachLockout(recentUsers);
+    // Shaped here, not in the panel, so the numbers are normalised ONCE and the
+    // client receives the same shape whether the collections are full, sparse or
+    // completely empty.
+    const engagement = engagementFrom(engagementRows);
+    const profile = profileFrom(profileRows);
+    const runway = runwayFrom(runwayRows);
+    const review = reviewFrom(reviewRows);
+    const activation = activationOf(engagement.assessors, users);
     res.json({
       metrics: { users, assessments, activeSubscriptions, inactiveSubscriptions: users - activeSubscriptions },
       recentUsers: recentWithLockout,
-      assessmentTrend,
+      assessmentTrend: Array.isArray(assessmentTrend) ? assessmentTrend : [],
+      // The window the two trend arrays actually cover. The client densifies back
+      // to this many columns, so a server that trimmed the buckets must trim this
+      // too — otherwise the chart would claim days it was never sent.
+      trendDays: TREND_BUCKET_DAYS,
+      signupTrend: Array.isArray(signupSeries) ? signupSeries : [],
       analytics: {
         signups7d, signups30d, planBreakdown, twoFactorEnabled, lockedAccounts,
         twoFactorPct: users > 0 ? Math.round((twoFactorEnabled / users) * 100) : 0,
+        // Activation: how many members have EVER produced an assessment, as a
+        // share of everyone who registered. Capped at `users` because the two
+        // are independent queries — a signup landing between them would
+        // otherwise report 108% of members as activated.
+        activatedMembers: activation.members,
+        activationPct: activation.pct,
+        // Engagement depth: did they come back, and how recently?
+        activeAssessors7d: engagement.active7d,
+        activeAssessors30d: engagement.active30d,
+        repeatAssessors: engagement.repeat,
+        oneOffAssessors: engagement.singletons,
+        repeatPct: engagement.assessors > 0
+          ? Math.round((engagement.repeat / engagement.assessors) * 100)
+          : 0,
+        // What members actually say about themselves.
+        profile,
+        // Renewal runway, and the review backlog waiting on the admin.
+        runway,
+        review,
+        // Priced from the same catalogue the checkout charges from — see
+        // listValueMonthly. Labelled as list value in the UI.
+        listValueMonthly: listValueMonthly(planBreakdown),
       },
       // Providers are no longer listed here. This block used to re-report
       // GROQ/OPENAI/ANTHROPIC from a set of *_HEALTH_URL variables that appear
@@ -329,17 +422,51 @@ router.get('/users', async (req, res) => {
     const users = await User.find(filter)
       .sort({ createdAt: -1 })
       .limit(100)
-      .select('firstName lastName email createdAt subscriptionActive subscriptionPlan subscriptionStartedAt subscriptionExpiresAt subscriptionPermanent subscriptionSource twoFactorEnabled lastLoginAt lastLoginIp lastLoginLocation lastLoginUserAgent accountRole accountStatus profilePicture')
+      .select('firstName lastName email createdAt subscriptionActive subscriptionPlan subscriptionStartedAt subscriptionExpiresAt subscriptionPermanent subscriptionSource twoFactorEnabled twoFactorMethod lastLoginAt lastLoginIp lastLoginLocation lastLoginUserAgent accountRole accountStatus profilePicture')
       .lean();
     let countMap = new Map();
+    let passkeyMap = new Map();
     if (users.length > 0) {
-      const counts = await Assessment.aggregate([
-        { $match: { user: { $in: users.map(u => u._id) } } },
-        { $group: { _id: '$user', count: { $sum: 1 } } },
+      const ids = users.map(u => u._id);
+      // Two grouped aggregates, run together. A per-user countDocuments() loop
+      // would be 100 extra round trips on every table render — the exact N+1
+      // this endpoint was rewritten to remove.
+      //
+      // The passkey query is allowed to fail on its own: on a database where the
+      // collection has not been created yet, a missing collection must degrade
+      // the security column to "password only" rather than take down the whole
+      // users table. Security display is important; the account list is load
+      // bearing.
+      const [counts, passkeyCounts] = await Promise.all([
+        Assessment.aggregate([
+          { $match: { user: { $in: ids } } },
+          { $group: { _id: '$user', count: { $sum: 1 } } },
+        ]),
+        Passkey.aggregate([
+          { $match: { user: { $in: ids } } },
+          { $group: { _id: '$user', count: { $sum: 1 } } },
+        ]).catch((error) => {
+          console.error('[admin/users] passkey counts unavailable:', error.message);
+          return [];
+        }),
       ]);
       countMap = new Map(counts.map(c => [String(c._id), c.count]));
+      passkeyMap = new Map(passkeyCounts.map(c => [String(c._id), c.count]));
     }
-    const withCounts = users.map(user => ({ ...user, assessmentCount: countMap.get(String(user._id)) || 0 }));
+    const withCounts = users.map(user => ({
+      ...user,
+      assessmentCount: countMap.get(String(user._id)) || 0,
+      passkeyCount: passkeyMap.get(String(user._id)) || 0,
+      // Resolved server-side from the real rows above, so the badge cannot
+      // drift from the account's actual state. `security` is the single field
+      // the grid renders; the raw inputs stay on the row for anything that
+      // needs them.
+      security: describeFactor({
+        passkeyCount: passkeyMap.get(String(user._id)) || 0,
+        twoFactorEnabled: user.twoFactorEnabled,
+        twoFactorMethod: user.twoFactorMethod,
+      }),
+    }));
     // Heal unknown locations in the background (IP geo lookup never blocks this response)
     const { backfillLocations } = require('../utils/geo');
     backfillLocations(withCounts);
@@ -1895,7 +2022,60 @@ router.get('/security/monitor', async (req, res) => {
       };
     }),
 
-    // ── 6. Delete Account ────────────────────────────────────────────────
+    // ── 6. Groq (system detection & threat prediction) ────────────────────
+    // The detection engine's provider, watched by the same rule as the default
+    // AI above: it is probed with a real request through the one shared probe
+    // function, so this row can never disagree with the AI panel's card. It is
+    // a WARNING rather than a CRITICAL when down, because detection has a
+    // rule-based fallback and keeps reporting without it — calling a degraded
+    // but working panel "critical" would train an admin to ignore the word.
+    probe('groq', 'Groq (Detection AI)', 'openrouter', async () => {
+      const result = await checkAiProvider(AI_PROVIDERS.find((entry) => entry.key === 'groq'));
+
+      if (result.status === 'unconfigured') {
+        return { status: 'warning', detail: 'GROQ_API_KEY is not configured — system detection falls back to rule-based verdicts.' };
+      }
+      if (result.status === 'rejected') {
+        return { status: 'warning', detail: 'Groq key is invalid or revoked; detection falls back to rule-based verdicts.' };
+      }
+      if (result.status === 'unreachable' || result.status === 'error') {
+        return { status: 'warning', detail: result.detail };
+      }
+      return {
+        status: 'healthy',
+        detail: result.detail.replace(/^Reachable — /, 'Detection AI reachable. ')
+          + ' Powers system detection & threat prediction.',
+      };
+    }),
+
+    // ── 7. Anthropic (priority assessment flagging) ───────────────────────
+    // Watched by the same rule as the other two AI providers, and for the same
+    // reason: a WARNING, not a CRITICAL, when it is down. Priority flagging
+    // degrades to the rule engine (utils/severity.js), which is the
+    // authoritative floor and needs no provider at all — so the feature still
+    // flags the textbook emergencies. Reporting that as "critical" would
+    // train an admin to ignore a word that is supposed to mean "a person needs
+    // to look at this now".
+    probe('anthropic', 'Anthropic (Priority Flagging AI)', 'openrouter', async () => {
+      const result = await checkAiProvider(AI_PROVIDERS.find((entry) => entry.key === 'anthropic'));
+
+      if (result.status === 'unconfigured') {
+        return { status: 'warning', detail: 'ANTHROPIC_API_KEY is not configured — priority flagging runs on the rule engine alone.' };
+      }
+      if (result.status === 'rejected') {
+        return { status: 'warning', detail: 'Anthropic key is invalid or revoked; priority flagging runs on the rule engine alone.' };
+      }
+      if (result.status === 'unreachable' || result.status === 'error') {
+        return { status: 'warning', detail: result.detail };
+      }
+      return {
+        status: 'healthy',
+        detail: result.detail.replace(/^Reachable — /, 'Priority-flagging AI reachable. ')
+          + ' Provides a second opinion on assessments; it can escalate a Priority flag but never clear one.',
+      };
+    }),
+
+    // ── 8. Delete Account ────────────────────────────────────────────────
     probe('delete_account', 'Account Deletion (Soft-delete)', 'delete_account', async () => {
       const deletedCount = await User.countDocuments({ accountStatus: 'deleted' });
       const recentDelete = await AdminEvent.findOne({ title: 'Account deleted' }).sort({ createdAt: -1 }).select('detail createdAt').lean();
@@ -2359,21 +2539,64 @@ router.get('/security', (req, res) => {
 // stale keys and used to still report a clean reload. Now a successful reload
 // clears the flag because the values genuinely agree, and a failed one leaves
 // it set.
+//
+// The 10 s POLL also reloads, and only when the file and this process actually
+// disagree. It used to never reload, on the reasonable grounds that a half-typed
+// .env read every 10 s would make the panel flap — but the consequence was that
+// pasting a key into the file changed nothing until somebody pressed a button or
+// restarted the server, so a newly configured provider simply had no card. The
+// flap concern is handled by the card policy instead: a provider with no usable
+// key renders NO card at all, and one with a half-typed key renders one card
+// that is corrected on the very next poll. `isEnvStale()` compares values rather
+// than timestamps, so this costs a reload only when a reload would change
+// something.
 const aiPayload = async (force) => {
   // The reload belongs to this function, not to getAiProviders, because this is
   // the only place whose answer depends on whether it worked. It reports which
   // variable NAMES it applied — names only, never values.
-  const reload = force ? reloadFromDisk() : null;
-  const providers = await getAiProviders({ force, reload: false });
+  const autoReload = !force && isEnvStale();
+  const reload = (force || autoReload) ? reloadFromDisk() : null;
+  // A reload that actually moved a key must also re-probe: the cached verdict is
+  // up to AI_CHECK_TTL_MS old and would keep describing the pre-edit key, which
+  // is exactly the stale-verdict failure `envStale` exists to warn about.
+  const applied = Boolean(reload && reload.error === null
+    && (reload.changed.length > 0 || reload.removed.length > 0));
+  const providers = await getAiProviders({ force: force || applied, reload: false });
+
+  // Detection reads the Security Center's own probe results, so it is offered
+  // whatever the most recent monitor run produced rather than re-running 40
+  // probes. On a first load there is no cached run yet: detection then falls
+  // back to the rule-based verdict and says so, instead of firing a monitor
+  // run from inside the AI panel and paying for both.
+  const monitors = monitorCache && monitorCache.payload ? monitorCache.payload.monitors : [];
+  const overallStatus = monitorCache && monitorCache.payload
+    ? monitorCache.payload.overallMonitorStatus
+    : 'unknown';
+  const detection = await detectSystemThreats({ monitors, overallStatus, force });
+
   return {
     providers,
     checkedAt: oldestCheck(providers) || new Date().toISOString(),
     // A read that skipped the reload may be answering with values from before a
     // .env edit. Saying so beats showing a confident stale verdict.
     envStale: isEnvStale(),
-    // Only on "Check now", so the panel can confirm the new key was picked up —
-    // or say plainly that the file could not be read, instead of leaving the
-    // admin to conclude from an unchanged verdict that their key is broken.
+    // What the priority-flagging provider ACTUALLY did on its last real call.
+    // The card above cannot answer this: `/v1/models` is served to a valid key
+    // with no credit, so an account that passes every health check can still be
+    // one that never completes a triage. null until a submission is triaged.
+    priorityFlagging: getLastOutcome(),
+    // Which provider each purpose is actually dispatched to. The cards above
+    // report whether a provider is up; this reports which one this server
+    // would call, which is the other half of "is the AI working".
+    routing: describeRouting(),
+    detection,
+    // The reload receipt. It rides on BOTH paths deliberately: on "Check now" it
+    // confirms the key was picked up, and on the poll it confirms the automatic
+    // detection above did the same thing — which is the feedback that makes a
+    // newly pasted key landing as a card feel like a response rather than a
+    // coincidence. `error` is reported so a file that could not be read says so
+    // instead of leaving the admin to conclude from an unchanged verdict that
+    // their key is broken.
     reload: reload && {
       ok: reload.error === null,
       changed: reload.changed,

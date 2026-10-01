@@ -1,0 +1,46 @@
+# Normalize line endings.
+#
+# WHY THIS EXISTS NOW
+# -------------------
+# It was added alongside .github/workflows/ci.yml. GitHub Actions runs every
+# `run:` block through bash on a Linux runner, and bash treats CRLF as
+# significant: a line ending in `\` becomes "escape a carriage return" instead of
+# "continue to the next line". A multi-line command in a workflow that was
+# committed from Windows therefore fails on CI with a syntax error near an
+# otherwise-correct token, and the failure looks like a bug in the workflow
+# rather than an invisible line ending.
+#
+# `text=auto` lets Git detect each file's content, then the rules below pin the
+# result so what is committed is LF everywhere it matters. Without a
+# .gitattributes, line endings here depend on whichever machine last touched the
+# file.
+
+* text=auto
+
+*.js   text eol=lf
+*.jsx  text eol=lf
+*.ts   text eol=lf
+*.tsx  text eol=lf
+*.mjs  text eol=lf
+*.cjs  text eol=lf
+*.json text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.md   text eol=lf
+*.css  text eol=lf
+*.html text eol=lf
+*.svg  text eol=lf
+*.sh   text eol=lf
+
+# Never rewrite these — normalizing them would corrupt the content.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.woff binary
+*.woff2 binary
+
+# Lockfiles must stay byte-identical: npm compares them exactly.
+package-lock.json -text

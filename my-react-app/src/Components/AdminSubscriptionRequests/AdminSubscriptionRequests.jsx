@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ConfirmModal from '../ConfirmModal/ConfirmModal';
 import AdminSubscriptionPanel from '../AdminSubscriptionPanel/AdminSubscriptionPanel';
 import AdminSubscriptionCancels from '../AdminSubscriptionCancels/AdminSubscriptionCancels';
+import ImageLightbox from '../ImageLightbox/ImageLightbox';
 import './AdminSubscriptionRequests.css';
 
 /**
@@ -155,10 +156,10 @@ export default function AdminSubscriptionRequests({ request }) {
   const [rows, setRows] = useState([]);
   const [counts, setCounts] = useState({ pending: 0, approved: 0, rejected: 0 });
   const [loading, setLoading] = useState(true);
-// Whether a load has ever completed. `loading` alone cannot drive the empty
-// state, because the first load no longer sets it synchronously — so "still
-// loading" is tracked separately from "currently refreshing".
-const [loaded, setLoaded] = useState(false);
+  // Whether a load has ever completed. `loading` alone cannot drive the empty
+  // state, because the first load no longer sets it synchronously — so "still
+  // loading" is tracked separately from "currently refreshing".
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
@@ -167,6 +168,9 @@ const [loaded, setLoaded] = useState(false);
   const [proof, setProof] = useState(null); // { id, src }
   const [proofLoading, setProofLoading] = useState(false);
   const [proofError, setProofError] = useState('');
+  // The full-size viewer, or null. It holds the row's own src so the caption
+  // and the download name can name the member whose receipt this is.
+  const [viewer, setViewer] = useState(null); // { src, label, fileBase }
 
   // Per-row review form.
   const [reviewNote, setReviewNote] = useState('');
@@ -187,6 +191,31 @@ const [loaded, setLoaded] = useState(false);
     setNotice(message);
     if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
     noticeTimer.current = window.setTimeout(() => setNotice(''), 6000);
+  }, []);
+
+  // ── Full-size viewer ─────────────────────────────────────────────────────
+  /**
+   * Open the receipt at full size.
+   *
+   * This used to be an <a href={src} target="_blank">, which is why it never
+   * worked: the proof is a `data:` URL, and no current browser will navigate a
+   * tab to one. The tab opened blank and reported nothing at all. Rendering
+   * the same src in an overlay sidesteps the restriction — the image was
+   * always loadable, it just could never be a link target.
+   *
+   * The viewer belongs to the row that opened it, so every path that takes
+   * that row away closes it too (see toggleRow and runDecision). Leaving it
+   * open would float a receipt over a queue it no longer belongs to.
+   */
+  const openViewer = useCallback((row, src) => {
+    const who = row?.user?.email || row?.user?.firstName || 'receipt';
+    setViewer({
+      src,
+      label: `Payment proof — ${who}`,
+      // The id keeps two receipts for the same member from overwriting each
+      // other in the downloads folder.
+      fileBase: `payment-proof-${row?._id || 'receipt'}`,
+    });
   }, []);
 
   useEffect(() => () => {
@@ -267,6 +296,7 @@ const [loaded, setLoaded] = useState(false);
       setReviewNote('');
       setReviewDays('');
       setShowControls(false);
+      setViewer(null);
       return;
     }
     setOpenId(row._id);
@@ -275,6 +305,8 @@ const [loaded, setLoaded] = useState(false);
     setShowControls(false);
     setProof(null);
     setProofError('');
+    // Switching rows abandons the previous receipt, so its viewer goes too.
+    setViewer(null);
 
     const token = ++proofToken.current;
     setProofLoading(true);
@@ -349,6 +381,7 @@ const [loaded, setLoaded] = useState(false);
       setReviewNote('');
       setReviewDays('');
       setShowControls(false);
+      setViewer(null);
       await load(status, activeSearch);
     } catch (decisionError) {
       setError(decisionError.message);
@@ -606,10 +639,21 @@ const [loaded, setLoaded] = useState(false);
                       ) : proofError ? (
                         <p className="asr-error" role="alert">{proofError}</p>
                       ) : proof && proof.id === row._id ? (
-                        <a href={proof.src} target="_blank" rel="noreferrer" className="asr-proof__link">
+                        /* A <button>, not an <a href={proof.src} target="_blank">.
+                           The proof is a `data:` URL and browsers refuse to
+                           navigate a tab to one, so that link opened an empty
+                           tab with no error — while the <img> beside it kept
+                           working, which is exactly why it looked like the
+                           image was broken. */
+                        <button
+                          type="button"
+                          className="asr-proof__link"
+                          onClick={() => openViewer(row, proof.src)}
+                          aria-label="View the payment receipt at full size"
+                        >
                           <img className="asr-proof__img" src={proof.src} alt="Payment receipt submitted with this request" />
-                          <span className="asr-proof__hint">Open full size</span>
-                        </a>
+                          <span className="asr-proof__hint">View full size</span>
+                        </button>
                       ) : (
                         <p className="asr-empty">Select “View proof” to load the image.</p>
                       )}
@@ -692,6 +736,19 @@ const [loaded, setLoaded] = useState(false);
         />
       )}
         </>
+      )}
+
+      {/* ── Full-size receipt viewer ─────────────────────────────────────── */}
+      {/* Rendered OUTSIDE the queue switch above, so it cannot be torn out from
+          under itself by anything that happens to re-render that branch. */}
+      {viewer && (
+        <ImageLightbox
+          key={viewer.src}
+          src={viewer.src}
+          alt={viewer.label}
+          fileBase={viewer.fileBase}
+          onClose={() => setViewer(null)}
+        />
       )}
     </div>
   );

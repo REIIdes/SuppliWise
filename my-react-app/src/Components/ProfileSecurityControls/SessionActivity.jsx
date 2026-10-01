@@ -12,31 +12,8 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { getSecurityDevices, getSecurityEvents, revokeSecurityDevice, revokeOtherSecurityDevices } from '../../api';
+import { NOTABLE, eventLabel } from '../../utils/securityEventLabels';
 import './SessionActivity.css';
-
-const EVENT_LABELS = {
-  'login-success': 'Signed in',
-  'unrecognized-login': 'Signed in from a new device',
-  'login-failure': 'Failed sign-in',
-  'mfa-success': 'Second factor accepted',
-  'mfa-failure': 'Second factor rejected',
-  'mfa-enabled': 'Two-factor enabled',
-  'mfa-disabled': 'Two-factor disabled',
-  'password-changed': 'Password changed',
-  'password-change-failed': 'Incorrect password',
-  'backup-codes-generated': 'Recovery codes created',
-  'backup-codes-invalidated': 'Recovery codes invalidated',
-  'backup-code-used': 'Recovery code used',
-  'session-revoked': 'Session revoked',
-  'sessions-revoked-all': 'All other sessions signed out',
-  'device-trust-revoked': 'Device removed',
-  'recovery-email-changed': 'Recovery email changed',
-  'account-locked': 'Sign-in temporarily paused',
-};
-
-// Events worth drawing the eye to. Neutral phrasing: these are notable, not
-// proven malicious.
-const NOTABLE = new Set(['unrecognized-login', 'mfa-failure', 'account-locked', 'backup-code-used', 'password-changed', 'mfa-disabled', 'recovery-email-changed']);
 
 function when(iso) {
   if (!iso) return '';
@@ -190,7 +167,7 @@ export default function SessionActivity({ onRequireStepUp, onChanged }) {
                   <span className="psc-event__dot" aria-hidden="true" />
                   <div className="psc-event__body">
                     <span className="psc-event__name">
-                      {EVENT_LABELS[e.type] || 'Security event'}
+                      {eventLabel(e.type)}
                       {!e.success && <span className="psc-event__status">failed</span>}
                     </span>
                     {e.reason && <span className="psc-event__reason">{e.reason}</span>}

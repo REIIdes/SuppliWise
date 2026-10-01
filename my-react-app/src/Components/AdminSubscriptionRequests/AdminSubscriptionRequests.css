@@ -711,16 +711,32 @@
 }
 .asr-detail > * { min-width: 0; }
 
+/* A <button>, not a link. The proof is a `data:` URL and browsers refuse to
+   navigate a tab to one, so the old <a href target="_blank"> opened an empty
+   tab with no error in it — while the <img> beside it kept rendering, which is
+   what made it look like the image was broken rather than the link. The button
+   resets below are what a bare <button> would otherwise get wrong: the UA
+   button box, the inherited font, and a non-pointer cursor. */
 .asr-proof__link {
   display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
   border: 1px solid var(--asr-line);
   border-radius: 11px;
   overflow: hidden;
   background: var(--asr-canvas);
-  text-decoration: none;
-  transition: border-color 0.15s ease;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .asr-proof__link:hover { border-color: var(--asr-all); }
+.asr-proof__link:focus-visible {
+  outline: 2px solid var(--asr-all);
+  outline-offset: 2px;
+}
 
 /* Receipts are tall and narrow: contain the height so one portrait screenshot
    cannot push the review form and the approve buttons off screen. */

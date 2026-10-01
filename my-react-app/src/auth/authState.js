@@ -47,6 +47,46 @@ export const hasAdminSession = () => {
   }
 };
 
+/**
+ * Is this tab currently showing the ADMIN area?
+ *
+ * ── Why this exists ────────────────────────────────────────────────────────
+ *
+ * The admin session and the user session are deliberately separate worlds:
+ * `adminToken` is in localStorage (shared by the browser), the user session is in
+ * sessionStorage (per tab). But localStorage SHARED is the problem, not the
+ * solution: the user-account DIRECTORY (`sw_accounts`) also lives in
+ * localStorage, so a tab opened for the admin console can see that this browser
+ * has user accounts — and the new-tab bootstrap then asks other tabs to hand
+ * one over. It did, and the admin tab quietly became a user session holder.
+ *
+ * From there the damage is mechanical and reproducible:
+ *   1. the tab is now a user session, so the user stack (revalidator,
+ *      subscription SSE, account-aware guards) all mount on an admin URL;
+ *   2. when that user signs out, this tab matches the `session-dead` message and
+ *      is hard-navigated to `/login` with "Your session has ended." — the admin
+ *      console is destroyed by a user sign-out it had nothing to do with.
+ *
+ * An admin tab has no use for a user session: `AdminLogin`, `AdminDashboard`,
+ * `AdminChangePassword` and `AssessmentManagement` import only `BASE_URL`,
+ * `parseJSON` and `getPasswordRules` from the API layer — no user credential.
+ * So the correct rule is strict: on an `/admin/*` route this tab does not
+ * participate in the user-session system at all.
+ *
+ * Matched on the live `location`, not React state, because the API layer
+ * (api.js) needs it outside React — a hook would only help components, and the
+ * contamination happens below the component layer.
+ */
+export const isAdminRoute = () => {
+  try {
+    const path = window.location.pathname;
+    // `/admin` and `/admin/...`, but NOT `/administrator` or `/admin-tools`.
+    return path === '/admin' || path.startsWith('/admin/');
+  } catch {
+    return false;
+  }
+};
+
 // ── "a user session ended in this tab" flag ────────────────────────────────
 // Set whenever this tab's user session is torn down (explicit sign-out, 401,
 // cross-tab revoke) and cleared when a new session installs here. Route

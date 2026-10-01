@@ -1,11 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
+const { completeWithFallback } = require('../utils/aiRouter');
 
 // @route   POST /api/polish
-// @desc    Polish a free-text health description using OpenRouter AI (DeepSeek V4 Flash)
+// @desc    Polish a free-text health description using the routed AI provider
 // @access  Private — authenticated callers only. This endpoint spends real
-//          OpenRouter quota on every request; leaving it anonymous made it a
+//          provider quota on every request; leaving it anonymous made it a
 //          free AI proxy for anyone who found the route (the ip-based
 //          aiLimiter alone only slows an attacker down). Verified there is no
 //          unauthenticated caller anywhere in the frontend before adding it.
@@ -39,12 +40,16 @@ router.post('/', protect, async (req, res) => {
       return res.json({ polished: null, rejected: true, reason: 'garbage' });
     }
 
-    const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-    if (!OPENROUTER_API_KEY || OPENROUTER_API_KEY === 'your_openrouter_api_key_here') {
-      // No API key — return cleaned version using basic preprocessing
-      return res.json({ polished: basicClean(raw), rejected: false });
-    }
-
+    // Provider, model, key AND fallback all come from the routing table, so this
+    // route cannot disagree with the admin panel about which model is in use — the
+    // bug this replaces: this file sent `deepseek/deepseek-v4-flash` while the
+    // panel reported `...-0731` for the very same key.
+    //
+    // It used to resolve a single target and hand-roll its own `fetch`. That made
+    // this the one call site that ignored the declared fallback, so a provider
+    // that could not answer dropped straight to `basicClean` instead of trying
+    // the next one — and it hard-coded an OpenRouter-only request field, which is
+    // a 400 on every other provider. Walking the chain fixes both at once.
     const prompt = `Polish the following patient-written health description:
 
 1. If the input is gibberish, random characters, spam, or completely unrelated to health — respond with exactly: REJECTED
@@ -58,52 +63,41 @@ router.post('/', protect, async (req, res) => {
    - Use possibility language ("reports", "describes", "indicates")
    - Do NOT include any explanation, preamble, or extra text — output ONLY the polished paragraph`;
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12000);
-
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'deepseek/deepseek-v4-flash',
-        messages: [
-          {
-            role: 'system',
-            content: prompt,
-          },
-          // Patient text travels as its own message so it cannot override the instructions above
-          { role: 'user', content: raw },
-        ],
-        max_tokens: 300,
-        temperature: 0.2,
-        stream: false,
-        reasoning: { effort: 'none' },
-      }),
-      signal: controller.signal,
+    // Patient text travels as its own message so it cannot override the
+    // instructions above, and `json: false` because the model is asked for prose
+    // (or the literal word REJECTED), not an object.
+    const result = await completeWithFallback('polish', {
+      system: prompt,
+      user: raw,
+      maxTokens: 300,
+      temperature: 0.2,
+      timeoutMs: 12000,
+      json: false,
+      // `reasoning.effort` is an OpenRouter-GATEWAY field. Scoped by provider key
+      // so it is never sent to a provider that would reject it as unknown.
+      extraBody: (target) => (target.provider === 'openrouter'
+        ? { reasoning: { effort: 'none' } }
+        : null),
     });
-    clearTimeout(timeout);
 
-    if (!response.ok) {
-      console.error('[polish] OpenRouter error:', response.status);
+    // Every provider in the chain failed. Name which ones and why — a silent drop
+    // to `basicClean` is how a revoked key goes unnoticed for months.
+    if (!result.ok) {
+      console.error('[polish] no provider answered:', JSON.stringify(result.attempts || []));
       return res.json({ polished: basicClean(raw), rejected: false });
     }
 
-    const data = await response.json();
-    const choice = data.choices?.[0]?.message;
-    const result = String(choice?.content || choice?.reasoning || '').trim();
+    const output = String(result.text || '').trim();
 
-    if (result === 'REJECTED' || result.toUpperCase().startsWith('REJECTED')) {
+    if (output === 'REJECTED' || output.toUpperCase().startsWith('REJECTED')) {
       return res.json({ polished: null, rejected: true, reason: 'not_health_related' });
     }
 
-    if (!result || result.length < 10) {
+    if (!output || output.length < 10) {
       return res.json({ polished: basicClean(raw), rejected: false });
     }
 
-    return res.json({ polished: result, rejected: false });
+    return res.json({ polished: output, rejected: false });
 
   } catch (err) {
     console.error('[polish]', err.message);
@@ -114,7 +108,7 @@ router.post('/', protect, async (req, res) => {
   }
 });
 
-// Basic cleanup when OpenRouter is unavailable
+// Basic cleanup when the AI provider is unavailable
 function basicClean(text) {
   return text
     .trim()

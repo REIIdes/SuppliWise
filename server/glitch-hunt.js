@@ -19,9 +19,29 @@ const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 const User = require('./models/User');
 const Assessment = require('./models/Assessment');
+const Session = require('./models/Session');
 const { issueUserSession } = require('./utils/sessions');
 
+// Must match SESSION_CACHE_TTL_MS in middleware/auth.js. Kept as a literal
+// (not imported) because that constant is module-private and exporting it just
+// for a probe would widen the module's surface for no product benefit. If the
+// server's cache TTL changes, bump this too — the probe waits it out on
+// purpose, and too small a value would silently re-test the cache instead of
+// the session rule.
+const SESSION_CACHE_TTL_MS_FOR_PROBE = 30 * 1000;
+
 const BASE = `http://127.0.0.1:${process.env.PORT || 5000}/api`;
+
+// One shared password, declared once. It used to be repeated as a bare literal at
+// four separate call sites ('GlitchHunt123' twice, 'Escalate1234', 'Nope12345'),
+// which is exactly how it fell behind utils/passwordRules.js: register started
+// demanding a symbol, and the suite could no longer create the accounts it needs
+// to run a single probe. Keep it here so register, the escalation probe and the
+// login probe can never drift apart again.
+//
+// Verified against the live policy: length, upper, lower, number, symbol, and
+// not derived from the account's email address.
+const PROBE_PASSWORD = 'QuartzMeadow!47';
 
 let failures = 0;
 let passes = 0;
@@ -93,7 +113,7 @@ async function main() {
     const res = await call('POST', '/auth/register', {
       body: {
         firstName: 'Glitch', lastName: `Hunt${tag}`,
-        email, password: 'GlitchHunt123',
+        email, password: PROBE_PASSWORD,
         dateOfBirth: '1995-05-05', gender: 'Male',
         captchaId: captcha.id, captchaAnswer: captcha.answer,
       },
@@ -173,7 +193,7 @@ async function main() {
   const escalate = await call('POST', '/auth/register', {
     body: {
       firstName: 'Evil', lastName: 'Admin', email: `hunt-esc-${stamp}@example.com`,
-      password: 'Escalate1234', dateOfBirth: '1990-01-01', gender: 'Male',
+      password: PROBE_PASSWORD, dateOfBirth: '1990-01-01', gender: 'Male',
       captchaId: captcha2.id, captchaAnswer: captcha2.answer,
       role: 'admin', accountRole: 'moderator', accountStatus: 'active',
       subscriptionPlan: 'custom', subscriptionActive: true, twoFactorEnabled: false,
@@ -234,7 +254,10 @@ async function main() {
   const nosqlForgot = await call('POST', '/auth/forgot-password', { body: { email: { $gt: '' } } });
   check('NoSQL operator forgot-password rejected', nosqlForgot.status === 400 || nosqlForgot.status === 401, `got ${nosqlForgot.status}`);
   const nosqlReg = await call('POST', '/auth/register', {
-    body: { firstName: { $gt: '' }, lastName: 'X', email: { $gt: '' }, password: 'NoSql12345', dateOfBirth: '1990-01-01', gender: 'Male' },
+    // A policy-COMPLIANT password on purpose: this probe is about the NoSQL
+    // operator in the email field, and a password-policy rejection would make
+    // it pass for the wrong reason.
+    body: { firstName: { $gt: '' }, lastName: 'X', email: { $gt: '' }, password: PROBE_PASSWORD, dateOfBirth: '1990-01-01', gender: 'Male' },
   });
   check('NoSQL operator register rejected without 500', nosqlReg.status >= 400 && nosqlReg.status < 500, `got ${nosqlReg.status}`);
 
@@ -343,7 +366,7 @@ async function main() {
   }
 
   // Login must not leak the OTP (dev override must be off in responses).
-  const loginLeak = await call('POST', '/auth/login', { body: { email: A.email, password: 'GlitchHunt123' } });
+  const loginLeak = await call('POST', '/auth/login', { body: { email: A.email, password: PROBE_PASSWORD } });
   check('login response never contains an OTP', loginLeak.status === 200 && !(/\b\d{6}\b/.test(JSON.stringify(loginLeak.data)) && loginLeak.data.otp), JSON.stringify(loginLeak.data).slice(0, 160));
   check('login response carries no stack/paths', !FORBIDDEN_LEAK.test(JSON.stringify(loginLeak.data)));
 
@@ -389,8 +412,38 @@ async function main() {
   check('user JWT has no exp (revocation-based)', claims?.exp === undefined);
   // Sign in again (register issues sessions; use B's token re-minted) — a
   // stale token must die. Re-issue B's session to displace the old one.
+  //
+  // NOTE ON WHY THIS IS TWO ASSERTIONS, NOT ONE.
+  //
+  // This probe calls issueUserSession() in the PROBE's process, so it cannot
+  // reach middleware/auth.js's 30-second session validation cache inside the
+  // server. Revocations are announced in-process (onSessionRevoked), so a
+  // revocation issued here leaves the server's cache believing the old session
+  // is still live until that TTL elapses. Asserting the API answer immediately
+  // therefore measured the cache, not the session rule — and it failed while
+  // the rule was in fact holding (test-session-flows.js proves the same rule
+  // through the real /auth/login-2fa path, where the announcement does fire).
+  //
+  // So: assert the GROUND TRUTH first (it is instant and is the actual
+  // invariant — the displaced session is stamped revoked and the account's
+  // pointer has moved), then confirm the API refuses the token once the
+  // documented cache window has passed.
   const staleToken = B.token;
+  const staleSid = jwt.decode(staleToken)?.sid;
   const fresh = await issueUserSession(B.id);
+  const freshSid = jwt.decode(fresh)?.sid;
+
+  const displacedRow = await Session.findById(staleSid).lean();
+  const pointerRow = await User.findById(B.id).select('+currentSessionId').lean();
+  check('displaced session is stamped revoked immediately',
+    Boolean(displacedRow?.revokedAt), `revokedAt=${displacedRow?.revokedAt || 'null'}`);
+  check('account pointer moved to the newer session',
+    String(pointerRow?.currentSessionId) === String(freshSid),
+    `currentSessionId=${pointerRow?.currentSessionId} expected=${freshSid}`);
+
+  // Outlive the server's cache TTL so the API answer reflects real session
+  // state rather than a stale positive entry.
+  await new Promise((r) => setTimeout(r, SESSION_CACHE_TTL_MS_FOR_PROBE + 1500));
   const staleMe = await call('GET', '/auth/me', { token: staleToken });
   check('replaced session is rejected server-side', staleMe.status === 401, `got ${staleMe.status}`);
   const freshMe = await call('GET', '/auth/me', { token: fresh });

@@ -44,7 +44,7 @@ const MfaTransaction = require('../models/MfaTransaction');
 const totpSecret = require('../utils/totpSecret');
 const { verifyTotpOnce } = require('../utils/totp');
 const mfa = require('../utils/mfaTransaction');
-const { AUTH_METHODS, publicUser, completeSignIn } = require('../utils/authFlow');
+const { AUTH_METHODS, publicUser, publicPictures, completeSignIn } = require('../utils/authFlow');
 const {
   accountKey, lockRemainingMs, recordAccountFailure, clearOffenses, lockMeta,
 } = require('../utils/lockout');
@@ -453,6 +453,11 @@ router.post('/verify', verifyLimiter, async (req, res) => {
 
   return res.json({
     ...publicUser(user),
+    // The read above projects the picture fields out, so they are read
+    // separately rather than reported as absent — otherwise signing in with an
+    // authenticator code blanks the avatar in the client's cached profile.
+    // See publicPictures in utils/authFlow.js.
+    ...(await publicPictures(user)),
     token: sessionToken,
     authMethod: AUTH_METHODS.TOTP,
     mfaVerified: true,

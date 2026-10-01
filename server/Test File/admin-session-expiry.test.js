@@ -113,6 +113,41 @@ test('admin session expiry — the ten-minute window over real HTTP', { skip: pr
 
   const readStamp = async (id) => (await AdminAccount.findById(id).lean()).lastActivityAt;
 
+  /**
+   * Wait until a fire-and-forget write has landed.
+   *
+   * The activity stamp is written without awaiting (an activity update must
+   * never fail the request it was made for), so it arrives after the response.
+   * A fixed sleep is the obvious way to wait for it and the wrong one: 250 ms is
+   * ample on an idle machine and not enough on a loaded one, which is how this
+   * suite came to fail intermittently. Polling to a deadline is both faster in
+   * the common case and correct in the slow one.
+   *
+   * ONLY for assertions that a write DID happen. Where the assertion is that
+   * nothing was written, polling cannot tell "not yet" from "never" — see
+   * settleNoWrite for those.
+   */
+  const waitForWrite = async (id, notBeforeMs, timeoutMs = 5000) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const value = await readStamp(id);
+      if (value && new Date(value).getTime() > notBeforeMs) return value;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    return null;
+  };
+
+  /**
+   * Give a write every chance to land, so "nothing was written" is a real
+   * observation rather than an impatient one.
+   *
+   * The counterpart to waitForWrite. Long on purpose: a false PASS is the
+   * dangerous outcome for a negative assertion, and every test that uses this
+   * proves the write is reachable by also asserting a control case that does
+   * land.
+   */
+  const settleNoWrite = (ms = 1200) => new Promise((r) => setTimeout(r, ms));
+
   const call = (path, { method = 'GET', token, body, headers = {} } = {}) => fetch(`${base}${path}`, {
     method,
     headers: {
@@ -218,15 +253,12 @@ test('admin session expiry — the ten-minute window over real HTTP', { skip: pr
   // ══ 4. THE HEARTBEAT ═══════════════════════════════════════════════════
 
   await t.test('activity inside the window refreshes the stamp', async () => {
-    const admin = await seed({ lastActivityAt: ago(ADMIN_IDLE_TIMEOUT_MS - 60_000) });
+    const marker = ago(ADMIN_IDLE_TIMEOUT_MS - 60_000);
+    const admin = await seed({ lastActivityAt: marker });
     // Older than the heartbeat interval, so the conditional write is allowed.
     await call(PROBE, { token: adminToken(admin._id) });
-    await new Promise((r) => setTimeout(r, 250)); // the write is fire-and-forget
-    const after = await readStamp(admin._id);
-    assert.ok(
-      Date.now() - new Date(after).getTime() < 5_000,
-      'a genuine request must slide the activity stamp',
-    );
+    const after = await waitForWrite(admin._id, marker.getTime());
+    assert.ok(after, 'a genuine request must slide the activity stamp');
   });
 
   await t.test('the heartbeat is THROTTLED, not written on every request', async () => {
@@ -248,7 +280,20 @@ test('admin session expiry — the ten-minute window over real HTTP', { skip: pr
       const r = await call(PROBE, { token: adminToken(fresh._id) });
       assert.equal(r.status, 200, 'every request inside the window is served');
     }
-    await new Promise((r) => setTimeout(r, 250));
+    // The CONTROL runs first, so the "no write" half below cannot pass merely
+    // because writes are slow or broken: if this does not land, the assertion
+    // after it proves nothing.
+    const controlMarker = ago(ADMIN_HEARTBEAT_INTERVAL_MS * 2);
+    const control = await seed({ lastActivityAt: controlMarker });
+    await call(PROBE, { token: adminToken(control._id) });
+    assert.ok(
+      await waitForWrite(control._id, controlMarker.getTime()),
+      'a stamp older than the interval must be refreshed — the write is reachable',
+    );
+
+    // Now the negative half, given a generous window because a false PASS is
+    // what matters here and polling cannot distinguish "not yet" from "never".
+    await settleNoWrite();
     assert.equal(
       new Date(await readStamp(fresh._id)).getTime(),
       freshMarker.getTime(),
@@ -257,16 +302,6 @@ test('admin session expiry — the ten-minute window over real HTTP', { skip: pr
     // And the session still works — a throttle must never cost a working
     // administrator their session.
     assert.equal((await call(PROBE, { token: adminToken(fresh._id) })).status, 200);
-
-    const staleMarker = ago(ADMIN_HEARTBEAT_INTERVAL_MS * 2);
-    const stale = await seed({ lastActivityAt: staleMarker });
-    await call(PROBE, { token: adminToken(stale._id) });
-    await new Promise((r) => setTimeout(r, 250));
-    assert.notEqual(
-      new Date(await readStamp(stale._id)).getTime(),
-      staleMarker.getTime(),
-      'a stamp older than the interval must still be refreshed once',
-    );
   });
 
   await t.test('the heartbeat skips background polls', async () => {
@@ -275,7 +310,7 @@ test('admin session expiry — the ten-minute window over real HTTP', { skip: pr
     const marker = ago(ADMIN_HEARTBEAT_INTERVAL_MS * 2);
     const admin = await seed({ lastActivityAt: marker });
     await call(PROBE, { token: adminToken(admin._id), headers: { 'X-Admin-Background': 'true' } });
-    await new Promise((r) => setTimeout(r, 250));
+    await settleNoWrite();
     assert.equal(
       new Date(await readStamp(admin._id)).getTime(),
       marker.getTime(),
@@ -395,25 +430,33 @@ test('admin session expiry — the ten-minute window over real HTTP', { skip: pr
     // exactly how the idle timeout would end up disabled.
     assert.equal(r.data.token, undefined, 'the beacon must not mint a token');
 
-    await new Promise((res) => setTimeout(res, 250));
-    assert.notEqual(
-      new Date(await readStamp(admin._id)).getTime(),
-      marker.getTime(),
+    assert.ok(
+      await waitForWrite(admin._id, marker.getTime()),
       'the beacon must genuinely stamp activity',
     );
   });
 
   await t.test('the beacon is throttled like any other activity', async () => {
+    // Same shape as the middleware throttle test, and for the same reason: the
+    // control proves the write is reachable, so "no write" means something.
+    const controlMarker = ago(ADMIN_HEARTBEAT_INTERVAL_MS * 2);
+    const control = await seed({ lastActivityAt: controlMarker });
+    await call('/api/auth/admin-activity', { method: 'POST', token: adminToken(control._id) });
+    assert.ok(
+      await waitForWrite(control._id, controlMarker.getTime()),
+      'a beacon outside the interval must stamp activity — the write is reachable',
+    );
+
     const freshMarker = ago(ADMIN_HEARTBEAT_INTERVAL_MS / 2);
     const admin = await seed({ lastActivityAt: freshMarker });
     for (let i = 0; i < 4; i += 1) {
       assert.equal((await call('/api/auth/admin-activity', { method: 'POST', token: adminToken(admin._id) })).status, 200);
     }
-    await new Promise((r) => setTimeout(r, 250));
+    await settleNoWrite();
     assert.equal(
       new Date(await readStamp(admin._id)).getTime(),
       freshMarker.getTime(),
-      'four beacons inside the interval must still produce one write at most — and none here',
+      'four beacons inside the interval must produce no writes at all',
     );
   });
 

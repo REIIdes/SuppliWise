@@ -44,13 +44,23 @@
   flex-direction: column;
   gap: 26px;
   padding: 4px;
+  /* Contains the ambient wash bleed — see ::before. `clip`, not `hidden`, so
+     this does not become a scroll container and strand the sticky table head. */
+  overflow-x: clip;
   font-family: 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
   color: var(--rt-body);
   border-radius: 22px;
   isolation: isolate;
 }
 
-/* Ambient spectrum wash behind both cards */
+/* Ambient spectrum wash behind both cards.
+   It bleeds 40px past each side so the glow fades out over the page background
+   instead of ending at the card edge. That bleed used to reach the scroll
+   container: .admin-main sets `overflow-y: auto`, which forces the x axis to
+   compute to `auto` too, so a 40px overhang turned into a horizontal scrollbar
+   under the whole panel. `overflow-x: clip` contains it without creating a
+   scroll container, so the sticky table headers keep working — unlike
+   `overflow: hidden`, `clip` leaves the y axis as `visible`. */
 .security-status-container::before {
   content: '';
   position: absolute;
@@ -719,6 +729,15 @@
 .rt-row:hover { background: #f5f3ff; }
 .rt-row--open { background: #eef2ff; }
 
+/* The row an Overview "Threat notifications" link pointed at. Scrolled into
+   view and marked, because a row that merely scrolls past reads as noise in a
+   45-row table — the admin cannot tell which one the link meant. */
+.rt-row--highlighted {
+  background: #eef2ff;
+  box-shadow: inset 3px 0 0 var(--rt-indigo);
+}
+.rt-row--highlighted:hover { background: #e0e7ff; }
+
 /* Per-status accent bar down the left edge of the status cell */
 .rt-td--status {
   position: relative;
@@ -836,6 +855,16 @@
   font-size: 0.83rem;
   line-height: 1.7;
   color: #334155;
+  /* MUST be explicit. AdminDashboard.css sets an unscoped `th, td { … }`
+     rule with `white-space: nowrap`, and this cell is a <td>, so the probe
+     detail inherits `nowrap` from it. Detail strings are whole sentences
+     ("Provides a second opinion on assessments; it can escalate a Priority
+     flag but never clear one."), so without this the text runs off the
+     right edge and is silently truncated — the reader loses the second half
+     of the sentence that explains what the monitor actually does.
+     `nowrap` on the ancestor cannot be undone by the wrapping properties
+     below alone: they control WHERE a line may break, not WHETHER it does. */
+  white-space: normal;
   word-break: break-word;
   overflow-wrap: break-word;
   background: #fff;
@@ -1316,6 +1345,335 @@
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
+   THREAT PREDICTION
+   Lives here, not on the AI tab: it is a forecast about the probes below it.
+   Tone vocabulary mirrors the live banner (emerald / amber / orange / rose) so
+   "healthy" and "all clear" can never mean different colours on one screen.
+   Explicit colours only — no color-mix() — matching the rest of this sheet.
+   ══════════════════════════════════════════════════════════════════════════ */
+.tp-section {
+  --tp-ink: #b45309;
+  --tp-edge: #fcd34d;
+  --tp-bg: #fffbeb;
+  --tp-bar: linear-gradient(90deg, #fbbf24, #f59e0b);
+
+  border-color: var(--tp-edge);
+}
+.tp--nominal  { --tp-ink: #047857; --tp-edge: #6ee7b7; --tp-bg: #ecfdf5; --tp-bar: linear-gradient(90deg, #34d399, #10b981); }
+.tp--watch    { --tp-ink: #b45309; --tp-edge: #fcd34d; --tp-bg: #fffbeb; --tp-bar: linear-gradient(90deg, #fbbf24, #f59e0b); }
+.tp--elevated { --tp-ink: #c2410c; --tp-edge: #fdba74; --tp-bg: #fff7ed; --tp-bar: linear-gradient(90deg, #fb923c, #f97316); }
+.tp--severe   { --tp-ink: #be123c; --tp-edge: #fda4af; --tp-bg: #fff1f2; --tp-bar: linear-gradient(90deg, #fb7185, #f43f5e); }
+
+/* The rail is the section's own severity, not the generic spectrum: a wide
+   spectrum rail on a severe card would say "everything here is fine". */
+.tp-section::before { background: var(--tp-bar); animation: none; }
+
+/* A soft corner wash in the severity colour, so the card is recognisable as
+   "nominal" or "severe" before a word is read. */
+.tp-section::after {
+  content: '';
+  position: absolute;
+  top: -70px; right: -70px;
+  width: 240px; height: 240px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--tp-bg) 0%, transparent 70%);
+  opacity: .85;
+  pointer-events: none;
+}
+
+.rt-header__icon--tp {
+  background: linear-gradient(135deg, var(--rt-indigo), var(--rt-violet) 48%, var(--rt-fuchsia));
+  box-shadow: 0 10px 22px -10px rgba(139, 92, 246, .95);
+  animation-duration: 13s;
+}
+
+/* ── Verdict pill ─────────────────────────────────────────────────────── */
+.tp-verdict {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 7px;
+  flex-shrink: 0;
+}
+.tp-verdict__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border: 1.5px solid var(--tp-edge);
+  border-radius: 999px;
+  background: var(--tp-bg);
+  color: var(--tp-ink);
+  font-size: 0.86rem;
+  font-weight: 800;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+.tp-verdict__dot {
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: var(--tp-ink);
+  box-shadow: 0 0 0 4px var(--tp-edge);
+  animation: tp-pulse 2.4s ease-in-out infinite;
+}
+@keyframes tp-pulse {
+  0%, 100% { box-shadow: 0 0 0 4px var(--tp-edge); }
+  50%      { box-shadow: 0 0 0 8px var(--tp-bg); }
+}
+.tp-verdict__conf {
+  color: var(--rt-muted);
+  font-size: 0.74rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.tp-verdict__conf b { color: var(--tp-ink); font-weight: 800; }
+
+/* ── Summary ──────────────────────────────────────────────────────────── */
+.tp-summary {
+  margin: 0 0 14px;
+  max-width: 92ch;
+  padding: 13px 16px;
+  border: 1px solid var(--tp-edge);
+  border-left: 4px solid var(--tp-ink);
+  border-radius: 12px;
+  background: var(--tp-bg);
+  color: var(--rt-ink);
+  font-size: 0.95rem;
+  font-weight: 500;
+  line-height: 1.55;
+}
+
+/* ── Provenance chips ──────────────────────────────────────────────────── */
+.tp-provenance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+.tp-provenance__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border: 1px solid var(--rt-line);
+  border-radius: 999px;
+  background: var(--rt-raise);
+  color: var(--rt-body);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: .02em;
+}
+.tp-provenance__item svg { width: 13px; height: 13px; flex-shrink: 0; }
+/* Rule-engine output is called out, because "this came from a fallback" is a
+   materially different claim from "a model said this". */
+.tp-provenance__item--rules {
+  border-color: #c7d2fe;
+  background: #eef2ff;
+  color: #4338ca;
+}
+.tp-provenance__item--model {
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-weight: 600;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ── AI-unavailable notice ─────────────────────────────────────────────── */
+.tp-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  margin: 0 0 16px;
+  padding: 12px 15px;
+  border: 1px solid #f0c4c4;
+  border-left: 4px solid #c0392b;
+  border-radius: 12px;
+  background: #fdf3f2;
+  color: #8c2b20;
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+.tp-notice svg { width: 17px; height: 17px; flex-shrink: 0; margin-top: 1px; color: #c0392b; }
+.tp-notice strong { font-weight: 800; }
+
+/* ── Two-column body ───────────────────────────────────────────────────── */
+.tp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+  gap: 20px;
+  align-items: start;
+}
+.tp-col { min-width: 0; }
+
+.tp-col__title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--rt-line);
+  color: var(--rt-ink);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.tp-col__title-icon {
+  display: grid;
+  place-items: center;
+  width: 26px; height: 26px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  background: var(--tp-bg);
+  border: 1px solid var(--tp-edge);
+  color: var(--tp-ink);
+}
+.tp-col__title-icon svg { width: 14px; height: 14px; }
+.tp-col__count {
+  margin-left: auto;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--tp-bg);
+  border: 1px solid var(--tp-edge);
+  color: var(--tp-ink);
+  font-size: 0.72rem;
+  letter-spacing: .02em;
+}
+
+/* ── Empty state ───────────────────────────────────────────────────────── */
+/* This used to be one muted sentence in an empty column, which read as a
+   panel that had failed to load rather than a deliberate all-clear. */
+.tp-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+  padding: 26px 20px;
+  border: 1.5px dashed var(--tp-edge);
+  border-radius: 16px;
+  background: var(--tp-bg);
+}
+.tp-empty__icon {
+  display: grid;
+  place-items: center;
+  width: 46px; height: 46px;
+  border-radius: 50%;
+  background: var(--tp-surface);
+  border: 2px solid var(--tp-edge);
+  color: var(--tp-ink);
+}
+.tp-empty__icon svg { width: 24px; height: 24px; }
+.tp-empty__title {
+  margin: 4px 0 0;
+  color: var(--tp-ink);
+  font-size: 0.98rem;
+  font-weight: 800;
+}
+.tp-empty__hint {
+  margin: 0;
+  max-width: 34ch;
+  color: var(--rt-body);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+/* ── Predictions ──────────────────────────────────────────────────────── */
+.tp-preds { display: grid; gap: 11px; margin: 0; padding: 0; list-style: none; }
+.tp-pred {
+  padding: 13px 15px 14px;
+  border: 1px solid var(--rt-line);
+  border-left: 4px solid var(--tp-ink);
+  border-radius: 13px;
+  background: var(--tp-surface);
+  box-shadow: 0 1px 2px rgba(11, 18, 32, .04);
+}
+.tp-pred__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.tp-pred__title {
+  min-width: 0;
+  color: var(--rt-ink);
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.tp-pred__conf {
+  flex-shrink: 0;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--tp-bg);
+  border: 1px solid var(--tp-edge);
+  color: var(--tp-ink);
+  font-size: 0.76rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The confidence the model reported, drawn. The number alone cannot be ranked
+   at a glance across rows; the bar can. */
+.tp-meter {
+  height: 6px;
+  margin: 10px 0 9px;
+  border-radius: 999px;
+  background: var(--rt-line-2);
+  overflow: hidden;
+}
+.tp-meter__fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--tp-bar);
+  animation: tp-grow .7s cubic-bezier(.2, .8, .2, 1) both;
+}
+@keyframes tp-grow { from { transform: scaleX(0); transform-origin: left center; } }
+
+.tp-pred__why {
+  margin: 0;
+  color: var(--rt-body);
+  font-size: 0.84rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+/* ── Actions ──────────────────────────────────────────────────────────── */
+.tp-actions { display: grid; gap: 9px; margin: 0; padding: 0; list-style: none; counter-reset: none; }
+.tp-action {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 12px 14px;
+  border: 1px solid var(--rt-line);
+  border-radius: 12px;
+  background: var(--tp-bg);
+}
+.tp-action__step {
+  display: grid;
+  place-items: center;
+  width: 24px; height: 24px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: var(--tp-ink);
+  color: #fff;
+  font-size: 0.76rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.tp-action__text {
+  min-width: 0;
+  color: var(--rt-ink);
+  font-size: 0.87rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
    RESPONSIVE
    ══════════════════════════════════════════════════════════════════════════ */
 @media (max-width: 1080px) {
@@ -1369,6 +1727,9 @@
   .rt-detail-row { margin: -4px 0 10px; }
   .rt-detail-cell { padding: 0 14px 14px 18px; }
   .rt-detail-meta__key { margin-left: 0; }
+  /* Below this width the verdict can no longer sit beside the title without
+     crushing it, so it drops to its own row and stays right-aligned. */
+  .tp-verdict { flex-direction: row; align-items: center; gap: 12px; }
 }
 
 @media (max-width: 720px) {
@@ -1387,6 +1748,11 @@
   .rtl-select, .rtl-expand-all { flex: 1 1 auto; }
   .rtl-select__input, .rtl-expand-all { width: 100%; text-align: center; }
   .rtl-readout { flex: 1 1 100%; }
+
+  .tp-grid { grid-template-columns: 1fr; gap: 18px; }
+  .tp-summary { padding: 11px 13px; font-size: 0.88rem; }
+  .tp-verdict { width: 100%; justify-content: space-between; }
+  .tp-provenance__item { font-size: 0.71rem; }
 }
 
 @media (max-width: 640px) {
@@ -1420,6 +1786,8 @@
   .rt-empty__btn { animation: none; transition: none; }
 
   .rt-dot::after,
+  .tp-verdict__dot,
+  .tp-meter__fill,
   .pill--loading,
   .pill--loading::before,
   .rt-sync-icon--spin,
@@ -1429,6 +1797,9 @@
   /* The animated rail has no reduced-motion equivalent — pin it to a slice. */
   .rt-section::before,
   .rt-header__kicker { background-position: 30% 50%; }
+  /* The confidence meter still has to convey its value with motion off, so it
+     stays drawn — only the grow-in is dropped. */
+  .tp-meter__fill { transform: none; }
 }
 
 @media print {

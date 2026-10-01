@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import Toast from '../Components/Toast/Toast';
 import ConfirmModal from '../Components/ConfirmModal/ConfirmModal';
-import { getDashboard, updateIntake, getToken, getStoredUser, getMyProfile, setStoredUser } from '../api';
+import { getDashboard, updateIntake, updateIntakeBulk, getToken, getStoredUser, getMyProfile, setStoredUser } from '../api';
 import useSubscription from '../hooks/useSubscription';
 import './DashboardPage.css';
 
@@ -67,38 +67,46 @@ const ACTION_CARDS = [
   },
 ];
 
-/* ── Ordering for today's plan ──────────────────────────────────────────────
-   Untaken first, then by the clock (morning → lunch → evening), then by
-   priority. This ran as two byte-identical copies of the same comparator — one
-   on load, one on the optimistic re-sort after a tick — and a fix to one would
-   silently not apply to the other. One function, called from both. */
-const PRIORITY_ORDER = { High: 0, Medium: 1, Low: 2 };
-const TIME_ORDER = {
-  'morning': 0, 'breakfast': 0, 'before breakfast': 0, 'with breakfast': 0,
-  'lunch': 1, 'afternoon': 1, 'midday': 1, 'with lunch': 1,
-  'dinner': 2, 'evening': 2, 'night': 2, 'bedtime': 2, 'before bed': 2, 'with dinner': 2,
-  'anytime': 3,
+/* Grouping today's plan by part of day, plus the shared sort order — see
+   utils/timeSlots.js. Both this page and the tracker render the same plan, so
+   they must group and order it identically. `takenCount` is deliberately NOT
+   imported here: this page already derives its own count for the progress bar,
+   and importing a second one would leave two names meaning the same thing. */
+import { groupBySlot, pendingIds, sortPlan } from '../utils/timeSlots.js';
+import { layoutPlan, isTakenLate, isDeadHour, DEAD_HOURS } from '../utils/slotSchedule.js';
+
+/* Section icons. Inline SVG rather than emoji so they inherit `currentColor`
+   and match the tracker exactly. */
+const SLOT_ICONS = {
+  morning: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+    </svg>
+  ),
+  afternoon: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2v3M5.6 5.6l2.1 2.1M2 12h3M5.6 18.4l2.1-2.1" />
+      <path d="M9 17a5 5 0 0 1 10 0z" />
+    </svg>
+  ),
+  evening: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 18a7 7 0 0 1-10-11.7A7 7 0 0 0 17 18z" />
+    </svg>
+  ),
+  night: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+    </svg>
+  ),
+  anytime: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </svg>
+  ),
 };
-
-/** Morning=0 … evening=2, anything unrecognised sorts last. */
-function timeOrder(scheduledTime) {
-  if (!scheduledTime) return 3;
-  const time = String(scheduledTime).toLowerCase();
-  for (const [key, value] of Object.entries(TIME_ORDER)) {
-    if (time.includes(key)) return value;
-  }
-  return 3;
-}
-
-/** A NEW array — the caller's list is never mutated. */
-function sortPlan(supplements) {
-  return [...supplements].sort((a, b) => {
-    if (Boolean(a.taken) !== Boolean(b.taken)) return a.taken ? 1 : -1;
-    const byTime = timeOrder(a.scheduledTime) - timeOrder(b.scheduledTime);
-    if (byTime !== 0) return byTime;
-    return (PRIORITY_ORDER[a.priority] ?? 3) - (PRIORITY_ORDER[b.priority] ?? 3);
-  });
-}
 
 /** CSS modifier for a priority label, with a safe fallback for junk data. */
 const priorityTone = (priority) => {
@@ -154,6 +162,9 @@ function DashboardPage() {
   const [priorityLifted, setPriorityLifted] = useState(false);
   const [markTakenToastMessage, setMarkTakenToastMessage] = useState('');
   const [markTakenToastKey, setMarkTakenToastKey] = useState(0);
+  // Which time slot has a bulk request in flight, so its button can show
+  // progress and refuse a second press instead of double-submitting.
+  const [slotPending, setSlotPending] = useState(null);
   const [showNewAssessmentConfirm, setShowNewAssessmentConfirm] = useState(false);
   const [showPriorityBlock, setShowPriorityBlock] = useState(false);
   const [priorityBlock, setPriorityBlock] = useState({ blocked: false, count: 0 });
@@ -281,6 +292,77 @@ function DashboardPage() {
     };
   }, [scoreHelpOpen]);
 
+  // Morning / Afternoon / Evening sections, in the fixed order the tracker uses.
+  // Declared before the plan callbacks below, which read it to find a slot.
+  const slotGroups = useMemo(() => groupBySlot(todaysSupplements), [todaysSupplements]);
+
+  /* The clock the time windows are judged against. Re-renders on a timer and on
+     wake, so a window that closes while the page is open does not stay tickable
+     until a reload. See utils/slotSchedule.js for the windows themselves. */
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const tick = () => setNow(new Date());
+    const interval = setInterval(tick, 30_000);
+    const onWake = () => {
+      if (document.visibilityState === 'visible') tick();
+    };
+    document.addEventListener('visibilitychange', onWake);
+    window.addEventListener('focus', tick);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onWake);
+      window.removeEventListener('focus', tick);
+    };
+  }, []);
+
+  /* The page, laid out for the current moment: the one open frame, Anytime, and
+     the tray of doses whose window has closed. The SAME function the tracker
+     uses, so the two pages cannot disagree about what is on screen. */
+  const plan = useMemo(() => layoutPlan(slotGroups, now), [slotGroups, now]);
+
+  // The dead hours close New Assessment here as well as on the form itself.
+  const deadHours = isDeadHour(now);
+
+  /* Shared post-update bookkeeping for the single tick and the slot press, so
+     the two can never diverge on streak, adherence or the priority lifecycle. */
+  const applyIntakeResult = useCallback(async (result, { toastMessage } = {}) => {
+    if (!result?.stats) return;
+    setQuickStats(prev => ({
+      ...prev,
+      adherenceRate: result.stats.overallAdherence,
+      daysStreak: result.stats.daysStreak,
+      todaysProgress: result.stats.todaysProgress,
+    }));
+    setWellnessScore(result.stats.wellnessScore);
+
+    const { taken, total } = result.stats.todaysProgress;
+    if (taken === total && total > 0) {
+      // Hide the "marked as taken" toast immediately
+      setMarkTakenToastMessage('');
+      // Flag auto-lifted when the last supplement completed the plan
+      setPriorityLifted(!!result.priorityLifted);
+      if (result.priorityLifted) {
+        // Refresh the gate + banner state right away
+        fetchDashboardData();
+      }
+      // Strict gate: undo after an auto-lift reinstates the restriction
+      if (result.priorityReflagged) {
+        setMarkTakenToastKey(prev => prev + 1);
+        setMarkTakenToastMessage('Priority review reinstated — new assessments paused again.');
+        fetchDashboardData();
+      }
+      // Show completion toast
+      setShowCompletionToast(true);
+      // Auto-hide after 4 seconds
+      setTimeout(() => setShowCompletionToast(false), 4000);
+    } else if (toastMessage) {
+      // Show toast when marking as taken (but not completed all)
+      // Increment key to force re-render even if previous toast is still showing
+      setMarkTakenToastKey(prev => prev + 1);
+      setMarkTakenToastMessage(toastMessage);
+    }
+  }, [fetchDashboardData]);
+
   const handleSupplementToggle = useCallback(async (id) => {
     const supplement = todaysSupplements.find(s => s.id === id);
     if (!supplement) return;
@@ -296,45 +378,10 @@ function DashboardPage() {
 
     try {
       const result = await updateIntake(id, newTakenState);
-
-      // Update stats from server response
-      if (result.stats) {
-        setQuickStats(prev => ({
-          ...prev,
-          adherenceRate: result.stats.overallAdherence,
-          daysStreak: result.stats.daysStreak,
-          todaysProgress: result.stats.todaysProgress,
-        }));
-        setWellnessScore(result.stats.wellnessScore);
-
-        // Check if all supplements are now taken
-        if (result.stats.todaysProgress.taken === result.stats.todaysProgress.total &&
-            result.stats.todaysProgress.total > 0) {
-          // Hide the "marked as taken" toast immediately
-          setMarkTakenToastMessage('');
-          // Flag auto-lifted when the last supplement completed the plan
-          setPriorityLifted(!!result.priorityLifted);
-          if (result.priorityLifted) {
-            // Refresh the gate + banner state right away
-            fetchDashboardData();
-          }
-          // Strict gate: undo after an auto-lift reinstates the restriction
-          if (result.priorityReflagged) {
-            setMarkTakenToastKey(prev => prev + 1);
-            setMarkTakenToastMessage('Priority review reinstated — new assessments paused again.');
-            fetchDashboardData();
-          }
-          // Show completion toast
-          setShowCompletionToast(true);
-          // Auto-hide after 4 seconds
-          setTimeout(() => setShowCompletionToast(false), 4000);
-        } else if (newTakenState) {
-          // Show toast when marking as taken (but not completed all)
-          // Increment key to force re-render even if previous toast is still showing
-          setMarkTakenToastKey(prev => prev + 1);
-          setMarkTakenToastMessage('Supplement marked as taken');
-        }
-      }
+      await applyIntakeResult(
+        result,
+        newTakenState ? { toastMessage: 'Supplement marked as taken' } : {}
+      );
     } catch (err) {
       console.error('Error updating intake:', err);
       // Revert optimistic update on error
@@ -344,11 +391,53 @@ function DashboardPage() {
         )
       );
     }
-  }, [todaysSupplements, fetchDashboardData]);
+  }, [todaysSupplements, applyIntakeResult]);
+
+  /* One press for a whole time slot. The server writes the batch as a single
+     update and computes the streak from the FINAL state, so pressing "take all
+     morning" five times cannot award and then revoke the day-complete streak
+     five times on the way through. */
+  const handleSlotTaken = useCallback(async (slotKey) => {
+    const group = slotGroups.find(g => g.key === slotKey);
+    if (!group) return;
+    const ids = pendingIds(group.items);
+    if (ids.length === 0) return;
+
+    // Snapshot the rows being changed so a failure restores exactly what was
+    // there, rather than assuming they were all untaken.
+    const previous = todaysSupplements.filter(sup => ids.includes(sup.id));
+    const takenAt = new Date();
+
+    setSlotPending(slotKey);
+    setTodaysSupplements((prev) => sortPlan(prev.map((sup) => (
+      ids.includes(sup.id) ? { ...sup, taken: true, takenAt } : sup
+    ))));
+
+    try {
+      const result = await updateIntakeBulk(ids, true);
+      await applyIntakeResult(result, {
+        toastMessage: `${ids.length} ${group.label.toLowerCase()} supplements marked as taken`,
+      });
+    } catch (err) {
+      console.error('Error marking time slot as taken:', err);
+      setTodaysSupplements((prev) => {
+        const restored = new Map(previous.map(sup => [sup.id, sup]));
+        return prev.map(sup => restored.get(sup.id) ?? sup);
+      });
+      setMarkTakenToastKey(prev => prev + 1);
+      setMarkTakenToastMessage('Could not update those supplements. Please try again.');
+    } finally {
+      setSlotPending(null);
+    }
+  }, [slotGroups, todaysSupplements, applyIntakeResult]);
 
   const navigateToCard = (cardName) => {
     switch (cardName) {
       case 'assessment': {
+        // Dead hours close this action too. The card and the empty-state button
+        // are already disabled, so this is the backstop against a programmatic
+        // activation — and it re-reads the clock rather than trusting the render.
+        if (isDeadHour(new Date())) break;
         // Priority gate: an unresolved Priority assessment must finish first
         if (priorityPaused) {
           setShowPriorityBlock(true);
@@ -392,6 +481,158 @@ function DashboardPage() {
   const planPercent = todaysSupplements.length
     ? Math.round((takenCount / todaysSupplements.length) * 100)
     : 0;
+  /* One supplement row. Extracted so the active frame and the missed tray show
+     the SAME row — they used to be separate inline blocks, which is how a
+     "Taken" pill ends up on one and a button on the other for identical data. */
+  const renderRow = (supplement, { missed = false, locked = false, slotKey = '' } = {}) => {
+    const isTaken = !!supplement.taken;
+    // Judged against the row's OWN window, from its timestamp — not against the
+    // clock now. A dose recorded at 1:03 AM for a 10 PM slot reads "Took it
+    // Late" even when it is looked at again at lunchtime.
+    const late = isTaken && isTakenLate(supplement, slotKey || supplement.missedSlot);
+    return (
+      <div
+        key={supplement.id}
+        className={[
+          'supplement-item',
+          `supplement-item--${priorityTone(supplement.priority)}`,
+          isTaken ? 'is-taken' : '',
+          !isTaken && missed ? 'supplement-item--missed' : '',
+          !isTaken && locked ? 'supplement-item--locked' : '',
+        ].filter(Boolean).join(' ')}
+      >
+        <div className="supplement-info">
+          <div className="supplement-header">
+            <h4 className="supplement-name">{supplement.name}</h4>
+            {supplement.priority && (
+              <span className={`priority-chip priority-chip--${priorityTone(supplement.priority)}`}>
+                {supplement.priority}
+              </span>
+            )}
+            {isTaken ? (
+              <span className="taken-badge">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                taken
+              </span>
+            ) : missed ? (
+              <span className="missed-badge">Missed</span>
+            ) : null}
+          </div>
+          <p className="supplement-details">
+            {supplement.dosage} - {supplement.scheduledTime}
+          </p>
+          <p className="supplement-time">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
+            </svg>
+            {isTaken
+              ? `Taken at ${new Date(supplement.takenAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}${late ? ' · late' : ''}`
+              : `Best Time: ${supplement.scheduledTime}`}
+          </p>
+        </div>
+        {/* No Undo button by request. A read-only "Taken" pill takes its place
+            so the row does not end in empty space and the state is legible. */}
+        {isTaken ? (
+          late ? (
+            // Amber, not green. Green reads as "done, on time", which is exactly
+            // what a late dose is not.
+            <span className="supplement-late-pill">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" />
+                <polyline points="12 7 12 12 15 14" />
+              </svg>
+              Took it Late
+            </span>
+          ) : (
+            <span className="supplement-taken-pill">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              Taken
+            </span>
+          )
+        ) : locked ? (
+          <span className="supplement-locked-pill">Locked</span>
+        ) : (
+          <button
+            type="button"
+            className="supplement-btn"
+            onClick={() => handleSupplementToggle(supplement.id)}
+            disabled={slotPending !== null}
+            aria-label={`Mark ${supplement.name} as taken`}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            {missed ? 'Took it late' : 'Mark as Taken'}
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  /** One time frame: header with the hours and a take-all, then its rows. */
+  const renderFrame = (group, section) => {
+    const isPending = slotPending === group.key;
+    const isDeadHour = section.isDeadHour;
+    return (
+      <section
+        key={group.key}
+        className={[
+          'slot-group',
+          `slot-group--${group.key}`,
+          section.isComplete ? 'slot-group--complete' : '',
+          isDeadHour && section.isTickable ? 'slot-group--snoozed' : '',
+        ].filter(Boolean).join(' ')}
+        aria-labelledby={`dash-slot-${group.key}`}
+      >
+        <header className="slot-group__header">
+          <span className="slot-group__label">
+            <span className={`slot-group__icon slot-group__icon--${group.key}`} aria-hidden="true">
+              {SLOT_ICONS[group.key]}
+            </span>
+            <span className="slot-group__names">
+              <h4 id={`dash-slot-${group.key}`} className="slot-group__title">{group.label}</h4>
+              <span className="slot-group__window">
+                {isDeadHour ? `Locked until ${DEAD_HOURS.endsAt}` : section.window}
+              </span>
+            </span>
+          </span>
+          <span className="slot-group__meta">
+            {isDeadHour && section.isTickable && (
+              <span className="slot-group__flag slot-group__flag--night">Locked until {DEAD_HOURS.endsAt}</span>
+            )}
+            <span className="slot-group__count">{section.taken}/{section.total}</span>
+            {section.isComplete ? (
+              <span className="slot-group__done">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                Done
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="btn-slot-taken"
+                onClick={() => handleSlotTaken(group.key)}
+                disabled={isPending}
+                aria-label={`Mark all ${group.label.toLowerCase()} supplements as taken`}
+              >
+                {isPending ? 'Saving…' : isDeadHour ? 'Took it anyway' : `Take all ${group.label.toLowerCase()}`}
+              </button>
+            )}
+          </span>
+        </header>
+        <div className="supplements-list">
+          {group.items.map((supplement) => renderRow(supplement, { slotKey: group.key }))}
+        </div>
+      </section>
+    );
+  };
+
   const band = scoreBand(wellnessScore);
   const todayLabel = useMemo(
     () => new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }),
@@ -574,18 +815,38 @@ function DashboardPage() {
         <div className="dashboard-cards">
           {ACTION_CARDS.map((card) => {
             const blocked = card.key === 'assessment' && priorityPaused;
+            // New Assessment is closed during the dead hours, same as the form it
+            // leads to. Without this the card still looked live and walked the
+            // user straight into a page they could not use — and this card is
+            // the main way in, so it has to carry the lock itself.
+            const snoozed = card.key === 'assessment' && deadHours;
+            const inert = blocked || snoozed;
+            const cardLabel = blocked
+              ? `${card.label} — paused until the priority review finishes`
+              : snoozed
+                ? `${card.label} — closed until ${DEAD_HOURS.endsAt}`
+                : card.label;
             return (
               <button
                 type="button"
                 key={card.key}
-                className={`dashboard-card dashboard-card--${card.tone}${blocked ? ' dashboard-card--blocked' : ''}`}
-                onClick={() => navigateToCard(card.key)}
-                aria-label={blocked ? `${card.label} — paused until the priority review finishes` : card.label}
+                className={[
+                  'dashboard-card',
+                  `dashboard-card--${card.tone}`,
+                  blocked ? 'dashboard-card--blocked' : '',
+                  snoozed ? 'dashboard-card--snoozed' : '',
+                ].filter(Boolean).join(' ')}
+                onClick={() => { if (!inert) navigateToCard(card.key); }}
+                disabled={inert}
+                aria-label={cardLabel}
+                title={snoozed ? `Closed between midnight and ${DEAD_HOURS.endsAt}` : undefined}
               >
                 <span className="card-icon">{card.icon}</span>
                 <span className="card-body">
                   <span className="card-title">{card.label}</span>
-                  <span className="card-hint">{card.hint}</span>
+                  <span className="card-hint">
+                    {snoozed ? `Closed until ${DEAD_HOURS.endsAt}` : card.hint}
+                  </span>
                 </span>
                 <span className="card-arrow" aria-hidden="true">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
@@ -594,6 +855,7 @@ function DashboardPage() {
                   </svg>
                 </span>
                 {blocked && <span className="card-blocked-tag">Paused</span>}
+                {snoozed && <span className="card-blocked-tag card-blocked-tag--snoozed">Asleep</span>}
               </button>
             );
           })}
@@ -684,7 +946,17 @@ function DashboardPage() {
                 <button
                   type="button"
                   className="btn-go-recommendations"
-                  onClick={() => navigate(wellnessScore === 0 ? '/assessment' : '/recommendations')}
+                  // Only the "Take Assessment" half of this button is closed
+                  // during the dead hours; "Go to AI Recommendations" browses an
+                  // existing plan and has no reason to be.
+                  onClick={() => {
+                    if (wellnessScore === 0) {
+                      if (!deadHours) navigate('/assessment');
+                    } else {
+                      navigate('/recommendations');
+                    }
+                  }}
+                  disabled={wellnessScore === 0 && deadHours}
                 >
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     {wellnessScore === 0 ? (
@@ -704,68 +976,71 @@ function DashboardPage() {
                 </button>
               </div>
             ) : (
-              <div className="supplements-list">
-                {todaysSupplements.map((supplement) => (
-                  <div
-                    key={supplement.id}
-                    className={`supplement-item supplement-item--${priorityTone(supplement.priority)}${supplement.taken ? ' is-taken' : ''}`}
-                  >
-                    <div className="supplement-info">
-                      <div className="supplement-header">
-                        <h4 className="supplement-name">{supplement.name}</h4>
-                        {supplement.priority && (
-                          <span className={`priority-chip priority-chip--${priorityTone(supplement.priority)}`}>
-                            {supplement.priority}
-                          </span>
-                        )}
-                        {supplement.taken && (
-                          <span className="taken-badge">
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                              <polyline points="20 6 9 17 4 12" />
-                            </svg>
-                            taken
-                          </span>
-                        )}
-                      </div>
-                      <p className="supplement-details">
-                        {supplement.dosage} - {supplement.scheduledTime}
-                      </p>
-                      <p className="supplement-time">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                          <circle cx="12" cy="12" r="10" />
-                          <polyline points="12 6 12 12 16 14" />
-                        </svg>
-                        {supplement.taken
-                          ? `Taken at ${new Date(supplement.takenAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
-                          : `Best Time: ${supplement.scheduledTime}`
-                        }
-                      </p>
-                    </div>
-                    {/* No Undo button by request. A read-only "Taken" pill takes
-                        its place so the row does not end in empty space and the
-                        state is still legible. */}
-                    {supplement.taken ? (
-                      <span className="supplement-taken-pill">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                        Taken
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        className="supplement-btn"
-                        onClick={() => handleSupplementToggle(supplement.id)}
-                        aria-label={`Mark ${supplement.name} as taken`}
+              <div className="supplements-list supplements-list--slots">
+                {/* DEAD HOURS — every field listed and empty, each with a
+                    countdown to when it opens. No rows, no buttons. */}
+                {plan.deadHour && (
+                  <>
+                    <p className="slots-deadhead">
+                      Resting until {DEAD_HOURS.endsAt}. Your plan is ready — nothing to take yet.
+                    </p>
+                    {plan.placeholders.map(placeholder => (
+                      <section
+                        key={placeholder.key}
+                        className={`slot-group slot-group--${placeholder.key} slot-group--placeholder`}
+                        aria-labelledby={`dash-ph-${placeholder.key}`}
                       >
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                        Mark as Taken
-                      </button>
-                    )}
-                  </div>
-                ))}
+                        <header className="slot-group__header">
+                          <span className="slot-group__label">
+                            <span className={`slot-group__icon slot-group__icon--${placeholder.key}`} aria-hidden="true">
+                              {SLOT_ICONS[placeholder.key]}
+                            </span>
+                            <span className="slot-group__names">
+                              <h4 id={`dash-ph-${placeholder.key}`} className="slot-group__title">{placeholder.label}</h4>
+                              {placeholder.window && (
+                                <span className="slot-group__window">{placeholder.window}</span>
+                              )}
+                            </span>
+                          </span>
+                          <span className="slot-group__meta">
+                            <span className="slot-group__count slot-group__count--quiet">
+                              {placeholder.total} waiting
+                            </span>
+                            <span className="slot-group__countdown">
+                              Opens {placeholder.opensAt}
+                              {!placeholder.countdown.isDue && ` · in ${placeholder.countdown.text}`}
+                            </span>
+                          </span>
+                        </header>
+                      </section>
+                    ))}
+                  </>
+                )}
+
+                {/* THE ACTIVE FRAME — the only timed section on the page. */}
+                {!plan.deadHour && plan.active.map(({ group, section }) => renderFrame(group, section))}
+                {!plan.deadHour && plan.active.length === 0 && plan.upcomingCount > 0 && (
+                  <p className="slots-idle">
+                    Next up: {plan.upcomingCount === 1 ? 'your next time frame' : `${plan.upcomingCount} time frames`} — your plan starts at 4:00 AM.
+                  </p>
+                )}
+
+                {/* ANYTIME — no window, so never hidden, never locked. */}
+                {!plan.deadHour && plan.anytime && renderFrame(plan.anytime.group, plan.anytime.section)}
+
+                {/* TODAY MISSED — closed windows, parked at the very bottom. */}
+                {!plan.deadHour && plan.missed.total > 0 && (
+                  <section className="slot-tray" aria-labelledby="dash-missed-tray">
+                    <header className="slot-tray__header">
+                      <h4 id="dash-missed-tray" className="slot-tray__title">{plan.missed.title}</h4>
+                      <span className="slot-tray__count">{plan.missed.total}</span>
+                      <span className="slot-tray__note">Window passed — you can still record these</span>
+                    </header>
+                    <div className="supplements-list">
+                      {plan.missed.items.map((supplement) => renderRow(supplement, { missed: true }))}
+                    </div>
+                  </section>
+                )}
               </div>
             )}
           </section>

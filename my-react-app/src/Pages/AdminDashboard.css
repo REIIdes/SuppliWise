@@ -1402,7 +1402,6 @@
   transform: translateY(-1px);
   box-shadow: 0 8px 18px rgba(220, 38, 38, .4) !important;
 }
-.security-active { color: #15803d !important; font-weight: 700; }
 
 /* ── Narrow viewports ──────────────────────────────────────────────────── */
 /* A safety net on top of the wrapping above, not the mechanism: the wrap is
@@ -1649,8 +1648,20 @@ td small, .provider small, .security-row small, .notification span { display: bl
 }
 .attention::before { box-shadow: 0 0 0 3px rgba(180,83,9,.14); }
 
-.security-active { color: #047857; font-weight: 700; }
-.security-email { color: #b45309; }
+/* ── Security factor badge (users grid) ─────────────────────────────────
+   Four states, ordered by actual strength: a passkey outranks a TOTP app,
+   which outranks email codes, which is nothing.
+
+   Scoped to `.user-detail-item` on purpose. `.user-detail-item span` sets
+   `color` at (0,1,1), so an unscoped `.security-foo` rule at (0,1,0) loses
+   to it — which is why the old rules needed `!important` and why the amber
+   "email" colour never actually rendered. Scoping wins on specificity
+   without an !important. */
+.user-detail-item .security-badge { font-weight: 700; }
+.user-detail-item .security-badge--passkey { color: #0f766e; }
+.user-detail-item .security-badge--authenticator { color: #15803d; }
+.user-detail-item .security-badge--email { color: #b45309; }
+.user-detail-item .security-badge--password { color: #6b7280; }
 .danger-action {
   color: #be123c;
   border-color: #fecdd3;
@@ -1783,6 +1794,9 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
   --aip-idle: #64748b;
   --aip-idle-deep: #475569;
   --aip-idle-wash: #eef1f5;
+  --aip-watch: #f59e0b;
+  --aip-watch-deep: #b45309;
+  --aip-watch-wash: #fef3c7;
   --aip-all: #4f6bed;
   --aip-all-deep: #3730a3;
   --aip-violet: #7c3aed;
@@ -1865,7 +1879,62 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
 @keyframes aip-spin { to { transform: rotate(360deg); } }
 
 /* ── Provider cards ─────────────────────────────────────────────────────── */
-.provider-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 16px; margin-bottom: 22px; }
+/* `auto-fit` + `min()` rather than `auto-fill` + a fixed floor, and both
+   matter now that the grid only ever holds the CONFIGURED providers:
+     - `min(320px, 100%)` is what stops the track overflowing a viewport
+       narrower than the floor. With a bare `320px` the card is forced to 320px
+       and the grid bleeds out of the panel on a phone — the floor has to be
+       allowed to collapse, not just the container.
+     - `auto-fit` collapses the EMPTY tracks a sparse grid leaves behind, so a
+       single connected provider fills the row instead of sitting at a third of
+       the width next to two holes. */
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+  align-items: stretch;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+/* The grid is empty whenever no provider has a key. That is the normal starting
+   state, not a fault, so it reads as instructions rather than as an error — and
+   it names the exact variables to add, because "configure something" is not
+   actionable. */
+.provider-empty {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 0;
+  padding: 20px 22px;
+  border: 1px dashed var(--admin-line);
+  border-radius: 16px;
+  background: #fbfdfc;
+  color: var(--admin-muted);
+  font: 12.5px/1.6 Arial, sans-serif;
+}
+.provider-empty strong { color: var(--admin-ink); font-size: 14px; }
+.provider-empty code {
+  font: 400 12px 'Courier New', ui-monospace, monospace;
+  padding: 2px 6px;
+  border: 1px solid var(--admin-line);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--admin-ink);
+}
+.provider-empty ul {
+  display: grid;
+  gap: 6px;
+  margin: 3px 0 0;
+  padding-left: 18px;
+}
+/* The one state here that IS a fault: the request itself came back empty. */
+.provider-empty--down {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--aip-down) 32%, var(--admin-line));
+  background: var(--aip-down-wash);
+  color: var(--aip-down-deep);
+}
 
 .provider {
   --t: var(--aip-idle);
@@ -1884,9 +1953,12 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
   transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
 }
 
-.provider--ok   { --t: var(--aip-ok);   --t-deep: var(--aip-ok-deep);   --t-wash: var(--aip-ok-wash); }
-.provider--down { --t: var(--aip-down); --t-deep: var(--aip-down-deep); --t-wash: var(--aip-down-wash); }
-.provider--idle { --t: var(--aip-idle); --t-deep: var(--aip-idle-deep); --t-wash: var(--aip-idle-wash); }
+.provider--ok    { --t: var(--aip-ok);    --t-deep: var(--aip-ok-deep);    --t-wash: var(--aip-ok-wash); }
+.provider--down  { --t: var(--aip-down);  --t-deep: var(--aip-down-deep);  --t-wash: var(--aip-down-wash); }
+.provider--idle  { --t: var(--aip-idle);  --t-deep: var(--aip-idle-deep);  --t-wash: var(--aip-idle-wash); }
+/* Detection's middle band. It is deliberately amber and NOT green: "watch" is
+   the one state an admin must read without it also reading as "all clear". */
+.provider--watch { --t: var(--aip-watch); --t-deep: var(--aip-watch-deep); --t-wash: var(--aip-watch-wash); }
 
 /* A cap plus a corner wash in the status colour: the grid is scannable by
    colour alone, and the rows below are for the detail. */
@@ -1917,6 +1989,13 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
   display: flex;
   align-items: center;
   gap: 11px;
+  /* Wraps rather than squeezing. The provider name and the status pill are the
+     two things an admin scans for, so neither may be the one that loses: when
+     the track is too narrow for both, the pill drops to its own line and the
+     name keeps its full width. `flex-wrap` is the whole mechanism — a container
+     query would need a `container-type` ancestor for a rule that this already
+     expresses, and would cost support in older browsers for no gain. */
+  flex-wrap: wrap;
 }
 
 .provider__mark {
@@ -2026,16 +2105,334 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
   max-width: 82ch;
 }
 
-/* Responsive. `.provider-grid` is already `auto-fill minmax(310px, 1fr)`, so it
-   reflows on its own; only the stat strip needs explicit steps. */
+/* ── Routing table ───────────────────────────────────────────────────────── */
+/* The detection card that used to share this header block has moved to the
+   Security tab (SecurityStatus → ThreatPrediction), which is where its input
+   lives. Everything it needed here — .detect-pill, .aip-detect-grid,
+   .aip-detect-list — went with it; nothing in this file renders them. */
+.aip-routing {
+  margin-top: 18px;
+  padding: 20px;
+  border: 1px solid var(--admin-line);
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff, #fbfefc);
+}
+.aip-routing > .admin-muted { margin: 0 0 14px; max-width: 88ch; }
+
+/* ── Routing table ───────────────────────────────────────────────────────── */
+/* The routing table used to borrow `.provider__rows`, whose first column is a
+   fixed 62px because provider cards only ever label rows "Check" / "Model" /
+   "Used for". Routing labels are long uppercase phrases with no break
+   opportunity inside either word, so they overflowed that column and painted
+   over the very description they were supposed to label. These cards have no
+   shared narrow axis at all — that class of overlap is now unrepresentable. */
+.aip-routing {
+  position: relative;
+  background:
+    radial-gradient(1100px 300px at 100% -30%, rgba(124, 58, 237, .09), transparent 62%),
+    radial-gradient(760px 280px at 0% -20%, rgba(234, 88, 12, .07), transparent 60%),
+    linear-gradient(180deg, #ffffff, #fbfcfe);
+}
+
+.route-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px 24px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.route-head__text { min-width: 0; flex: 1 1 340px; }
+.route-head h3 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 8px;
+}
+/* A tinted square behind the glyph, so the heading reads as a section opener
+   rather than one more line of body copy. */
+.route-head__glyph {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 34px; height: 34px;
+  border-radius: 11px;
+  color: #ffffff;
+  background: linear-gradient(135deg, var(--admin-violet), var(--admin-indigo) 52%, var(--admin-teal));
+  box-shadow: 0 8px 18px -10px rgba(79, 107, 237, .95);
+}
+.route-head__text > .admin-muted { margin: 0; max-width: 74ch; }
+
+/* Triage chips. Amber and green here are the same vocabulary the rest of the
+   panel uses (needs a key / all keys present), not decoration. */
+.route-tally {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.route-tally li {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 7px 13px;
+  border: 1px solid var(--admin-line);
+  border-radius: 999px;
+  background: #f7faf8;
+  color: #5d6a64;
+  font: 700 11.5px/1 Arial, sans-serif;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+.route-tally b {
+  font: 800 15px/1 Arial, sans-serif;
+  color: var(--admin-ink);
+  letter-spacing: -0.01em;
+}
+/* Scoped with `li` so these outrank `.route-tally li` on specificity alone —
+   this sheet raises specificity rather than reaching for `!important`. */
+.route-tally li.route-tally--warn {
+  border-color: color-mix(in srgb, var(--aip-watch) 42%, var(--admin-line));
+  background: var(--aip-watch-wash);
+}
+.route-tally--warn b { color: #7a3e00; }
+.route-tally li.route-tally--ok {
+  border-color: color-mix(in srgb, var(--aip-ok) 42%, var(--admin-line));
+  background: var(--aip-ok-wash);
+}
+.route-tally--ok b { color: var(--aip-ok-deep); }
+
+/* One card per feature. auto-fill + a floor width means the last row reflows
+   to full-width cards instead of leaving a ragged one-column gap. */
+.route-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.route-card {
+  --rt: var(--admin-indigo);
+  --rt-deep: #3730a3;
+  --rt-wash: #eef1fe;
+
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  padding: 15px 15px 14px;
+  border: 1px solid color-mix(in srgb, var(--rt) 22%, var(--admin-line));
+  border-radius: 15px;
+  background: linear-gradient(180deg, #ffffff, var(--rt-wash) 190%);
+  overflow: hidden;
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+.route-card--violet  { --rt: #7c3aed; --rt-deep: #5b21b6; --rt-wash: #f4ecff; }
+.route-card--azure   { --rt: #2563eb; --rt-deep: #1d4ed8; --rt-wash: #e9f0ff; }
+.route-card--cyan    { --rt: #0891b2; --rt-deep: #0e7490; --rt-wash: #e1f6fc; }
+.route-card--indigo  { --rt: #4f6bef; --rt-deep: #3730a3; --rt-wash: #eef1fe; }
+.route-card--fuchsia { --rt: #c026d3; --rt-deep: #a21caf; --rt-wash: #fdeafd; }
+.route-card--ember   { --rt: #ea580c; --rt-deep: #c2410c; --rt-wash: #ffeee4; }
+
+.route-card::after {
+  content: '';
+  position: absolute;
+  top: -46px; right: -46px;
+  width: 132px; height: 132px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 100% 100%, color-mix(in srgb, var(--rt) 20%, transparent), transparent 70%);
+  pointer-events: none;
+}
+/* Cap rail: the card's colour is legible before a single word is read. */
+.route-card__rail {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--rt), var(--rt-deep));
+}
+.route-card:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--rt) 55%, var(--admin-line));
+  box-shadow: 0 18px 34px -24px color-mix(in srgb, var(--rt) 95%, transparent);
+}
+
+.route-card__head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.route-card__mark {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 30px; height: 30px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--rt), var(--rt-deep));
+  color: #fff;
+  font: 800 14px/1 Arial, sans-serif;
+  box-shadow: 0 6px 14px -9px color-mix(in srgb, var(--rt) 95%, transparent);
+}
+.route-card__head h4 {
+  margin: 0;
+  min-width: 0;
+  color: var(--admin-ink);
+  font: 700 14px/1.25 Georgia, 'Times New Roman', serif;
+  overflow-wrap: anywhere;
+}
+
+.route-card__detail {
+  position: relative;
+  margin: 0 0 12px;
+  /* Darker than the shared --admin-muted (4.33:1) so this body copy clears AA
+     at its own size; the token itself is left alone for the rest of the shell. */
+  color: #5d6a64;
+  font: 12.5px/1.5 Arial, sans-serif;
+  overflow-wrap: anywhere;
+}
+
+/* The dispatch line is the payload of the card, so it gets its own filled
+   strip rather than being appended to the prose in muted grey. The auto top
+   margin pins it and the model id to the bottom of every card in a row, which
+   is only true because nothing is rendered after the model line. */
+.route-card__to {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: auto 0 0;
+  padding: 8px 11px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--rt) 12%, #ffffff);
+  color: var(--rt-deep);
+  font: 800 12.5px/1.3 Arial, sans-serif;
+}
+.route-card__arrow { flex: 0 0 auto; font-size: 14px; line-height: 1; }
+.route-card__provider { min-width: 0; overflow-wrap: anywhere; }
+
+.route-card__model {
+  margin: 7px 0 0;
+  font: 400 11.5px/1.45 'Courier New', ui-monospace, monospace;
+  overflow-wrap: anywhere;
+}
+.route-card__model code {
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--rt) 26%, var(--admin-line));
+  border-radius: 7px;
+  background: #ffffff;
+  color: var(--admin-ink);
+}
+.route-card__modelNone {
+  display: inline-block;
+  padding: 2px 0;
+  color: #5d6a64;
+  font-style: italic;
+  opacity: .9;
+}
+
+/* The fallback line sits under the dispatch pair. Quieter than the model, and
+   deliberately not a warning: a fallback is resilience, not a problem. It reads
+   as a sub-note so an operator sees which provider is carrying the load without
+   mistaking it for the primary. */
+.route-card__fallback {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--admin-muted);
+}
+.route-card__fallback span {
+  margin-right: 3px;
+  opacity: .8;
+}
+
+/* An unconfigured route still gets its accent — it is still routed there — but
+   the warning is stated outright rather than left as a greyed-out aside, which
+   is what the old inline `(not configured …)` parenthetical amounted to.
+
+   Amber, not rose: rose is this panel's "broken" tone, and a missing key for an
+   optional feature is not broken. The text is a deeper amber than --aip-watch-deep
+   because that tone only reaches 4.5:1 on this wash and the key chip behind it
+   then dropped to 3.8:1 — and the key is the string an admin has to copy. */
+.route-card__warn {
+  --warn-ink: #7a3e00;
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--aip-watch) 45%, var(--admin-line));
+  border-radius: 10px;
+  background: var(--aip-watch-wash);
+  color: var(--warn-ink);
+  font: 600 11.5px/1.45 Arial, sans-serif;
+  overflow-wrap: anywhere;
+}
+.route-card__warn > svg { flex: 0 0 auto; margin-top: 1px; }
+.route-card__warn code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: rgba(122, 62, 0, .13);
+  color: var(--warn-ink);
+  font: 700 11px 'Courier New', ui-monospace, monospace;
+}
+.route-card--unset { border-style: dashed; }
+
+
+/* The priority-flagging receipt. Sits with the other advisories rather than
+   inside a card, because it is reporting one real call, not a panel state. */
+.aip-flagging {
+  margin: 14px 0 0;
+  max-width: 92ch;
+}
+.aip-flagging code {
+  font-size: 0.92em;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: rgba(100, 116, 139, .12);
+}
+
+/* A self-hosted gateway's address. Wraps rather than truncating: the host is
+   the thing being debugged, so cutting it off defeats the point. */
+.provider__host {
+  font: 400 11.5px/1.45 'Courier New', ui-monospace, monospace;
+  padding: 3px 7px;
+  border: 1px solid var(--admin-line);
+  border-radius: 7px;
+  background: #ffffff;
+  overflow-wrap: anywhere;
+}
+
+/* Responsive. `.provider-grid` and `.route-grid` are both `auto-fit minmax()`
+   with a collapsing floor, so they reflow on their own down to a single column
+   without overflowing a narrow viewport; only the strips that must not wrap
+   arbitrarily need explicit steps. */
 @media (max-width: 1100px) {
   .aip-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  /* The tally is a summary, not a control row: below this width it becomes a
+     full-width strip so it never leaves a stranded chip beside the heading. */
+  .route-head { gap: 12px; }
+  .route-tally { width: 100%; }
+  .route-tally li { flex: 1 1 auto; justify-content: center; }
 }
 @media (max-width: 560px) {
   .aip-stats { grid-template-columns: 1fr; gap: 9px; }
   .aip-stat { padding: 12px 14px; }
   .aip-stat__value { font-size: 23px; }
   .provider__row { grid-template-columns: 1fr; gap: 2px; }
+  .aip-routing { padding: 15px 13px; border-radius: 15px; }
+  .route-grid { grid-template-columns: 1fr; gap: 11px; }
+  .route-tally { gap: 6px; }
+  .route-tally li { flex: 1 1 100%; justify-content: flex-start; }
   .provider-env-stale .admin-secondary { margin-left: 0; width: 100%; justify-content: center; }
   /* No button here, so the icon has to lead rather than share a row with one. */
   .provider-env-reload { gap: 9px; font-size: 12.5px; }
@@ -2045,6 +2442,7 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
 @media (prefers-reduced-motion: reduce) {
   .aip-stat,
   .provider,
+  .route-card,
   .provider__statusDot,
   .ai-panel-actions .is-checking .aip-spin {
     animation: none !important;
@@ -2641,6 +3039,9 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
 .ov-stat--violet  { --tone-bg: linear-gradient(150deg, #f5f3ff, #ede9fe); --tone-ink: #6d28d9; --tone-line: #ddd6fe; }
 .ov-stat--cyan    { --tone-bg: linear-gradient(150deg, #ecfeff, #cffafe); --tone-ink: #0e7490; --tone-line: #a5f3fc; }
 .ov-stat--rose    { --tone-bg: linear-gradient(150deg, #fff1f2, #ffe4e6); --tone-ink: #be123c; --tone-line: #fecdd3; }
+/* amber is the "needs following up, not broken" tone — the renewal runway and
+   the priority queue use it so "soon" never looks the same as "failing". */
+.ov-stat--amber   { --tone-bg: linear-gradient(150deg, #fffbeb, #fef3c7); --tone-ink: #b45309; --tone-line: #fde68a; }
 
 .ov-stat__icon {
   display: grid;
@@ -2719,6 +3120,280 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
   border-radius: 999px;
   border: 1px solid var(--admin-line);
   white-space: nowrap;
+}
+/* The money-adjacent badge. Tone is carried by a left rule + a tinted ground
+   rather than a different hue, so it can never read as another severity. */
+.ov-panel-count--accent {
+  color: #3730a3;
+  background: linear-gradient(120deg, #eef2ff, #e0f2fe);
+  border-color: #c7d2fe;
+  cursor: help;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   DEEPER ANALYTICS
+   Row 1 kept its 1.35fr / 1fr / 1fr split because the activity bar chart needs
+   the extra width to keep 30 columns legible. Every row after it carries three
+   panels of near-equal weight (a chart, a funnel, tiles), so they use an even
+   split instead of inheriting a ratio chosen for a chart.
+   ══════════════════════════════════════════════════════════════════════════ */
+.ov-analytics-grid--even {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* ── Range toggle (7d / 14d / 30d) ─────────────────────────────────────
+   The active button is marked by aria-pressed AND a class, so the visual state
+   and the announced state can never disagree. `min-width` stops the row from
+   reflowing as the digits change. */
+.ov-range {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: -6px 0 14px;
+  padding: 4px;
+  border: 1px solid var(--admin-line);
+  border-radius: 999px;
+  background: #f6f8f9;
+  align-self: flex-start;
+}
+.ov-range__btn {
+  min-width: 40px;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  font: 800 11px Arial, sans-serif;
+  letter-spacing: .02em;
+  color: #5b6670;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease, box-shadow .15s ease;
+}
+.ov-range__btn:hover { background: #e9eef0; color: var(--admin-ink); }
+.ov-range__btn.is-active {
+  background: #fff;
+  color: #4338ca;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, .12);
+}
+.ov-range__btn:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 1px;
+}
+/* The "x% of all time" context. Lives inside the pill's row but is text, not a
+   control, so it is not a button and has no hover state of its own. */
+.ov-range__hint {
+  padding: 0 10px 0 6px;
+  font: 600 10.5px Arial, sans-serif;
+  color: var(--admin-muted);
+  white-space: nowrap;
+}
+
+/* ── Signup sparkline ───────────────────────────────────────────────────
+   `preserveAspectRatio="none"` lets the 320×96 viewBox stretch to the panel
+   width, so the chart fills whatever track it is given without a resize
+   observer. The line and fill are non-scaling strokes so the path stays one
+   pixel wide however the box is scaled — a scaled stroke turns a 2px line into
+   a 4px blob on a wide panel. */
+.ov-spark {
+  position: relative;
+  flex: 1;
+  min-height: 104px;
+  display: flex;
+}
+.ov-spark svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.ov-spark__line {
+  fill: none;
+  stroke: #4f46e5;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.ov-spark__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 12px 0 0;
+  font: 600 11px/1.4 Arial, sans-serif;
+  color: var(--admin-muted);
+}
+.ov-spark__foot strong { color: var(--admin-ink); }
+.ov-spark__delta { white-space: nowrap; color: var(--admin-muted); }
+
+/* ── Member journey funnel ───────────────────────────────────────────────
+   Each bar's width comes from the funnel helper, which measures every stage
+   against the FIRST one — so the three bars are directly comparable and the
+   narrowing shape is the honest picture. `data-step` only tints the steps so
+   the eye reads top-to-bottom as one object. */
+.ov-funnel {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1;
+  justify-content: center;
+}
+.ov-funnel__row { display: flex; flex-direction: column; gap: 6px; }
+.ov-funnel__head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.ov-funnel__label { font: 800 12px/1.3 Arial, sans-serif; color: var(--admin-ink); }
+.ov-funnel__nums { display: flex; align-items: baseline; gap: 7px; flex-shrink: 0; }
+.ov-funnel__nums strong { font: 800 15px/1 Arial, sans-serif; color: var(--admin-ink); }
+.ov-funnel__nums small { font: 800 10px/1 Arial, sans-serif; color: #6366f1; }
+.ov-funnel__track {
+  display: block;
+  height: 9px;
+  border-radius: 999px;
+  background: #eef1f4;
+  overflow: hidden;
+}
+.ov-funnel__track i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  /* min-width so a real-but-tiny stage (1 of 400) still reads as present
+     rather than as an empty track. */
+  min-width: 4px;
+  background: linear-gradient(90deg, #4f46e5, #7c3aed);
+  transition: width .45s cubic-bezier(.4, 0, .2, 1);
+}
+.ov-funnel__track i[data-step="1"] { background: linear-gradient(90deg, #7c3aed, #0891b2); }
+.ov-funnel__track i[data-step="2"] { background: linear-gradient(90deg, #0891b2, #0d9488); }
+.ov-funnel__meta { font: 500 10.5px/1.35 Arial, sans-serif; color: var(--admin-muted); }
+.ov-funnel__meta b { color: #b45309; font-weight: 800; }
+.ov-funnel__note {
+  margin: 14px 0 0;
+  padding-top: 12px;
+  border-top: 1px dashed var(--admin-line);
+  font: 500 10.5px/1.45 Arial, sans-serif;
+  color: var(--admin-muted);
+}
+
+/* ── Engagement / runway / backlog: three-up tile row ─────────────────── */
+.ov-stats--three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+/* ── Renewal runway footnote ───────────────────────────────────────────── */
+.ov-runway__foot {
+  margin: 13px 0 0;
+  padding-top: 12px;
+  border-top: 1px dashed var(--admin-line);
+  font: 500 10.5px/1.45 Arial, sans-serif;
+  color: var(--admin-muted);
+}
+
+/* ── Health profile strips ───────────────────────────────────────────────
+   Widths are flex-grow RATIOS rather than percentages, so a strip can never
+   overflow its track or leave a seam where a rounded 99.6% would have been. */
+.ov-profile { display: flex; flex-direction: column; gap: 16px; flex: 1; }
+.ov-profile__group { display: flex; flex-direction: column; gap: 7px; }
+.ov-profile__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font: 800 10px Arial, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--admin-muted);
+}
+.ov-profile__head small {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+  font-size: 10.5px;
+}
+.ov-profile__none { margin: 0; font: 500 10.5px Arial, sans-serif; color: #a3ada8; }
+.ov-strip {
+  display: flex;
+  height: 9px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #eef1f4;
+}
+.ov-strip i {
+  display: block;
+  min-width: 3px;
+  flex-basis: 0;
+  transition: flex-grow .45s cubic-bezier(.4, 0, .2, 1);
+}
+.ov-profile__legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.ov-profile__legend li { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.ov-profile__dot { width: 7px; height: 7px; border-radius: 2px; flex-shrink: 0; }
+.ov-profile__name {
+  font: 600 10.5px Arial, sans-serif;
+  color: #4b5563;
+  /* Long questionnaire labels ("Brain & Mental Health") must not push the
+     percentage off the end of the row. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 15ch;
+}
+.ov-profile__pct { font: 800 10.5px Arial, sans-serif; color: var(--admin-ink); flex-shrink: 0; }
+
+/* ── Top health goals ──────────────────────────────────────────────────── */
+.ov-goals {
+  margin-top: 15px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--admin-line);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.ov-goal-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ov-goal { display: flex; flex-direction: column; gap: 5px; }
+.ov-goal__text { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.ov-goal__label {
+  font: 600 11px/1.3 Arial, sans-serif;
+  color: var(--admin-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.ov-goal__nums { display: flex; align-items: baseline; gap: 6px; flex-shrink: 0; }
+.ov-goal__nums strong { font: 800 11.5px/1 Arial, sans-serif; color: var(--admin-ink); }
+.ov-goal__nums small { font: 700 10px/1 Arial, sans-serif; color: var(--admin-muted); }
+.ov-goal__track { display: block; height: 6px; border-radius: 999px; background: #eef1f4; overflow: hidden; }
+.ov-goal__track i {
+  display: block;
+  height: 100%;
+  min-width: 3px;
+  border-radius: 999px;
+  transition: width .45s cubic-bezier(.4, 0, .2, 1);
+}
+
+/* ── Responsive: the extra rows collapse before the first one does ────────
+   Three columns of a 15px-padded panel is the point where the numbers start
+   wrapping, so the new rows go to two columns at 1180px — before the original
+   row, whose first column is 1.35× wider and survives longer. */
+@media (max-width: 1180px) {
+  .ov-analytics-grid--even { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* The last panel in a 2-up grid would otherwise sit alone, half width. */
+  .ov-analytics-grid--even > :last-child { grid-column: 1 / -1; }
+}
+@media (max-width: 860px) {
+  .ov-analytics-grid--even { grid-template-columns: minmax(0, 1fr); }
+  .ov-analytics-grid--even > :last-child { grid-column: auto; }
+  .ov-stats--three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ov-spark { min-height: 120px; }
+  .ov-range { flex-wrap: wrap; border-radius: 16px; }
+  .ov-range__hint { padding: 0 4px 2px; }
+  .ov-spark__foot { flex-direction: column; align-items: flex-start; gap: 4px; }
+}
+@media (max-width: 560px) {
+  /* Tiles keep their 2-up grid down to phone width — the label and the number
+     both stay on one line, which is the whole reason for the tile layout. */
+  .ov-stats--three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ov-profile__name { max-width: 11ch; }
 }
 
 /* Inline link-style action inside a panel header / footer */
@@ -2877,6 +3552,114 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
   color: #065f46;
 }
 .ov-all-clear p { margin: 0; font: 12.5px/1.5 Arial, sans-serif; color: #047857; }
+
+/* ── Security verdict states ──────────────────────────────────────────────
+   An all-clear, a failed check and a still-running check are three different
+   claims. They used to share one green treatment (and the failed/running cases
+   did not exist), so "no verdict" was rendered in exactly the same confident
+   green as "verified secure". */
+.ov-all-clear--pending {
+  background: linear-gradient(135deg, #eef2ff, #e0e7ff);
+  border-color: #c7d2fe;
+}
+.ov-all-clear--pending .ov-all-clear__icon {
+  color: #4338ca;
+  box-shadow: 0 4px 10px -4px rgba(67, 56, 202, .7);
+  animation: threat-pulse 1.9s ease-in-out infinite;
+}
+.ov-all-clear--pending strong { color: #3730a3; }
+.ov-all-clear--pending p { color: #4338ca; }
+
+.ov-all-clear--error {
+  background: linear-gradient(135deg, #fef2f2, #fee2e2);
+  border-color: #fecaca;
+}
+.ov-all-clear--error .ov-all-clear__icon {
+  color: #b91c1c;
+  box-shadow: 0 4px 10px -4px rgba(185, 28, 28, .7);
+}
+.ov-all-clear--error strong { color: #991b1b; }
+.ov-all-clear--error p { color: #b91c1c; }
+
+/* Counts under the all-clear. "All systems secure" over an empty monitor list
+   is indistinguishable from a broken feed, so the numbers that back the claim
+   are shown next to it. */
+.ov-threat-tally {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ov-threat-tally__item {
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  font: 600 11px Arial, sans-serif;
+  color: #64748b;
+  white-space: nowrap;
+}
+.ov-threat-tally__item strong { font-weight: 800; margin-right: 3px; }
+.ov-threat-tally__item--healthy { color: #047857; border-color: #a7f3d0; background: #ecfdf5; }
+.ov-threat-tally__item--warning { color: #b45309; border-color: #fde68a; background: #fffbeb; }
+.ov-threat-tally__item--critical { color: #be123c; border-color: #fecdd3; background: #fff1f2; }
+
+.ov-threat-sync {
+  margin: 10px 0 0;
+  font: 11px Arial, sans-serif;
+  color: #94a3b8;
+}
+
+/* The clickable threat row. The whole row is the target so a phone tap does
+   not have to hit a 22px icon. */
+.ov-threat__link {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 10px;
+}
+.ov-threat__link:focus-visible {
+  outline: 2px solid #4f46e5;
+  outline-offset: 3px;
+}
+.ov-threat__body { min-width: 0; flex: 1; }
+.ov-threat__status {
+  display: inline-block;
+  margin-bottom: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font: 800 10px Arial, sans-serif;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+}
+.ov-threat--critical .ov-threat__status { background: #ffe4e6; color: #be123c; }
+.ov-threat--error     .ov-threat__status { background: #ede9fe; color: #6d28d9; }
+.ov-threat--warning   .ov-threat__status { background: #fef3c7; color: #b45309; }
+.ov-threat__go {
+  flex-shrink: 0;
+  align-self: center;
+  font: 700 20px/1 Arial, sans-serif;
+  color: #be123c;
+  opacity: .55;
+}
+.ov-threat__link:hover .ov-threat__go,
+.ov-threat__link:focus-visible .ov-threat__go { opacity: 1; }
+
+.ov-threat-more {
+  margin: 10px 0 0;
+  font: 11.5px Arial, sans-serif;
+  color: #9f1239;
+}
 
 .ov-threat-list {
   list-style: none;

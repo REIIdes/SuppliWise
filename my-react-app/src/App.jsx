@@ -54,7 +54,7 @@ import AdminProtectedRoute from './Components/AdminProtectedRoute';
 import SessionRevalidator from './Components/SessionRevalidator';
 import useAuth from './hooks/useAuth';
 import { useSubscription, resetSubscriptionStore } from './hooks/useSubscription';
-import { isAuthTransitionActive, hasAdminSession, hasUserSignedOut } from './auth/authState';
+import { isAuthTransitionActive, hasAdminSession, hasUserSignedOut, isAdminRoute } from './auth/authState';
 import { getToken, listAccounts, resumeSession } from './api';
 
 // ── Global Error Boundary — prevents white screens ─────────────────────────
@@ -285,7 +285,17 @@ function App() {
   // route guard renders (and possibly bounces to /login), give open tabs a
   // brief window to hand this tab a session via BroadcastChannel resume.
   // First-time visitors (no known accounts) skip the wait entirely.
-  const [sessionReady, setSessionReady] = useState(() => !!getToken() || listAccounts().length === 0);
+  //
+  // An ADMIN tab is never waiting for anything. The account directory is in
+  // localStorage, which is shared browser-wide, so an admin tab can see that
+  // user accounts exist and would otherwise sit here asking other tabs to hand
+  // one over — which is precisely how signing in as a user used to turn the
+  // admin console into a user session (and a later user sign-out then threw that
+  // tab onto the user login page). `resumeSession` refuses on an admin route;
+  // this keeps the gate from waiting for a resume that is never coming.
+  const [sessionReady, setSessionReady] = useState(
+    () => isAdminRoute() || !!getToken() || listAccounts().length === 0,
+  );
 
   useEffect(() => {
     if (sessionReady) return undefined;

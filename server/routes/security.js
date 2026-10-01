@@ -29,6 +29,7 @@ const { revokeOtherUserSessions } = require('../utils/sessions');
 const { sendOtpEmail, sendStatusEmail } = require('../utils/email');
 const { isValidEmail } = require('../utils/emailValidation');
 const rateLimits = require('../utils/rateLimits');
+const { strongestFactor } = require('../utils/strongestFactor');
 const {
   accountKey, recordOffense, lockRemainingMs, recordAccountFailure, clearOffenses, lockMeta,
 } = require('../utils/lockout');
@@ -205,9 +206,14 @@ router.get('/summary', async (req, res) => {
         count: passkeys.length,
         // The strongest factor the account actually has. Computed server-side
         // from real state, so the badge cannot disagree with the list below it.
-        strongestMethod: passkeys.length > 0
-          ? 'passkey'
-          : (user.twoFactorEnabled ? (user.twoFactorMethod || 'authenticator') : 'password'),
+        // Shared with the admin Users grid via utils/strongestFactor.js — two
+        // copies of this expression is how the admin view started reporting
+        // "Google Authenticator active" for passkey-only accounts.
+        strongestMethod: strongestFactor({
+          passkeyCount: passkeys.length,
+          twoFactorEnabled: user.twoFactorEnabled,
+          twoFactorMethod: user.twoFactorMethod,
+        }),
         items: passkeys.map((p) => ({
           id: String(p._id),
           name: p.name || 'Passkey',

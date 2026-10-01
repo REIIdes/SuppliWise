@@ -1,4 +1,5 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { MONITOR_POLL_MS } from '../../hooks/useSecurityMonitor';
 import './SecurityStatus.css';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -28,6 +29,8 @@ const MONITOR_FRAMEWORK = {
   totp:               'STRIDE',
   database:           'Infrastructure',
   openrouter:         'AI / API',
+  groq:               'AI / API',
+  anthropic:          'AI / API',
   delete_account:     'OWASP',
   input_sanitization: 'OWASP',
   password_hashing:   'OWASP',
@@ -78,6 +81,8 @@ const MONITOR_LABEL = {
   totp:               'Google Authenticator (TOTP)',
   database:           'Database Connectivity',
   openrouter:         'OpenRouter API Connectivity',
+  groq:               'Groq (Detection AI)',
+  anthropic:          'Anthropic (Priority Flagging AI)',
   delete_account:     'Account Deletion (Soft-delete)',
   input_sanitization: 'Input Sanitization & Validation',
   password_hashing:   'Password Hashing (bcrypt)',
@@ -127,6 +132,8 @@ const MONITOR_IMPL = {
   totp:               'routes/auth.js · speakeasy',
   database:           'server/index.js · mongoose',
   openrouter:         'routes/recommend.js · openrouter.ai',
+  groq:               'utils/systemDetection.js · api.groq.com',
+  anthropic:          'utils/priorityFlagging.js · api.anthropic.com',
   delete_account:     'routes/admin.js · models/User.js',
   input_sanitization: 'utils/sanitize.js · routes/auth.js',
   password_hashing:   'models/User.js · bcryptjs (cost 12)',
@@ -176,6 +183,8 @@ const MONITOR_ORDER = [
   'totp',
   'database',
   'openrouter',
+  'groq',
+  'anthropic',
   'delete_account',
   'input_sanitization',
   'password_hashing',
@@ -255,15 +264,15 @@ const FRAMEWORK_FILTERS = Object.keys(FW_TONE).filter(
 );
 
 // ── Polling cadence ───────────────────────────────────────────────────────
-// Polling on a fixed period regardless of how long the previous request took
-// is how overlapping checks used to pile up on a slow endpoint. The next poll
-// is scheduled from the end of the previous one instead.
-const MONITOR_POLL_MS = 30000;
-
-// Longest a single check may occupy the panel. `adminRequest` has no timeout
-// of its own, so without this a stalled connection could leave the Sync button
-// disabled and the panel frozen on stale numbers indefinitely.
-const MONITOR_REQUEST_TIMEOUT_MS = 20000;
+// MONITOR_POLL_MS is imported from the shared hook rather than declared here:
+// the fetch, the 30 s cadence and the request timeout now live in one place
+// (hooks/useSecurityMonitor.js) because the Overview "Threat notifications" card
+// reads the same monitor response. Two copies of the cadence would be two
+// schedules, and the two surfaces would drift out of step.
+//
+// The next poll is scheduled from the END of the previous one rather than on a
+// fixed period, because polling regardless of how long the previous request took
+// is how overlapping checks used to pile up on a slow endpoint.
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Small helpers
@@ -393,7 +402,7 @@ function Chevron() {
 //  drive it, but it is keyed by monitor key — so a row stays open across polls
 //  even though the row element itself is re-created on every refresh.
 // ═══════════════════════════════════════════════════════════════════════════
-function MonitorRow({ monitor, isOpen, onToggle, now }) {
+function MonitorRow({ monitor, isOpen, onToggle, now, highlighted, registerNode }) {
   const key    = monitor.key;
   const status = monitor.status || 'loading';
   const label  = monitor.label || MONITOR_LABEL[key] || key;
@@ -403,7 +412,15 @@ function MonitorRow({ monitor, isOpen, onToggle, now }) {
 
   return (
     <Fragment>
-      <tr className={`rt-row rt-row--${status}${isOpen ? ' rt-row--open' : ''}`}>
+      <tr
+        // Handed to the parent so a deep link can scroll this exact row into
+        // view. A callback ref rather than a querySelector because the row is
+        // re-created on every poll, and the parent has to be able to re-resolve
+        // the node each time rather than hold a detached one.
+        ref={registerNode ? node => registerNode(key, node) : undefined}
+        id={`rt-row-${key}`}
+        className={`rt-row rt-row--${status}${isOpen ? ' rt-row--open' : ''}${highlighted ? ' rt-row--highlighted' : ''}`}
+      >
         {/* The whole row is clickable for mouse users; the only focusable
             control is the chevron button, which is the accessible path to the
             same action. */}
@@ -804,97 +821,335 @@ function AuditRecord({ audit }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+//  Threat prediction
+//
+//  A forecast ABOUT the probes listed in the monitor above, derived from their
+//  results — so it lives here rather than on the AI tab, where it used to sit
+//  beside the provider cards that merely produced its input.
+//
+//  Severity is its own vocabulary, deliberately not the monitor's status and
+//  deliberately not AI_STATUS on the AI tab: those answer "did the probe
+//  return" and "can we reach the provider", this answers "how bad is the
+//  system". `watch` exists as a distinct, non-green middle, because a panel
+//  that painted "we could not determine this" the same as "all clear" would be
+//  worse than showing nothing. An unrecognised severity falls to `watch` for
+//  the same reason: never let unknown read as fine.
+// ═══════════════════════════════════════════════════════════════════════════
+const TP_SEVERITY = {
+  nominal:  {
+    label: 'Nominal',  cls: 'tp--nominal',
+    ink: '#047857', edge: '#6ee7b7', bg: '#ecfdf5', bar: 'linear-gradient(90deg, #34d399, #10b981)',
+  },
+  watch:    {
+    label: 'Watch',    cls: 'tp--watch',
+    ink: '#b45309', edge: '#fcd34d', bg: '#fffbeb', bar: 'linear-gradient(90deg, #fbbf24, #f59e0b)',
+  },
+  elevated: {
+    label: 'Elevated', cls: 'tp--elevated',
+    ink: '#c2410c', edge: '#fdba74', bg: '#fff7ed', bar: 'linear-gradient(90deg, #fb923c, #f97316)',
+  },
+  severe:   {
+    label: 'Severe',   cls: 'tp--severe',
+    ink: '#be123c', edge: '#fda4af', bg: '#fff1f2', bar: 'linear-gradient(90deg, #fb7185, #f43f5e)',
+  },
+};
+
+const tpMeta = (severity) => TP_SEVERITY[severity] || TP_SEVERITY.watch;
+
+/** Confidence is a model output, so it is clamped rather than trusted. */
+function tpConfidence(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+function TpIcon({ name }) {
+  const paths = {
+    shield: (
+      <>
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+        <polyline points="9 12 11 14 15 10" />
+      </>
+    ),
+    trend: (
+      <>
+        <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+        <polyline points="17 6 23 6 23 12" />
+      </>
+    ),
+    check: (
+      <>
+        <circle cx="12" cy="12" r="10" />
+        <polyline points="8 12.5 11 15.5 16 9" />
+      </>
+    ),
+    bolt: <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />,
+  };
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {paths[name] || paths.shield}
+    </svg>
+  );
+}
+
+/** Empty state. Previously a bare sentence, which read as a panel that failed. */
+function TpEmpty({ tone, icon, title, hint }) {
+  return (
+    <div className={`tp-empty ${tone}`}>
+      <span className="tp-empty__icon" aria-hidden="true"><TpIcon name={icon} /></span>
+      <p className="tp-empty__title">{title}</p>
+      <p className="tp-empty__hint">{hint}</p>
+    </div>
+  );
+}
+
+function ThreatPrediction({ detection, now }) {
+  if (!detection) return null;
+
+  const meta = tpMeta(detection.severity);
+  // Highest confidence first: the ranking IS the forecast, so sorting is what
+  // turns a list of equally-weighted sentences into a priority order.
+  const predictions = (Array.isArray(detection.predictions) ? detection.predictions : [])
+    .filter((p) => p && (p.title || p.rationale))
+    .map((p) => ({ ...p, confidence: tpConfidence(p.confidence) }))
+    .sort((a, b) => (b.confidence ?? -1) - (a.confidence ?? -1));
+  const actions = (Array.isArray(detection.actions) ? detection.actions : [])
+    .map((a) => String(a || '').trim())
+    .filter(Boolean);
+
+  const overall = tpConfidence(detection.confidence);
+  const fromRules = detection.source === 'rules';
+
+  return (
+    <section className={`rt-section tp-section ${meta.cls}`} aria-labelledby="tp-title">
+      <div className="rt-header">
+        <div className="rt-header__title-wrap">
+          <span className="rt-header__icon rt-header__icon--tp" aria-hidden="true">
+            <TpIcon name="trend" />
+          </span>
+          <div>
+            <h2 className="rt-header__title" id="tp-title">Threat prediction</h2>
+            <p className="rt-header__kicker">
+              {detection.probeCount != null
+                ? `${detection.probeCount} probe results analysed`
+                : 'Derived from the live probe results'}
+              {detection.checkedAt && (
+                <>
+                  <span className="rt-sep" aria-hidden="true">·</span>
+                  {formatAgo(detection.checkedAt, now)}
+                </>
+              )}
+            </p>
+          </div>
+        </div>
+
+        <div className="tp-verdict">
+          <span className="tp-verdict__pill" role="status">
+            <i className="tp-verdict__dot" aria-hidden="true" />
+            {meta.label}
+          </span>
+          {overall != null && (
+            <span className="tp-verdict__conf">
+              <b>{overall}%</b> confidence
+            </span>
+          )}
+        </div>
+      </div>
+
+      {detection.summary && <p className="tp-summary">{detection.summary}</p>}
+
+      {/* Provenance. The forecast is model output, so where it came from and
+          how long it took is part of the claim, not decoration. */}
+      <ul className="tp-provenance">
+        <li className={`tp-provenance__item${fromRules ? ' tp-provenance__item--rules' : ''}`}>
+          <TpIcon name={fromRules ? 'bolt' : 'shield'} />
+          {fromRules ? 'Rule engine' : 'AI analysis'}
+        </li>
+        {detection.provider && <li className="tp-provenance__item">{detection.provider}</li>}
+        {detection.model && <li className="tp-provenance__item tp-provenance__item--model">{detection.model}</li>}
+        {detection.latencyMs != null && (
+          <li className="tp-provenance__item">
+            {detection.latencyMs >= 1000
+              ? `${(detection.latencyMs / 1000).toFixed(1)}s`
+              : `${detection.latencyMs}ms`}
+          </li>
+        )}
+      </ul>
+
+      {/* The advisory layer is allowed to be unavailable — detection keeps
+          working without it. Saying so is the difference between "no anomalies"
+          and "we could not look", which look identical otherwise. */}
+      {detection.aiAvailable === false && (
+        <p className="tp-notice" role="status">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1"
+            strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          <span>
+            <strong>AI prediction unavailable</strong> —{' '}
+            {detection.aiError || 'the provider did not answer.'}{' '}
+            Everything below is the rule-based verdict, which keeps working without the AI.
+          </span>
+        </p>
+      )}
+
+      <div className="tp-grid">
+        <div className="tp-col">
+          <h3 className="tp-col__title">
+            <span className="tp-col__title-icon" aria-hidden="true"><TpIcon name="trend" /></span>
+            Predicted next
+            {predictions.length > 0 && <span className="tp-col__count">{predictions.length}</span>}
+          </h3>
+          {predictions.length === 0 ? (
+            <TpEmpty
+              tone={meta.cls}
+              icon="check"
+              title="No predicted risks"
+              hint="Nothing in the current probe results points to a failure that has not happened yet. This panel updates as soon as a probe changes."
+            />
+          ) : (
+            <ul className="tp-preds">
+              {predictions.map((item, i) => (
+                <li className="tp-pred" key={`${item.title}-${i}`}>
+                  <div className="tp-pred__head">
+                    <strong className="tp-pred__title">{item.title}</strong>
+                    {item.confidence != null && (
+                      <span className="tp-pred__conf" title={`${item.confidence}% confidence`}>
+                        {item.confidence}%
+                      </span>
+                    )}
+                  </div>
+                  {item.confidence != null && (
+                    <div className="tp-meter" role="presentation" aria-hidden="true">
+                      <span className="tp-meter__fill" style={{ width: `${item.confidence}%` }} />
+                    </div>
+                  )}
+                  {item.rationale && <p className="tp-pred__why">{item.rationale}</p>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="tp-col">
+          <h3 className="tp-col__title">
+            <span className="tp-col__title-icon" aria-hidden="true"><TpIcon name="shield" /></span>
+            Recommended actions
+            {actions.length > 0 && <span className="tp-col__count">{actions.length}</span>}
+          </h3>
+          {actions.length === 0 ? (
+            <TpEmpty
+              tone={meta.cls}
+              icon="check"
+              title="No actions required"
+              hint="Nothing needs a human right now. Keep the monitor running."
+            />
+          ) : (
+            <ol className="tp-actions">
+              {actions.map((action, i) => (
+                <li className="tp-action" key={i}>
+                  <span className="tp-action__step" aria-hidden="true">{i + 1}</span>
+                  <span className="tp-action__text">{action}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 //  Main component
 // ═══════════════════════════════════════════════════════════════════════════
-const SecurityStatus = ({ adminRequest, onDownloadReport }) => {
-  const [monitors,             setMonitors]             = useState([]);
-  const [overallMonitorStatus, setOverallMonitorStatus] = useState('loading');
-  const [syncedAt,             setSyncedAt]             = useState(null);
-  const [syncing,              setSyncing]              = useState(false);
-  const [checking,             setChecking]             = useState(false);
-  const [monitorError,         setMonitorError]         = useState('');
-  const [audit,                setAudit]                = useState(null);
+// Stand-in for a missing `monitor` prop. Every field is falsy/empty and the
+// status is 'loading' — deliberately NOT 'healthy', so a caller that forgets to
+// pass the prop gets an honest "still checking" panel rather than one that
+// confidently reports an all-clear it never received.
+const EMPTY_MONITOR = {
+  monitors: [],
+  status: 'loading',
+  syncedAt: null,
+  audit: null,
+  error: '',
+  syncing: false,
+  checking: false,
+  sync: async () => {},
+};
+
+const SecurityStatus = ({ monitor, onDownloadReport, detection, focusMonitorKey }) => {
+  // The live probe state is owned by the caller: one fetch, one poll, shared
+  // with the Overview "Threat notifications" card (see hooks/useSecurityMonitor).
+  //
+  // This component deliberately holds NO fetch of its own. React cannot skip a
+  // hook call, so keeping a local fallback here would run the 45 probes a second
+  // time on every dashboard render — the exact duplicate traffic the shared
+  // hook exists to remove. A missing prop is therefore an explicit empty state,
+  // not a reason to quietly start polling.
+  const {
+    monitors, status: overallMonitorStatus, syncedAt, audit,
+    syncing, checking, error: monitorError, sync: syncMonitor,
+  } = monitor || EMPTY_MONITOR;
+
   const [downloading,          setDownloading]          = useState(false);
+  const [downloadError,        setDownloadError]        = useState('');
   // Toolbar state
   const [query,                setQuery]                = useState('');
   const [statusFilter,         setStatusFilter]         = useState('all');
   const [frameworkFilter,      setFrameworkFilter]      = useState('all');
   const [openKeys,             setOpenKeys]             = useState(() => new Set());
+  // The deep-link key whose reveal has already been applied. Adjusting state
+  // during render (React's documented pattern for "a prop changed") rather than
+  // in an effect, which would cascade an extra render on every arrival.
+  const [appliedFocusKey,      setAppliedFocusKey]      = useState(null);
 
-  const intervalRef  = useRef(null);
   const searchRef    = useRef(null);
-  // Set while a request is on the wire, and bumped on every request so a slow
-  // response can never overwrite a newer one.
-  const inFlightRef  = useRef(false);
-  const requestSeqRef = useRef(0);
+  const rowNodesRef  = useRef(new Map());
 
-  const fetchMonitor = useCallback(async (force = false) => {
-    if (!adminRequest) return;
-    // Never stack requests: a poll that outlives its own period would queue
-    // behind the previous one and the panel would fall further and further
-    // behind the state it is meant to be showing.
-    if (inFlightRef.current) return;
-    inFlightRef.current = true;
-    const seq = ++requestSeqRef.current;
-    setChecking(true);
-    // Only a user-initiated Sync drives the button label and spinner. Background
-    // polls used to flip it to "Syncing…" and disable it every 30 s, which read
-    // as a permanently stuck control and blocked the one action an admin
-    // actually wants to take. `checking` still disables it so a click can never
-    // queue a second request behind the one already running.
-    if (force) setSyncing(true);
-    setMonitorError('');
-    // Abort the request if it outlives its budget, so the panel always returns
-    // to an interactive state and never sits on a spinner with stale numbers.
-    const controller = new AbortController();
-    const abortTimer = window.setTimeout(() => controller.abort(), MONITOR_REQUEST_TIMEOUT_MS);
-    try {
-      const data = await adminRequest(`/security/monitor${force ? '?fresh=1' : ''}`, { signal: controller.signal });
-      if (seq !== requestSeqRef.current) return; // superseded by a newer request
-      setMonitors(data.monitors || []);
-      setOverallMonitorStatus(data.overallMonitorStatus || 'healthy');
-      setSyncedAt(data.syncedAt || new Date().toISOString());
-      // Static record of the completed audit (rarely changes — only replace
-      // when the API actually sent one, so a stale-but-valid record never
-      // flashes away between the polls).
-      if (data.audit) setAudit(data.audit);
-    } catch (err) {
-      if (seq !== requestSeqRef.current) return;
-      setMonitorError(
-        err?.name === 'AbortError'
-          ? 'The security check did not respond in time. It will retry automatically.'
-          : err.message || 'Unable to load monitor data.',
-      );
-    } finally {
-      window.clearTimeout(abortTimer);
-      inFlightRef.current = false;
-      if (seq === requestSeqRef.current) {
-        setChecking(false);
-        if (force) setSyncing(false);
-      }
-    }
-  }, [adminRequest]);
+  const registerNode = useCallback((key, node) => {
+    if (node) rowNodesRef.current.set(key, node);
+    else rowNodesRef.current.delete(key);
+  }, []);
 
-  // Initial load + auto-refresh. The timer restarts after every completed poll
-  // so a slow check delays the next one instead of racing it.
-  useEffect(() => {
-    if (!adminRequest) return undefined;
-    let cancelled = false;
-    const tick = async () => {
-      if (cancelled) return;
-      await fetchMonitor(false);
-      if (!cancelled) intervalRef.current = window.setTimeout(tick, MONITOR_POLL_MS);
-    };
-    tick();
-    return () => {
-      cancelled = true;
-      window.clearTimeout(intervalRef.current);
-    };
-  }, [fetchMonitor, adminRequest]);
+  const fetchMonitor = useCallback(
+    (force = false) => syncMonitor(force),
+    [syncMonitor],
+  );
+
+  // ── Deep link from another surface ─────────────────────────────────────
+  // The Overview card links a specific failing monitor straight to its row.
+  // Applied at render time so the row is already expanded and unfiltered on the
+  // first paint that shows it — an effect would paint the un-revealed row first
+  // and then correct itself, which reads as a flicker on every click.
+  if (focusMonitorKey && appliedFocusKey !== focusMonitorKey) {
+    setAppliedFocusKey(focusMonitorKey);
+    // Open it, so the probe detail is visible without a second click, and drop
+    // the filters that could otherwise be hiding it.
+    setOpenKeys(prev => (prev.has(focusMonitorKey) ? prev : new Set(prev).add(focusMonitorKey)));
+    setQuery('');
+    setStatusFilter('all');
+    setFrameworkFilter('all');
+  }
+
+  // Scrolling waits for the node: the target row does not exist on the very
+  // first render if the opening poll is still in flight, and scrollIntoView
+  // against a missing node is a silent no-op that never retries.
+  useLayoutEffect(() => {
+    if (!focusMonitorKey) return;
+    const node = rowNodesRef.current.get(focusMonitorKey);
+    if (!node || typeof node.scrollIntoView !== 'function') return;
+    // 'nearest' so a row already on screen is not yanked, and the admin keeps
+    // their place in a 45-row table.
+    node.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [focusMonitorKey, monitors, appliedFocusKey]);
 
   // Live "Xs ago" clock — only running while something on screen shows a
-  // relative time, so an idle tab settles down to zero timers.
-  const now = useNow(Boolean(syncedAt));
+  // relative time, so an idle tab settles down to zero timers. The threat
+  // prediction carries its own timestamp, so it counts as a reason to tick too.
+  const now = useNow(Boolean(syncedAt) || Boolean(detection && detection.checkedAt));
 
   // ── Derived monitor list ───────────────────────────────────────────────
   // Every key in MONITOR_ORDER always gets a row, so the table keeps a stable
@@ -999,15 +1254,20 @@ const SecurityStatus = ({ adminRequest, onDownloadReport }) => {
   const handleDownload = async () => {
     if (!onDownloadReport || downloading) return;
     setDownloading(true);
-    setMonitorError('');
+    setDownloadError('');
     try {
       await onDownloadReport();
     } catch (error) {
-      setMonitorError(error?.message || 'Unable to generate the security report.');
+      setDownloadError(error?.message || 'Unable to generate the security report.');
     } finally {
       setDownloading(false);
     }
   };
+
+  // A failed PDF export is NOT a failed security probe. They used to share one
+  // string, so a broken report could blank out a healthy monitor panel's error
+  // line and vice versa. Kept separate, rendered together.
+  const visibleError = downloadError || monitorError;
 
   const filtersActive = Boolean(query.trim()) || statusFilter !== 'all' || frameworkFilter !== 'all';
 
@@ -1054,7 +1314,13 @@ const SecurityStatus = ({ adminRequest, onDownloadReport }) => {
         />
 
         {/* Error message */}
-        {monitorError && <div className="rt-error" role="alert">{monitorError}</div>}
+        {visibleError && <div className="rt-error" role="alert">{visibleError}</div>}
+
+        {/* ── Forecast, placed directly under the live verdict ───────────────
+            It reads the probe results below it, so it goes above them: the
+            operator gets "all clear → and here is what breaks next" before
+            being made to scroll a 40-row table to reach the answer. */}
+        <ThreatPrediction detection={detection} now={now} />
 
         {/* Quick-glance summary tiles */}
         <div className="rt-stats">
@@ -1139,6 +1405,8 @@ const SecurityStatus = ({ adminRequest, onDownloadReport }) => {
                           isOpen={openKeys.has(m.key)}
                           onToggle={() => toggleRow(m.key)}
                           now={now}
+                          highlighted={focusMonitorKey === m.key}
+                          registerNode={registerNode}
                         />
                       ))}
                     </Fragment>

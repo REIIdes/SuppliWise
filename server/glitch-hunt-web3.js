@@ -458,8 +458,19 @@ async function main() {
   const sellerAfter = await balanceOf(HS.token);
   check('double-confirm: no 500s', confs.every((r) => r.status < 500 && r.status !== 0), JSON.stringify(confs.map((r) => r.status)));
   check('exactly one confirmation succeeds', confOk === 1, `successes ${confOk}`);
-  check('seller paid exactly once (+9.7, never +19.4)', sellerAfter === sellerBefore + 9.7,
-    `${sellerAfter} vs ${sellerBefore + 9.7}`);
+  // Expected payout comes from the ONE confirmation that succeeded, never from a
+  // hard-coded 9.7. What this probe verifies is that a double-confirm pays the
+  // seller exactly ONCE — a property of the settlement, not of the fee. The
+  // marketplace fee is a DAO-governed parameter (DEFAULT_PARAMS.marketplaceFeePct)
+  // and has already moved 3% -> 2%, so the literal failed for a reason that had
+  // nothing to do with the race under test. The epsilon covers IEEE-754 balances.
+  const settledOnce = confs.filter((r) => r.status === 200)[0];
+  const singleProceeds = Number(settledOnce?.data?.proceeds);
+  const credited = sellerAfter - sellerBefore;
+  check('seller paid exactly once (the proceeds of a single release)',
+    Number.isFinite(singleProceeds) && singleProceeds > 0
+      && Math.abs(credited - singleProceeds) < 1e-9 && credited < singleProceeds * 2,
+    `credited ${credited} vs single-release proceeds ${singleProceeds}`);
   const targetAfter = (await call('GET', '/web3/market/orders', { token: HN.token })).data.bought.find((o) => String(o._id) === String(oTarget.data.order._id));
   check('target order settled released', targetAfter?.status === 'released', `status ${targetAfter?.status}`);
 

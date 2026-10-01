@@ -2,6 +2,32 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
+// ── Response headers the CSP <meta> in index.html structurally cannot carry ──
+//
+// The policy in index.html covers everything a meta tag is allowed to express.
+// `frame-ancestors` is the one that matters here and it is NOT: per spec it is
+// IGNORED when delivered in a `<meta http-equiv>` and is honoured only as a real
+// response header. Helmet already sets it for the API origin, so without this
+// the app origin had no framing protection at all — any site could iframe
+// SuppliWise and clickjack it.
+//
+// Multiple CSP policies are enforced as an INTERSECTION, so shipping a
+// frame-ancestors-only header alongside the existing meta policy adds exactly
+// this one restriction and nothing else. It is deliberately scoped that way: it
+// cannot loosen the meta policy, and it cannot break the app.
+//
+// SCOPE — read this before assuming production is covered. This applies to
+// `vite dev` and `vite preview` only. `vite build` emits a static `dist/` that
+// some other server hands out, and no host config exists in this repo to do it
+// for us, so whoever deploys it must send these same headers. Tracked as a
+// manual action in SECURITY_AUDIT_REPORT.md §9.
+const securityHeaders = {
+  'X-Frame-Options': 'DENY',
+  'Content-Security-Policy': "frame-ancestors 'none'",
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ command }) => ({
   // `vite build` and `vite dev` otherwise share one node_modules/.vite cache,
@@ -150,6 +176,7 @@ export default defineConfig(({ command }) => ({
   ],
   server: {
     host: 'localhost',
+    headers: securityHeaders,
     // Fail loudly instead of silently moving to 5174 when something is already
     // holding 5173. A shifted port leaves you reading a stale browser tab
     // pointed at a dead port, and running a second Vite process against the
@@ -161,5 +188,12 @@ export default defineConfig(({ command }) => ({
         changeOrigin: true,
       },
     },
+  },
+  // `vite preview` serves the real production build, so it needs the same
+  // headers as dev. Without this the closest thing to production — the thing you
+  // would actually check a build against — was the one origin with no framing
+  // protection at all.
+  preview: {
+    headers: securityHeaders,
   },
 }))

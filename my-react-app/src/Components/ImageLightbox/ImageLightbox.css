@@ -1,0 +1,193 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   FULL-SIZE IMAGE VIEWER
+   The overlay behind "View full size" on a payment receipt.
+
+   WHY AN OVERLAY AND NOT A NEW TAB
+   --------------------------------
+   The proof is a `data:` URL, and browsers refuse top-level navigation to
+   `data:` URLs outright — the old link opened a blank tab with no error
+   anywhere. Rendering it in place sidesteps the restriction entirely, and it
+   also keeps the reviewer in the queue: the point of looking at the receipt is
+   to decide something on the row behind it.
+
+   The scrim is near-opaque rather than a dim blur. A receipt is mostly white,
+   and a translucent backdrop washes out the pale greys of a bank-statement
+   screenshot — exactly the detail being checked.
+
+   The zoom buttons are the same shape as the existing queue controls, so the
+   toolbar reads as part of the console rather than as a borrowed OS dialog.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.ivl {
+  /* Above the confirm dialog (2000) and the queue's own cancel sheet (3200):
+     this can be opened from a row that also owns those. */
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  display: flex;
+  flex-direction: column;
+  background: rgba(8, 14, 11, 0.94);
+  color: #eef3f0;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+  animation: ivl-in 0.16s ease-out;
+}
+
+@keyframes ivl-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ivl { animation: none; }
+}
+
+/* ── Toolbar ─────────────────────────────────────────────────────────── */
+.ivl__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(20, 33, 27, 0.72);
+}
+
+.ivl__heading { min-width: 0; }
+
+.ivl__title {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: #fff;
+  /* A long filename must not push the toolbar off a narrow screen. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ivl__meta {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  color: #9db3a8;
+  font-variant-numeric: tabular-nums;
+}
+
+.ivl__tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Zoom group is visually one control with dividers, matching the segmented
+   look already used for the queue switcher. */
+.ivl__zoom {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.ivl__tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  height: 32px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #eef3f0;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.ivl__tool svg { width: 16px; height: 16px; }
+.ivl__tool:hover:not(:disabled) { background: rgba(255, 255, 255, 0.18); }
+.ivl__tool:active:not(:disabled) { background: rgba(255, 255, 255, 0.26); }
+.ivl__tool:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 1px; }
+.ivl__tool:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.ivl__tool--wide { min-width: 52px; font-variant-numeric: tabular-nums; }
+
+/* Inside the zoom group the buttons share one outline, so their own radius
+   has to be 0 or the group's rounded corners are clipped unevenly. */
+.ivl__zoom .ivl__tool { border-radius: 0; }
+.ivl__zoom .ivl__tool + .ivl__tool { border-left: 1px solid rgba(255, 255, 255, 0.14); }
+
+.ivl__tool--close { background: rgba(244, 63, 94, 0.22); }
+.ivl__tool--close:hover { background: rgba(244, 63, 94, 0.42); }
+
+/* ── The picture ─────────────────────────────────────────────────────── */
+.ivl__stage {
+  flex: 1 1 auto;
+  min-height: 0; /* Without this a flex child refuses to shrink, and the
+                     toolbar is pushed off the bottom of a short window. */
+  display: flex;
+  overflow: auto;
+  /* `margin: auto` on the child centres it, and unlike justify/align-content
+     it does not clip the overflow — so a zoomed image can be scrolled to on
+     every side instead of being cut off at the top-left. */
+  padding: 16px;
+  cursor: zoom-in;
+  overscroll-behavior: contain;
+}
+
+.ivl__img {
+  margin: auto;
+  flex: 0 0 auto;
+  display: block;
+  max-width: none;
+  border-radius: 4px;
+  background: #fff;
+  /* Receipts are evidence: never let a stray tap drag the image out to
+     another site, and never let a double-tap fire a text selection. */
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+/* Fitted state. The image is capped to the stage and letterboxed inside its
+   own box, so a tall receipt keeps its aspect ratio instead of stretching. */
+.ivl__img--fit {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  cursor: zoom-out;
+}
+
+/* ── Damaged image ───────────────────────────────────────────────────── */
+.ivl__broken {
+  margin: auto;
+  max-width: 420px;
+  padding: 28px 24px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  text-align: center;
+}
+.ivl__broken svg { width: 40px; height: 40px; color: #94a3b8; }
+.ivl__broken-title { margin: 12px 0 0; font-size: 14px; font-weight: 700; color: #fff; }
+.ivl__broken-text { margin: 6px 0 0; font-size: 12.5px; line-height: 1.55; color: #9db3a8; }
+
+/* ── Phones ──────────────────────────────────────────────────────────── */
+@media (max-width: 560px) {
+  .ivl__bar { padding: 10px 12px; }
+  .ivl__heading { flex: 1 1 100%; }
+  .ivl__tools { flex: 1 1 100%; justify-content: space-between; }
+  .ivl__tool { height: 38px; min-width: 38px; }
+  .ivl__tool--wide { min-width: 56px; }
+  .ivl__stage { padding: 10px; }
+}

@@ -83,16 +83,48 @@ test.after(async () => {
   // NO dropDatabase(). Tear down only what this suite created, by a
   // throwaway-scoped filter, so an interrupted or misconfigured run can never
   // take unrelated data with it.
-  if (mongoose.connection.readyState === 1) {
-    const { User } = require('../models/User');
-    const PasswordResetToken = require('../models/PasswordResetToken');
-    const fixtures = await User.find({ email: EMAIL }).select('_id').lean().catch(() => []);
-    for (const u of fixtures) {
-      await PasswordResetToken.deleteMany({ user: u._id }).catch(() => {});
-    }
-    await User.deleteMany({ email: EMAIL }).catch(() => {});
+  //
+  // TWO BUGS USED TO LIVE HERE, and together they made `npm test` HANG FOREVER
+  // rather than fail:
+  //
+  //   1. `const { User } = require('../models/User')` — models/User.js ends with
+  //      `module.exports = mongoose.model('User', ...)`, i.e. it exports the
+  //      model ITSELF, not a named `User`. The destructure therefore produced
+  //      `undefined`, and the next line threw
+  //      "Cannot read properties of undefined (reading 'find')". Every other
+  //      call site in this file takes the whole module, which is why only the
+  //      cleanup path was affected.
+  //   2. That throw happened BEFORE `mongoose.disconnect()`. The connection pool
+  //      and its timers stayed open, so the event loop could never drain and the
+  //      process hung indefinitely — it never reported the failure and never
+  //      exited. That is why this only reproduced with MONGO_TEST_URI set: with
+  //      no test database `readyState !== 1`, the whole block was skipped.
+  //
+  // The try/finally is load-bearing: cleanup must never be able to strand the
+  // connection, whatever else goes wrong inside it.
+  try {
+    // Release the SMTP connection pool BEFORE the database. This suite calls the
+    // real `sendStatusEmail` (only `sendPasswordResetEmail` is stubbed), which
+    // builds a `pool: true` transporter. Its sockets are open handles, so they
+    // keep the event loop alive and the process never exits after the last test
+    // — the suite would appear to hang rather than finish.
+    await require('../utils/email').closeTransporter();
+  } catch {
+    /* best effort — never let cleanup strand the process */
   }
-  await mongoose.disconnect().catch(() => {});
+  try {
+    if (mongoose.connection.readyState === 1) {
+      const User = require('../models/User');
+      const PasswordResetToken = require('../models/PasswordResetToken');
+      const fixtures = await User.find({ email: EMAIL }).select('_id').lean().catch(() => []);
+      for (const u of fixtures) {
+        await PasswordResetToken.deleteMany({ user: u._id }).catch(() => {});
+      }
+      await User.deleteMany({ email: EMAIL }).catch(() => {});
+    }
+  } finally {
+    await mongoose.disconnect().catch(() => {});
+  }
 });
 
 /**

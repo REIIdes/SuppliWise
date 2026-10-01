@@ -6,6 +6,11 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 // ── mirrors of the component's data + rules ─────────────────────────────
 const MONITOR_FRAMEWORK = {
@@ -65,6 +70,17 @@ function buildVisibleGroups(rows, { query = '', statusFilter = 'all', frameworkF
 }
 
 const countVisible = groups => groups.reduce((n, g) => n + g.items.length, 0);
+
+/**
+ * Drop CSS comments before reading any rule out of a stylesheet.
+ *
+ * Order matters: the comments in this file quote selectors verbatim, e.g.
+ * "an unscoped `th, td { … }` rule". A comment therefore contains a `}`, and
+ * matching a block with `[^}]*` against comment-laden source stops at that
+ * brace and yields a truncated (or empty) rule — which reads as "the
+ * declaration is missing" and would fail for the wrong reason.
+ */
+const stripComments = css => css.replace(/\/\*[\s\S]*?\*\//g, '');
 
 // ── tests ───────────────────────────────────────────────────────────────
 test('no filters shows every monitor in its group band', () => {
@@ -266,4 +282,123 @@ test('auto-refresh progress stays inside 0–100% across the poll window', () =>
   assert.equal(progress(t0, t0 + POLL * 5), 1);
   // …and a timestamp from the future must not go negative.
   assert.equal(progress(t0, t0 - 5000), 0);
+});
+
+/**
+ * The server gained a `groq` monitor (the detection provider). The component
+ * builds its table from four separate maps plus MONITOR_ORDER, and a key
+ * missing from MONITOR_ORDER gets NO ROW AT ALL — it is not a degraded row, it
+ * is an absent one, and nothing in the rendered output says so. That is exactly
+ * the failure this guards, so it reads the real component source rather than
+ * the local mirror above, which is only a subset of the component's data.
+ */
+test('every monitor key the server returns has a row in the Security Center', () => {
+  const src = fs.readFileSync(path.join(HERE, 'SecurityStatus.jsx'), 'utf8');
+
+  // The three AI provider probes the server registers. Kept as literals on
+  // purpose: if the server adds a fourth provider this fails loudly rather than
+  // silently rendering a dashboard that quietly omits it.
+  const serverProbeKeys = ['openrouter', 'groq', 'anthropic'];
+
+  // Object maps close with `};`, the order array with `];` — both are read as
+  // raw source text, so the closer has to match the declaration.
+  const blockOf = (name) => {
+    const objStart = src.indexOf(`const ${name} = {`);
+    const arrStart = src.indexOf(`const ${name} = [`);
+    const start = objStart !== -1 ? objStart : arrStart;
+    assert.ok(start !== -1, `${name} not found in SecurityStatus.jsx`);
+    const closer = objStart !== -1 && (arrStart === -1 || objStart < arrStart) ? '};' : '];';
+    const end = src.indexOf(closer, start);
+    assert.ok(end !== -1, `${name} is unterminated`);
+    return src.slice(start, end);
+  };
+
+  for (const key of serverProbeKeys) {
+    assert.ok(blockOf('MONITOR_FRAMEWORK').includes(`${key}:`), `${key} has no framework label`);
+    assert.ok(blockOf('MONITOR_LABEL').includes(`${key}:`), `${key} has no display label`);
+    assert.ok(blockOf('MONITOR_IMPL').includes(`${key}:`), `${key} has no implementation path`);
+    assert.ok(
+      new RegExp(`^\\s*'${key}',`, 'm').test(blockOf('MONITOR_ORDER')),
+      `${key} is missing from MONITOR_ORDER, so it would render no row at all`
+    );
+  }
+
+  // The AI providers must sit in the same framework band, or the framework
+  // filter would split "AI / API" across three chips.
+  const framework = blockOf('MONITOR_FRAMEWORK');
+  for (const key of serverProbeKeys) {
+    assert.match(framework, new RegExp(`${key}:\\s*'AI / API'`), `${key} is in its own framework band`);
+  }
+});
+
+/**
+ * The probe detail is a full sentence, but the cell that holds it is a <td>,
+ * and AdminDashboard.css ships an UNSCOPED `th, td { … white-space: nowrap }`
+ * rule. `white-space` is an inherited property, so the detail text inherited
+ * `nowrap` from that global rule and was clipped mid-sentence at the right
+ * edge — the monitor told an admin what it checks and then cut off before
+ * saying what it does.
+ *
+ * `word-break` / `overflow-wrap` do NOT defend against this: they govern WHERE
+ * a line may break, not WHETHER wrapping happens at all, so a descendant of a
+ * `nowrap` ancestor still lays out on one line. Only an explicit
+ * `white-space: normal` on the element fixes it, which is why this asserts on
+ * the declaration rather than on the presence of a wrapping hint.
+ */
+test('the expanded probe detail is allowed to wrap, not clipped to one line', () => {
+  // Comments are stripped from the WHOLE file before any block is read, not
+  // from the matched block. A comment that quotes a selector (`th, td { … }`)
+  // otherwise contains a `}` and truncates the match at the wrong place — the
+  // rule this test exists to check would be read as empty.
+  const css = stripComments(fs.readFileSync(path.join(HERE, 'SecurityStatus.css'), 'utf8'));
+
+  const block = css.match(/\.rt-detail-text\s*\{([^}]*)\}/);
+  assert.ok(block, '.rt-detail-text rule is missing from SecurityStatus.css');
+
+  const declarations = block[1]
+    .split(';')
+    .map(d => d.trim())
+    .filter(Boolean);
+
+  const whiteSpace = declarations.find(d => d.startsWith('white-space'));
+  assert.ok(
+    whiteSpace,
+    '.rt-detail-text sets no white-space, so it inherits `nowrap` from AdminDashboard.css\'s unscoped `th, td` rule and the detail is truncated.',
+  );
+  assert.equal(
+    whiteSpace,
+    'white-space: normal',
+    `.rt-detail-text must wrap, but found "${whiteSpace}" — probe details are whole sentences.`,
+  );
+});
+
+/**
+ * The same unscoped `th, td` rule also sets `padding`, `vertical-align` and a
+ * border on every cell in this table. This component overrides the ones that
+ * matter for its own layout, so a future edit to the shared rule cannot quietly
+ * reintroduce a cell that is mis-padded or top-aligned against its content.
+ */
+test('every cell in the monitor table overrides the shared admin table cell styles', () => {
+  const css = stripComments(fs.readFileSync(path.join(HERE, 'SecurityStatus.css'), 'utf8'));
+  const ruleFor = (selector) => {
+    const m = css.match(new RegExp(`(?:^|[,}\\s])${selector.replace('.', '\\.')}\\s*\\{([^}]*)\\}`));
+    return m ? m[1] : null;
+  };
+
+  // The detail cell must lay its own padding out; the shared rule hard-codes
+  // `padding: 12px 10px` for every td on the admin surface.
+  const detailCell = ruleFor('.rt-detail-cell');
+  assert.ok(detailCell, '.rt-detail-cell rule is missing');
+  assert.match(detailCell, /padding:/, '.rt-detail-cell relies on the shared `th, td` padding');
+
+  // The description cell zeroes padding on purpose — the inner flex row owns
+  // it — so it must say so rather than inherit 12px/10px.
+  const descCell = ruleFor('.rt-td--desc');
+  assert.ok(descCell, '.rt-td--desc rule is missing');
+  assert.match(descCell, /padding:\s*0/, '.rt-td--desc must zero the inherited cell padding');
+
+  // Data cells align their content with the shared rule's `vertical-align: top`.
+  const dataCell = ruleFor('.rt-td');
+  assert.ok(dataCell, '.rt-td rule is missing');
+  assert.match(dataCell, /vertical-align:/, '.rt-td relies on the shared `th, td` vertical-align');
 });

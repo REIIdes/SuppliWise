@@ -47,6 +47,38 @@ function escapeHtml(value) {
 // Create reusable transporter
 let transporter = null;
 
+/**
+ * Drop the cached transporter, actually CLOSING it first.
+ *
+ * The error paths below used to do a bare `transporter = null`. That discards
+ * the reference without closing anything, and this transporter is created with
+ * `pool: true, maxConnections: 3` — so every failure left a live connection pool
+ * (sockets, timers) attached to a process that had already forgotten about it.
+ * Those pools are never garbage collected while their sockets are open.
+ *
+ * That is a slow resource leak in production, and it is also what made
+ * `Test File/password-reset-db.test.js` hang FOREVER instead of exiting: the
+ * suite reached the real `sendStatusEmail`, built a pooled transporter, and the
+ * open pool kept the event loop alive after the last test. `npm test` only ever
+ * exercised the skip path, so it was invisible.
+ *
+ * `close()` is safe to call on an unconnected transporter and never rejects, but
+ * it is still guarded: a failure here must not mask the error that sent us down
+ * this path in the first place.
+ *
+ * @returns {Promise<void>}
+ */
+async function closeTransporter() {
+  const dying = transporter;
+  transporter = null;
+  if (!dying || typeof dying.close !== 'function') return;
+  try {
+    await dying.close();
+  } catch {
+    /* the original failure is the one worth reporting */
+  }
+}
+
 const getTransporter = () => {
   if (!transporter) {
     // Check if email is configured
@@ -267,7 +299,9 @@ This is an automated message from SuppliWise.
     console.log(`[Email] Verification email sent successfully to ${maskEmail(toEmail)}`);
     return true;
   } catch (error) {
-    transporter = null;
+    // Close, don't just forget — see closeTransporter(). Dropping the reference
+    // on its own leaked the whole connection pool on every send failure.
+    await closeTransporter();
     console.error('[Email] Failed to send OTP email:', error.message);
     return false;
   }
@@ -392,7 +426,9 @@ The SuppliWise Team`,
     console.log(`[Email] Password reset link sent to ${maskEmail(clean)}`);
     return true;
   } catch (error) {
-    transporter = null;
+    // Close, don't just forget — see closeTransporter(). Dropping the reference
+    // on its own leaked the whole connection pool on every send failure.
+    await closeTransporter();
     console.error('[Email] Failed to send password reset link:', error.message);
     return false;
   }
@@ -489,7 +525,9 @@ The SuppliWise Team
     console.log(`[Email] Credential update email sent successfully to ${maskEmail(clean)}`);
     return true;
   } catch (error) {
-    transporter = null;
+    // Close, don't just forget — see closeTransporter(). Dropping the reference
+    // on its own leaked the whole connection pool on every send failure.
+    await closeTransporter();
     console.error('[Email] Failed to send credential update email:', error.message);
     return false;
   }
@@ -506,6 +544,10 @@ module.exports = {
   // Verifies SMTP credentials at startup so a bad app-password shows up in
   // the server log immediately instead of as mysterious login failures.
   verifyEmailConfig,
+  // Closes the pooled transporter. Exported so a graceful shutdown and the test
+  // suites can release the socket pool — an unclosed pool keeps the Node event
+  // loop alive forever.
+  closeTransporter,
   DEFAULT_CREDENTIAL_UPDATE_DESCRIPTION,
 };
 

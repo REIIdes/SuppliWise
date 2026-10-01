@@ -41,41 +41,69 @@ function mayChangePassword(req) {
 // traffic. Invalidated immediately on sign-out/session change via the
 // sessionVersion bump in the JWT.
 const sessionCache = new Map(); // sid -> { user, sid, exp }
+const sessionOwners = new Map(); // sid -> userId, so a plan change can evict every session
 const SESSION_CACHE_TTL_MS = 30 * 1000; // 30 seconds
 const SESSION_CACHE_MAX = 5000;
 
 function getCachedSession(sid) {
-  const entry = sessionCache.get(sid);
+  const key = String(sid);
+  const entry = sessionCache.get(key);
   if (!entry) return null;
   if (Date.now() > entry.exp) {
-    sessionCache.delete(sid);
+    sessionCache.delete(key);
+    sessionOwners.delete(key);
     return null;
   }
   return entry;
 }
 
 function setCachedSession(sid, user) {
+  const key = String(sid);
   if (sessionCache.size >= SESSION_CACHE_MAX) {
     // Evict oldest entries when cache is full
     const now = Date.now();
-    for (const [key, val] of sessionCache) {
-      if (now > val.exp) sessionCache.delete(key);
+    for (const [cachedSid, val] of sessionCache) {
+      if (now > val.exp) {
+        sessionCache.delete(cachedSid);
+        sessionOwners.delete(cachedSid);
+      }
     }
     // If still too large, delete oldest 25%
     if (sessionCache.size >= SESSION_CACHE_MAX) {
       const keys = [...sessionCache.keys()];
       for (let i = 0; i < keys.length / 4; i++) {
         sessionCache.delete(keys[i]);
+        sessionOwners.delete(keys[i]);
       }
     }
   }
-  sessionCache.set(sid, { user, sid, exp: Date.now() + SESSION_CACHE_TTL_MS });
+  sessionCache.set(key, { user, sid, exp: Date.now() + SESSION_CACHE_TTL_MS });
+  sessionOwners.set(key, String(user?._id || ''));
 }
 
 function invalidateSessionCache(sid) {
   if (!sid) return;
-  sessionCache.delete(String(sid));
-  lastTouched.delete(String(sid));
+  const key = String(sid);
+  sessionCache.delete(key);
+  sessionOwners.delete(key);
+  lastTouched.delete(key);
+}
+
+// Subscription changes are published to every open client immediately. Drop
+// every cached snapshot for the affected account so the very next request
+// re-reads the authoritative plan instead of serving the old tier for the
+// cache's remaining TTL.
+function invalidateUserSessionCache(userId) {
+  const owner = String(userId || '');
+  if (!owner) return 0;
+  let invalidated = 0;
+  for (const [sid, cachedOwner] of sessionOwners) {
+    if (cachedOwner === owner) {
+      invalidateSessionCache(sid);
+      invalidated += 1;
+    }
+  }
+  return invalidated;
 }
 
 // Revoked sessions must stop working on the very next request, not at the end
@@ -112,6 +140,13 @@ const {
 // decides anything. It feeds the "signed-in devices" list.
 const TOUCH_INTERVAL_MS = ADMIN_HEARTBEAT_INTERVAL_MS;
 const lastTouched = new Map(); // sid → epoch ms
+
+// A published plan change is the authoritative signal that the cached user
+// snapshot is stale. Invalidate before any SSE listener runs so a client that
+// reacts immediately and calls an entitlement-gated endpoint gets fresh data.
+const subscriptionBus = require('../utils/subscriptionBus');
+subscriptionBus.onPublish((userId) => invalidateUserSessionCache(userId));
+
 function touchSession(sid) {
   const now = Date.now();
   const previous = lastTouched.get(sid) || 0;
@@ -314,6 +349,7 @@ module.exports = {
   protect,
   adminOnly,
   rejectSession,
+  invalidateUserSessionCache,
   SESSION_ENDED_MESSAGE,
   PASSWORD_CHANGE_REQUIRED,
   PASSWORD_CHANGE_ALLOWLIST,

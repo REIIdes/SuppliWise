@@ -8,6 +8,7 @@ const DashboardMetrics = require('../models/DashboardMetrics');
 const { notExpiredFilter, expiryFromCreatedAt } = require('../utils/assessments');
 const { can } = require('../utils/plan');
 const { selfHealOpenPriority } = require('../utils/priorityGate');
+const { buildScheduleSlotIndex, resolveTimeSlot } = require('../utils/dailyScheduleSlots');
 
 // Coerce any JSON value to a plain string for DB equality filters.
 // Objects (e.g. {"$ne": "x"}) would otherwise become NoSQL operators and
@@ -79,6 +80,208 @@ const validateStreak = async (userId, assessmentId, metrics) => {
   return metrics.currentStreak;
 };
 
+/**
+ * Recompute today's progress and persist everything that depends on it
+ * (adherence, streak, wellness score and the priority flag lifecycle) after one
+ * or more intake records changed.
+ *
+ * This used to live inline inside POST /intake, which meant the bulk endpoint
+ * could only have been written by copying ~180 lines of streak/priority
+ * bookkeeping — and the priority auto-lift has to fire on exactly the change
+ * that completes the day, so a copy that drifted by one branch would award or
+ * revoke the review without the plan actually being complete. One function, one
+ * copy of the rules, called by both endpoints.
+ *
+ * @returns {Promise<{priorityLifted: boolean, priorityReflagged: boolean, stats: object|null}>}
+ *   `stats` is null when the user has no metrics row for this assessment, which
+ *   is the only case where there is nothing to write.
+ */
+const finalizeIntakeChange = async (req, assessmentId) => {
+  const todayKey = getTodayKey();
+
+  // Update metrics — independent reads run in parallel
+  const [todayRecords, metrics, totals, assessmentDoc] = await Promise.all([
+    IntakeRecord.find({ user: req.user._id, assessment: assessmentId, dayKey: todayKey }).select('taken').lean(),
+    DashboardMetrics.findOne({ user: req.user._id, assessment: assessmentId }),
+    Promise.all([
+      IntakeRecord.countDocuments({ user: req.user._id, assessment: assessmentId }),
+      IntakeRecord.countDocuments({ user: req.user._id, assessment: assessmentId, taken: true }),
+    ]),
+    // Only the slices needed downstream (wellness baseline + priority state)
+    Assessment.findById(assessmentId).select('aiResults.wellnessBaseline priority resolvedReason').lean(),
+  ]);
+
+  const totalToday = todayRecords.length;
+  const takenToday = todayRecords.filter(r => r.taken).length;
+  const todayAdherence = calculateAdherence(takenToday, totalToday);
+
+  // Overall adherence via counted aggregation (no full-history load)
+  const [totalAll, takenAll] = totals;
+  const overallAdherence = calculateAdherence(takenAll, totalAll);
+
+  if (!metrics) {
+    return { priorityLifted: false, priorityReflagged: false, stats: null };
+  }
+
+  const today = todayKey;
+  const yesterday = new Date(new Date().setDate(new Date().getDate() - 1))
+    .toISOString().split('T')[0];
+
+  // MIDNIGHT CHECK: Evaluate if we crossed into a new day
+  if (metrics.lastTrackedDate && metrics.lastTrackedDate !== today) {
+    // New day has started - check if yesterday was completed
+    if (metrics.lastCompletedDay === metrics.lastTrackedDate) {
+      // Yesterday finished with 100% - keep streak
+      // Reset daily flag for new day
+      metrics.streakAwardedToday = false;
+    } else {
+      // Yesterday finished incomplete - break streak
+      metrics.currentStreak = 0;
+      metrics.streakAwardedToday = false;
+      metrics.lastCompletedDay = null;
+    }
+  }
+
+  // CURRENT DAY LOGIC: Update streak based on current completion state
+  if (takenToday === totalToday && totalToday > 0) {
+    // User has 100% completion RIGHT NOW
+
+    if (!metrics.streakAwardedToday) {
+      // First time completing 100% today - award streak
+      metrics.currentStreak += 1;
+      metrics.streakAwardedToday = true;
+      metrics.lastCompletedDay = today;
+
+      if (metrics.currentStreak > metrics.longestStreak) {
+        metrics.longestStreak = metrics.currentStreak;
+      }
+    } else {
+      // Already awarded streak today, just mark completion
+      metrics.lastCompletedDay = today;
+    }
+  } else if (takenToday < totalToday && totalToday > 0) {
+    // User does NOT have 100% completion right now
+
+    if (metrics.streakAwardedToday && metrics.lastCompletedDay === today && metrics.currentStreak > 0) {
+      // They had completed today but just undid - remove today's streak
+      // Only decrement if streak is greater than 0 to prevent negative values
+      metrics.currentStreak -= 1;
+      metrics.lastCompletedDay = null; // Today is no longer completed
+      metrics.streakAwardedToday = false; // Reset flag to allow re-awarding if they complete again
+    }
+  }
+
+  metrics.lastTrackedDate = today;
+  metrics.overallAdherence = overallAdherence;
+
+  // Auto-lift: all of today's AI-suggested supplements taken on a
+  // Priority assessment finishes its review (strict two-way gate below).
+  // Both directions are premium bookkeeping (the re-flag also notifies), so
+  // they follow the same entitlement as the pause itself: after a downgrade
+  // a stale Priority document must stay untouched instead of being resolved
+  // and then reinstated behind the user's back.
+  let priorityLifted = false;
+  let priorityReflagged = false;
+  const priorityEntitled = can(req.user, 'priorityAssessment');
+  const completedNow = takenToday === totalToday && totalToday > 0;
+  if (priorityEntitled && completedNow && assessmentDoc && assessmentDoc.priority === 'Priority') {
+    try {
+      await Assessment.findByIdAndUpdate(assessmentId, {
+        // Resolved by completion: Standard again, with the normal 5-year
+        // window counted from CREATION. It used to set expiresAt to "now",
+        // which retired the record the instant the user finished their
+        // priority review and showed "Expired <today>" in history.
+        $set: {
+          priority: 'Standard',
+          resolvedAt: new Date(),
+          resolvedReason: 'intake-complete',
+          expiresAt: expiryFromCreatedAt(assessmentDoc.createdAt),
+        },
+      });
+      priorityLifted = true;
+      const UserNotification = require('../models/UserNotification');
+      const AdminEvent = require('../models/AdminEvent');
+      await UserNotification.create({
+        user: req.user._id,
+        type: 'info',
+        title: 'Priority review completed',
+        detail: 'All of today\u2019s supplements were taken, so the priority review on your assessment is finished. You can start a new assessment any time.',
+        assessmentId,
+      }).catch(() => {});
+      await AdminEvent.create({
+        type: 'resolved',
+        title: 'Priority auto-resolved (intake complete)',
+        detail: `User ${req.user._id} completed all of today\u2019s supplements for assessment ${assessmentId}. Flag lifted automatically.`,
+        user: req.user._id,
+        assessmentId,
+        linkUserId: req.user._id,
+      }).catch(() => {});
+    } catch (liftError) {
+      console.error('[dashboard intake] priority auto-lift failed:', liftError.message);
+    }
+  } else if (priorityEntitled && !completedNow && assessmentDoc && assessmentDoc.priority === 'Standard' && assessmentDoc.resolvedReason === 'intake-complete') {
+    // Strict gate: undoing after an auto-lift breaks 100% completion,
+    // so the restriction comes back. Admin-resolved flags are never touched.
+    try {
+      await Assessment.findByIdAndUpdate(assessmentId, {
+        $set: {
+          priority: 'Priority',
+          flaggedAt: new Date(),
+          resolvedAt: null,
+          resolvedReason: '',
+          expiresAt: null,
+          flagReasons: ['Intake undone after auto-resolve — review reinstated'],
+        },
+      });
+      priorityReflagged = true;
+      const UserNotification = require('../models/UserNotification');
+      const AdminEvent = require('../models/AdminEvent');
+      await UserNotification.create({
+        user: req.user._id,
+        type: 'severe-flag',
+        title: 'Priority review reinstated',
+        detail: 'A supplement was marked not taken, so today\u2019s plan is incomplete again. The priority review is back in effect and new assessments are paused until it is finished.',
+        assessmentId,
+      }).catch(() => {});
+      await AdminEvent.create({
+        type: 'severe-flag',
+        title: 'Priority re-flagged (intake undone)',
+        detail: `User ${req.user._id} undid a supplement for assessment ${assessmentId} after auto-resolve. Restriction reinstated.`,
+        user: req.user._id,
+        assessmentId,
+        linkUserId: req.user._id,
+      }).catch(() => {});
+    } catch (reflagError) {
+      console.error('[dashboard intake] priority re-flag failed:', reflagError.message);
+    }
+  }
+
+  // Wellness baseline from the already-fetched assessment slice
+  const wellnessBaseline = getWellnessBaseline(assessmentDoc);
+
+  metrics.wellnessScore = calculateWellnessScore(
+    wellnessBaseline,
+    overallAdherence,
+    metrics.currentStreak
+  );
+  await metrics.save();
+
+  return {
+    priorityLifted,
+    priorityReflagged,
+    stats: {
+      todaysProgress: {
+        taken: takenToday,
+        total: totalToday,
+        percentage: todayAdherence,
+      },
+      overallAdherence: metrics.overallAdherence,
+      daysStreak: metrics.currentStreak,
+      wellnessScore: metrics.wellnessScore,
+    },
+  };
+};
+
 // @route   GET /api/dashboard
 // @desc    Get complete dashboard data for the user's active assessment
 // @access  Private
@@ -148,23 +351,34 @@ router.get('/', protect, async (req, res) => {
     const recommendations = latestAssessment.aiResults?.recommendations || [];
     const dailySchedule = latestAssessment.aiResults?.dailySchedule || [];
 
+    // Morning / Afternoon / Evening buckets, taken from the AI daily schedule
+    // (the same grouping the results page renders) so the tracker and the
+    // results page can never disagree about which stack a supplement belongs to.
+    const scheduleSlotIndex = buildScheduleSlotIndex(dailySchedule);
+
     // Daily plan snapshot: on the first load of a day with an empty plan,
     // seed today's records from the AI recommendations so the day always
     // lists what needed to be taken. Untouched days automatically read as
     // MISSED (red) in the calendar and day-detail views.
     if (todayIntakeRecords.length === 0 && recommendations.length > 0) {
       const seeds = recommendations.slice(0, 20)
-        .map(rec => ({
-          user: req.user._id,
-          assessment: latestAssessment._id,
-          supplementName: rec.name || rec.supplement,
-          dosage: rec.dosage || '',
-          priority: ['High', 'Medium', 'Low'].includes(rec.priority) ? rec.priority : 'Medium',
-          scheduledTime: rec.timing || 'Anytime',
-          taken: false,
-          date: new Date(),
-          dayKey: todayKey,
-        }))
+        .map(rec => {
+          const name = rec.name || rec.supplement;
+          // Schedule time first, recommendation timing second — same order the
+          // response mapping below uses, so a record never drifts from its card.
+          const slot = resolveTimeSlot({ name, timing: rec.timing }, scheduleSlotIndex);
+          return {
+            user: req.user._id,
+            assessment: latestAssessment._id,
+            supplementName: name,
+            dosage: rec.dosage || '',
+            priority: ['High', 'Medium', 'Low'].includes(rec.priority) ? rec.priority : 'Medium',
+            scheduledTime: slot.timeLabel || rec.timing || 'Anytime',
+            taken: false,
+            date: new Date(),
+            dayKey: todayKey,
+          };
+        })
         .filter(doc => doc.supplementName);
       if (seeds.length > 0) {
         // Bulk upsert: one round-trip instead of N (was a major bottleneck
@@ -275,15 +489,24 @@ router.get('/', protect, async (req, res) => {
         createdAt: latestAssessment.createdAt,
         summary: latestAssessment.aiResults?.simplifiedSummary || latestAssessment.aiResults?.summary || '',
       },
-      todaysSupplements: todayIntakeRecords.map(rec => ({
-        id: rec._id,
-        name: rec.supplementName,
-        dosage: rec.dosage,
-        priority: priorityMap[rec.supplementName] || rec.priority || 'Medium', // Use recommendation priority first
-        scheduledTime: timingMap[rec.supplementName] || rec.scheduledTime || 'Anytime', // Use recommendation timing first
-        taken: rec.taken,
-        takenAt: rec.takenAt,
-      })),
+      todaysSupplements: todayIntakeRecords.map(rec => {
+        const timing = timingMap[rec.supplementName] || rec.scheduledTime || 'Anytime';
+        const slot = resolveTimeSlot({ name: rec.supplementName, timing }, scheduleSlotIndex);
+        return {
+          id: rec._id,
+          name: rec.supplementName,
+          dosage: rec.dosage,
+          priority: priorityMap[rec.supplementName] || rec.priority || 'Medium', // Use recommendation priority first
+          scheduledTime: timing, // Use recommendation timing first
+          // Grouping for the tracker: which part of the day this belongs to.
+          timeSlot: slot.key,
+          timeSlotLabel: slot.label,
+          timeSlotOrder: slot.order,
+          scheduleTime: slot.timeLabel,
+          taken: rec.taken,
+          takenAt: rec.takenAt,
+        };
+      }),
       stats: {
         wellnessScore: metrics.wellnessScore,
         daysStreak: validatedStreak,
@@ -343,204 +566,87 @@ router.post('/intake', protect, async (req, res) => {
     record.takenAt = taken ? new Date() : null;
     await record.save();
 
-    // Update metrics — independent reads run in parallel
-    const todayKey = getTodayKey();
-    const [todayRecords, metrics, totals, assessmentDoc] = await Promise.all([
-      IntakeRecord.find({ user: req.user._id, assessment: record.assessment, dayKey: todayKey }).select('taken').lean(),
-      DashboardMetrics.findOne({ user: req.user._id, assessment: record.assessment }),
-      Promise.all([
-        IntakeRecord.countDocuments({ user: req.user._id, assessment: record.assessment }),
-        IntakeRecord.countDocuments({ user: req.user._id, assessment: record.assessment, taken: true }),
-      ]),
-      // Only the slices needed downstream (wellness baseline + priority state)
-      Assessment.findById(record.assessment).select('aiResults.wellnessBaseline priority resolvedReason').lean(),
-    ]);
+    const outcome = await finalizeIntakeChange(req, record.assessment);
 
-    const totalToday = todayRecords.length;
-    const takenToday = todayRecords.filter(r => r.taken).length;
-    const todayAdherence = calculateAdherence(takenToday, totalToday);
-
-    // Overall adherence via counted aggregation (no full-history load)
-    const [totalAll, takenAll] = totals;
-    const overallAdherence = calculateAdherence(takenAll, totalAll);
-
-    if (metrics) {
-      const today = todayKey;
-      const yesterday = new Date(new Date().setDate(new Date().getDate() - 1))
-        .toISOString().split('T')[0];
-      
-      // MIDNIGHT CHECK: Evaluate if we crossed into a new day
-      if (metrics.lastTrackedDate && metrics.lastTrackedDate !== today) {
-        // New day has started - check if yesterday was completed
-        if (metrics.lastCompletedDay === metrics.lastTrackedDate) {
-          // Yesterday finished with 100% - keep streak
-          // Reset daily flag for new day
-          metrics.streakAwardedToday = false;
-        } else {
-          // Yesterday finished incomplete - break streak
-          metrics.currentStreak = 0;
-          metrics.streakAwardedToday = false;
-          metrics.lastCompletedDay = null;
-        }
-      }
-      
-      // CURRENT DAY LOGIC: Update streak based on current completion state
-      if (takenToday === totalToday && totalToday > 0) {
-        // User has 100% completion RIGHT NOW
-        
-        if (!metrics.streakAwardedToday) {
-          // First time completing 100% today - award streak
-          metrics.currentStreak += 1;
-          metrics.streakAwardedToday = true;
-          metrics.lastCompletedDay = today;
-          
-          if (metrics.currentStreak > metrics.longestStreak) {
-            metrics.longestStreak = metrics.currentStreak;
-          }
-        } else {
-          // Already awarded streak today, just mark completion
-          metrics.lastCompletedDay = today;
-        }
-      } else if (takenToday < totalToday && totalToday > 0) {
-        // User does NOT have 100% completion right now
-        
-        if (metrics.streakAwardedToday && metrics.lastCompletedDay === today && metrics.currentStreak > 0) {
-          // They had completed today but just undid - remove today's streak
-          // Only decrement if streak is greater than 0 to prevent negative values
-          metrics.currentStreak -= 1;
-          metrics.lastCompletedDay = null; // Today is no longer completed
-          metrics.streakAwardedToday = false; // Reset flag to allow re-awarding if they complete again
-        }
-      }
-      
-      metrics.lastTrackedDate = today;
-
-      metrics.overallAdherence = overallAdherence;
-
-      // Auto-lift: all of today's AI-suggested supplements taken on a
-      // Priority assessment finishes its review (strict two-way gate below).
-      // Both directions are premium bookkeeping (the re-flag also notifies), so
-      // they follow the same entitlement as the pause itself: after a downgrade
-      // a stale Priority document must stay untouched instead of being resolved
-      // and then reinstated behind the user's back.
-      let priorityLifted = false;
-      let priorityReflagged = false;
-      const priorityEntitled = can(req.user, 'priorityAssessment');
-      const completedNow = takenToday === totalToday && totalToday > 0;
-      if (priorityEntitled && completedNow && assessmentDoc && assessmentDoc.priority === 'Priority') {
-        try {
-          await Assessment.findByIdAndUpdate(record.assessment, {
-            // Resolved by completion: Standard again, with the normal 5-year
-            // window counted from CREATION. It used to set expiresAt to "now",
-            // which retired the record the instant the user finished their
-            // priority review and showed "Expired <today>" in history.
-            $set: {
-              priority: 'Standard',
-              resolvedAt: new Date(),
-              resolvedReason: 'intake-complete',
-              expiresAt: expiryFromCreatedAt(assessmentDoc.createdAt),
-            },
-          });
-          priorityLifted = true;
-          const UserNotification = require('../models/UserNotification');
-          const AdminEvent = require('../models/AdminEvent');
-          await UserNotification.create({
-            user: req.user._id,
-            type: 'info',
-            title: 'Priority review completed',
-            detail: 'All of today\u2019s supplements were taken, so the priority review on your assessment is finished. You can start a new assessment any time.',
-            assessmentId: record.assessment,
-          }).catch(() => {});
-          await AdminEvent.create({
-            type: 'resolved',
-            title: 'Priority auto-resolved (intake complete)',
-            detail: `User ${req.user._id} completed all of today\u2019s supplements for assessment ${record.assessment}. Flag lifted automatically.`,
-            user: req.user._id,
-            assessmentId: record.assessment,
-            linkUserId: req.user._id,
-          }).catch(() => {});
-        } catch (liftError) {
-          console.error('[dashboard POST /intake] priority auto-lift failed:', liftError.message);
-        }
-      } else if (priorityEntitled && !completedNow && assessmentDoc && assessmentDoc.priority === 'Standard' && assessmentDoc.resolvedReason === 'intake-complete') {
-        // Strict gate: undoing after an auto-lift breaks 100% completion,
-        // so the restriction comes back. Admin-resolved flags are never touched.
-        try {
-          await Assessment.findByIdAndUpdate(record.assessment, {
-            $set: {
-              priority: 'Priority',
-              flaggedAt: new Date(),
-              resolvedAt: null,
-              resolvedReason: '',
-              expiresAt: null,
-              flagReasons: ['Intake undone after auto-resolve — review reinstated'],
-            },
-          });
-          priorityReflagged = true;
-          const UserNotification = require('../models/UserNotification');
-          const AdminEvent = require('../models/AdminEvent');
-          await UserNotification.create({
-            user: req.user._id,
-            type: 'severe-flag',
-            title: 'Priority review reinstated',
-            detail: 'A supplement was marked not taken, so today\u2019s plan is incomplete again. The priority review is back in effect and new assessments are paused until it is finished.',
-            assessmentId: record.assessment,
-          }).catch(() => {});
-          await AdminEvent.create({
-            type: 'severe-flag',
-            title: 'Priority re-flagged (intake undone)',
-            detail: `User ${req.user._id} undid a supplement for assessment ${record.assessment} after auto-resolve. Restriction reinstated.`,
-            user: req.user._id,
-            assessmentId: record.assessment,
-            linkUserId: req.user._id,
-          }).catch(() => {});
-        } catch (reflagError) {
-          console.error('[dashboard POST /intake] priority re-flag failed:', reflagError.message);
-        }
-      }
-      
-      // Wellness baseline from the already-fetched assessment slice
-      const wellnessBaseline = getWellnessBaseline(assessmentDoc);
-      
-      metrics.wellnessScore = calculateWellnessScore(
-        wellnessBaseline,
-        overallAdherence,
-        metrics.currentStreak
-      );
-      await metrics.save();
-
-      res.json({
-        message: 'Intake updated',
-        priorityLifted,
-        priorityReflagged,
-        record: {
-          id: record._id,
-          taken: record.taken,
-          takenAt: record.takenAt,
-        },
-        stats: {
-          todaysProgress: {
-            taken: takenToday,
-            total: totalToday,
-            percentage: todayAdherence,
-          },
-          overallAdherence: metrics.overallAdherence,
-          daysStreak: metrics.currentStreak,
-          wellnessScore: metrics.wellnessScore,
-        },
-      });
-    } else {
-      res.json({
-        message: 'Intake updated',
-        record: {
-          id: record._id,
-          taken: record.taken,
-          takenAt: record.takenAt,
-        },
-      });
-    }
+    res.json({
+      message: 'Intake updated',
+      record: {
+        id: record._id,
+        taken: record.taken,
+        takenAt: record.takenAt,
+      },
+      ...outcome,
+    });
   } catch (error) {
     console.error('[dashboard POST /intake]', error.message);
+    res.status(500).json({ message: 'Could not update intake. Please try again.' });
+  }
+});
+
+// @route   POST /api/dashboard/intake/bulk
+// @desc    Mark a whole time slot (Morning / Afternoon / Evening) taken in one press
+// @access  Private
+router.post('/intake/bulk', protect, async (req, res) => {
+  try {
+    const { recordIds, taken } = req.body;
+
+    if (!Array.isArray(recordIds) || recordIds.length === 0) {
+      return res.status(400).json({ message: 'Choose at least one supplement to update.' });
+    }
+    if (typeof taken !== 'boolean') {
+      return res.status(400).json({ message: 'Taken status is required.' });
+    }
+    // A slot is at most a handful of rows; anything larger is a client bug, and
+    // an unbounded $in is the sort of thing that quietly times out.
+    if (recordIds.length > 60) {
+      return res.status(400).json({ message: 'Too many supplements in one update.' });
+    }
+
+    // Reject non-ObjectId values before they reach the $in filter (CastError → 500)
+    const ids = [...new Set(recordIds.filter(id => typeof id === 'string' && mongoose.isValidObjectId(id)))];
+    if (ids.length === 0) {
+      return res.status(400).json({ message: 'No valid supplements to update.' });
+    }
+
+    const todayKey = getTodayKey();
+    const records = await IntakeRecord.find({
+      _id: { $in: ids },
+      user: req.user._id,
+    }).select('_id assessment dayKey').lean();
+
+    if (records.length === 0) {
+      return res.status(404).json({ message: 'Intake records not found.' });
+    }
+
+    // One plan per request: the metrics recompute below is per assessment, so a
+    // mixed batch would silently report only the first plan's numbers.
+    const assessments = new Set(records.map(rec => String(rec.assessment)));
+    if (assessments.size > 1) {
+      return res.status(400).json({ message: 'Those supplements come from different plans. Refresh and try again.' });
+    }
+
+    // History is read-only, exactly as for the single-record endpoint.
+    const todayRecords = records.filter(rec => rec.dayKey === todayKey);
+    if (todayRecords.length === 0) {
+      return res.status(400).json({ message: 'Only today\u2019s supplements can be updated. Past days are read-only history.' });
+    }
+
+    const takenAt = taken ? new Date() : null;
+    await IntakeRecord.updateMany(
+      { _id: { $in: todayRecords.map(rec => rec._id) } },
+      { $set: { taken, takenAt } }
+    );
+
+    const outcome = await finalizeIntakeChange(req, todayRecords[0].assessment);
+
+    res.json({
+      message: taken ? 'Supplements marked as taken' : 'Supplements marked as not taken',
+      updated: todayRecords.length,
+      skipped: records.length - todayRecords.length,
+      ...outcome,
+    });
+  } catch (error) {
+    console.error('[dashboard POST /intake/bulk]', error.message);
     res.status(500).json({ message: 'Could not update intake. Please try again.' });
   }
 });
@@ -1032,20 +1138,99 @@ router.get('/my-plan', protect, async (req, res) => {
       dayKey: todayKey,
     });
 
+    // Same Morning/Afternoon/Evening buckets the dashboard returns, so both
+    // readers of "the plan" group identically.
+    const scheduleSlotIndex = buildScheduleSlotIndex(latestAssessment.aiResults?.dailySchedule || []);
+
     res.json({
-      supplements: todaySupplements.map(rec => ({
-        id: rec._id,
-        name: rec.supplementName,
-        dosage: rec.dosage,
-        priority: rec.priority,
-        scheduledTime: rec.scheduledTime,
-        taken: rec.taken,
-        takenAt: rec.takenAt,
-      })),
+      supplements: todaySupplements.map(rec => {
+        const slot = resolveTimeSlot({ name: rec.supplementName, timing: rec.scheduledTime }, scheduleSlotIndex);
+        return {
+          id: rec._id,
+          name: rec.supplementName,
+          dosage: rec.dosage,
+          priority: rec.priority,
+          scheduledTime: rec.scheduledTime,
+          timeSlot: slot.key,
+          timeSlotLabel: slot.label,
+          timeSlotOrder: slot.order,
+          scheduleTime: slot.timeLabel,
+          taken: rec.taken,
+          takenAt: rec.takenAt,
+        };
+      }),
     });
   } catch (error) {
     console.error('[dashboard GET /my-plan]', error.message);
     res.status(500).json({ message: 'Could not load your plan. Please try again.' });
+  }
+});
+
+// @route   GET /api/dashboard/current-supplements
+// @desc    What the user is already taking, to pre-fill the assessment's
+//          "Currently Taking Supplements?" question
+// @access  Private
+//
+// WHY THIS IS A READ, NOT A WRITE
+// A returning user retaking the assessment has to answer "are you taking any
+// supplements?" about themselves, and the honest answer is already in the
+// database: the plan they are tracking right now. Re-typing it is both tedious
+// and a source of silent drift — a user who answers "No" here while their
+// dashboard shows five supplements in the morning stack gets recommendations
+// that contradict the plan they are actually following.
+//
+// WHAT COUNTS AS "TAKING SOMETHING"
+// Two independent signals, either of which is enough:
+//   1. a supplement ticked as taken today — the strongest, they demonstrably
+//      did it today;
+//   2. any supplement on today's plan at all — they were prescribed it, even
+//      if today's tick is still outstanding.
+//
+// Both are read from IntakeRecords rather than from the assessment's own
+// `takingSupplements` answer, because that answer is what we are trying to
+// pre-fill and copying it back would only ever echo a stale value.
+router.get('/current-supplements', protect, async (req, res) => {
+  try {
+    const latestAssessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
+      .sort({ createdAt: -1 })
+      .select('_id aiResults.recommendations');
+
+    if (!latestAssessment) {
+      // No assessment yet: nothing to detect, and the client leaves the
+      // question blank for the user to answer.
+      return res.json({ hasPlan: false, takingSupplements: false, supplements: [], takenCount: 0 });
+    }
+
+    const todayKey = getTodayKey();
+    const records = await IntakeRecord.find({
+      user: req.user._id,
+      assessment: latestAssessment._id,
+      dayKey: todayKey,
+    }).select('supplementName dosage taken').lean();
+
+    const takenCount = records.filter(rec => rec.taken).length;
+
+    // Names from the plan the user is tracking; fall back to the assessment's
+    // recommendations so a plan that was never opened still counts.
+    const names = records
+      .map(rec => str(rec.supplementName).trim())
+      .filter(Boolean);
+    if (names.length === 0) {
+      for (const rec of (latestAssessment.aiResults?.recommendations || []).slice(0, 20)) {
+        const name = str(rec && (rec.name || rec.supplement)).trim();
+        if (name && !names.includes(name)) names.push(name);
+      }
+    }
+
+    res.json({
+      hasPlan: names.length > 0,
+      takingSupplements: names.length > 0,
+      supplements: names.slice(0, 20),
+      takenCount,
+    });
+  } catch (error) {
+    console.error('[dashboard GET /current-supplements]', error.message);
+    res.status(500).json({ message: 'Could not load your current supplements.' });
   }
 });
 

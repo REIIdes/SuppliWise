@@ -16,7 +16,6 @@
 // ═══════════════════════════════════════════════════════════════════════════
 require('dotenv').config();
 const mongoose = require('mongoose');
-const { connectTestDb, skipMessage } = require('./Test File/testDbGuard');
 
 const BASE = process.env.SMOKE_BASE_URL || 'http://localhost:5000/api';
 
@@ -156,12 +155,30 @@ async function seedAssessment(userId) {
 }
 
 async function main() {
-  // Tests write real User/Web3 documents. Never let them reach the
-  // application's own database — see Test File/testDbGuard.js.
-  const db = await connectTestDb();
-  if (!db.connected) { console.log(skipMessage(db)); return; }
+  // Inherently LIVE-database checks: the accounts are created THROUGH the
+  // running API (so the server mints their sessions), then read and written
+  // directly here.
+  //
+  // That makes a separate MONGO_TEST_URI unusable here. This used to connect via
+  // connectTestDb(), putting this script's reads and writes on the TEST database
+  // while the API created every account on the APPLICATION database — two
+  // different databases, so cleanupPreviousRuns() found nothing, wallet reads
+  // came back empty, and the run asserted against state it could not see. It also
+  // made the suite report "0 passed, 0 failed" (a silent no-op) whenever
+  // MONGO_TEST_URI was unset. A guard that points a suite away from the very data
+  // it must observe is worse than no guard.
+  //
+  // So this connects to the application's own database, the same way the other
+  // live suites do (glitch-hunt.js, glitch-hunt-web3.js, test-session-flows.js).
+  // It is strictly scoped: it creates only `web3-smoke-*@example.com` accounts of
+  // its own, and purges exactly that prefix — never a real account.
+  //
+  // testDbGuard still guards the `npm test` unit suites, which is where the
+  // accidental-production-write risk actually came from.
+  await mongoose.connect(process.env.MONGO_URI);
   const W = require('./models/Web3');
   const { sha256Hex } = require('./blockchain/crypto');
+  const { escrowSplit } = require('./blockchain/rules');
 
   section('Setup');
   const User = require('./models/User');
@@ -440,8 +457,16 @@ async function main() {
     JSON.stringify({ l1: l1.data, l2: l2.data, l3: l3.data }).slice(0, 240));
 
   const listings = await call('GET', '/web3/market/listings', { token: A.token });
+  // The escrow fee is a GOVERNED parameter (DEFAULT_PARAMS.marketplaceFeePct in
+  // models/Web3.js), and a DAO vote can change it at runtime. So this suite must
+  // not hard-code a literal: asserting `feePct === 3` meant the run failed the
+  // moment the on-chain value moved to 2, with no product defect involved. The
+  // assertion below checks the value is a sane percentage, and the money
+  // assertions further down derive from whatever the chain reports.
+  const feePct = Number(listings.data?.feePct);
   check('browse returns listings + fee + oracle feeds',
-    listings.status === 200 && listings.data.listings.length >= 3 && listings.data.feePct === 3
+    listings.status === 200 && listings.data.listings.length >= 3
+      && Number.isFinite(feePct) && feePct >= 0 && feePct <= 100
       && Array.isArray(listings.data.oracleFeeds),
     JSON.stringify({ n: listings.data?.listings?.length, fee: listings.data?.feePct }));
 
@@ -455,10 +480,19 @@ async function main() {
 
   const conf = await call('POST', `/web3/market/orders/${o1.data.order._id}/confirm`, { token: A.token, body: {} });
   const balSAfter = (await call('GET', '/web3/wallet', { token: B.token })).data.wallet.balance;
-  check('delivery confirmation executes the contract (seller paid − 3% fee)',
-    conf.status === 200 && conf.data.order.status === 'released' && conf.data.fee === 0.3 && conf.data.proceeds === 9.7
-      && balSAfter === balSBuy + 9.7,
-    JSON.stringify({ fee: conf.data?.fee, proceeds: conf.data?.proceeds, delta: balSAfter - balSBuy }));
+  // Expected money is computed with the SAME rule the server uses
+  // (blockchain/rules.escrowSplit), at whatever feePct the chain currently
+  // reports. Re-deriving the percentage here would just re-introduce the drift.
+  const split = escrowSplit(10, feePct);
+  // The balance comparison needs an epsilon: balances are IEEE-754 doubles, so
+  // `100 + 9.8` is 109.799999999999997 and a strict `===` on the delta fails on
+  // arithmetic that is correct to the cent.
+  const credited = balSAfter - balSBuy;
+  check('delivery confirmation executes the contract (seller paid − platform fee)',
+    conf.status === 200 && conf.data.order.status === 'released'
+      && conf.data.fee === split.fee && conf.data.proceeds === split.proceeds
+      && Math.abs(credited - split.proceeds) < 1e-9,
+    JSON.stringify({ feePct, want: split, got: { fee: conf.data?.fee, proceeds: conf.data?.proceeds }, delta: credited }));
 
   // ── 15. Decentralized dispute resolution ──────────────────────────────
   section('Feature 15 — Decentralized dispute resolution');

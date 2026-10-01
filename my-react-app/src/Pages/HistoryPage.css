@@ -329,6 +329,20 @@
 .active-info-action svg { transition: transform 0.18s; }
 .active-info-action:hover svg { transform: translateX(3px); }
 
+/* "Start new" is closed between midnight and 4:00 AM, same as the form. Flattened
+   rather than hidden so the banner keeps its shape — a button that appears and
+   disappears between visits is more jarring than one that is plainly asleep. */
+.active-info-action:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+.active-info-action:disabled:hover {
+  background: rgba(255, 255, 255, 0.16);
+  transform: none;
+}
+.active-info-action:disabled:hover svg { transform: none; }
+
 /* ═══ Summary tiles ═══ */
 .history-stats {
   display: grid;
@@ -1329,7 +1343,6 @@
 @media (max-width: 640px) {
   .history-container { padding: 24px 14px 72px; }
   .history-header { align-items: stretch; flex-direction: column; gap: 16px; }
-  .history-header-actions .btn-primary { width: 100%; }
   .history-subtitle { font-size: 13.5px; }
 
   .active-info-banner {

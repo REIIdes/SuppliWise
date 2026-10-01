@@ -13,7 +13,7 @@
     "send-admin-credentials": "node scripts/send-admin-credentials.js",
     "test": "node --test \"Test File/*.test.js\"",
     "test:flows": "node test-subscription-flows.js",
-    "check": "node --check index.js && node --check middleware/auth.js && node --check middleware/stepUp.js && node --check routes/auth.js && node --check routes/admin.js && node --check routes/passkeys.js && node --check routes/totp.js && node --check routes/recoveryCodes.js && node --check routes/sessions.js && node --check routes/security.js && node --check models/User.js && node --check models/Session.js && node --check models/Passkey.js && node --check models/AuthChallenge.js && node --check models/MfaTransaction.js && node --check models/SecurityEvent.js && node --check utils/sessions.js && node --check utils/userSession.js && node --check utils/adminSession.js && node --check utils/rateLimits.js && node --check utils/secretBox.js && node --check utils/totpSecret.js && node --check utils/webauthn.js && node --check utils/mfaTransaction.js && node --check utils/origins.js && node --check utils/authFlow.js && node --check utils/email.js && node --check utils/adminAccounts.js && node --check utils/adminCredentialNotice.js && node --check utils/adminCredentialHandoff.js && node --check scripts/notify-admins.js && node --check scripts/send-admin-credentials.js"
+    "check": "node scripts/check-syntax.js"
   },
   "dependencies": {
     "@simplewebauthn/server": "^14.0.3",
@@ -27,7 +27,7 @@
     "helmet": "8.0.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.3.4",
-    "nodemailer": "^9.0.3",
+    "nodemailer": "^10.0.13",
     "qrcode": "^1.5.4",
     "speakeasy": "^2.0.0"
   },

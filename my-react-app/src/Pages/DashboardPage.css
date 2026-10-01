@@ -466,6 +466,403 @@
   overscroll-behavior: contain;
 }
 
+/* The grouped wrapper holds every section and does not scroll itself — each
+   section scrolls its own rows, so one tall section cannot push the others out
+   of view. Same structure as the tracker page, scoped to this page's tokens. */
+.dashboard-wrapper .supplements-list--slots {
+  max-height: none;
+  overflow: visible;
+  padding-right: 0;
+  margin-right: 0;
+  gap: 18px;
+}
+
+.dashboard-wrapper .slot-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dashboard-wrapper .slot-group__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 14px;
+  border: 1px solid var(--d-line);
+  border-radius: var(--d-radius-md, 14px);
+  background: var(--d-surface, #fff);
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.dashboard-wrapper .slot-group--complete .slot-group__header {
+  background: linear-gradient(180deg, #f2fdf8, #e7f8f0);
+  border-color: #b6ecd3;
+}
+
+/* A window whose time has passed with something still unticked. Recessed rather
+   than alarming: a missed dose is a fact to record, not an error to shout about. */
+.dashboard-wrapper .slot-group--missed .slot-group__header {
+  background: linear-gradient(180deg, #fffbfb, #fef2f2);
+  border-color: #fecaca;
+}
+.dashboard-wrapper .slot-group--missed .slot-group__icon {
+  color: #b91c1c;
+  background: #fee2e2;
+}
+.dashboard-wrapper .slot-group--missed .slot-group__title { color: #7f1d1d; }
+.dashboard-wrapper .slot-group--missed .slot-group__window { color: #991b1b; }
+
+.dashboard-wrapper .slot-group--upcoming .slot-group__header {
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  border-color: #e5e7eb;
+}
+.dashboard-wrapper .slot-group--upcoming .slot-group__icon { opacity: 0.55; }
+
+.dashboard-wrapper .slot-group__names {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+/* The hours, printed so the window is checkable rather than assumed. */
+.dashboard-wrapper .slot-group__window {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: #6b7280;
+  white-space: nowrap;
+}
+
+.dashboard-wrapper .slot-group__flag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.dashboard-wrapper .slot-group__flag--soon {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.dashboard-wrapper .missed-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  background: #fee2e2;
+  color: #b91c1c;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* A missed row keeps its button usable — a late entry, not a lockout. */
+.dashboard-wrapper .supplement-item--missed {
+  background: #fef7f7;
+  border-color: #fecaca;
+  opacity: 0.92;
+}
+.dashboard-wrapper .supplement-item--missed .supplement-name { color: #7f1d1d; }
+.dashboard-wrapper .supplement-item--missed:hover { border-color: #fca5a5; }
+
+/* ── Dead hours (midnight → 4:00 AM) ────────────────────────────────────────
+   The quietest treatment on the page, and cooler than the red "Missed" state:
+   "Missed" is a claim about the user's day, and at 2 AM nothing was ever due.
+   This only says "not now". */
+.dashboard-wrapper .slot-group--snoozed .slot-group__header {
+  background: linear-gradient(180deg, #f8fafc, #eef2f7);
+  border-color: #dbe3ec;
+}
+.dashboard-wrapper .slot-group--snoozed .slot-group__icon {
+  color: #64748b;
+  background: #e2e8f0;
+}
+.dashboard-wrapper .slot-group--snoozed .slot-group__title { color: #475569; }
+.dashboard-wrapper .slot-group--snoozed .slot-group__window { color: #64748b; }
+
+.dashboard-wrapper .slot-group__flag--night {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.dashboard-wrapper .supplement-item--snoozed {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+.dashboard-wrapper .supplement-item--snoozed .supplement-name { color: #475569; }
+.dashboard-wrapper .supplement-item--snoozed:hover { border-color: #cbd5e1; }
+
+/* A dose recorded outside its own window. Amber, because the sibling "Taken"
+   pill is green and green reads "on time". */
+.dashboard-wrapper .supplement-late-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #b45309;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* ── New Assessment, asleep during the dead hours ──────────────────────────
+   Recessed and desaturated rather than hidden: the card is one of four on the
+   dashboard, and silently removing one makes the row jump. Keeping it visible
+   with an "Asleep" tag is what tells the user it is a clock, not a bug. */
+.dashboard-wrapper .dashboard-card--snoozed {
+  opacity: 0.5;
+  filter: grayscale(0.7);
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none;
+}
+
+.dashboard-wrapper .dashboard-card--snoozed:hover { transform: none !important; }
+
+.dashboard-wrapper .card-blocked-tag--snoozed {
+  background: #475569;
+  color: #f8fafc;
+}
+
+.dashboard-wrapper .btn-go-recommendations:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ── The missed tray ─────────────────────────────────────────────────────
+   Doses whose window closed while they were still unticked, parked at the very
+   bottom so they never compete with what the user can do right now. */
+.dashboard-wrapper .slot-tray {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+  padding-top: 16px;
+  border-top: 2px dashed #fecaca;
+}
+
+.dashboard-wrapper .slot-tray__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 9px 14px;
+  border: 1px solid #fecaca;
+  border-radius: var(--d-radius-md, 14px);
+  background: linear-gradient(180deg, #fffbfb, #fef2f2);
+}
+
+/* Past the dead hours the day is over: cooler and flatter. */
+.dashboard-wrapper .slot-tray--locked .slot-tray__header {
+  background: linear-gradient(180deg, #f8fafc, #eef2f7);
+  border-color: #dbe3ec;
+}
+
+.dashboard-wrapper .slot-tray__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #991b1b;
+}
+.dashboard-wrapper .slot-tray--locked .slot-tray__title { color: #475569; }
+
+.dashboard-wrapper .slot-tray__count {
+  font-size: 12px;
+  font-weight: 700;
+  color: #b91c1c;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #fee2e2;
+  white-space: nowrap;
+}
+.dashboard-wrapper .slot-tray--locked .slot-tray__count {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.dashboard-wrapper .slot-tray__note {
+  font-size: 12px;
+  color: #7f1d1d;
+}
+.dashboard-wrapper .slot-tray--locked .slot-tray__note { color: #64748b; }
+
+/* Shown when no frame is open — before 5 AM, or between windows. */
+.dashboard-wrapper .slots-idle {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px dashed #cbd5e1;
+  border-radius: var(--d-radius-md, 14px);
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: #64748b;
+}
+
+/* A row the dead hours closed out: no button, and it says so. */
+.dashboard-wrapper .supplement-item--locked {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+  opacity: 0.85;
+}
+.dashboard-wrapper .supplement-item--locked .supplement-name { color: #64748b; }
+
+.dashboard-wrapper .supplement-locked-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #64748b;
+  font-size: 12.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* ── Dead-hour placeholders ────────────────────────────────────────────────
+   Every field listed, every one empty, each with a countdown. */
+.dashboard-wrapper .slots-deadhead {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid #dbe3ec;
+  border-radius: var(--d-radius-md, 14px);
+  background: linear-gradient(180deg, #f8fafc, #eef2f7);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: #475569;
+}
+
+.dashboard-wrapper .slot-group--placeholder .slot-group__header {
+  background: linear-gradient(180deg, #fbfcfe, #f4f7fa);
+  border-color: #e6ebf1;
+  border-style: dashed;
+}
+.dashboard-wrapper .slot-group--placeholder .slot-group__icon { opacity: 0.5; }
+.dashboard-wrapper .slot-group--placeholder .slot-group__title { color: #64748b; }
+
+.dashboard-wrapper .slot-group__count--quiet {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.dashboard-wrapper .slot-group__countdown {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #0f766e;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #ccfbf1;
+  white-space: nowrap;
+}
+
+.dashboard-wrapper .slot-group__label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.dashboard-wrapper .slot-group__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  color: #0d9488;
+  background: #d9f2ec;
+}
+
+.dashboard-wrapper .slot-group__icon--morning   { color: #d97706; background: #fef3c7; }
+.dashboard-wrapper .slot-group__icon--afternoon { color: #0d9488; background: #d9f2ec; }
+.dashboard-wrapper .slot-group__icon--evening   { color: #4f46e5; background: #e0e7ff; }
+.dashboard-wrapper .slot-group__icon--night     { color: #4338ca; background: #e0e7ff; }
+.dashboard-wrapper .slot-group__icon--anytime   { color: #4b5563; background: #e5e7eb; }
+
+.dashboard-wrapper .slot-group__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--d-ink, #1f2937);
+}
+
+.dashboard-wrapper .slot-group__meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.dashboard-wrapper .slot-group__count {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #4b5563;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.08);
+  white-space: nowrap;
+}
+
+.dashboard-wrapper .slot-group__done {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: #10b981;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* "Take all morning" — one press instead of five. Quieter than the per-item
+   button so the individual action stays the obvious default. */
+.dashboard-wrapper .btn-slot-taken {
+  padding: 7px 14px;
+  border: 1px solid #a7f3d0;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #047857;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.dashboard-wrapper .btn-slot-taken:hover:not(:disabled) {
+  background: #d1fae5;
+  border-color: #6ee7b7;
+  transform: translateY(-1px);
+}
+
+.dashboard-wrapper .btn-slot-taken:focus-visible {
+  outline: 3px solid var(--d-teal, #0d9488);
+  outline-offset: 2px;
+}
+
+.dashboard-wrapper .btn-slot-taken:disabled {
+  opacity: 0.6;
+  cursor: progress;
+  transform: none;
+}
+
+.dashboard-wrapper .supplement-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .dashboard-wrapper .supplements-list::-webkit-scrollbar { width: 6px; }
 .dashboard-wrapper .supplements-list::-webkit-scrollbar-track {
   background: transparent;
@@ -1191,6 +1588,8 @@
   .dashboard-wrapper .card-arrow { top: 18px; right: 16px; }
   .dashboard-wrapper .dashboard-right-column { grid-template-columns: minmax(0, 1fr); }
   .dashboard-wrapper .supplements-list { max-height: none; overflow: visible; padding-right: 0; margin-right: 0; }
+  .dashboard-wrapper .slot-group__header { flex-wrap: wrap; row-gap: 8px; }
+  .dashboard-wrapper .slot-group__meta { width: 100%; justify-content: space-between; }
   .dashboard-wrapper .dashboard-section { padding: 18px 16px; }
   .dashboard-wrapper .section-title { font-size: 17px; }
   .dashboard-wrapper .completion-toast {

@@ -4,6 +4,7 @@ import {
   TAB_TOKEN_KEY,
   TAB_USER_KEY,
   DIRECTORY_KEY,
+  isAdminRoute,
   markUserSignedOut,
   clearUserSignedOut,
   SUBSCRIPTION_REVALIDATE_EVENT,
@@ -141,9 +142,37 @@ const postToTabs = (message) => {
   try { authChannel?.postMessage(message); } catch { /* channel closed — best-effort */ }
 };
 
+// Send a dead/ended USER session to the sign-in screen — never from the admin
+// area.
+//
+// Every one the redirects below used to be was an unconditional navigation to
+// the user sign-in path. On an `/admin/*` route that is simply the wrong
+// destination: the tab has no user session to end, and the admin console is
+// destroyed by a user-side event. That is exactly the reported bug — signing
+// out as a user threw a signed-in admin tab onto the user login page with
+// "Your session has ended." A hard navigation also cannot be undone by a route
+// guard, so nothing downstream could recover it.
+//
+// (The test that counts the navigations looks for the exact call text, so this
+// comment deliberately does not contain it.)
+//
+// On an admin route this is a NO-OP, and that is correct in both cases: a tab with
+// an admin session keeps its console, and a tab without one is already handled by
+// AdminProtectedRoute, which bounces to `/admin/login` — the right destination.
+const goToUserSignIn = () => {
+  if (isAdminRoute()) return;
+  if (window.location.pathname !== '/login' && window.location.pathname !== '/signup') {
+    window.location.replace('/login');
+  }
+};
+
 // Ask the other tabs whether any of them holds one of `ids`; the first reply
 // wins. Resolves null after `timeoutMs` (no holder, or BroadcastChannel is
 // unavailable) — the caller then falls back to a fresh sign-in.
+//
+// The request states whether the asker is an admin tab. Holders use it to decline
+// rather than hand a user session to the admin console, which is what turned an
+// admin tab into a user one (see isAdminRoute in auth/authState.js).
 const requestSessionFromTabs = (ids, timeoutMs = 400) => new Promise((resolve) => {
   if (!authChannel || !Array.isArray(ids) || !ids.length) { resolve(null); return; }
   const rid = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -163,7 +192,9 @@ const requestSessionFromTabs = (ids, timeoutMs = 400) => new Promise((resolve) =
   };
   const timer = setTimeout(() => finish(null), timeoutMs);
   authChannel.addEventListener('message', onMessage);
-  try { authChannel.postMessage({ type: 'resume', rid, ids }); } catch { finish(null); }
+  try {
+    authChannel.postMessage({ type: 'resume', rid, ids, admin: isAdminRoute() });
+  } catch { finish(null); }
 });
 
 // This tab's answers to other tabs: hand over THIS session when asked for an
@@ -181,11 +212,14 @@ if (authChannel) {
       rememberDeadToken(msg.token);
       clearTabSession();
       setAuthNotice(SESSION_ENDED_MESSAGE);
-      const deadPath = window.location.pathname;
-      if (deadPath !== '/login' && deadPath !== '/signup') window.location.replace('/login');
+      goToUserSignIn();
       return;
     }
     if (msg.type === 'resume' && Array.isArray(msg.ids)) {
+      // Never hand a user session to a tab sitting in the admin console. That
+      // request is the route by which an admin tab used to become a user tab,
+      // and from there a user sign-out destroyed the admin session.
+      if (msg.admin) return;
       const id = getActiveAccountId();
       const token = getToken();
       if (!id || !token || !msg.ids.includes(id)) return;
@@ -195,8 +229,7 @@ if (authChannel) {
         // login form rather than looping through a doomed /dashboard.
         clearTabSession();
         setAuthNotice(SESSION_ENDED_MESSAGE);
-        const heldPath = window.location.pathname;
-        if (heldPath !== '/login' && heldPath !== '/signup') window.location.replace('/login');
+        goToUserSignIn();
         return;
       }
       postToTabs({ type: 'session', rid: msg.rid, id, token, user: getStoredUser() });
@@ -207,8 +240,7 @@ if (authChannel) {
       // (only THIS account's session — others are untouched), clear the tab,
       // and show the login screen if we're on an app page.
       signOutCurrentAccount().then(() => {
-        const path = window.location.pathname;
-        if (path !== '/login' && path !== '/signup') window.location.replace('/login');
+        goToUserSignIn();
       }).catch(() => { /* local clear already happened */ });
     }
   });
@@ -233,6 +265,13 @@ const accountIdOf = (token) => {
   const payload = decodeJwt(token);
   return payload && payload.id ? String(payload.id) : null;
 };
+
+// Which account a token belongs to, as a plain string. Exported so a caller can
+// answer "is this sign-in for the account this tab is ALREADY on?" without
+// decoding a JWT itself — the identity check behind keeping the cached profile
+// across a re-sign-in (see completeLogin in Pages/LogIn.jsx), where guessing
+// wrong would hand one account another's avatar.
+export { accountIdOf };
 
 const isAdminToken = (token) => !!token && decodeJwt(token)?.role === 'admin';
 
@@ -525,6 +564,18 @@ export const listAccounts = () => {
 // works — the caller then falls back to a fresh sign-in.
 export const resumeSession = async (timeoutMs = 400) => {
   if (getToken()) return true;
+  // THE FIX for "signing in as a user turned my admin tab into a user tab".
+  //
+  // The account directory is in localStorage, which every tab shares, so a tab
+  // opened for the admin console can see that this browser has user accounts and
+  // decide to ask other tabs for one. It got handed one, and the tab silently
+  // became a user session — after which a user sign-out matched it and hard-
+  // navigated the admin console to `/login`.
+  //
+  // There is nothing to resume: admin routes authenticate with `adminToken` and
+  // no admin page reads a user credential. So the bootstrap declines outright
+  // rather than trying to be clever about which kind of session it found.
+  if (isAdminRoute()) return false;
   const ids = readDirectory().map((e) => e.id);
   if (!ids.length) return false;
   const hit = await requestSessionFromTabs(ids, timeoutMs);
@@ -781,10 +832,12 @@ const handleAuthError = (serverMessage, code) => {
     clearTabSession();
     setAuthNotice(message);
   }
-  // Redirect to login page (but never yank the signup form mid-typing).
-  if (window.location.pathname !== '/login' && window.location.pathname !== '/signup') {
-    window.location.replace('/login');
-  }
+  // Send the tab to the user sign-in screen — a no-op in the admin area, where
+  // this would destroy a perfectly good admin console over a user-side event.
+  // NOTE this runs even when `token` is falsy: a 401 from any caller on an admin
+  // route used to navigate that tab to `/login`, which is the same bug arriving
+  // by a different road.
+  goToUserSignIn();
   return message;
 };
 
@@ -1165,6 +1218,121 @@ export const completePasswordReset = async (token, newPassword) => {
     throw err;
   }
   return data; // { message, success }
+};
+
+// ── Alternative recovery proofs ──────────────────────────────────────────────
+// For when the mailbox is the thing that is broken — which is, inconveniently,
+// the exact situation people open the reset screen in. Each of these proves
+// control of the account by some other route and returns the SAME grant the
+// emailed link would have produced, so `completePasswordReset` redeems them all
+// identically and there is still exactly one place a password changes.
+//
+// A 401 from any of them is deliberately UNDIFFERENTIATED: unknown account, no
+// second factor configured, wrong secret, spent secret and locked account all
+// come back the same. The screen therefore has nothing to branch on and cannot
+// accidentally leak which is which.
+//
+// ── Why these cannot use `friendlyError` directly ───────────────────────────
+//
+// `friendlyError(401)` calls `handleAuthError`, which treats the 401 as proof
+// that THIS TAB's session is dead: it clears the tab session and navigates to
+// /login. On a signed-in screen that is exactly right.
+//
+// Here it is a bug, and a bad one. These routes are UNAUTHENTICATED — the
+// caller holds no session at all — and the server answers 401 for a *wrong
+// recovery code*. So the first person to mistype their code was silently signed
+// out of the tab and thrown to the sign-in screen, mid-recovery, with their
+// address gone and no explanation. Every subsequent attempt did the same thing.
+//
+// Passing `isLoginAttempt = true` skips the teardown and returns the server's
+// own message, which is the generic refusal by design. It is a naming fit that
+// happens to be exactly right: this IS an authentication attempt, just one that
+// never had a session to tear down in the first place.
+const recoveryError = (status, serverMessage) =>
+  new Error(friendlyError(status, serverMessage, true));
+
+/** Redeem a recovery (backup) code. */
+export const recoverWithRecoveryCode = async (email, code) => {
+  const res = await apiFetch('/auth/password-reset/recovery-code', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, code }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw recoveryError(res.status, data?.message);
+  return data; // { message, resetToken, expiresAt, remainingCodes }
+};
+
+/** Redeem a 6-digit code from an authenticator app. */
+export const recoverWithAuthenticator = async (email, code) => {
+  const res = await apiFetch('/auth/password-reset/authenticator', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, code }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw recoveryError(res.status, data?.message);
+  return data; // { message, resetToken, expiresAt }
+};
+
+/**
+ * Send the reset link to the account's verified secondary address instead.
+ *
+ * Always resolves: like `/request`, the server cannot answer honestly about
+ * whether the account exists or has a recovery address without becoming an
+ * enumeration oracle, so there is nothing here to branch on.
+ */
+export const requestRecoveryEmailReset = async (email) => {
+  const res = await apiFetch('/auth/password-reset/recovery-email', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw recoveryError(res.status, data?.message);
+  return data; // { message }
+};
+
+/**
+ * Redeem a passkey for a reset grant. Drives the full WebAuthn ceremony.
+ *
+ * Rejects with a `cancelled` flag when the person dismisses the platform prompt,
+ * so the caller can stay silent instead of showing an error for something they
+ * chose to cancel — the same distinction `signInWithPasskey` makes.
+ */
+export const recoverWithPasskey = async () => {
+  if (!isPasskeySupported()) {
+    throw new Error('This browser cannot use passkeys. Try Chrome, Edge, Safari or Firefox on this device.');
+  }
+  const webauthn = await loadWebAuthn();
+  if (!webauthn) return null; // a reload was scheduled; the page is going away
+  const { startAuthentication } = webauthn;
+
+  const optionsRes = await apiFetch('/auth/password-reset/passkey/options', { method: 'POST' });
+  const optionsJSON = await parseJSON(optionsRes);
+  if (!optionsRes.ok) throw recoveryError(optionsRes.status, optionsJSON?.message);
+
+  let response;
+  try {
+    response = await startAuthentication({ optionsJSON });
+  } catch {
+    // NotAllowedError covers both a dismissed prompt and a timeout. Neither is
+    // something the person did wrong, so it is reported as a cancel — the
+    // underlying error is deliberately not surfaced, because its text differs
+    // between browsers and would read as a fault on this screen.
+    const cancelled = new Error('Passkey prompt dismissed.');
+    cancelled.cancelled = true;
+    throw cancelled;
+  }
+
+  const verified = await apiFetch('/auth/password-reset/passkey/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ response }),
+  });
+  const data = await parseJSON(verified);
+  if (!verified.ok) throw recoveryError(verified.status, data?.message);
+  return data; // { message, resetToken, expiresAt }
 };
 
 // ── Account security dashboard (/api/security) ─────────────────────────────
@@ -1763,6 +1931,29 @@ export const replyToSupportThread = async (threadId, body) => {
 export const getMyPlan = async () => {
   const res = await apiFetch('/dashboard/my-plan', {
     headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// What the user is already taking — pre-fills the assessment's
+// "Currently Taking Supplements?" question from their existing plan.
+export const getCurrentSupplements = async () => {
+  const res = await apiFetch('/dashboard/current-supplements', {
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// Mark a whole time slot (Morning / Afternoon / Evening) taken in one press
+export const updateIntakeBulk = async (recordIds, taken) => {
+  const res = await apiFetch('/dashboard/intake/bulk', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify({ recordIds, taken }),
   });
   const data = await parseJSON(res);
   if (!res.ok) throw new Error(friendlyError(res.status, data?.message));

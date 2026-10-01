@@ -358,6 +358,442 @@
   border-color: #9ca3af;
 }
 
+.btn-mark-taken:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* ── The missed tray ─────────────────────────────────────────────────────
+   Doses whose window closed while they were still unticked. Parked at the very
+   bottom of the plan, below every live frame, so it never competes with what
+   the user can actually do right now. */
+.slot-tray {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+  padding-top: 16px;
+  border-top: 2px dashed #fecaca;
+}
+
+.slot-tray__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 9px 14px;
+  border: 1px solid #fecaca;
+  border-radius: var(--sw-radius-md, 14px);
+  background: linear-gradient(180deg, #fffbfb, #fef2f2);
+}
+
+/* Past the dead hours the day is over: cooler and flatter, so the tray stops
+   reading as something to act on. */
+.slot-tray--locked .slot-tray__header {
+  background: linear-gradient(180deg, #f8fafc, #eef2f7);
+  border-color: #dbe3ec;
+}
+
+.slot-tray__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #991b1b;
+}
+
+.slot-tray--locked .slot-tray__title { color: #475569; }
+
+.slot-tray__count {
+  font-size: 12px;
+  font-weight: 700;
+  color: #b91c1c;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #fee2e2;
+  white-space: nowrap;
+}
+
+.slot-tray--locked .slot-tray__count {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.slot-tray__note {
+  font-size: 12px;
+  color: #7f1d1d;
+}
+
+.slot-tray--locked .slot-tray__note { color: #64748b; }
+
+/* Shown when no frame is open — before 5 AM, or between windows. */
+.slots-idle {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px dashed #cbd5e1;
+  border-radius: var(--sw-radius-md, 14px);
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: #64748b;
+}
+
+/* A row the dead hours closed out: no button, and it says so. */
+.supplement-card--locked {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+  opacity: 0.85;
+}
+
+.supplement-card--locked .supplement-name { color: #64748b; }
+
+.supplement-locked-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #64748b;
+  font-size: 12.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* ── Dead-hour placeholders ────────────────────────────────────────────────
+   Every field listed, every one empty, each with a countdown. Showing the shape
+   of the day without offering a single button is what stops the pause from
+   reading as a broken screen. */
+.slots-deadhead {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid #dbe3ec;
+  border-radius: var(--sw-radius-md, 14px);
+  background: linear-gradient(180deg, #f8fafc, #eef2f7);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: #475569;
+}
+
+.slot-group--placeholder .slot-group__header {
+  background: linear-gradient(180deg, #fbfcfe, #f4f7fa);
+  border-color: #e6ebf1;
+  border-style: dashed;
+}
+
+.slot-group--placeholder .slot-group__icon { opacity: 0.5; }
+.slot-group--placeholder .slot-group__title { color: #64748b; }
+
+.slot-group__count--quiet {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.slot-group__countdown {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #0f766e;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #ccfbf1;
+  white-space: nowrap;
+}
+
+/* ── Dead hours (midnight → 4:00 AM) ────────────────────────────────────────
+   Deliberately the QUIETEST treatment in the file — cooler and flatter than
+   "Missed", which is warm-red. The distinction is the point: "Missed" is a
+   statement about the user's day, and telling someone at 2 AM that they missed
+   something would be both false and hostile. This just says: not now. */
+.slot-group--snoozed .slot-group__header {
+  background: linear-gradient(180deg, #f8fafc, #eef2f7);
+  border-color: #dbe3ec;
+}
+
+.slot-group--snoozed .slot-group__icon {
+  color: #64748b;
+  background: #e2e8f0;
+}
+
+.slot-group--snoozed .slot-group__title {
+  color: #475569;
+}
+
+.slot-group--snoozed .slot-group__window {
+  color: #64748b;
+}
+
+.slot-group__flag--night {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.supplement-card--snoozed {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+.supplement-card--snoozed .supplement-name {
+  color: #475569;
+}
+
+.supplement-card--snoozed:hover {
+  border-color: #cbd5e1;
+}
+
+/* ── Time-slot grouping ───────────────────────────────────────────────────
+   Today's plan is grouped Morning / Afternoon / Evening / Before Bed so it
+   reads the same way the results page's schedule does. The slot header is a
+   plain band: the list of cards below it is untouched, so a supplement still
+   looks exactly the same whether or not slots are ever rendered. */
+.supplements-list--slots {
+  /* The outer wrapper holds every section; each section scrolls its own list,
+     so one tall section cannot push the others out of view. */
+  max-height: none;
+  overflow: visible;
+  gap: 18px;
+}
+
+.slot-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.slot-group__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 14px;
+  border: 1px solid var(--sw-line, #e2f1ea);
+  border-radius: var(--sw-radius-md, 14px);
+  background: linear-gradient(180deg, #ffffff, #f4fbf7);
+  box-shadow: var(--sw-shadow-sm, 0 1px 2px rgba(9, 78, 58, 0.06));
+}
+
+.slot-group--complete .slot-group__header {
+  background: linear-gradient(180deg, #f2fdf8, #e7f8f0);
+  border-color: #b6ecd3;
+}
+
+/* A window whose time has passed with something still unticked. Deliberately
+   RECESSED rather than alarming: a missed dose is a fact to record, not an
+   error state to shout about, and a red block on every yesterday section is how
+   a tracker becomes something people stop opening. */
+.slot-group--missed .slot-group__header {
+  background: linear-gradient(180deg, #fffbfb, #fef2f2);
+  border-color: #fecaca;
+}
+
+.slot-group--missed .slot-group__icon {
+  color: #b91c1c;
+  background: #fee2e2;
+}
+
+.slot-group--missed .slot-group__title {
+  color: #7f1d1d;
+}
+
+/* Not yet open — ahead of the user, so it recedes rather than demanding action. */
+.slot-group--upcoming .slot-group__header {
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  border-color: #e5e7eb;
+}
+
+.slot-group--upcoming .slot-group__icon {
+  opacity: 0.55;
+}
+
+.slot-group__names {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+/* The hours, printed so the window is checkable rather than assumed. */
+.slot-group__window {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: #6b7280;
+  white-space: nowrap;
+}
+
+.slot-group--missed .slot-group__window {
+  color: #991b1b;
+}
+
+.slot-group__flag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.slot-group__flag--soon {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.missed-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  background: #fee2e2;
+  color: #b91c1c;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* A dose recorded outside its own window. Amber rather than red: it WAS taken,
+   just late — an error colour would overstate it. Amber specifically because the
+   sibling "Taken" pill is green, and green reads "on time". */
+.supplement-late-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #b45309;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* A missed row keeps its button usable — this is a late entry, not a lockout.
+   The styling says "out of time" while the control still works. */
+.supplement-card--missed {
+  background: #fef7f7;
+  border-color: #fecaca;
+  opacity: 0.92;
+}
+
+.supplement-card--missed .supplement-name {
+  color: #7f1d1d;
+}
+
+.supplement-card--missed:hover {
+  border-color: #fca5a5;
+}
+
+.slot-group__label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.slot-group__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  color: #0d9488;
+  background: #d9f2ec;
+}
+
+.slot-group__icon--morning   { color: #d97706; background: #fef3c7; }
+.slot-group__icon--afternoon { color: #0d9488; background: #d9f2ec; }
+.slot-group__icon--evening   { color: #4f46e5; background: #e0e7ff; }
+.slot-group__icon--night     { color: #4338ca; background: #e0e7ff; }
+.slot-group__icon--anytime   { color: #4b5563; background: #e5e7eb; }
+
+.slot-group__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #1f2937;
+}
+
+.slot-group__meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.slot-group__count {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #4b5563;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.08);
+  white-space: nowrap;
+}
+
+.slot-group__done {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: #10b981;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* "Take all morning" — the whole point of the grouping: one press instead of
+   five. Kept visually quieter than the per-item button so the individual
+   action is still the obvious default. */
+.btn-slot-taken {
+  padding: 7px 14px;
+  border: 1px solid #a7f3d0;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #047857;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color var(--sw-dur, 0.24s) ease,
+    border-color var(--sw-dur, 0.24s) ease, transform var(--sw-dur, 0.24s) ease;
+}
+
+.btn-slot-taken:hover:not(:disabled) {
+  background: #d1fae5;
+  border-color: #6ee7b7;
+  transform: translateY(-1px);
+}
+
+.btn-slot-taken:focus-visible {
+  outline: 3px solid var(--sw-teal, #0d9488);
+  outline-offset: 2px;
+}
+
+.btn-slot-taken:disabled {
+  opacity: 0.6;
+  cursor: progress;
+  transform: none;
+}
+
+@media (max-width: 768px) {
+  .slot-group__header {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .slot-group__meta {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
 /* This Week's Adherence */
 .adherence-box {
   display: flex;

@@ -1,12 +1,17 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import useSecurityMonitor from '../hooks/useSecurityMonitor';
 import { BASE_URL, parseJSON } from '../api';
 import { PLAN_LABELS, normalizePlanId } from '../utils/plan';
 import {
-  OVERVIEW_TREND_DAYS, formatMetricValue, formatCount, shareOf, dayParts,
+  OVERVIEW_TREND_DAYS, OVERVIEW_TREND_OPTIONS, normalizeWindow, trendCeiling,
+  formatMetricValue, formatCount, shareOf, dayParts,
   buildTrendSeries, axisTicks, initialsOf, displayNameOf, buildPlanMix, donutBackground,
+  sparkPath, buildSegments, buildRankedBars, buildFunnel, compareWindows, rateOf,
+  signedPercent, dayCountLabel,
 } from '../utils/adminOverview';
 import { pictureUrl } from '../utils/pictureUrl';
+import { securityFactor } from '../utils/securityFactor';
 import { formatShortDate, formatDateTime, isRealDate } from '../utils/dates';
 import { downloadSecurityReport } from '../utils/securityReport';
 import './AdminDashboard.css';
@@ -571,6 +576,34 @@ function AdminDashboard() {
     if (!response.ok) throw new Error(data?.message || 'Unable to load admin data.');
     return data;
   }, [navigate]);
+
+  // ── Live security monitor (shared) ────────────────────────────────────
+  // Owned here, not inside either surface, because the Overview "Threat
+  // notifications" card and the Security Center tab answer the same question
+  // and used to answer it from two unrelated endpoints — so the card could say
+  // "All systems secure" while the tab it links to showed critical monitors.
+  // One fetch and one poll for both means they cannot disagree.
+  //
+  // `active` keeps the 45 probes off the wire while neither surface is on
+  // screen: the card only renders on Overview, the table only on Security.
+  // Switching between the two then shows the already-warm result instead of
+  // flashing 45 "Checking…" rows.
+  const monitor = useSecurityMonitor(request, tab === 'overview' || tab === 'security');
+
+  // A specific monitor to reveal when the Security tab opens, set by clicking a
+  // row on the Overview card. Cleared once consumed so a later manual visit to
+  // the tab starts unfiltered.
+  const [focusMonitorKey, setFocusMonitorKey] = useState(null);
+
+  const openSecurityCenter = useCallback((monitorKey = null) => {
+    setFocusMonitorKey(monitorKey);
+    setTab('security');
+  }, []);
+
+  // Leaving the tab through the sidebar (rather than a deep link) discards any
+  // pending focus, so returning to Security later is not silently filtered to
+  // one monitor the admin picked minutes ago.
+  const clearMonitorFocus = useCallback(() => setFocusMonitorKey(null), []);
 
   const loadUsers = useCallback(async () => {
     try {
@@ -1351,7 +1384,7 @@ function AdminDashboard() {
       // queue someone has to work through, so it lands on that tab directly.
       handleTabClick('subscriptions');
     } else if (notification.type === 'security') {
-      setTab('security');
+      openSecurityCenter();
     }
     if (notification._id && !notification.read) {
       markAsRead(notification._id);
@@ -1361,6 +1394,11 @@ function AdminDashboard() {
 
   const handleTabClick = (item) => {
     setTab(item);
+    // A sidebar click is a deliberate move to a whole tab, so it always cancels
+    // a pending deep-link focus. Without this, an admin who deep-linked to one
+    // monitor, visited Users, then came back via the sidebar would land on a
+    // Security Center still filtered to that one monitor with no visible cause.
+    clearMonitorFocus();
     // Pre-fetch full lists the first time heavy tabs are opened
     if (item === 'assessment-management' && allUsers.length === 0) {
       request('/users?search=').then(data => {
@@ -1626,14 +1664,14 @@ function AdminDashboard() {
           {error && <div className="admin-alert danger" role="alert">{error}</div>}
           {notice && <div className="admin-alert success" role="status">{notice}</div>}
 
-          {tab === 'overview'               && <div className="admin-tab-panel"><Overview overview={overview} onNavigate={setTab} /></div>}
+          {tab === 'overview'               && <div className="admin-tab-panel"><Overview overview={overview} onNavigate={setTab} monitor={monitor} onOpenSecurity={openSecurityCenter} /></div>}
           {tab === 'users'                  && <div className="admin-tab-panel"><Users users={users} setUsers={setUsers} usersFetchedAt={usersFetchedAt} search={search} setSearch={value => { searchRef.current = value; setSearch(value); }} loadUsers={loadUsers} request={request} onSubscriptionChanged={applySubscriptionUpdate} updateAccount={updateAccount} deleteAccount={deleteAccount} deletingUserId={deletingUserId} unlockUser={unlockUser} expandedUser={expandedUser} setExpandedUser={setExpandedUser} /></div>}
           {tab === 'admins'                 && <div className="admin-tab-panel"><Admins admins={admins} adminsFetchedAt={adminsFetchedAt} search={adminSearch} setSearch={value => { adminSearchRef.current = value; setAdminSearch(value); }} loadAdmins={loadAdmins} toggleAdmin={toggleAdmin} unlockAdmin={unlockAdmin} currentAdmin={profile} expandedAdmin={expandedAdmin} setExpandedAdmin={setExpandedAdmin} notifyCredentials={notifyCredentials} previewCredentialNotice={previewCredentialNotice} credentialNotice={credentialNotice} clearCredentialNotice={() => setCredentialNotice(null)} previewCredentialHandoff={previewCredentialHandoff} handoffCredentials={handoffCredentials} credentialHandoff={credentialHandoff} clearCredentialHandoff={() => setCredentialHandoff(null)} /></div>}
           {tab === 'subscriptions'          && <div className="admin-tab-panel"><AdminSubscriptionRequests request={request} /></div>}
           {tab === 'chats'                   && <div className="admin-tab-panel"><AdminSupportChats request={request} /></div>}
           {tab === 'assessment-management'  && <div className="admin-tab-panel"><AssessmentManagement users={allUsers} /></div>}
           {tab === 'ai'                     && <div className="admin-tab-panel"><AiPanel ai={ai} onCheckNow={checkAiNow} checking={checkingAi} reload={aiReload} /></div>}
-          {tab === 'security'               && <div className="admin-tab-panel"><SecurityStatus adminRequest={request} onDownloadReport={() => downloadReportRef.current()} /></div>}
+          {tab === 'security'               && <div className="admin-tab-panel"><SecurityStatus monitor={monitor} onDownloadReport={() => downloadReportRef.current()} detection={ai?.detection} focusMonitorKey={focusMonitorKey} /></div>}
           {tab === 'profile'                && <div className="admin-tab-panel"><ProfilePanel profile={profile} appearance={appearance} onSaveAppearance={saveAppearance} editOpen={editProfileOpen} onToggleEdit={() => setEditProfileOpen(v => !v)} form={profileForm} setForm={setProfileForm} message={profileMessage} onSubmit={changePassword} rotateOtp={rotateOtp} setRotateOtp={setRotateOtp} rotatedKey={rotatedKey} onRotate={rotateAuthenticator} /></div>}
         </main>
       </div>
@@ -1692,23 +1730,90 @@ const METRIC_STYLE = {
   activeSubscriptions:   { from: '#059669', to: '#34d399', glow: 'rgba(5, 150, 105, .75)' },
   inactiveSubscriptions: { from: '#ea580c', to: '#fbbf24', glow: 'rgba(234, 88, 12, .7)' },
 };
+
+/* Severity orders for the health-profile strips. These are the labels the
+   assessment questionnaire actually offers (AssessmentPage SLEEP_OPTIONS, the
+   diet radio list, and the Low/Moderate/High/Severe stress scale the
+   recommendation engine branches on), listed best → worst so a strip always
+   reads left-to-right from healthy to concerning.
+
+   A label that is NOT in these lists still renders — buildSegments appends
+   unknown labels in count order — so adding an option to the questionnaire
+   shows up here rather than silently disappearing. */
+const DIET_ORDER = ['DASH', 'Mediterranean', 'Flexitarian', 'Pescatarian', 'Omnivore', 'Vegetarian', 'Paleo', 'Keto', 'Vegan', 'Carnivore'];
+const STRESS_ORDER = ['Low', 'Moderate', 'High', 'Severe'];
+const SLEEP_ORDER = ['Excellent', 'Good', 'Average', 'Poor', 'Very Poor'];
+
 const METRIC_STYLE_FALLBACK = { from: '#334155', to: '#64748b', glow: 'rgba(51, 65, 85, .6)' };
+
+// Status words for a live monitor row. These mirror the labels the Security
+// Center's own status pills use, so a control described here reads identically
+// once the admin follows the link.
+const THREAT_STATUS_LABEL = {
+  critical: 'Critical',
+  error: 'Error',
+  warning: 'Warning',
+};
+const statusLabel = status => THREAT_STATUS_LABEL[status] || 'Warning';
+
+// Wall-clock time of the last completed probe run. Deliberately absolute
+// rather than relative ("2m ago"): the Overview card has no live clock of its
+// own, and a relative label with no clock behind it would sit frozen showing a
+// number that is quietly wrong.
+function formatMonitorClock(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
 
 /* `overview` is null until the first GET /admin/overview answers, so every
    branch below has to render from a missing payload rather than assume a shape
    — the skeleton is what a first-time visitor sees during that window. */
-function Overview({ overview, onNavigate }) {
+function Overview({ overview, onNavigate, monitor, onOpenSecurity }) {
   const metrics = (overview && typeof overview.metrics === 'object' && overview.metrics) || {};
   const analytics = (overview && typeof overview.analytics === 'object' && overview.analytics) || {};
   const recentUsers = Array.isArray(overview?.recentUsers) ? overview.recentUsers : [];
-  const notifications = Array.isArray(overview?.notifications) ? overview.notifications : [];
+
+  /* Which window the two trend charts are read over. ONE control drives both, so
+     "signups" and "assessments" can never be showing different spans of time
+     without the reader noticing — which is the one way two side-by-side charts
+     quietly contradict each other. */
+  const [rangeDays, setRangeDays] = useState(OVERVIEW_TREND_DAYS);
+  // The server ships the widest window once; the toggle may only narrow to it.
+  const windowOptions = useMemo(
+    () => OVERVIEW_TREND_OPTIONS.filter(days => days <= trendCeiling(overview?.trendDays)),
+    [overview?.trendDays],
+  );
+  // A payload that lands mid-session can report a narrower ceiling than the
+  // window already selected. Falling back rather than clamping keeps the label
+  // ("last 30 days") and the rendered chart in agreement.
+  const activeWindow = normalizeWindow(rangeDays, overview?.trendDays);
+  // The card is driven by the SAME live monitor the Security tab renders, not by
+  // the static env checks in `overview.notifications`. Those two sets barely
+  // overlap, so the card could read "All systems secure" while the Security
+  // Center it links to was showing critical monitors.
+  const monitorTotal = monitor?.total || 0;
+  const monitorCounts = (monitor && typeof monitor.counts === 'object' && monitor.counts) || {};
+  const attention = Array.isArray(monitor?.attention) ? monitor.attention : [];
+  const monitorPending = Boolean(monitor?.pending);
+  const monitorError = monitor?.error || '';
+  const monitorSyncedAt = monitor?.syncedAt || null;
+  const healthyCount = monitorCounts.healthy || 0;
+  const warningCount = monitorCounts.warning || 0;
+  const criticalCount = (monitorCounts.critical || 0) + (monitorCounts.error || 0);
+  // How many live probes the card is allowed to list before deferring the rest
+  // to the Security tab. The panel is one column of a dashboard grid; a full 45
+  // rows would push every other panel below the fold.
+  const THREAT_PREVIEW = 4;
+  const shownThreats = attention.slice(0, THREAT_PREVIEW);
+  const hiddenThreats = attention.length - shownThreats.length;
 
   const totalUsers = Math.max(0, Number(metrics.users) || 0);
   const paidMembers = Math.max(0, Number(metrics.activeSubscriptions) || 0);
   const freeMembers = Math.max(0, Number(metrics.inactiveSubscriptions) || 0);
 
   /* ── Activity window ────────────────────────────────────────────── */
-  const series = buildTrendSeries(overview?.assessmentTrend);
+  const series = buildTrendSeries(overview?.assessmentTrend, activeWindow);
   const windowTotal = series.reduce((sum, day) => sum + day.count, 0);
   const windowMax = series.reduce((max, day) => Math.max(max, day.count), 0);
   const windowDays = series.length;
@@ -1721,13 +1826,19 @@ function Overview({ overview, onNavigate }) {
   const lastDay = dayParts(series[windowDays - 1]?.key);
   const windowLabel = windowDays
     ? `${firstDay.month} ${firstDay.number} – ${lastDay.month} ${lastDay.number}`
-    : `Last ${OVERVIEW_TREND_DAYS} days`;
+    : `Last ${activeWindow} days`;
+  // The badge is the total ASSESSMENTS IN THE WINDOW, never "all time" — the
+  // two used to be conflated, which made a quiet fortnight look like a
+  // collapsing product when the lifetime total was unchanged.
+  const windowShare = windowTotal > 0
+    ? `${Math.min(100, Math.round((windowTotal / (Number(metrics.assessments) || windowTotal)) * 100))}% of all time`
+    : 'None in this window';
 
   /* ── Metric cards ───────────────────────────────────────────────── */
   const metricNotes = {
     users: `${formatCount(paidMembers)} paying · ${formatCount(freeMembers)} free`,
     assessments: windowTotal > 0
-      ? `${formatCount(windowTotal)} in the last ${windowDays || OVERVIEW_TREND_DAYS} days`
+      ? `${formatCount(windowTotal)} in the last ${windowDays || activeWindow} days`
       : 'None in this window',
     activeSubscriptions: shareOf(paidMembers, totalUsers),
     inactiveSubscriptions: shareOf(freeMembers, totalUsers),
@@ -1770,6 +1881,149 @@ function Overview({ overview, onNavigate }) {
       label: 'New · 30 days', note: shareOf(signups30d, totalUsers),
     },
   ];
+
+  /* ── Acquisition: signups over the selected window ───────────────── */
+  // The series is read at the FULL ceiling, not at the selected window, because
+  // the ± comparison underneath needs a real 7-day baseline behind the recent 7.
+  // Narrowing the source to 7 days would make that baseline 7 days of zeros and
+  // print "−100%" against a week that never existed.
+  const signupSeries = buildTrendSeries(overview?.signupTrend, trendCeiling(overview?.trendDays));
+  // The PLOT is then cut back to the selected window, unconditionally. The
+  // comparison keeps the full series; the chart must not, or the two panels
+  // under one shared range control would quietly be showing different spans of
+  // time — the one way two side-by-side charts contradict each other.
+  const signupWindow = signupSeries.slice(Math.max(0, signupSeries.length - activeWindow));
+  const signupTotal = signupWindow.reduce((sum, day) => sum + day.count, 0);
+  const signupMax = signupWindow.reduce((max, day) => Math.max(max, day.count), 0);
+  // Always a 7-vs-7 comparison, whatever the chart is showing, and labelled as
+  // such — a reader who has the window on 30 days must not assume the delta
+  // covers 30 days.
+  const signupCompare = compareWindows(signupSeries, { recent: 7, previous: 7 });
+  const signupSpark = sparkPath(signupWindow, { width: 320, height: 96 });
+  const signupFirst = dayParts(signupWindow[0]?.key);
+  const signupLast = dayParts(signupWindow[signupWindow.length - 1]?.key);
+  const signupRangeLabel = signupWindow.length
+    ? `${signupFirst.month} ${signupFirst.number} – ${signupLast.month} ${signupLast.number}`
+    : `Last ${activeWindow} days`;
+  // Peak day, as a date. Without it the sparkline shows a shape with no way to
+  // ask "which day was that?".
+  const signupPeak = signupWindow.reduce((best, day) => (day.count > (best?.count ?? -1) ? day : best), null);
+  const signupPeakLabel = signupPeak?.count > 0 ? dayParts(signupPeak.key) : null;
+
+  /* ── Activation funnel ──────────────────────────────────────────── */
+  // Registered is the denominator for the WHOLE funnel, so the three rows are
+  // always comparable: the share column answers "of everyone who ever joined,
+  // how far did they get", which is the only question the rows can answer
+  // against each other.
+  const activatedMembers = Math.min(totalUsers, Math.max(0, Number(analytics.activatedMembers) || 0));
+  const funnelRows = buildFunnel([
+    { key: 'registered', label: 'Registered', hint: 'Accounts created', value: totalUsers },
+    { key: 'assessed', label: 'Took an assessment', hint: 'Reached the questionnaire', value: activatedMembers },
+    { key: 'subscribed', label: 'Subscribed', hint: 'On a live paid plan', value: paidMembers },
+  ]);
+  const funnelTop = funnelRows[0]?.value || 0;
+  // One number is not a conversion, so the panel says so rather than printing
+  // a confident 100% for a single-member install.
+  const funnelVerdict = funnelTop > 1 ? null : 'Not enough members to read a conversion rate yet.';
+
+  /* ── Engagement depth ───────────────────────────────────────────── */
+  const active7d = Math.max(0, Number(analytics.activeAssessors7d) || 0);
+  const active30d = Math.max(0, Number(analytics.activeAssessors30d) || 0);
+  const repeatAssessors = Math.max(0, Number(analytics.repeatAssessors) || 0);
+  const oneOffAssessors = Math.max(0, Number(analytics.oneOffAssessors) || 0);
+  const repeatPct = Math.max(0, Math.min(100, Number(analytics.repeatPct) || 0));
+  const totalAssessments = Math.max(0, Number(metrics.assessments) || 0);
+  const engagementTiles = [
+    {
+      id: 'activation', icon: 'flag', tone: 'indigo', value: formatCount(activatedMembers),
+      label: 'Ever assessed', note: activatedMembers > 0 ? shareOf(activatedMembers, totalUsers) : 'Nobody has submitted one yet',
+      progress: totalUsers > 0 ? Math.round((activatedMembers / totalUsers) * 100) : 0,
+    },
+    {
+      id: 'returning', icon: 'repeat', tone: 'emerald', value: `${repeatPct}%`, label: 'Returned members',
+      note: `${formatCount(repeatAssessors)} of ${formatCount(activatedMembers)} came back`,
+      progress: repeatPct,
+    },
+    {
+      id: 'active7', icon: 'pulse', tone: 'violet', value: formatCount(active7d),
+      label: 'Active · 7 days', note: active30d > 0 ? `${formatCount(active30d)} in 30 days` : 'No 30-day activity yet',
+    },
+    {
+      id: 'depth', icon: 'layers', tone: 'cyan', value: rateOf(totalAssessments, activatedMembers),
+      label: 'Per assessor', note: `${formatCount(oneOffAssessors)} took exactly one`,
+    },
+  ];
+
+  /* ── Renewal runway ─────────────────────────────────────────────── */
+  const runway = (analytics.runway && typeof analytics.runway === 'object' && analytics.runway) || {};
+  const expiring7d = Math.max(0, Number(runway.expiring7d) || 0);
+  const expiring30d = Math.max(0, Number(runway.expiring30d) || 0);
+  const permanentGrants = Math.max(0, Number(runway.permanent) || 0);
+  const lapsed30d = Math.max(0, Number(runway.lapsed30d) || 0);
+  // The server prices this from the catalogue the checkout charges from, so the
+  // figure cannot drift from the pricing page. It is LIST value, and is
+  // labelled as such — plans are granted by hand, so nothing here has been
+  // reconciled against a bank statement.
+  const listValue = (analytics.listValueMonthly && typeof analytics.listValueMonthly === 'object'
+    ? analytics.listValueMonthly : {}) || {};
+  const listValueText = typeof listValue.formatted === 'string' && listValue.formatted.trim()
+    ? listValue.formatted : '—';
+  // expiring30d already includes expiring7d, so the "next 7-30 days" band is
+  // the difference — adding them would double-count every imminent renewal.
+  const expiringLater = Math.max(0, expiring30d - expiring7d);
+  const runwayTiles = [
+    {
+      id: 'renew7', icon: 'refresh', tone: expiring7d > 0 ? 'amber' : 'emerald', value: formatCount(expiring7d),
+      label: 'Renews · 7 days', note: expiring7d > 0 ? 'Follow up before the window closes' : 'Nothing due this week',
+    },
+    {
+      id: 'renew30', icon: 'calendar', tone: 'cyan', value: formatCount(expiringLater),
+      label: 'Renews · 7–30 days', note: `${formatCount(expiring30d)} inside 30 days`,
+    },
+    {
+      id: 'permanent', icon: 'shield', tone: 'indigo', value: formatCount(permanentGrants),
+      label: 'Permanent grants', note: `${formatCount(Math.max(0, Number(runway.live) || 0))} live in total`,
+    },
+    {
+      id: 'lapsed', icon: 'flag', tone: lapsed30d > 0 ? 'rose' : 'emerald', value: formatCount(lapsed30d),
+      label: 'Lapsed · 30 days', note: lapsed30d > 0 ? 'Windows that closed' : 'No recent lapses',
+    },
+  ];
+
+  /* ── Member health profile ──────────────────────────────────────── */
+  const profile = (analytics.profile && typeof analytics.profile === 'object' && analytics.profile) || {};
+  // Fixed severity orders. The questionnaire is the source of these labels, and
+  // a payload in a different order still renders worst-last.
+  const dietSegments = buildSegments(profile.diets, DIET_ORDER);
+  const stressSegments = buildSegments(profile.stress, STRESS_ORDER);
+  const sleepSegments = buildSegments(profile.sleep, SLEEP_ORDER);
+  const goalBars = buildRankedBars(
+    (Array.isArray(profile.goals) ? profile.goals : []).map(goal => ({ label: goal?.label, value: goal?.count })),
+    { limit: 5 },
+  );
+  const segmentTotal = segments => segments.reduce((sum, part) => sum + part.value, 0);
+
+  /* ── Review backlog ─────────────────────────────────────────────── */
+  const review = (analytics.review && typeof analytics.review === 'object' && analytics.review) || {};
+  const priorityQueued = Math.max(0, Number(review.priority) || 0);
+  const openFlags = Math.max(0, Number(review.openFlags) || 0);
+  const backlogTotal = priorityQueued + openFlags;
+  const reviewTiles = [
+    {
+      id: 'priority', icon: 'flag', tone: priorityQueued > 0 ? 'amber' : 'emerald', value: formatCount(priorityQueued),
+      label: 'Priority queue', note: 'Flagged Priority by an admin',
+    },
+    {
+      id: 'flags', icon: 'alert', tone: openFlags > 0 ? 'rose' : 'emerald', value: formatCount(openFlags),
+      label: 'Open flags', note: 'Auto-detected, not yet resolved',
+    },
+    {
+      id: 'clear', icon: 'check', tone: backlogTotal > 0 ? 'indigo' : 'emerald',
+      value: backlogTotal > 0 ? formatCount(backlogTotal) : 'Clear', label: 'Awaiting review',
+      note: backlogTotal > 0 ? 'Items in assessment management' : 'Nothing needs your attention',
+    },
+  ];
+
 
   return (
     <>
@@ -1819,6 +2073,25 @@ function Overview({ overview, onNavigate }) {
               <span className="ov-panel-count">{formatCount(windowTotal)} total</span>
               <span className="ov-panel-count">{windowAvg.toFixed(1)} / day</span>
             </div>
+          </div>
+
+          {/* One range control for BOTH trend charts. The server sends the widest
+              window once, so switching costs a re-slice rather than a request —
+              and because the control is shared, the two charts can never be
+              showing different spans of time. */}
+          <div className="ov-range" role="group" aria-label="Analytics time range">
+            {windowOptions.map(days => (
+              <button
+                type="button"
+                key={days}
+                className={`ov-range__btn${days === activeWindow ? ' is-active' : ''}`}
+                aria-pressed={days === activeWindow}
+                onClick={() => setRangeDays(days)}
+              >
+                {days}d
+              </button>
+            ))}
+            <span className="ov-range__hint">{windowShare}</span>
           </div>
 
           {windowTotal === 0 ? (
@@ -1949,6 +2222,288 @@ function Overview({ overview, onNavigate }) {
 
       </section>
 
+      {/* ── Analytics, second tier ─────────────────────────────────────
+          Acquisition, activation, engagement depth, renewal runway, the health
+          profile members submit, and the review backlog. Each row is
+          self-contained: an empty payload renders an empty state or a zeroed
+          tile, never a blank box and never a NaN in a style attribute. */}
+      <section className="ov-analytics-grid ov-analytics-grid--even">
+
+        {/* Signup momentum — the top of the funnel, over time. */}
+        <div className="admin-panel ov-analytics">
+          <div className="ov-panel-header">
+            <div>
+              <h3>Signup momentum</h3>
+              <p className="ov-panel-sub">{signupRangeLabel}</p>
+            </div>
+            <div className="ov-panel-badges">
+              <span className="ov-panel-count">{formatCount(signupTotal)} new</span>
+              <span className="ov-panel-count">
+                {signupCompare.pct === null
+                  ? `${formatCount(signupCompare.recent)} in 7 days`
+                  : `${signedPercent(signupCompare.pct)} vs prev 7d`}
+              </span>
+            </div>
+          </div>
+
+          {signupTotal === 0 ? (
+            <div className="ov-empty-state">
+              <span className="ov-empty-state__icon"><UserStatIcon name="user" size={26} /></span>
+              <strong>No new accounts in this window</strong>
+              <p>The line starts drawing here the moment someone registers.</p>
+            </div>
+          ) : (
+            <>
+              <div
+                className="ov-spark"
+                role="img"
+                aria-label={`New accounts per day over ${signupWindow.length} days: ${signupTotal} in total, peak ${signupMax} on ${signupPeakLabel ? signupPeakLabel.full : 'no single day'}.`}
+              >
+                <svg viewBox="0 0 320 96" preserveAspectRatio="none" focusable="false">
+                  <defs>
+                    <linearGradient id="ov-spark-fill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#6366f1" stopOpacity="0.34" />
+                      <stop offset="100%" stopColor="#6366f1" stopOpacity="0.02" />
+                    </linearGradient>
+                  </defs>
+                  <path className="ov-spark__area" d={signupSpark.area} fill="url(#ov-spark-fill)" />
+                  <path className="ov-spark__line" d={signupSpark.line} />
+                </svg>
+              </div>
+              <p className="ov-spark__foot">
+                {signupPeakLabel
+                  ? <>Peak {signupPeakLabel.full} · <strong>{signupPeak.count}</strong> {signupPeak.count === 1 ? 'account' : 'accounts'}</>
+                  : `${formatCount(signupMax)} at the busiest`}
+                <span className="ov-spark__delta">
+                  {signupCompare.direction === 'up' ? '▲' : signupCompare.direction === 'down' ? '▼' : '■'}{' '}
+                  {formatCount(Math.abs(signupCompare.delta))} vs previous 7 days
+                </span>
+              </p>
+            </>
+          )}
+        </div>
+
+        {/* Member journey — registered → assessed → subscribed. */}
+        <div className="admin-panel ov-analytics">
+          <div className="ov-panel-header">
+            <div>
+              <h3>Member journey</h3>
+              <p className="ov-panel-sub">Share of everyone who joined</p>
+            </div>
+          </div>
+          {funnelRows.length === 0 || totalUsers === 0 ? (
+            <div className="ov-empty-state">
+              <span className="ov-empty-state__icon"><UserStatIcon name="users" size={26} /></span>
+              <strong>No members yet</strong>
+              <p>The funnel builds itself from the first account to register.</p>
+            </div>
+          ) : (
+            <>
+              <ul className="ov-funnel">
+                {funnelRows.map((row, index) => (
+                  <li className="ov-funnel__row" key={row.key}>
+                    <div className="ov-funnel__head">
+                      <span className="ov-funnel__label">{row.label}</span>
+                      <span className="ov-funnel__nums">
+                        <strong>{formatCount(row.value)}</strong>
+                        <small>{row.sharePct}%</small>
+                      </span>
+                    </div>
+                    <span className="ov-funnel__track" aria-hidden="true">
+                      <i
+                        style={{ width: `${row.widthPct}%` }}
+                        data-step={index}
+                      />
+                    </span>
+                    <span className="ov-funnel__meta">
+                      {row.hint}
+                      {row.dropPct !== null && row.dropPct > 0 && (
+                        <> · <b>−{row.dropPct}%</b> from the step above</>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {funnelVerdict && <p className="ov-funnel__note">{funnelVerdict}</p>}
+            </>
+          )}
+        </div>
+
+        {/* Engagement depth — did they come back? */}
+        <div className="admin-panel ov-analytics">
+          <div className="ov-panel-header">
+            <div>
+              <h3>Engagement depth</h3>
+              <p className="ov-panel-sub">Beyond the first assessment</p>
+            </div>
+          </div>
+          {activatedMembers === 0 ? (
+            <div className="ov-empty-state">
+              <span className="ov-empty-state__icon"><UserStatIcon name="activity" size={26} /></span>
+              <strong>No assessments yet</strong>
+              <p>Retention appears here once members start submitting them.</p>
+            </div>
+          ) : (
+            <div className="ov-stats">
+              {engagementTiles.map(tile => (
+                <div className={`ov-stat ov-stat--${tile.tone}`} key={tile.id}>
+                  <span className="ov-stat__icon"><UserStatIcon name={tile.icon} size={17} /></span>
+                  <strong className="ov-stat__value">{tile.value}</strong>
+                  <span className="ov-stat__label">{tile.label}</span>
+                  <span className="ov-stat__note">{tile.note}</span>
+                  {tile.progress !== undefined && (
+                    <span className="ov-stat__meter" aria-hidden="true">
+                      <i style={{ width: `${tile.progress}%` }} />
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+      </section>
+
+      <section className="ov-analytics-grid ov-analytics-grid--even">
+
+        {/* Renewal runway — what needs following up before it lapses. */}
+        <div className="admin-panel ov-analytics">
+          <div className="ov-panel-header">
+            <div>
+              <h3>Renewal runway</h3>
+              <p className="ov-panel-sub">Paid windows closing soon</p>
+            </div>
+            <div className="ov-panel-badges">
+              <span className="ov-panel-count ov-panel-count--accent" title="Paid base priced at the published catalogue rates. Plans are granted by hand, so this is list value rather than recognised revenue.">
+                {listValueText} / mo list
+              </span>
+            </div>
+          </div>
+          <div className="ov-stats">
+            {runwayTiles.map(tile => (
+              <div className={`ov-stat ov-stat--${tile.tone}`} key={tile.id}>
+                <span className="ov-stat__icon"><UserStatIcon name={tile.icon} size={17} /></span>
+                <strong className="ov-stat__value">{tile.value}</strong>
+                <span className="ov-stat__label">{tile.label}</span>
+                <span className="ov-stat__note">{tile.note}</span>
+              </div>
+            ))}
+          </div>
+          <p className="ov-runway__foot">
+            {dayCountLabel(expiring30d, 'window', 'windows')} inside 30 days · {formatCount(paidMembers)} live
+            {' · '}{formatCount(paidMembers)} of {formatCount(totalUsers)} members on a plan
+          </p>
+        </div>
+
+        {/* Health profile — what members say about themselves. */}
+        <div className="admin-panel ov-analytics">
+          <div className="ov-panel-header">
+            <div>
+              <h3>Health profile</h3>
+              <p className="ov-panel-sub">What members report</p>
+            </div>
+          </div>
+          {dietSegments.length === 0 && stressSegments.length === 0 && sleepSegments.length === 0 ? (
+            <div className="ov-empty-state">
+              <span className="ov-empty-state__icon"><UserStatIcon name="users" size={26} /></span>
+              <strong>No profile answers yet</strong>
+              <p>Diet, stress and sleep break down as soon as assessments arrive.</p>
+            </div>
+          ) : (
+            <div className="ov-profile">
+              {[
+                { key: 'diet', title: 'Diet', segments: dietSegments },
+                { key: 'stress', title: 'Stress level', segments: stressSegments },
+                { key: 'sleep', title: 'Sleep quality', segments: sleepSegments },
+              ].map(group => (
+                <div className="ov-profile__group" key={group.key}>
+                  <div className="ov-profile__head">
+                    <span>{group.title}</span>
+                    <small>{formatCount(segmentTotal(group.segments))} answers</small>
+                  </div>
+                  {group.segments.length === 0 ? (
+                    <p className="ov-profile__none">No answers recorded</p>
+                  ) : (
+                    <>
+                      <div className="ov-strip" role="img" aria-label={`${group.title}: ${group.segments.map(part => `${part.label} ${part.pct}%`).join(', ')}.`}>
+                        {group.segments.map(part => (
+                          <i
+                            key={part.label}
+                            style={{ flexGrow: part.value, background: part.color }}
+                            title={`${part.label}: ${formatCount(part.value)} (${part.pct}%)`}
+                          />
+                        ))}
+                      </div>
+                      <ul className="ov-profile__legend">
+                        {group.segments.map(part => (
+                          <li key={part.label}>
+                            <span className="ov-profile__dot" style={{ background: part.color }} aria-hidden="true" />
+                            <span className="ov-profile__name">{part.label}</span>
+                            <span className="ov-profile__pct">{part.pct}%</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Review backlog + top health goals. */}
+        <div className="admin-panel ov-analytics">
+          <div className="ov-panel-header">
+            <div>
+              <h3>Review backlog</h3>
+              <p className="ov-panel-sub">Waiting on an administrator</p>
+            </div>
+            {onNavigate && (
+              <button type="button" className="ov-ghost-btn" onClick={() => onNavigate('assessment-management')}>
+                Open queue
+              </button>
+            )}
+          </div>
+          <div className="ov-stats ov-stats--three">
+            {reviewTiles.map(tile => (
+              <div className={`ov-stat ov-stat--${tile.tone}`} key={tile.id}>
+                <span className="ov-stat__icon"><UserStatIcon name={tile.icon} size={17} /></span>
+                <strong className="ov-stat__value">{tile.value}</strong>
+                <span className="ov-stat__label">{tile.label}</span>
+                <span className="ov-stat__note">{tile.note}</span>
+              </div>
+            ))}
+          </div>
+          <div className="ov-goals">
+            <div className="ov-profile__head">
+              <span>Top health goals</span>
+              <small>{goalBars.length ? `Top ${goalBars.length}` : 'None'}</small>
+            </div>
+            {goalBars.length === 0 ? (
+              <p className="ov-profile__none">No goals selected yet</p>
+            ) : (
+              <ul className="ov-goal-list">
+                {goalBars.map(goal => (
+                  <li className="ov-goal" key={goal.label}>
+                    <span className="ov-goal__text">
+                      <span className="ov-goal__label">{goal.label}</span>
+                      <span className="ov-goal__nums">
+                        <strong>{formatCount(goal.value)}</strong>
+                        <small>{goal.sharePct}%</small>
+                      </span>
+                    </span>
+                    <span className="ov-goal__track" aria-hidden="true">
+                      <i style={{ width: `${goal.pct}%`, background: goal.color }} />
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+
+      </section>
+
       {/* ── Bottom grid: activity + notifications ──────────────────── */}
       <section className="ov-grid">
 
@@ -2025,46 +2580,142 @@ function Overview({ overview, onNavigate }) {
           )}
         </div>
 
-        {/* Threat notifications */}
+        {/* Threat notifications — the Security tab's live verdict, summarised.
+            Every branch below carries a way into the Security Center: the card
+            used to render "All systems secure" as a dead end, because the only
+            button lived in the failures branch that this state never reached. */}
         <div className="admin-panel ov-threats">
           <div className="ov-panel-header">
             <div>
               <h3>Threat notifications</h3>
               <p className="ov-panel-sub">
-                {notifications.length === 0
-                  ? 'Security controls'
-                  : `${notifications.length} ${notifications.length === 1 ? 'control needs' : 'controls need'} attention`}
+                {monitorPending
+                  ? 'Running security checks…'
+                  : monitorError
+                    ? 'Security checks unavailable'
+                    : attention.length === 0
+                      ? 'Live security controls'
+                      : `${attention.length} ${attention.length === 1 ? 'control needs' : 'controls need'} attention`}
               </p>
             </div>
-            {notifications.length > 0 && (
-              <span className="ov-threat-count">{notifications.length}</span>
+            {!monitorPending && !monitorError && attention.length > 0 && (
+              <span className="ov-threat-count">{attention.length}</span>
             )}
           </div>
 
-          {notifications.length === 0 ? (
-            <div className="ov-all-clear">
+          {/* Failure to reach the monitor is NOT an all-clear. The earlier
+              version collapsed an empty result to "All systems secure", so a
+              dropped poll reported the platform as safe — the most dangerous
+              thing this panel can claim. */}
+          {monitorError ? (
+            <>
+              <div className="ov-all-clear ov-all-clear--error">
+                <span className="ov-all-clear__icon"><UserStatIcon name="shield" size={22} /></span>
+                <div>
+                  <strong>Security checks could not run</strong>
+                  <p>{monitorError}</p>
+                </div>
+              </div>
+              {onOpenSecurity && (
+                <button type="button" className="ov-ghost-btn ov-ghost-btn--wide" onClick={() => onOpenSecurity()}>
+                  Open security center
+                </button>
+              )}
+            </>
+          ) : monitorPending ? (
+            <div className="ov-all-clear ov-all-clear--pending">
               <span className="ov-all-clear__icon"><UserStatIcon name="shield" size={22} /></span>
               <div>
-                <strong>All systems secure</strong>
-                <p>Every security control is passing. Nothing needs your attention.</p>
+                <strong>Checking security controls…</strong>
+                <p>Probes have not reported yet, so no verdict is available.</p>
               </div>
             </div>
+          ) : attention.length === 0 ? (
+            <>
+              <div className="ov-all-clear">
+                <span className="ov-all-clear__icon"><UserStatIcon name="shield" size={22} /></span>
+                <div>
+                  <strong>All systems secure</strong>
+                  <p>
+                    All {monitorTotal} live {monitorTotal === 1 ? 'probe is' : 'probes are'} passing.
+                    Nothing needs your attention.
+                  </p>
+                </div>
+              </div>
+              {/* Counts make the claim checkable — "All systems secure" over an
+                  empty monitor list is indistinguishable from a broken feed. */}
+              {monitorTotal > 0 && (
+                <ul className="ov-threat-tally">
+                  <li className="ov-threat-tally__item ov-threat-tally__item--healthy">
+                    <strong>{healthyCount}</strong> healthy
+                  </li>
+                  <li className={`ov-threat-tally__item ov-threat-tally__item--${warningCount ? 'warning' : 'muted'}`}>
+                    <strong>{warningCount}</strong> warnings
+                  </li>
+                  <li className={`ov-threat-tally__item ov-threat-tally__item--${criticalCount ? 'critical' : 'muted'}`}>
+                    <strong>{criticalCount}</strong> critical
+                  </li>
+                </ul>
+              )}
+              {monitorSyncedAt && (
+                <p className="ov-threat-sync">Last checked {formatMonitorClock(monitorSyncedAt)}</p>
+              )}
+              {onOpenSecurity && (
+                <button type="button" className="ov-ghost-btn ov-ghost-btn--wide" onClick={() => onOpenSecurity()}>
+                  Open security center
+                </button>
+              )}
+            </>
           ) : (
             <>
               <ul className="ov-threat-list">
-                {notifications.map((note, i) => (
-                  <li className="ov-threat" key={`${note?.title || 'threat'}-${i}`}>
-                    <span className="ov-threat__icon" aria-hidden="true">!</span>
-                    <div>
-                      <strong className="ov-threat__title">{note?.title || 'Security check'}</strong>
-                      {note?.detail && <p className="ov-threat__detail">{note.detail}</p>}
-                    </div>
-                  </li>
-                ))}
+                {shownThreats.map(note => {
+                  const status = note?.status || 'warning';
+                  const label = note?.label || 'Security check';
+                  return (
+                    <li className="ov-threat" key={note?.key || label}>
+                      {/* Each row links to the monitor it describes. A non-clickable
+                          row is the reason the card could not be acted on before. */}
+                      {onOpenSecurity ? (
+                        <button
+                          type="button"
+                          className={`ov-threat__link ov-threat--${status}`}
+                          onClick={() => onOpenSecurity(note?.key || null)}
+                          title={`Open ${label} in the security center`}
+                        >
+                          <span className="ov-threat__icon" aria-hidden="true">!</span>
+                          <span className="ov-threat__body">
+                            <strong className="ov-threat__title">{label}</strong>
+                            <span className="ov-threat__status">{statusLabel(status)}</span>
+                            {note?.detail && <p className="ov-threat__detail">{note.detail}</p>}
+                          </span>
+                          <span className="ov-threat__go" aria-hidden="true">›</span>
+                        </button>
+                      ) : (
+                        <>
+                          <span className="ov-threat__icon" aria-hidden="true">!</span>
+                          <div>
+                            <strong className="ov-threat__title">{label}</strong>
+                            <span className="ov-threat__status">{statusLabel(status)}</span>
+                            {note?.detail && <p className="ov-threat__detail">{note.detail}</p>}
+                          </div>
+                        </>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
-              {onNavigate && (
-                <button type="button" className="ov-ghost-btn ov-ghost-btn--wide" onClick={() => onNavigate('security')}>
-                  Open security center
+              {hiddenThreats > 0 && (
+                <p className="ov-threat-more">
+                  {hiddenThreats} more {hiddenThreats === 1 ? 'control needs' : 'controls need'} attention.
+                </p>
+              )}
+              {monitorSyncedAt && (
+                <p className="ov-threat-sync">Last checked {formatMonitorClock(monitorSyncedAt)}</p>
+              )}
+              {onOpenSecurity && (
+                <button type="button" className="ov-ghost-btn ov-ghost-btn--wide" onClick={() => onOpenSecurity()}>
+                  {hiddenThreats > 0 ? `Open all ${attention.length} in security center` : 'Open security center'}
                 </button>
               )}
             </>
@@ -2178,6 +2829,56 @@ function UserStatIcon({ name, size = 19 }) {
       </>
     ),
     chevron: <path d="M6.5 9.2l5.5 5.6 5.5-5.6" />,
+    /* ── Overview analytics ──────────────────────────────────────────
+       The deeper analytics panels talk about acquisition, retention, renewal
+       and the review queue, so they need marks for THOSE ideas rather than more
+       people-icons. Each is deliberately distinguishable from the existing
+       `activity` pulse at a 17px tile size: `pulse` is the heartbeat of today,
+       `layers` the depth of one member's history, `repeat` the fact that they
+       came back at all. */
+    pulse: (
+      <>
+        <path d="M2.6 12.2h3.2l1.9 4.6L11 6.4l2.1 5.8h3" />
+        <path d="M19.4 6.6a5.4 5.4 0 0 1 0 6.4" />
+        <path d="M21.8 4.2a8.8 8.8 0 0 1 0 11" />
+      </>
+    ),
+    layers: (
+      <>
+        <path d="M12 3.2l8.4 4.2-8.4 4.2-8.4-4.2z" />
+        <path d="M3.6 12.2l8.4 4.2 8.4-4.2" />
+        <path d="M3.6 16.6l8.4 4.2 8.4-4.2" />
+      </>
+    ),
+    repeat: (
+      <>
+        <path d="M3.6 11.2A8.4 8.4 0 0 1 18.4 6.6" />
+        <polyline points="14.4 3.4 18.6 6.6 14.4 9.8" />
+        <path d="M20.4 12.8a8.4 8.4 0 0 1-14.8 4.6" />
+        <polyline points="9.6 20.6 5.4 17.4 9.6 14.2" />
+      </>
+    ),
+    refresh: (
+      <>
+        <path d="M20.6 5.4v5.2h-5.2" />
+        <path d="M3.4 18.6v-5.2h5.2" />
+        <path d="M5.6 9.8a7 7 0 0 1 11.4-2.7l3.6 3.3" />
+        <path d="M18.4 14.2a7 7 0 0 1-11.4 2.7L3.4 13.6" />
+      </>
+    ),
+    flag: (
+      <>
+        <path d="M5 21V4.2" />
+        <path d="M5 4.8h11.4l-2.2 4 2.2 4H5" />
+      </>
+    ),
+    alert: (
+      <>
+        <path d="M12 3.6L21.4 19.4a1.2 1.2 0 0 1-1 1.9H3.6a1.2 1.2 0 0 1-1-1.9z" />
+        <path d="M12 9.4v4.4" />
+        <path d="M12 17.2h.01" />
+      </>
+    ),
   };
   return <svg {...common}>{paths[name] || paths.users}</svg>;
 }
@@ -2420,6 +3121,10 @@ function Users({ users, setUsers, usersFetchedAt, search, setSearch, loadUsers, 
         {visibleUsers.map(user => {
           const fullName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Unknown';
           const initials = fullName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+          // Resolved once per row. The strongest factor is a property of the
+          // account, not of the cell, and computing it inline three times in
+          // the JSX below is how this column ended up disagreeing with itself.
+          const security = securityFactor(user);
           const isOpen = expandedUser === user._id;
           const color = avatarColor(fullName);
           const state = statusOf(user);
@@ -2556,9 +3261,14 @@ function Users({ users, setUsers, usersFetchedAt, search, setSearch, loadUsers, 
                     </div>
                     <div className="user-detail-item">
                       <strong>2FA / Security</strong>
-                      <span className={user.twoFactorEnabled ? 'security-active' : 'security-email'}>
-                        {user.twoFactorEnabled ? 'Google Authenticator active' : 'Email OTP active'}
+                      <span className={`security-badge security-badge--${security.method}`}>
+                        {security.label}
                       </span>
+                      {/* The supporting line is what makes this column honest:
+                          it names the factor's actual strength, so an admin
+                          reading "Email OTP active" is not left thinking this
+                          account is as protected as one with a passkey. */}
+                      <small>{security.note}</small>
                     </div>
                     <div className="user-detail-item">
                       <strong>Lockout Status</strong>
@@ -3605,8 +4315,273 @@ function providerModelLine(provider) {
   return model;
 }
 
+/**
+ * System detection & threat prediction used to live here, inside the AI tab.
+ *
+ * It is a forecast ABOUT the Security Center probes, drawn from their results,
+ * so it belonged under the probes rather than beside the provider cards that
+ * merely produced its input. It now renders inside SecurityStatus, and the
+ * severity vocabulary moved with it — deliberately: AI_STATUS answers "can we
+ * reach this provider", and borrowing its green/rose for a verdict about the
+ * whole system would let a healthy provider card sit on top of a severe one.
+ *
+ * See SecurityStatus.jsx → ThreatPrediction.
+ */
+
+/**
+ * Accent colour for a routing card, chosen by PROVIDER rather than by position.
+ *
+ * The old table reused `.provider__rows`, the provider cards' grid, whose first
+ * column is a hard 62px — sized for labels like "Check" and "Model". A routing
+ * label is a two-word uppercase string with no break opportunity inside either
+ * word, so it overflowed that column and printed itself across the description
+ * it was meant to label. Giving each route a whole card removes the shared
+ * narrow axis entirely, and keying the colour off the provider means every route
+ * bound to the same model reads as the same colour — which is the one grouping
+ * an admin actually wants from this table.
+ *
+ * The accents deliberately skip emerald/rose/amber/slate: those already mean
+ * reachable/broken/watch/idle elsewhere in this panel, and reusing them here
+ * would make "this route goes to Groq" look like a health verdict.
+ */
+const ROUTE_TONES = {
+  openrouter: 'violet',
+  groq: 'ember',
+  anthropic: 'fuchsia',
+  openai: 'cyan',
+};
+
+/** A provider added on the server later still lands on a defined accent. */
+const ROUTE_TONE_CYCLE = ['azure', 'cyan', 'indigo', 'violet', 'fuchsia', 'ember'];
+
+function routeTone(route, index) {
+  const key = String(route?.provider || '').trim().toLowerCase();
+  if (ROUTE_TONES[key]) return ROUTE_TONES[key];
+  return ROUTE_TONE_CYCLE[index % ROUTE_TONE_CYCLE.length];
+}
+
+/**
+ * The routing table, as cards.
+ *
+ * Everything below renders defensively. The payload is the one place in this
+ * panel that is generated from a hand-maintained list on the server, so a route
+ * added without a label or a detail must still produce a readable card rather
+ * than "undefined" painted in the middle of the admin console.
+ */
+function RoutingTable({ routing }) {
+  const rows = (Array.isArray(routing) ? routing : []).filter(Boolean);
+  if (rows.length === 0) return null;
+
+  const providers = new Set(
+    rows.map((route) => String(route.providerLabel || route.provider || '').trim()).filter(Boolean)
+  );
+  const unset = rows.filter((route) => !route.configured).length;
+
+  return (
+    <section className="admin-panel aip-routing" aria-labelledby="aip-routing-title">
+      <header className="route-head">
+        <div className="route-head__text">
+          <h3 id="aip-routing-title">
+            <span className="route-head__glyph" aria-hidden="true">
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="16 3 21 8 16 13" />
+                <path d="M21 8H9a4 4 0 0 0-4 4v1" />
+                <polyline points="8 21 3 16 8 11" />
+                <path d="M3 16h12a4 4 0 0 0 4-4v-1" />
+              </svg>
+            </span>
+            Where each feature is sent
+          </h3>
+          <p className="admin-muted">
+            Every AI feature is dispatched through this one table, so a provider card above
+            and the request that actually goes out can never disagree. Work is spread across
+            providers rather than piled on one: the features that write a member’s plan and
+            supplement guide use the default provider, the chat assistant and priority
+            flagging go to Anthropic, description polish goes to OpenAI, and system detection
+            goes to Groq. Add a key to <code>server/.env</code> and its purpose moves across
+            on its own — nothing here needs a restart.
+          </p>
+        </div>
+
+        {/* Triage before detail: an admin opening this panel wants to know how
+            many features are affected by a missing key, not read six cards. */}
+        <ul className="route-tally">
+          <li><b>{rows.length}</b> features</li>
+          <li><b>{providers.size}</b> {providers.size === 1 ? 'provider' : 'providers'}</li>
+          <li className={unset ? 'route-tally--warn' : 'route-tally--ok'}>
+            <b>{unset}</b> missing {unset === 1 ? 'key' : 'keys'}
+          </li>
+        </ul>
+      </header>
+
+      <ul className="route-grid">
+        {rows.map((route, index) => {
+          const tone = routeTone(route, index);
+          const name = String(route.label || route.purpose || 'Unnamed feature');
+          const provider = String(route.providerLabel || route.provider || 'Unknown provider');
+          return (
+            <li
+              className={`route-card route-card--${tone}${route.configured ? '' : ' route-card--unset'}`}
+              key={route.purpose || `${tone}-${index}`}
+            >
+              <span className="route-card__rail" aria-hidden="true" />
+
+              <header className="route-card__head">
+                <span className="route-card__mark" aria-hidden="true">
+                  {providerMonogram(provider)}
+                </span>
+                <h4>{name}</h4>
+              </header>
+
+              {route.detail && <p className="route-card__detail">{route.detail}</p>}
+
+              {/* The warning sits ABOVE the dispatch line, not below it. The strip
+                  carries `margin-top: auto`, so anything placed after it would hang
+                  lower on cards that have a warning and leave the dispatch lines of
+                  one row ragged — and the dispatch line is the whole point of the
+                  card. Placed here it also reads in the right order: the problem,
+                  then where the request goes. */}
+              {!route.configured && (
+                <p className="route-card__warn">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                    <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+                  </svg>
+                  <span>
+                    Not configured — set{' '}
+                    <code>{route.envKey || 'this provider’s key'}</code> in server/.env
+                  </span>
+                </p>
+              )}
+
+              <p className="route-card__to">
+                <span className="route-card__arrow" aria-hidden="true">→</span>
+                <span className="route-card__provider">{provider}</span>
+              </p>
+
+              <p className="route-card__model">
+                {route.model
+                  ? <code>{route.model}</code>
+                  : <span className="route-card__modelNone">No model pinned</span>}
+              </p>
+
+              {/* A fallback is part of where a request goes. Naming it here stops
+                  an operator assuming the primary is the only thing that can
+                  answer — and, on chat, that an unfunded Anthropic key is
+                  about to take the assistant offline. */}
+              {route.fallbackLabel && (
+                <p className="route-card__fallback">
+                  <span aria-hidden="true">↳</span> falls back to {route.fallbackLabel}
+                </p>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+/**
+ * What the priority-flagging provider actually did.
+ *
+ * This card exists because the provider card above CANNOT answer the question.
+ * The health probe requests the model list, which a valid Anthropic key serves
+ * happily — so an account with a working key and no credit probes "Reachable"
+ * while every completion fails and the feature silently never runs. The card
+ * would be telling the truth about the key and a lie about the feature.
+ *
+ * So this reads the LAST REAL CALL instead, and says plainly when there has not
+ * been one yet.
+ */
+function PriorityFlaggingCard({ outcome }) {
+  if (!outcome) {
+    return (
+      <p className="admin-muted aip-flagging">
+        <strong>Priority flagging AI has not been called yet.</strong> It is exercised when a
+        member submits an assessment the rule engine does not flag on its own. Until then the
+        rule engine (<code>utils/severity.js</code>) is doing the whole job, which is a complete
+        and supported way to run.
+      </p>
+    );
+  }
+
+  const ok = outcome.ok;
+  return (
+    <p className={`provider-env-reload provider-env-reload--${ok ? 'ok' : 'bad'} aip-flagging`}>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        {ok
+          ? <><polyline points="20 6 9 17 4 12" /></>
+          : <><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></>}
+      </svg>
+      <span>
+        <strong>
+          {ok
+            ? `Priority flagging AI answered${outcome.escalated ? ' and escalated a flag' : ''}.`
+            : 'Priority flagging AI did not answer.'}
+        </strong>{' '}
+        {outcome.model ? `${outcome.model} · ` : ''}
+        {outcome.latencyMs != null ? `${outcome.latencyMs} ms · ` : ''}
+        {relativeTime(outcome.at)}.
+        {outcome.confidence != null && <> Confidence {outcome.confidence}%.</>}
+        {outcome.error ? <> {outcome.error}</> : null}
+        {ok && !outcome.escalated && (
+          <> It did not consider this submission worth escalating, so the rule verdict stands.</>
+        )}{' '}
+        Either way the rule engine is authoritative — this layer can escalate a Priority
+        review, never clear one.
+      </span>
+    </p>
+  );
+}
+
+/**
+ * Credentials that are set but cannot be spent on anything — REMOVED, and
+ * deliberately so.
+ *
+ * This used to be a red banner listing every credential in server/.env that no
+ * feature dispatches to. It was accurate, and it made an entirely normal
+ * deployment look broken: "OpenAI is probed for health, but no feature is
+ * routed to it" is a true sentence about a perfectly healthy configuration,
+ * painted in the same alarm colour as a rejected key. An operator who sees red
+ * on a panel that is working learns to ignore red — which is precisely when a
+ * real one arrives.
+ *
+ * Both halves of that problem are fixed at the source instead:
+ *
+ *   - The AI work is now SPREAD across the providers that have keys, so there is
+ *     no spare credential sitting idle while one provider takes every request.
+ *   - "Is anything routed to this provider?" is read from the ROUTING TABLE
+ *     rather than a string written beside the provider, so the claim cannot go
+ *     stale the way the hand-maintained one did.
+ *
+ * A provider with no usable key now renders NO CARD at all (see `AiPanel`), so
+ * "not configured" is expressed by absence rather than by an alarm. The routing
+ * table below still names every feature, the provider that will serve it, and
+ * the exact variable to set when it cannot.
+ *
+ * `utils/envUsage.js` still exists and still answers "which credentials are
+ * unreadable" for scripts and diagnostics — it is simply no longer rendered as
+ * an alarm in the middle of a working panel.
+ */
+
 function AiPanel({ ai, onCheckNow, checking, reload }) {
-  const providers = ai?.providers || [];
+  // EVERY provider this server knows about, including the ones with no key.
+  // Used for the totals, and for naming what could be added.
+  const known = Array.isArray(ai?.providers) ? ai.providers : [];
+
+  // ONLY the providers a usable credential is bound for in server/.env.
+  //
+  // This is the card policy, and it is what makes "add a key and the card
+  // appears" work without any button press: the server reloads .env when the
+  // file and the running process disagree (see routes/admin.js → aiPayload), so
+  // a pasted key lands on the next poll and this filter reveals its card. A
+  // provider nobody configured is not a fault and not news — it is simply not
+  // part of this deployment — and it was previously spending a third of the
+  // grid to say so.
+  const providers = known.filter((provider) => provider && provider.configured);
 
   // One-second tick keeps "last checked 12 s ago" truthful. It is scoped to
   // this component, which only mounts while the AI tab is on screen.
@@ -3619,8 +4594,10 @@ function AiPanel({ ai, onCheckNow, checking, reload }) {
   // Triage numbers first. The question an admin opens this tab to answer is
   // "is anything broken", and making them read six cards to find out is the
   // thing the strip above them exists to remove. Counts are derived from the
-  // same AI_STATUS tone map the cards use, so a card and the number above it
-  // can never disagree about what "broken" means.
+  // same AI_STATUS tone map the cards use, and over the SAME list the grid
+  // renders, so a card and the number above it can never disagree — in either
+  // direction, which is what changed when unconfigured providers stopped
+  // getting a card.
   const counts = providers.reduce(
     (acc, provider) => {
       const status = AI_STATUS[provider.status]
@@ -3634,8 +4611,8 @@ function AiPanel({ ai, onCheckNow, checking, reload }) {
   const statCards = [
     { tone: 'ok', label: 'Reachable', value: counts.ok, hint: 'Answered a live probe' },
     { tone: 'down', label: 'Needs attention', value: counts.down, hint: 'Configured, but failing' },
-    { tone: 'idle', label: 'Not configured', value: counts.idle, hint: 'No key set — optional' },
-    { tone: 'all', label: 'Providers', value: providers.length, hint: 'Known to this server' },
+    { tone: 'all', label: 'Connected', value: providers.length, hint: 'Have a key in server/.env' },
+    { tone: 'idle', label: 'Supported', value: known.length, hint: 'Providers this server knows' },
   ];
 
   return (
@@ -3647,6 +4624,8 @@ function AiPanel({ ai, onCheckNow, checking, reload }) {
           probed with a real request rather than read from an environment variable — a
           key can exist and still be revoked, unreachable, or never called. Database
           and API connectivity are monitored in the <strong>Security Center</strong> tab.
+          The routing table below records which provider each feature is actually
+          dispatched to, so a card and the request that goes out cannot disagree.
         </p>
       </header>
 
@@ -3737,10 +4716,44 @@ function AiPanel({ ai, onCheckNow, checking, reload }) {
         </p>
       )}
 
+      {/* The grid shows ONLY providers with a key bound. So the two "nothing
+          here" states need telling apart, which the old single "No provider data
+          available." could not do: "the request came back empty" is a fault and
+          needs saying, while "no provider is configured yet" is the normal
+          starting point and must not read like one. */}
       <div className="provider-grid">
-        {providers.length === 0 && (
-          <p className="admin-muted">No provider data available.</p>
+        {ai && known.length === 0 && (
+          <p className="provider-empty provider-empty--down">
+            The server returned no provider data. Check that it is running and that this
+            administrator session is still valid, then use <strong>Check now</strong>.
+          </p>
         )}
+
+        {!ai && (
+          <p className="provider-empty">Loading the providers this server can reach…</p>
+        )}
+
+        {ai && known.length > 0 && providers.length === 0 && (
+          <div className="provider-empty">
+            <strong>No provider keys are set.</strong>
+            <span>
+              A card appears here for each provider with a key in <code>server/.env</code>,
+              and disappears again if you remove one — there is nothing to press and
+              nothing to restart. OpenRouter is the default: that one key alone makes
+              every AI feature work.
+            </span>
+            <ul>
+              {known.map((provider) => (
+                <li key={provider.key}>
+                  <code>{provider.envKey || `${String(provider.key).toUpperCase()}_API_KEY`}</code>
+                  {' — '}
+                  {provider.label}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {providers.map((provider) => {
           const status = AI_STATUS[provider.status]
             || (provider.configured ? AI_STATUS.ok : AI_STATUS.unconfigured);
@@ -3779,10 +4792,23 @@ function AiPanel({ ai, onCheckNow, checking, reload }) {
                   <dt>Model</dt>
                   <dd>{providerModelLine(provider)}</dd>
                 </div>
+                {/* A self-hosted provider's address is the single most likely
+                    thing to be wrong, so it is named on the card rather than
+                    left for the operator to recall. */}
+                {provider.baseUrl && (
+                  <div className="provider__row">
+                    <dt>Gateway</dt>
+                    <dd><code className="provider__host">{provider.baseUrl}</code></dd>
+                  </div>
+                )}
                 <div className="provider__row">
                   <dt>Used for</dt>
+                  {/* Read from the routing table by the server, so this can only
+                      be empty when NOTHING dispatches here — which is now a real
+                      statement about a configured provider (the self-hosted
+                      gateway) rather than a stale copy of an old assignment. */}
                   <dd className={provider.usedBy ? undefined : 'provider-usage--idle'}>
-                    {provider.usedBy || 'No route in this server calls it yet'}
+                    {provider.usedBy || 'Connected, but no feature dispatches to it yet'}
                   </dd>
                 </div>
               </dl>
@@ -3790,6 +4816,10 @@ function AiPanel({ ai, onCheckNow, checking, reload }) {
           );
         })}
       </div>
+
+      <RoutingTable routing={ai?.routing} />
+
+      <PriorityFlaggingCard outcome={ai?.priorityFlagging} />
 
       <p className="aip-footnote admin-muted">
         Token usage and accuracy should be connected to provider usage APIs before being
