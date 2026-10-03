@@ -1,0 +1,341 @@
+/* ══════════════════════════════════════════════════════════════════
+   AssessmentResultsDisplay  (ard- prefix)
+══════════════════════════════════════════════════════════════════ */
+
+.ard-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  font-family: Arial, sans-serif;
+  color: #111827;
+}
+
+/* ── Section heading ────────────────────────────────────────────── */
+.ard-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #d46b35;
+  margin: 0 0 10px;
+}
+
+.ard-divider {
+  height: 1px;
+  background: #e5e7eb;
+  margin-bottom: 16px;
+}
+
+/* ── Summary card ───────────────────────────────────────────────── */
+.ard-summary {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-left: 4px solid #18342a;
+  border-radius: 8px;
+  padding: 16px 18px;
+  margin-bottom: 20px;
+}
+
+.ard-summary p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.65;
+  color: #374151;
+}
+
+/* ── Consult-doctor alert ───────────────────────────────────────── */
+.ard-consult {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-top: 14px;
+  padding: 12px 16px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+}
+.ard-consult__icon {
+  font-size: 18px;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+.ard-consult__body { flex: 1; min-width: 0; }
+.ard-consult__title {
+  font: 700 13px/1.4 Arial, sans-serif;
+  color: #92400e;
+  margin: 0 0 4px;
+}
+.ard-consult__reason {
+  margin: 0;
+  font: 13px/1.5 Arial, sans-serif;
+  color: #78350f;
+}
+
+/* ── Recommendations grid ───────────────────────────────────────── */
+.ard-rec-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+/* ── Single recommendation card ─────────────────────────────────── */
+.ard-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  overflow: hidden;
+  transition: box-shadow 0.15s;
+}
+.ard-card:hover {
+  box-shadow: 0 2px 12px rgba(0,0,0,.07);
+}
+
+/* Card top bar */
+.ard-card__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  background: #18342a;
+}
+.ard-card__name {
+  margin: 0;
+  font: 700 14px/1.3 Arial, sans-serif;
+  color: #eff6ee;
+}
+
+/* Priority badge */
+.ard-priority {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font: 700 11px/1.4 Arial, sans-serif;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.ard-priority--high   { background: #fecaca; color: #991b1b; }
+.ard-priority--medium { background: #fed7aa; color: #9a3412; }
+.ard-priority--low    { background: #d1fae5; color: #065f46; }
+.ard-priority--default{ background: #f3f4f6; color: #374151; }
+
+/* Card body */
+.ard-card__body {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* Field row */
+.ard-field {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 5px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+.ard-field:last-child { border-bottom: none; }
+
+.ard-field__label {
+  flex-shrink: 0;
+  width: 120px;
+  font: 700 11px/1.5 Arial, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+}
+.ard-field__value {
+  flex: 1;
+  font: 13px/1.55 Arial, sans-serif;
+  color: #374151;
+  word-break: break-word;
+}
+
+/* ── Confidence bar ─────────────────────────────────────────────── */
+.ard-confidence {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+}
+.ard-confidence__label {
+  flex-shrink: 0;
+  width: 120px;
+  font: 700 11px/1.5 Arial, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+}
+.ard-confidence__track {
+  flex: 1;
+  height: 7px;
+  background: #e5e7eb;
+  border-radius: 20px;
+  overflow: hidden;
+}
+.ard-confidence__fill {
+  height: 100%;
+  border-radius: 20px;
+  background: linear-gradient(90deg, #18342a, #3dbf8a);
+  transition: width 0.5s ease;
+}
+.ard-confidence__pct {
+  flex-shrink: 0;
+  width: 34px;
+  text-align: right;
+  font: 700 12px/1 Arial, sans-serif;
+  color: #18342a;
+}
+
+/* ── Empty state ────────────────────────────────────────────────── */
+.ard-empty {
+  font: italic 13px Arial, sans-serif;
+  color: #9ca3af;
+  padding: 8px 0;
+}
+
+/* ── Responsive ─────────────────────────────────────────────────── */
+@media (max-width: 540px) {
+  .ard-field        { flex-direction: column; gap: 2px; }
+  .ard-field__label { width: auto; }
+  .ard-confidence   { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .ard-confidence__label { width: auto; }
+  .ard-confidence__track { width: 100%; }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   VIBRANT THEME REFRESH (ard- prefix only — never leaks globally)
+   ════════════════════════════════════════════════════════════════════ */
+.ard-section-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: #065f46;
+}
+.ard-section-title::after {
+  content: '';
+  flex: 1;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #10b981, #34d399 40%, transparent);
+}
+.ard-divider { display: none; }
+
+/* Summary card — mint glow panel */
+.ard-summary {
+  background: linear-gradient(180deg, #ffffff, #f0fdf4);
+  border: 1px solid #a7f3d0;
+  border-left: 5px solid #10b981;
+  border-radius: 16px;
+  box-shadow: 0 6px 20px rgba(16, 185, 129, 0.10);
+  animation: ard-rise 0.4s ease both;
+}
+.ard-summary p { color: #1f2937; }
+
+/* Consult-doctor alert — amber glow with pulsing icon chip */
+.ard-consult {
+  background: linear-gradient(180deg, #fffbeb, #fef3c7);
+  border: 1.5px solid #f59e0b;
+  border-radius: 14px;
+  box-shadow: 0 6px 18px rgba(245, 158, 11, 0.20);
+  align-items: center;
+}
+.ard-consult__icon {
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  border-radius: 50%;
+  font-size: 19px;
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.45);
+  animation: ard-pulse 2.2s ease-in-out infinite;
+}
+@keyframes ard-pulse {
+  0%, 100% { box-shadow: 0 4px 12px rgba(245, 158, 11, 0.45); }
+  50% { box-shadow: 0 4px 20px rgba(245, 158, 11, 0.7); }
+}
+.ard-consult__title { color: #92400e; font-size: 14px; }
+
+/* Recommendation cards — lift, glow, staggered entrance */
+.ard-rec-list { gap: 16px; }
+.ard-card {
+  border: 1px solid #a7f3d0;
+  border-radius: 16px;
+  box-shadow: 0 4px 16px rgba(6, 95, 70, 0.08);
+  transition: transform 0.18s ease, box-shadow 0.2s ease;
+  /* `backwards` not `both`: a filled `to { transform }` outranks normal author
+     rules, which would permanently kill the .ard-card:hover lift below. */
+  animation: ard-rise 0.45s ease backwards;
+}
+.ard-rec-list .ard-card:nth-child(2) { animation-delay: 0.07s; }
+.ard-rec-list .ard-card:nth-child(3) { animation-delay: 0.14s; }
+.ard-rec-list .ard-card:nth-child(n+4) { animation-delay: 0.2s; }
+@keyframes ard-rise {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.ard-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 14px 30px rgba(6, 95, 70, 0.16);
+}
+
+/* Card top bar — emerald→teal gradient */
+.ard-card__bar {
+  background: linear-gradient(120deg, #065f46, #059669 55%, #0d9488);
+  padding: 14px 18px;
+}
+.ard-card__name {
+  font-size: 15px;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+/* Priority badges — glassy pills with glow */
+.ard-priority {
+  padding: 4px 12px;
+  font-size: 12px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 3px 8px rgba(0, 0, 0, 0.18);
+}
+.ard-priority--high {
+  background: linear-gradient(135deg, #fb7185, #e11d48);
+  color: #fff;
+}
+.ard-priority--medium {
+  background: linear-gradient(135deg, #fbbf24, #d97706);
+  color: #fff;
+}
+.ard-priority--low {
+  background: linear-gradient(135deg, #6ee7b7, #059669);
+  color: #fff;
+}
+.ard-priority--default { background: rgba(255, 255, 255, 0.25); color: #fff; }
+
+/* Card body */
+.ard-card__body { padding: 16px 18px; }
+.ard-field__label { color: #059669; }
+.ard-field__value { color: #1f2937; }
+.ard-confidence__label { color: #059669; }
+.ard-confidence__track {
+  height: 9px;
+  background: #d1fae5;
+  box-shadow: inset 0 1px 3px rgba(6, 95, 70, 0.15);
+}
+.ard-confidence__fill {
+  background: linear-gradient(90deg, #34d399, #059669 60%, #0d9488);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+  transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ard-confidence__pct { color: #065f46; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ard-summary, .ard-card { animation: none; }
+  .ard-consult__icon { animation: none; }
+  .ard-card, .ard-confidence__fill { transition: none; }
+}

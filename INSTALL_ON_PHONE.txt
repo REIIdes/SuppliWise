@@ -1,0 +1,80 @@
+═══════════════════════════════════════════════════════════
+   📱 SUPPLIWISE - INSTALL ON YOUR PHONE
+═══════════════════════════════════════════════════════════
+
+🚀 QUICK INSTALL (2 MINUTES)
+
+1️⃣  START DEV SERVER (On your PC):
+    cd my-react-app
+    npm run dev
+    
+    ✅ Server running at: http://192.168.0.102:5173
+
+2️⃣  OPEN ON YOUR PHONE:
+    • Connect phone to same WiFi as PC
+    • Open browser (Chrome/Edge on Android, Safari on iOS)
+    • Go to: http://192.168.0.102:5173
+
+3️⃣  INSTALL:
+    
+    📱 ANDROID (Chrome/Edge):
+    • Wait 3 seconds
+    • Green banner appears: "Install SuppliWise"
+    • Tap "Install App"
+    • Tap "Install" in popup
+    • Done! ✅
+    
+    🍎 iOS (Safari):
+    • Tap Share button (box with arrow ↑)
+    • Scroll down → "Add to Home Screen"
+    • Tap "Add"
+    • Done! ✅
+
+4️⃣  LAUNCH:
+    • Tap SuppliWise icon on home screen
+    • Opens full screen (no browser UI!)
+    • Enjoy! 🎉
+
+═══════════════════════════════════════════════════════════
+
+✨ WHAT YOU GET:
+
+✅ Full screen app (no browser bars/URL)
+✅ Home screen icon with SuppliWise logo
+✅ Splash screen on launch
+✅ Works offline (limited)
+✅ Fast loading (cached)
+✅ Auto-updates
+✅ App shortcuts (Dashboard, Assessment)
+
+═══════════════════════════════════════════════════════════
+
+🔧 TROUBLESHOOTING:
+
+❌ "Can't connect"
+   → Check phone and PC on same WiFi
+   → Check dev server is running (npm run dev)
+   → Try http://192.168.0.102:5173 again
+
+❌ "Install banner doesn't appear"
+   → Wait 3 seconds after page loads
+   → Android: Use Chrome/Edge (not Samsung Browser)
+   → iOS: Use Safari Share → Add to Home Screen
+
+❌ "App won't open"
+   → Delete app, reinstall
+   → Clear browser cache
+   → Restart browser
+
+═══════════════════════════════════════════════════════════
+
+📖 NEED MORE HELP?
+
+See detailed guides:
+• PWA_INSTALLATION_GUIDE.md (full instructions)
+• PWA_SETUP_COMPLETE.md (technical details)
+
+═══════════════════════════════════════════════════════════
+
+That's it! Your SuppliWise app is now installable! 🚀
+

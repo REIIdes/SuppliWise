@@ -1,0 +1,1350 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Profile Page — modern redesign
+   Cover header with legibility overlay · card sections · refined inputs
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.profile-page {
+  min-height: 100vh;
+  background:
+    radial-gradient(1000px 380px at 8% -100px, rgba(16, 185, 129, 0.24), transparent 60%),
+    radial-gradient(900px 340px at 95% -70px, rgba(56, 189, 248, 0.22), transparent 60%),
+    radial-gradient(800px 520px at 50% 115%, rgba(139, 92, 247, 0.18), transparent 62%),
+    linear-gradient(180deg, #e8f8f1 0%, #f2f6fc 100%);
+  padding: 28px 20px 48px;
+}
+
+.profile-container {
+  max-width: 880px;
+  margin: 0 auto;
+  background: #ffffff;
+  border: 1px solid #e2eaf5;
+  border-radius: 24px;
+  box-shadow: 0 28px 68px rgba(15, 60, 35, 0.13), 0 2px 6px rgba(15, 60, 35, 0.06);
+  overflow: hidden;
+}
+
+/* ── Cover banner ──────────────────────────────────────────────────────
+   Pure artwork only. The name/email live on the identity card below, so a
+   panoramic photo is never cropped sideways to squeeze text in beside it. */
+.profile-cover {
+  position: relative;
+  height: 190px;
+  background:
+    radial-gradient(560px 240px at 14% 0%, rgba(253, 224, 71, 0.55), transparent 62%),
+    radial-gradient(520px 260px at 88% 6%, rgba(45, 212, 191, 0.55), transparent 64%),
+    radial-gradient(460px 300px at 52% 108%, rgba(168, 85, 247, 0.42), transparent 66%),
+    linear-gradient(118deg, #059669 0%, #10b981 22%, #0d9488 52%, #0891b2 78%, #4f46e5 100%);
+  background-size: 220% 220%, 220% 220%, 220% 220%, 180% 180%;
+  animation: cover-flow 16s ease-in-out infinite alternate;
+  overflow: hidden;
+}
+@keyframes cover-flow {
+  from { background-position: 0% 12%, 100% 90%, 40% 100%, 0% 50%; }
+  to   { background-position: 100% 80%, 0% 10%, 70% 0%, 100% 50%; }
+}
+
+/* Legibility wash. Sits above the artwork, below the controls. */
+.profile-cover::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(3, 22, 14, 0.16) 0%, rgba(3, 22, 14, 0.06) 45%, rgba(3, 22, 14, 0.55) 100%),
+    radial-gradient(900px 200px at 50% 118%, rgba(5, 46, 35, 0.55), transparent 70%);
+  pointer-events: none;
+}
+
+/* Soft light bloom + faint weave so a flat gradient never looks flat. */
+.profile-cover::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(320px 150px at 22% 18%, rgba(255, 255, 255, 0.22), transparent 66%),
+    radial-gradient(300px 160px at 82% 30%, rgba(191, 247, 208, 0.20), transparent 66%),
+    repeating-linear-gradient(118deg, rgba(255, 255, 255, 0.045) 0 1px, transparent 1px 14px);
+  pointer-events: none;
+}
+
+.banner-edit-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 2;
+  background: rgba(3, 22, 14, 0.5);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  color: #fff;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 10px 22px -12px rgba(0, 0, 0, 0.9);
+  transition: transform 0.2s, background 0.2s, box-shadow 0.2s;
+}
+.banner-edit-btn:hover {
+  background: rgba(3, 22, 14, 0.74);
+  transform: translateY(-2px) scale(1.05);
+  box-shadow: 0 14px 28px -12px rgba(0, 0, 0, 0.95);
+}
+.banner-edit-btn:active { transform: translateY(0) scale(0.97); }
+.banner-edit-btn:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+.banner-edit-btn svg { display: block; }
+
+.profile-remove-banner {
+  position: absolute;
+  left: 16px;
+  top: 16px;
+  z-index: 2;
+  background: rgba(190, 18, 60, 0.55);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  color: #fff;
+  padding: 8px 16px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.2s;
+}
+.profile-remove-banner:hover { background: rgba(190, 18, 60, 0.8); transform: translateY(-2px); }
+.profile-remove-banner:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+
+/* ── Identity card ───────────────────────────────────────────────────
+   The avatar straddles the cover edge: half on the artwork, half on the
+   card. This is the one overlap that makes the header read as a profile
+   rather than a banner with a title stuck underneath it. */
+.profile-identity {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 20px;
+  margin-top: -58px;
+  padding: 0 30px 22px;
+}
+
+.profile-identity__text { min-width: 0; padding-bottom: 4px; }
+.profile-identity__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 6px;
+}
+
+.profile-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 6px;
+  padding: 4px 12px 4px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #065f46;
+  background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+  border: 1px solid #6ee7b7;
+  box-shadow: 0 6px 14px -10px rgba(5, 150, 105, 0.95);
+}
+.profile-eyebrow::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: linear-gradient(140deg, #10b981, #4f46e5);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18);
+}
+
+.profile-title {
+  font-size: clamp(26px, 4.4vw, 34px);
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  line-height: 1.12;
+  margin: 0 0 5px;
+  color: #0f172a;
+  overflow-wrap: anywhere;
+}
+
+.profile-subtitle {
+  font-size: 14.5px;
+  color: #64748b;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Plan chip */
+.profile-plan-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #475569;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  white-space: nowrap;
+}
+.profile-plan-chip__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #94a3b8;
+}
+.profile-plan-chip--active {
+  color: #ffffff;
+  background: linear-gradient(120deg, #10b981, #0d9488 52%, #4f46e5);
+  border-color: transparent;
+  box-shadow: 0 12px 24px -14px rgba(13, 148, 136, 0.95);
+}
+.profile-plan-chip--active .profile-plan-chip__dot {
+  background: #fde68a;
+  box-shadow: 0 0 0 3px rgba(253, 230, 138, 0.3);
+}
+
+.profile-chip-btn {
+  padding: 8px 15px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #be123c;
+  background: #fff1f2;
+  border: 1px solid #fecdd3;
+  cursor: pointer;
+  transition: background 0.18s, transform 0.18s, border-color 0.18s;
+  white-space: nowrap;
+}
+.profile-chip-btn:hover { background: #ffe4e6; border-color: #fda4af; transform: translateY(-2px); }
+.profile-chip-btn:focus-visible { outline: 3px solid rgba(225, 29, 72, 0.45); outline-offset: 2px; }
+
+.profile-avatar-large {
+  position: relative;
+  z-index: 3;
+  width: 124px;
+  height: 124px;
+  background: linear-gradient(140deg, #34d399, #10b981 40%, #0d9488 72%, #6366f1);
+  border: 5px solid #fff;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 54px;
+  font-weight: 800;
+  color: #fff;
+  text-transform: uppercase;
+  overflow: hidden;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.32);
+  box-shadow:
+    0 18px 38px -16px rgba(5, 46, 35, 0.75),
+    0 0 0 6px rgba(255, 255, 255, 0.9),
+    0 0 40px rgba(16, 185, 129, 0.45);
+  transition: transform 0.22s ease, box-shadow 0.25s ease;
+}
+.profile-avatar-large:hover { transform: translateY(-3px) scale(1.02); }
+.profile-avatar-large:focus-visible { outline: 3px solid #4f46e5; outline-offset: 4px; }
+
+.profile-section-title svg {
+  color: #fff;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  padding: 6px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #22c55e, #0d9488);
+  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.35);
+}
+
+/* The initial + <img> pair is owned by ProfileAvatarImage so this card and
+   the account menu always show the same picture with the same fallback. */
+.profile-avatar-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  z-index: 1;
+}
+
+.profile-avatar-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(4, 26, 15, 0.62);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.2s;
+  color: #fff;
+  z-index: 2;
+}
+
+.profile-avatar-large:hover .profile-avatar-overlay {
+  opacity: 1;
+}
+
+.profile-avatar-overlay span {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* ── Form + sections as cards ─────────────────────────────────────────── */
+.profile-form {
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  background:
+    radial-gradient(700px 300px at 100% 0%, rgba(45, 212, 191, 0.10), transparent 62%),
+    radial-gradient(620px 320px at 0% 100%, rgba(99, 102, 241, 0.09), transparent 62%),
+    #f3f7fb;
+}
+
+/* ── Load-failure recovery ──────────────────────────────────────────────
+   Promoted out of the (now removed) Subscription Status card. The failure is
+   about the profile fetch, so it sits at the top of the form rather than
+   being buried in a billing panel. */
+.profile-load-alert {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 15px;
+  border-radius: 14px;
+  background: linear-gradient(120deg, #fff7ed, #ffedd5);
+  border: 1px solid #fdba74;
+  color: #9a3412;
+  box-shadow: 0 12px 26px -22px rgba(234, 88, 12, 0.95);
+  animation: section-rise 0.35s ease backwards;
+}
+.profile-load-alert__icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  color: #fff;
+  background: linear-gradient(140deg, #fb923c, #ea580c);
+}
+.profile-load-alert__icon svg { width: 17px; height: 17px; }
+.profile-load-alert__body { flex: 1; min-width: 0; font-size: 13.5px; line-height: 1.5; }
+.profile-load-alert__retry {
+  flex-shrink: 0;
+  padding: 9px 18px;
+  border-radius: 999px;
+  border: 1px solid #fdba74;
+  background: #fff;
+  color: #9a3412;
+  font: 700 12.5px/1 Arial, sans-serif;
+  cursor: pointer;
+  transition: transform 0.16s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+.profile-load-alert__retry:hover:not(:disabled) {
+  background: #fff7ed;
+  transform: translateY(-2px);
+  box-shadow: 0 10px 20px -12px rgba(234, 88, 12, 0.9);
+}
+.profile-load-alert__retry:focus-visible { outline: 3px solid rgba(234, 88, 12, 0.5); outline-offset: 2px; }
+.profile-load-alert__retry:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* Account-menu scroll targets. The Navbar is `position: sticky`, so it stays
+   over the content while scrolling — without this offset the section heading
+   the menu just navigated to would land underneath it. */
+#profile-personal,
+#profile-accounts,
+#account-security {
+  scroll-margin-top: 104px;
+}
+/* scrollToSection focuses the heading for screen readers; it must not draw a
+   focus ring, because the scroll itself is the feedback. */
+#profile-personal h2:focus,
+#profile-accounts h2:focus,
+#account-security h2:focus { outline: none; }
+
+.profile-info-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 13px 15px;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 12px;
+  font-size: 13px;
+  color: #0369a1;
+  line-height: 1.55;
+}
+
+.profile-info-notice svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.profile-info-notice strong {
+  font-weight: 700;
+}
+
+.profile-section {
+  position: relative;
+  margin-bottom: 0;
+  background: #fff;
+  border: 1px solid #e6efe9;
+  border-radius: 18px;
+  padding: 26px;
+  box-shadow: 0 1px 3px rgba(15, 60, 35, 0.05);
+  overflow: hidden;
+  transition: border-color 0.2s, box-shadow 0.25s, transform 0.2s;
+}
+/* Colour-coded top rail, assigned per section below. */
+.profile-section::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #10b981, #0d9488 52%, #4f46e5);
+}
+.profile-section--personal::before { background: linear-gradient(90deg, #10b981, #0d9488); }
+.profile-section--security::before { background: linear-gradient(90deg, #f59e0b, #f97316 55%, #ef4444); }
+.profile-section--accounts::before { background: linear-gradient(90deg, #0ea5e9, #06b6d4 55%, #14b8a6); }
+
+.profile-section:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 20px 38px -26px rgba(15, 60, 35, 0.55);
+}
+.profile-section:focus-within {
+  border-color: #6ee7b7;
+  box-shadow: 0 4px 18px rgba(34, 197, 94, 0.10);
+}
+
+/* Staggered entrance */
+@keyframes section-rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.profile-form > .profile-section,
+.profile-form > .profile-actions {
+  animation: section-rise 0.45s ease both;
+}
+.profile-form > *:nth-child(2) { animation-delay: 0.06s; }
+.profile-form > *:nth-child(3) { animation-delay: 0.12s; }
+.profile-form > *:nth-child(4) { animation-delay: 0.18s; }
+.profile-form > *:nth-child(5) { animation-delay: 0.24s; }
+.profile-form > *:nth-child(6) { animation-delay: 0.30s; }
+
+.profile-section-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: #0f172a;
+  margin: 0 0 6px;
+}
+
+.profile-section-title::before {
+  content: '';
+  width: 5px;
+  height: 22px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #22c55e, #15803d);
+  flex-shrink: 0;
+}
+
+.profile-section-subtitle {
+  font-size: 13.5px;
+  color: #6b7280;
+  margin: 0 0 20px;
+}
+
+.profile-form-group {
+  margin-bottom: 18px;
+  flex: 1;
+}
+
+.profile-form-group:last-child {
+  margin-bottom: 0;
+}
+
+.profile-form-group label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #0f766e;
+  margin-bottom: 8px;
+}
+
+.profile-helper-text {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  color: #6b7280;
+  margin-top: 6px;
+  line-height: 1.45;
+}
+
+.profile-form-group input,
+.profile-form-group select {
+  width: 100%;
+  padding: 13px 16px;
+  font-size: 15.5px;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffffff, #fbfdff);
+  color: #0f172a;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+  box-sizing: border-box;
+}
+.profile-form-group input:hover:not(:focus):not(:disabled),
+.profile-form-group select:hover:not(:focus):not(:disabled) {
+  border-color: #a5b4fc;
+  background: #fff;
+}
+
+/* Password input wrapper for eye button */
+.profile-password-input-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.profile-password-input-wrap input {
+  padding-right: 48px; /* Make room for eye button */
+}
+
+.profile-eye-btn {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #9ca3af;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s;
+}
+
+.profile-eye-btn:hover {
+  color: #16a34a;
+}
+
+.profile-eye-btn:focus {
+  outline: none;
+  color: #16a34a;
+}
+
+.profile-form-group input:focus,
+.profile-form-group select:focus {
+  outline: none;
+  border-color: #0d9488;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(13, 148, 136, 0.14);
+}
+.profile-form-group input:focus-visible,
+.profile-form-group select:focus-visible {
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.20);
+}
+
+.profile-form-group input:disabled,
+.profile-form-group select:disabled {
+  background: #f1f5f4;
+  color: #6b7280;
+  cursor: not-allowed;
+  border-color: #e7ecea;
+}
+
+.profile-form-row {
+  display: flex;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.profile-form-row:last-child {
+  margin-bottom: 0;
+}
+
+/* ── Alerts ───────────────────────────────────────────────────────────── */
+.profile-alert {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  font-size: 14.5px;
+  font-weight: 500;
+  background: #fff;
+  border: 1px solid #e6efe9;
+}
+
+.profile-alert svg {
+  flex-shrink: 0;
+}
+
+.profile-alert-error {
+  background: #fef2f2;
+  color: #991b1b;
+  border-color: #fecaca;
+}
+
+.profile-alert-success {
+  background: #f0fdf4;
+  color: #166534;
+  border-color: #bbf7d0;
+}
+
+/* ── Actions ──────────────────────────────────────────────────────────────
+   Sticky so Save/Cancel stay reachable no matter how long the security
+   cards below are — on a phone that is the difference between finishing
+   an edit and scrolling back up to find the button. */
+.profile-actions {
+  position: sticky;
+  bottom: 12px;
+  z-index: 5;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.92);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  border: 1px solid #dbe7e1;
+  border-radius: 18px;
+  padding: 16px 24px;
+  box-shadow: 0 18px 40px -22px rgba(15, 60, 35, 0.7);
+}
+
+.profile-btn {
+  padding: 13px 30px;
+  font-size: 15px;
+  font-weight: 700;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.2s, background 0.2s, filter 0.2s;
+}
+.profile-btn:focus-visible {
+  outline: 3px solid rgba(79, 70, 229, 0.5);
+  outline-offset: 3px;
+}
+
+.profile-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* No .profile-btn-logout any more: "Log Out" moved into the navbar account
+   menu, which is reachable from every page. */
+
+.profile-btn-primary {
+  background: linear-gradient(135deg, #4ade80 0%, #16a34a 55%, #0d9488 100%);
+  color: #fff;
+  box-shadow: 0 6px 18px rgba(34, 197, 94, 0.28);
+  position: relative;
+  overflow: hidden;
+}
+
+.profile-btn-primary::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -70%;
+  width: 45%;
+  height: 100%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+  transform: skewX(-18deg);
+  transition: left 0.5s ease;
+}
+
+.profile-btn-primary:hover:not(:disabled)::after {
+  left: 130%;
+}
+
+.profile-btn-primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 22px rgba(34, 197, 94, 0.34);
+}
+
+.profile-btn-secondary {
+  background: #eef2f0;
+  color: #374151;
+}
+
+.profile-btn-secondary:hover:not(:disabled) {
+  background: #e2e8e5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .profile-cover,
+  .profile-form > .profile-section,
+  .profile-form > .profile-actions {
+    animation: none;
+  }
+  .profile-avatar-large,
+  .profile-chip-btn,
+  .banner-edit-btn,
+  .profile-remove-banner,
+  .profile-section,
+  .profile-btn { transition: none; }
+  .profile-section:hover,
+  .profile-avatar-large:hover,
+  .profile-chip-btn:hover,
+  .banner-edit-btn:hover,
+  .profile-remove-banner:hover { transform: none; }
+  .profile-section--flash { animation: none; }
+}
+
+/* ── Recent security activity (Account Security card) ─────────────────── */
+.profile-section--flash {
+  animation: sec-flash 2.2s ease;
+}
+@keyframes sec-flash {
+  0%, 60% { box-shadow: 0 0 0 3px #6ee7b7, 0 8px 28px rgba(16, 185, 129, 0.35); }
+  100% { box-shadow: none; }
+}
+.security-activity {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid #e5e7eb;
+}
+.security-activity__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #065f46;
+  margin: 0 0 12px;
+}
+.security-activity__empty {
+  font-size: 13px;
+  color: #9ca3af;
+  margin: 0;
+  line-height: 1.5;
+}
+.security-activity__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.security-activity__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #f9fafb;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+.security-activity__item:hover {
+  transform: translateY(-1px);
+  background: #f0fdf4;
+  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.14);
+}
+.security-activity__item--unread {
+  background: linear-gradient(180deg, #f0fdf4, #ecfdf5);
+  border-color: #a7f3d0;
+}
+.security-activity__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+  flex-shrink: 0;
+  margin-top: 5px;
+}
+.security-activity__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.security-activity__name {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #111827;
+}
+.security-activity__detail {
+  font-size: 12.5px;
+  color: #6b7280;
+  line-height: 1.5;
+}
+.security-activity__time {
+  font-size: 11.5px;
+  color: #9ca3af;
+}
+
+/* ── OTP Modal ────────────────────────────────────────────────────────── */
+.profile-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(6, 25, 15, 0.55);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+  animation: modal-fade 0.18s ease-out;
+}
+
+@keyframes modal-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.profile-modal {
+  position: relative;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid rgba(24, 52, 42, 0.1);
+  border-radius: 20px;
+  padding: 32px;
+  max-width: 450px;
+  width: 100%;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.35);
+  animation: modal-pop 0.2s ease-out;
+}
+
+/* Vibrant spectrum rail, matching the Web3/admin surfaces. */
+.profile-modal::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #22c55e 0%, #0d9488 42%, #4f6bed 74%, #d46b35 100%);
+}
+
+@keyframes modal-pop {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+.profile-modal h2 {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: #0f172a;
+  margin: 0 0 14px;
+}
+
+.profile-modal p {
+  font-size: 14.5px;
+  color: #6b7280;
+  margin: 0 0 12px;
+  line-height: 1.55;
+}
+
+.profile-modal-email {
+  font-weight: 700;
+  color: #16a34a;
+  font-size: 16px;
+  margin-bottom: 8px;
+}
+
+.profile-modal-note {
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+/* OTP Expiry Timer */
+.otp-expiry-timer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: #f0f9ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  margin-bottom: 16px;
+  font-size: 14px;
+  color: #1e40af;
+  font-weight: 500;
+}
+
+.otp-expiry-timer svg {
+  flex-shrink: 0;
+}
+
+.otp-expiry-timer .expiring-soon {
+  color: #dc2626;
+  font-weight: 700;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.profile-otp-input {
+  width: 100%;
+  padding: 14px 16px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 8px;
+  text-align: center;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 12px;
+  margin-bottom: 16px;
+  box-sizing: border-box;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.profile-otp-input:focus {
+  outline: none;
+  border-color: #22c55e;
+  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.12);
+}
+
+/* Real digits keep the wide tracking; the hint is tracked lightly so
+   "Enter 6-digit code" does not read as one stretched-out word. */
+.profile-otp-input::placeholder {
+  color: #a9b8b0;
+  font-weight: 500;
+  letter-spacing: 3px;
+}
+
+.profile-otp-input:disabled {
+  background: #f3f4f6;
+  cursor: not-allowed;
+}
+
+/* A recovery code is 10 letters/digits and a hyphen, not 6 digits, so the
+   8px digit tracking above cannot be reused: it would push the hyphen and the
+   last symbol outside the box. Tighter tracking, and a monospace face so the
+   two halves of the code line up for someone reading it off paper. */
+.profile-otp-input--code {
+  letter-spacing: 2px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-transform: uppercase;
+}
+
+.profile-otp-input--code::placeholder {
+  letter-spacing: 1px;
+}
+
+.profile-modal-error {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+  padding: 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+.profile-modal-success {
+  background: #f0fdf4;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+  padding: 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+.profile-modal-resend {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.profile-modal-resend-btn {
+  background: transparent;
+  border: none;
+  color: #16a34a;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 8px 16px;
+  border-radius: 8px;
+  transition: background 0.2s;
+}
+
+.profile-modal-resend-btn:hover:not(:disabled) {
+  background: #f0fdf4;
+}
+
+.profile-modal-resend-btn:disabled {
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
+.profile-modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.profile-modal-btn {
+  padding: 12px 24px;
+  font-size: 15px;
+  font-weight: 700;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.2s, background 0.2s;
+}
+
+/* A saturated green at opacity .6 left the white label sitting on pale
+   green — effectively unreadable while the 6-digit code was incomplete.
+   The disabled state now picks its own neutral surface + dimmed text so the
+   contrast ratio stays legible instead of washing out. */
+.profile-modal-btn:disabled {
+  opacity: 1;
+  cursor: not-allowed;
+  background: #e7ece9;
+  color: #85958d;
+  box-shadow: none;
+  transform: none;
+}
+
+.profile-modal-btn-primary:disabled {
+  background: #e7ece9;
+  color: #85958d;
+}
+
+.profile-modal-btn-primary {
+  background: linear-gradient(135deg, #22c55e 0%, #15803d 100%);
+  color: #fff;
+  box-shadow: 0 6px 16px rgba(34, 197, 94, 0.28);
+}
+
+.profile-modal-btn-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(34, 197, 94, 0.34);
+}
+
+.profile-modal-btn-secondary {
+  background: #eef2f0;
+  color: #374151;
+}
+
+.profile-modal-btn-secondary:hover:not(:disabled) {
+  background: #e2e8e5;
+}
+
+/* Keyboard focus was invisible: the input's :focus rule removes the outline
+   and the buttons never defined one. Placed after :focus so it wins on
+   equal specificity. */
+.profile-otp-input:focus-visible,
+.profile-modal-btn:focus-visible,
+.profile-modal-resend-btn:focus-visible {
+  outline: 3px solid rgba(212, 107, 53, 0.6);
+  outline-offset: 2px;
+}
+
+/* ── Responsive ───────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .profile-page {
+    padding: 0 0 32px;
+    background:
+      radial-gradient(700px 300px at 10% -80px, rgba(16, 185, 129, 0.20), transparent 60%),
+      radial-gradient(640px 280px at 92% -60px, rgba(56, 189, 248, 0.20), transparent 60%),
+      #f1f6fa;
+  }
+
+  .profile-container {
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    box-shadow: none;
+  }
+
+  .profile-cover {
+    height: 156px;
+  }
+
+  /* Below ~640px the avatar stops straddling: a half-clipped circle on a
+     narrow screen reads as a rendering bug, so it centres on its own row
+     and the text stacks cleanly underneath. */
+  .profile-identity {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 14px;
+    margin-top: -46px;
+    padding: 0 18px 20px;
+  }
+
+  .profile-identity__actions {
+    grid-column: 1 / -1;
+    justify-content: center;
+    padding-bottom: 0;
+  }
+
+  .profile-avatar-large {
+    width: 96px;
+    height: 96px;
+    font-size: 42px;
+  }
+
+  .profile-title {
+    font-size: 24px;
+  }
+
+  .profile-subtitle {
+    font-size: 13.5px;
+  }
+
+  .profile-form {
+    padding: 18px 14px;
+    gap: 14px;
+  }
+
+  .profile-section {
+    padding: 20px 16px;
+  }
+
+  .profile-form-row {
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .profile-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    bottom: 8px;
+    padding: 14px 16px;
+  }
+
+  .profile-btn {
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .profile-cover {
+    height: 132px;
+  }
+
+  /* Single column: avatar centred above the name, never clipped. */
+  .profile-identity {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    text-align: center;
+    gap: 12px;
+    margin-top: -40px;
+    padding: 0 14px 18px;
+  }
+
+  .profile-avatar-large {
+    width: 92px;
+    height: 92px;
+    font-size: 40px;
+  }
+
+  .profile-title {
+    font-size: 22px;
+  }
+
+  .profile-form {
+    padding: 14px 10px;
+  }
+
+  .profile-section {
+    padding: 18px 14px;
+    border-radius: 16px;
+  }
+
+  .profile-section-title {
+    font-size: 17px;
+  }
+
+  .profile-modal {
+    padding: 24px;
+  }
+
+  .profile-modal h2 {
+    font-size: 20px;
+  }
+
+  .profile-otp-input {
+    font-size: 18px;
+    letter-spacing: 6px;
+  }
+
+  .profile-modal-actions {
+    flex-direction: column;
+  }
+
+  .profile-modal-btn {
+    width: 100%;
+  }
+}
+
+/* ── Plan & billing ────────────────────────────────────────────────────
+   Where "Manage billing" lands. The plan name uses the CUSTOMER-facing label
+   (Free/Deluxe/Premium/Ultimate) rather than the internal tier key, because this
+   is the one screen a subscriber reads to answer "what am I paying for". */
+.profile-section--billing { max-width: 640px; }
+
+.billing-card {
+  margin-top: 6px;
+  padding: 20px;
+  border: 1px solid #dbeee2;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.billing-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #eaf3ed;
+}
+
+.billing-card__label {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #7a8a7a;
+  margin-bottom: 3px;
+}
+
+.billing-card__plan {
+  display: block;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #14301f;
+}
+
+/* Mirrors the pricing page's PAID / ADMIN chips so the two screens read the
+   same way. */
+.billing-source {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  white-space: nowrap;
+}
+
+.billing-source--paid { color: #047857; background: #ecfdf5; border-color: #a7f3d0; }
+.billing-source--admin { color: #b45309; background: #fffbeb; border-color: #fde68a; }
+.billing-source--free { color: #7a8a7a; background: #f1f5f2; border-color: #dbeee2; }
+
+.billing-rows { margin: 16px 0 0; display: flex; flex-direction: column; gap: 11px; }
+
+.billing-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.billing-row dt {
+  margin: 0;
+  font-size: 12.5px;
+  color: #6b7c6b;
+}
+
+.billing-row dd {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #1f3d2c;
+  text-align: right;
+}
+
+.billing-note {
+  margin: 16px 0 0;
+  padding: 11px 13px;
+  border-radius: 10px;
+  border: 1px solid #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.billing-note strong { color: #78350f; }
+
+/* "change" beside the seat count: a text link, because the row itself is a
+   readout and the action belongs on the pricing page, not here. */
+.billing-link {
+  border: none;
+  background: none;
+  padding: 0;
+  margin-left: 4px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  color: #047857;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.billing-link:hover { color: #065f46; }
+.billing-link:focus-visible { outline: 2px solid #10b981; outline-offset: 2px; }
+
+.billing-actions { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 10px; }
+
+.billing-footnote {
+  margin: 14px 0 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: #7a8a7a;
+}
+
+@media (max-width: 640px) {
+  .billing-card { padding: 16px; }
+  .billing-card__plan { font-size: 21px; }
+  .billing-row { flex-direction: column; gap: 2px; }
+  .billing-row dd { text-align: left; }
+}

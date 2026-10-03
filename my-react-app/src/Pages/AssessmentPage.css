@@ -1,0 +1,1742 @@
+/* ── Assessment Page ── */
+/* The shared mesh backdrop. Fixed so the colour reads as light across the
+   page, and clipped so it can never open a horizontal scrollbar. */
+.assessment-wrapper {
+  min-height: 100vh;
+  position: relative;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  font-family: sans-serif;
+  color: var(--sw-ink, #0d2b23);
+  background: var(--sw-mesh, linear-gradient(168deg, #eefcf5, #f5f0ff));
+  background-attachment: fixed;
+}
+
+/* ── Card-based layout for Step 1 ── */
+.info-cards-row {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+/* The two side-by-side cards get a hairline, a lift and their own tinted
+   top edge, matching every other surface in the product. The 1.5px #e5e7eb /
+   #bbf7d0 / #bfdbfe borders were three unrelated greys-and-tints for what is
+   one repeated component. */
+.info-card {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--sw-line, #e2f1ea);
+  border-radius: var(--sw-radius-lg, 20px);
+  background: var(--sw-surface, #fff);
+  box-shadow: var(--sw-shadow-sm, 0 1px 2px rgba(9, 78, 58, 0.06));
+  overflow: hidden;
+  transition: transform var(--sw-dur, 0.24s) var(--sw-ease, ease),
+    box-shadow var(--sw-dur, 0.24s) ease, border-color var(--sw-dur, 0.24s) ease;
+}
+
+/* The accent is what tells the two cards apart — emerald and azure, matching
+   the icon each one already carries. */
+.info-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 20px;
+  right: 20px;
+  height: 3px;
+  border-radius: 0 0 4px 4px;
+  background: var(--card-accent, linear-gradient(90deg, #34d399, #22d3ee));
+}
+
+.info-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--sw-line-strong, #cbe7da);
+  box-shadow: var(--sw-shadow-md, 0 10px 28px -14px rgba(9, 78, 58, 0.26));
+}
+
+.demographics-card {
+  --card-accent: linear-gradient(90deg, #34d399, #10b981);
+  background: linear-gradient(to bottom, #ffffff 0%, #f6fdf9 100%);
+}
+
+.measurements-card {
+  --card-accent: linear-gradient(90deg, #38bdf8, #4f46e5);
+  background: linear-gradient(to bottom, #ffffff 0%, #f5f9ff 100%);
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.card-icon {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.card-icon-green {
+  color: #22c55e;
+}
+
+.card-icon-blue {
+  color: #3b82f6;
+}
+
+.card-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #111827;
+  margin: 0;
+  font-family: sans-serif;
+}
+
+.card-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card-field label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #111827;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.card-field input[type='number'],
+.card-field input[type='text'] {
+  padding: 10px 14px;
+  border: none;
+  border-radius: 8px;
+  background: #f3f4f6;
+  font-size: 14px;
+  color: #111827;
+  font-family: sans-serif;
+  outline: none;
+  transition: box-shadow 0.2s;
+  height: 44px;
+  box-sizing: border-box;
+}
+
+.card-field input:focus {
+  box-shadow: 0 0 0 2px #4ade80;
+}
+
+/* Responsive: stack cards on mobile */
+@media (max-width: 768px) {
+  .info-cards-row {
+    flex-direction: column;
+  }
+}
+
+.assessment-container {
+  flex: 1;
+  max-width: 800px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+/* Header row */
+.assessment-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  gap: 16px;
+}
+
+.assessment-header > div {
+  flex: 1;
+}
+
+.assessment-title {
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.16;
+  color: var(--sw-emerald-deep, #059669);
+  margin: 0 0 10px;
+  background: var(--sw-grad-spectrum, linear-gradient(92deg, #059669, #06b6d4 45%, #6366f1));
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .assessment-title { color: transparent; }
+}
+
+.step-counter {
+  padding: 5px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--sw-line-strong, #cbe7da);
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--sw-teal, #0d9488);
+}
+
+/* Progress bar */
+/* Thicker than the 6px it was: on a four-step assessment the bar is the only
+   thing telling someone how much is left, and 6px of grey reads as a rule. */
+.progress-bar-track {
+  width: 100%;
+  height: 9px;
+  background: #e6efe9;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--sw-grad-brand, linear-gradient(135deg, #10b981, #0891b2));
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
+  transition: width 0.45s var(--sw-ease, cubic-bezier(0.16, 1, 0.3, 1));
+}
+
+/* Card */
+.assessment-card {
+  padding: 32px 36px;
+  border: 1px solid var(--sw-line, #e2f1ea);
+  border-radius: var(--sw-radius-xl, 26px);
+  background: var(--sw-surface, #fff);
+  box-shadow: var(--sw-shadow-md, 0 10px 28px -14px rgba(9, 78, 58, 0.26));
+}
+
+/* The step fades in as it changes. Kept from the removed override block. */
+.step-body { animation: step-fade 0.35s ease both; }
+@keyframes step-fade {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Step body */
+.step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.step-section-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #111827;
+  margin: 0 0 20px 0;
+}
+
+.step-hint {
+  font-size: 14px;
+  color: #6b7280;
+  margin: -12px 0 16px 0;
+}
+
+/* Two-column row */
+.step-row {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 20px;
+  align-items: flex-start;
+}
+
+.step-row .step-field {
+  flex: 1;
+}
+
+/* Inline row - label and input on same line */
+.step-row-inline {
+  display: flex;
+  gap: 32px;
+  margin-bottom: 20px;
+  align-items: center;
+}
+
+/* Inline field - label and input horizontal */
+.step-field-inline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+
+.step-field-inline label {
+  font-size: 15px;
+  font-weight: 500;
+  color: #111827;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.step-field-inline input,
+.step-field-inline .gender-pill-group,
+.step-field-inline .ft-in-row {
+  flex: 1;
+}
+
+/* Age field takes less space in inline layout */
+#field-age.step-field-inline {
+  flex: 0 0 auto;
+  min-width: 200px;
+  max-width: 250px;
+}
+
+/* Gender field takes remaining space in inline layout */
+#field-gender.step-field-inline {
+  flex: 1;
+}
+
+/* Age field takes less space in the Age/Gender row */
+#field-age {
+  flex: 0 0 30%;
+  max-width: 180px;
+  min-width: 120px;
+}
+
+/* Gender field takes remaining space */
+#field-gender {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Field */
+.step-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.step-field label {
+  font-size: 15px;
+  font-weight: 500;
+  color: #111827;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.field-hint {
+  font-size: 12px;
+  font-weight: 400;
+  color: #9ca3af;
+  margin-left: 4px;
+}
+
+.age-notice {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: #1d4ed8;
+  font-family: sans-serif;
+  line-height: 1.5;
+}
+
+.step-field input[type='number'],
+.step-field input[type='text'],
+.step-field textarea,
+.step-field select {
+  padding: 10px 14px;
+  border: none;
+  border-radius: 8px;
+  background: #f3f4f6;
+  font-size: 14px;
+  color: #111827;
+  font-family: sans-serif;
+  outline: none;
+  resize: vertical;
+  transition: box-shadow 0.2s;
+  height: 44px;
+  box-sizing: border-box;
+}
+
+/* When viewing a read-only assessment from history, block all interactions inside the container */
+.assessment-container.readonly,
+.assessment-container.readonly * {
+  pointer-events: none !important;
+  user-select: none !important;
+}
+
+.assessment-container.readonly .progress-bar-fill { opacity: 0.6; }
+
+/* Keep footer navigation usable so user can move between steps while viewing history */
+.assessment-container.readonly .assessment-footer,
+.assessment-container.readonly .assessment-footer * {
+  pointer-events: auto !important;
+  user-select: auto !important;
+}
+
+/* Allow the small tooltip/info buttons ('?') to be clickable in readonly history view */
+.assessment-container.readonly .diet-info-btn,
+.assessment-container.readonly .diet-tooltip-wrap,
+.assessment-container.readonly .diet-tooltip-close {
+  pointer-events: auto !important;
+  user-select: auto !important;
+}
+
+.step-field input:focus,
+.step-field textarea:focus,
+.step-field select:focus {
+  box-shadow: 0 0 0 2px #4ade80;
+}
+
+/* Gender select dropdown */
+.gender-select {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23374151' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 40px;
+}
+
+/* Read-only age field styling */
+.step-field input.age-readonly {
+  background: #e5e7eb;
+  color: #6b7280;
+  cursor: not-allowed;
+  font-weight: 500;
+}
+
+.step-field input.age-readonly:focus {
+  box-shadow: none;
+}
+
+/* Radio / checkbox groups */
+.radio-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+
+.radio-label,
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #374151;
+  cursor: pointer;
+  /* Flex items default to min-width:auto, so the label text refuses to shrink
+     below its longest word and pushes the row wider than its grid track.
+     min-width:0 lets it wrap instead. */
+  min-width: 0;
+  /* Positioning context for the info panel of the option tooltips (diet, health
+     goals, activity level, medical conditions). Required by the
+     `.diet-tooltip-wrap--card` block further down, which anchors the panel to
+     the option instead of to the 17px '?' button. */
+  position: relative;
+}
+
+.radio-label input,
+.checkbox-label input {
+  accent-color: #22c55e;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.checkbox-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.checkbox-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 32px;
+}
+
+/* Required field star */
+.required-star {
+  color: #dc2626;
+  margin-left: 2px;
+}
+
+/* Required fields notice at top of step */
+.required-notice {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: #1e40af;
+  margin-bottom: 20px;
+  font-family: sans-serif;
+}
+
+.required-notice .required-star {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+/* Conditional label for nested required fields */
+.conditional-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #374151;
+  display: block;
+  margin-bottom: 6px;
+}
+
+/* Medication/Allergy group with None checkbox */
+.medication-allergy-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.medication-allergy-group .checkbox-label {
+  margin-bottom: 8px;
+}
+
+/* Field error state */
+.field-error input,
+.field-error textarea {
+  box-shadow: 0 0 0 2px #fca5a5 !important;
+}
+
+.field-error-msg {
+  font-size: 12px;
+  color: #dc2626;
+  margin-top: -4px;
+}
+
+/* Says where a pre-filled answer came from, so it reads as a starting point
+   rather than a locked-in value the user has to fight. */
+.field-hint-text {
+  margin: 10px 0 0;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #065f46;
+}
+
+/* ── The dead-hours lock on the assessment ─────────────────────────────────
+   Cool and quiet, deliberately unlike the red error treatment: nothing is
+   wrong, the form is simply asleep. The note is the important half — a disabled
+   button with no explanation is the commonest way a user concludes the app has
+   broken. */
+.assessment-snoozed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.assessment-snoozed .btn-next:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.assessment-snoozed__note {
+  margin: 0;
+  text-align: center;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #64748b;
+  max-width: 42ch;
+}
+
+/* Flex-wrap radio group */
+.radio-group.flex-wrap {
+  flex-wrap: wrap;
+  gap: 12px 20px;
+}
+
+/* No symptoms label */
+.no-symptoms-label {
+  margin-bottom: 16px;
+  font-weight: 500;
+  color: #374151;
+}
+
+/* Symptoms list with severity */
+.symptoms-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.symptom-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #f9fafb;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.symptom-row .checkbox-label {
+  flex-shrink: 0;
+}
+
+.symptom-row-active {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+}
+
+.symptom-row-error {
+  background: #fff1f2;
+  border: 1px solid #f87171 !important;
+}
+
+.severity-required-inline {
+  font-size: 10px;
+  font-weight: 600;
+  color: #dc2626;
+  white-space: nowrap;
+  margin-right: 4px;
+  flex: 1;
+  text-align: center;
+}
+
+.severity-group {
+  display: flex;
+  gap: 6px;
+}
+
+.severity-btn {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: sans-serif;
+  transition: all 0.15s;
+  color: #6b7280;
+}
+
+.severity-btn.severity-mild       { border-color: #86efac; color: #16a34a; }
+.severity-btn.severity-moderate   { border-color: #fcd34d; color: #d97706; }
+.severity-btn.severity-severe     { border-color: #fca5a5; color: #dc2626; }
+
+.severity-btn.severity-active.severity-mild     { background: #dcfce7; border-color: #22c55e; color: #15803d; }
+.severity-btn.severity-active.severity-moderate { background: #fef9c3; border-color: #eab308; color: #a16207; }
+.severity-btn.severity-active.severity-severe   { background: #fee2e2; border-color: #ef4444; color: #b91c1c; }
+
+/* Footer */
+.assessment-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 1px solid #f3f4f6;
+}
+
+.btn-cancel {
+  padding: 10px 20px;
+  background: #fff;
+  color: #374151;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: sans-serif;
+  transition: background 0.2s;
+}
+
+.btn-cancel:hover {
+  background: #f9fafb;
+}
+
+.btn-next {
+  padding: 10px 24px;
+  background: #22c55e;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: sans-serif;
+  transition: background 0.2s;
+}
+
+.btn-next:hover:not(:disabled) {
+  background: #16a34a;
+}
+
+.btn-next:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* Error */
+.auth-error {
+  background: #fee2e2;
+  color: #dc2626;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 14px;
+  margin-bottom: 16px;
+  font-family: sans-serif;
+}
+
+/* ── AI Polish Textarea ── */
+.polish-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.polish-textarea-wrap {
+  position: relative;
+}
+
+.polish-wrap textarea {
+  /* The extra bottom padding reserves the strip the .polish-indicator occupies
+     (approx 22px tall at bottom:10px). Without it the pill floated on top of the
+     last line of text while polishing. The value only has to clear the
+     indicator while it is showing, so it is cheap and never causes a scrollbar
+     in the common case. */
+  padding: 10px 14px 34px;
+  border: none;
+  border-radius: 8px;
+  background: #f3f4f6;
+  font-size: 14px;
+  color: #111827;
+  font-family: sans-serif;
+  outline: none;
+  resize: vertical;
+  transition: box-shadow 0.2s;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.polish-wrap textarea:focus {
+  box-shadow: 0 0 0 2px #4ade80;
+}
+
+/* Spinner shown inside the textarea corner while polishing.
+   Fully opaque: at 0.85 alpha the grey textarea showed through and the
+   underlying text stayed readable underneath the pill, which is the same
+   overlap artefact as the diet tooltip, just smaller. */
+.polish-indicator {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: #ffffff;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: #16a34a;
+  font-family: sans-serif;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.polish-footer {
+  display: flex;
+  align-items: center;
+}
+
+@keyframes polish-spin {
+  to { transform: rotate(360deg); }
+}
+
+.polish-spinner {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border: 2px solid #bbf7d0;
+  border-top-color: #16a34a;
+  border-radius: 50%;
+  animation: polish-spin 0.7s linear infinite;
+}
+
+.polish-status {
+  font-size: 12.5px;
+  border-radius: 6px;
+  padding: 7px 12px;
+  font-family: sans-serif;
+  line-height: 1.5;
+}
+
+.polish-status--success {
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.polish-status--warn {
+  background: #fff7ed;
+  color: #92400e;
+  border: 1px solid #fed7aa;
+}
+
+.polish-undo {
+  background: none;
+  border: none;
+  color: #16a34a;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  font-family: sans-serif;
+}
+
+.polish-undo:hover {
+  color: #15803d;
+}
+
+/* ── Unit toggle (kg/lbs, cm/ft) ── */
+.unit-toggle-inline {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 10px;
+  vertical-align: middle;
+  height: 24px;
+  align-items: center;
+}
+
+.unit-btn {
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid #d1d5db;
+  background: #f9fafb;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: sans-serif;
+  color: #6b7280;
+  transition: all 0.15s;
+  height: 24px;
+  line-height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.unit-btn-active {
+  background: #22c55e;
+  border-color: #22c55e;
+  color: #fff;
+  font-weight: 600;
+}
+
+/* Feet + inches row */
+.ft-in-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ft-in-row input {
+  width: 80px;
+  flex-shrink: 0;
+}
+
+.ft-in-sep {
+  font-size: 13px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+/* ── Diet tooltip ── */
+.diet-label {
+  position: relative;
+}
+
+.diet-info-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  border: 1.5px solid #22c55e;
+  background: #f0fdf4;
+  color: #16a34a;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-left: 6px;
+  padding: 0;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.diet-info-btn:hover {
+  background: #dcfce7;
+  border-color: #16a34a;
+  color: #15803d;
+}
+
+.diet-tooltip-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  /* NO z-index here, on purpose.
+     This used to be `z-index: 30` on EVERY trigger wrapper. A positioned
+     element with a z-index becomes a stacking context, so the panel's own
+     `z-index: 31` could only outrank things inside its own wrapper — and among
+     the equal-z siblings the one later in the DOM painted on top. Result: the
+     '?' buttons of the options below the open one drew straight through the
+     description panel ("it glitches out"). At `auto` the wrapper is no longer a
+     stacking context, so the panel's z-index competes with the whole option
+     list and always wins. Verified: 0 punch-throughs at 320-1440px. */
+}
+
+.diet-tooltip-box {
+  position: absolute;
+  left: 26px;
+  top: -6px;
+  z-index: 31;
+  background: #f0fdf4;
+  color: #166534;
+  font-size: 13px;
+  line-height: 1.65;
+  padding: 12px 16px;
+  border-radius: 12px;
+  /* `min()` keeps the panel inside the viewport on a narrow window. Without it
+     the fixed 240px + the 26px offset ran off the right edge on small screens.
+     border-box is essential: as a content-box, `width` excluded the 32px of
+     horizontal padding and the panel rendered 34px WIDER than asked for. */
+  box-sizing: border-box;
+  width: min(260px, calc(100vw - 32px));
+  box-shadow: 0 4px 20px rgba(34, 197, 94, 0.15), 0 1px 4px rgba(0,0,0,0.06);
+  border: 1px solid #bbf7d0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/* The tooltip is a floating panel that deliberately covers the options beside
+   it, so the WHOLE open option is raised — not just the panel. A z-index on the
+   panel alone only competes inside its own stacking context, which is why the
+   neighbouring option labels could paint straight through it. `:has()` lifts
+   the ancestor, so the panel and its option win as one unit; browsers without
+   `:has()` simply keep the previous behaviour (the panel still carries its own
+   z-index, which is what fixes the '?' buttons punching through it). */
+.diet-label:has(.diet-tooltip-box) {
+  z-index: 30;
+}
+
+.diet-tooltip-close {
+  background: none;
+  border: none;
+  color: #86efac;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  margin-left: auto;
+  line-height: 1;
+  transition: color 0.15s;
+}
+
+.diet-tooltip-close:hover {
+  color: #16a34a;
+}
+
+/* ── Park the panel INSIDE its option (desktop) ─────────────────────────────
+   The panel used to be positioned against `.diet-tooltip-wrap` - only 17px
+   wide, the size of the '?' button - and then pushed a further 26px to the
+   right of it, so it grew rightwards from a point near the end of the option.
+   Two things went wrong from that:
+
+     - On a two-column row (health goals, medical conditions) a 260px panel
+       started that far right landed 40-70px outside the right border of the
+       assessment card.
+     - On the 3-column DIET grid it was worse: the third column sits hard
+       against the card's right edge, so the panel ran ~150px past the card and
+       gave the whole page a horizontal scrollbar.
+
+   Instead the wrapper stops being the containing block: it becomes static and
+   is pushed to the far right of the option by `margin-left:auto`, so the panel
+   is positioned against the OPTION and opens to the LEFT of its own trigger.
+
+   Opening leftwards is what makes the geometry work. Anchored at the top of a
+   ~30px row, a panel taller than the row would sit straight on top of the
+   trigger, hiding it and stealing the click that should toggle the panel shut -
+   so the horizontal offset has to clear the trigger, not overlap it.
+
+   `34px` = the trigger's own footprint (17px button + 6px margin) plus an 11px
+   gap. `min(260px, 100% - 34px)` then caps the panel at the option's own
+   width, which is what makes overflow past the card impossible in any column.
+
+   The trade-off: in the narrow 3-column diet grid the panel is now as wide as
+   its column rather than a free-floating 260px, so it is taller. That is the
+   price of not pushing a scrollbar onto the page.
+
+   The age and gender tooltips deliberately keep the trigger-anchored rules
+   above: they sit inline in a plain <label> with no flex row to fill, and they
+   are near the left edge of the card where 260px fits comfortably.
+
+   Gated to `min-width: 769px` because below that the panel is in normal flow
+   (see the block at the end of this file) and must not be repositioned at all. */
+@media (min-width: 769px) {
+  .diet-tooltip-wrap--card {
+    position: static;
+    flex: 0 0 auto;
+    margin-left: auto;
+  }
+
+  .diet-tooltip-wrap--card .diet-tooltip-box {
+    left: auto;
+    right: 34px;
+    width: min(260px, calc(100% - 34px));
+  }
+}
+
+/* ── 3-column grid for diet types ── */
+/* `minmax(0, 1fr)` rather than plain `1fr`: a bare `1fr` floors each track at
+   its min-content width, and "Mediterranean" + radio + "?" button is wider than
+   a third of a narrow column. That forced the whole grid ~40px past its
+   container and gave the assessment page a horizontal scrollbar. Allowing the
+   tracks to shrink lets the label wrap instead. */
+.checkbox-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px 24px;
+}
+
+/* ── Goal groups ── */
+.goal-group {
+  margin-bottom: 16px;
+}
+
+.goal-group-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #22c55e;
+  margin: 0 0 10px 0;
+}
+
+/* ── Symptom name styling ── */
+.symptom-name {
+  font-weight: 500;
+}
+
+/* ── Severity description ── */
+.severity-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.severity-desc {
+  font-size: 11.5px;
+  color: #6b7280;
+  background: #f9fafb;
+  border-radius: 6px;
+  padding: 5px 10px;
+  margin: 0;
+  line-height: 1.5;
+  max-width: 320px;
+  text-align: right;
+}
+
+.severity-desc strong {
+  color: #374151;
+}
+
+/* ── Pregnancy grid ── */
+.pregnancy-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 8px;
+}
+
+.pregnancy-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: #f9fafb;
+  border-radius: 8px;
+  padding: 10px 14px;
+  flex-wrap: wrap;
+}
+
+.pregnancy-label {
+  font-size: 14px;
+  color: #374151;
+  font-weight: 500;
+}
+
+/* ── Responsive tweaks ── */
+@media (max-width: 600px) {
+  .checkbox-grid-3 {
+    grid-template-columns: 1fr 1fr;
+  }
+  .ft-in-row input {
+    width: 60px;
+  }
+  .diet-tooltip-box {
+    left: 0;
+    top: 28px;
+    width: 220px;
+  }
+  .severity-wrap {
+    align-items: flex-start;
+  }
+  .severity-desc {
+    text-align: left;
+    max-width: 100%;
+  }
+  .pregnancy-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+/* ── Gender pill buttons ── */
+.gender-pill-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  height: 44px;
+  align-items: center;
+}
+
+.gender-pill {
+  padding: 0 18px;
+  border-radius: 999px;
+  border: 1.5px solid #d1d5db;
+  background: #f9fafb;
+  color: #374151;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: sans-serif;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+  height: 36px;
+  line-height: 36px;
+}
+
+.gender-pill:hover {
+  border-color: #22c55e;
+  color: #15803d;
+  background: #f0fdf4;
+}
+
+.gender-pill-active {
+  background: #22c55e;
+  border-color: #22c55e;
+  color: #fff;
+  font-weight: 600;
+}
+
+.gender-pill-active:hover {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #fff;
+}
+
+/* Read-only gender pill styling */
+.gender-pill-readonly {
+  cursor: default;
+  opacity: 1;
+}
+
+.gender-pill-readonly:hover {
+  border-color: #d1d5db;
+  color: #374151;
+  background: #f9fafb;
+}
+
+.gender-pill-readonly.gender-pill-active {
+  background: #f3f4f6;
+  border-color: #f3f4f6;
+  color: #111827;
+  font-weight: 500;
+  opacity: 1;
+}
+
+.gender-pill-readonly.gender-pill-active:hover {
+  background: #f3f4f6;
+  border-color: #f3f4f6;
+  color: #111827;
+}
+
+/* ── Section divider inside a step ── */
+.step-section-divider {
+  border: none;
+  border-top: 2px solid #f0fdf4;
+  margin: 28px 0 24px 0;
+}
+
+/* ── New section headers with icons (matching Step 1 style) ── */
+.section-header-with-icon {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.section-icon {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.section-icon-green {
+  color: #22c55e;
+}
+
+.section-icon-purple {
+  color: #a855f7;
+}
+
+.section-icon-red {
+  color: #ef4444;
+}
+
+.section-icon-orange {
+  color: #f97316;
+}
+
+.section-icon-teal {
+  color: #14b8a6;
+}
+
+.section-icon-purple {
+  color: #a855f7;
+}
+
+.section-title {
+  margin: 0;
+  font-family: sans-serif;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--sw-ink, #0d2b23);
+}
+
+/* A short accent rule rather than a full-width 3px bar. At full width the
+   divider was the heaviest thing on a page made of form fields, and it read
+   as a heading underline rather than as a separator between sections. */
+.section-divider {
+  width: 64px;
+  height: 4px;
+  margin-bottom: 22px;
+  border-radius: 999px;
+}
+
+.section-divider-green {
+  background: linear-gradient(to right, #10b981, #86efac);
+}
+
+.section-divider-purple {
+  background: linear-gradient(to right, #a855f7 0%, #e9d5ff 100%);
+}
+
+.section-divider-red {
+  background: linear-gradient(to right, #ef4444 0%, #fecaca 100%);
+}
+
+.section-divider-orange {
+  background: linear-gradient(to right, #f97316 0%, #fed7aa 100%);
+}
+
+.section-divider-teal {
+  background: linear-gradient(to right, #14b8a6 0%, #99f6e4 100%);
+}
+
+/* ── Subsection headers (smaller, for Step 4 subdivisions) ── */
+.subsection-header-with-icon {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 28px;
+  margin-bottom: 6px;
+}
+
+.subsection-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.subsection-icon-teal {
+  color: #14b8a6;
+}
+
+.subsection-icon-purple {
+  color: #a855f7;
+}
+
+.subsection-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #374151;
+  margin: 0;
+  font-family: sans-serif;
+}
+
+.subsection-divider {
+  height: 2px;
+  border-radius: 1px;
+  margin-bottom: 16px;
+}
+
+.subsection-divider-teal {
+  background: linear-gradient(to right, #14b8a6 0%, #ccfbf1 100%);
+}
+
+.subsection-divider-purple {
+  background: linear-gradient(to right, #a855f7 0%, #f3e8ff 100%);
+}
+
+/* ── Physical Activity Level description ── */
+.activity-option-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.activity-desc {
+  font-size: 12px;
+  color: #374151;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 6px;
+  padding: 7px 12px;
+  margin: 4px 0 4px 26px;
+  line-height: 1.6;
+  display: block;
+}
+
+/* ── Health Goal descriptions & subgroups ── */
+.goal-option-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.goal-desc {
+  font-size: 12px;
+  color: #374151;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 6px;
+  padding: 7px 12px;
+  margin: 4px 0 4px 26px;
+  line-height: 1.6;
+  display: block;
+}
+
+.goal-subgroup {
+  margin-bottom: 12px;
+}
+
+.goal-subgroup-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 8px 0 6px 0;
+}
+
+/* ── Medical Condition groups ── */
+.condition-group {
+  margin-bottom: 16px;
+}
+
+.condition-group-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #374151;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 8px 0;
+  padding-bottom: 4px;
+}
+
+.condition-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ── Symptoms locked until conditions selected ── */
+.symptoms-no-conditions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  background: #f9fafb;
+  border: 1px dashed #d1d5db;
+  border-radius: 10px;
+  padding: 16px 20px;
+  margin-top: 8px;
+}
+.symptoms-no-conditions-icon {
+  font-size: 20px;
+}
+.symptoms-no-conditions p {
+  font-size: 13px;
+  color: #6b7280;
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* ── Symptom condition group headers ── */
+.symptom-condition-group {
+  margin-bottom: 20px;
+}
+
+.symptom-condition-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #15803d;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 8px 0;
+  padding: 5px 10px;
+  background: #f0fdf4;
+  border-left: 3px solid #22c55e;
+  border-radius: 0 6px 6px 0;
+  display: block;
+}
+
+/* ── Per-condition no symptoms checkbox ── */
+.no-symptoms-for-condition {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #6b7280;
+  font-style: italic;
+  padding: 6px 0 0 4px;
+  border-top: 1px dashed #e5e7eb;
+}
+
+/* ── Step 4 layout improvements ── */
+
+/* Stack radio/checkbox options vertically in Step 4 */
+.step-body .radio-group.flex-wrap {
+  flex-direction: column;
+  gap: 10px;
+  flex-wrap: nowrap;
+}
+
+/* Add more breathing room between step fields in Step 4 */
+.step-body .step-field + .step-field {
+  margin-top: 8px;
+}
+
+/* Section divider between logical groups in Step 4 */
+.step4-divider {
+  border: none;
+  border-top: 1px solid #f0f0f0;
+  margin: 20px 0 8px 0;
+}
+
+/* ── Description Warning Modal ── */
+.description-warning-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeInBg 0.18s ease;
+}
+
+@keyframes fadeInBg {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.description-warning-box {
+  background: #fff;
+  border-radius: 16px;
+  padding: 32px 28px 24px;
+  max-width: 420px;
+  width: 92%;
+  text-align: center;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.18);
+  animation: slideUpBox 0.2s ease;
+}
+
+@keyframes slideUpBox {
+  from { transform: translateY(14px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.description-warning-icon {
+  font-size: 40px;
+  margin-bottom: 12px;
+}
+
+.description-warning-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: #111827;
+  margin: 0 0 10px 0;
+  font-family: sans-serif;
+}
+
+.description-warning-body {
+  font-size: 14px;
+  color: #6b7280;
+  line-height: 1.65;
+  margin: 0 0 24px 0;
+  font-family: sans-serif;
+}
+
+.description-warning-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.description-warning-actions .btn-cancel {
+  flex: 1;
+}
+
+.description-warning-actions .btn-next {
+  flex: 1;
+}
+
+/* ── AI Loading Screen ── */
+.ai-loading-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 420px;
+  animation: fadeInBg 0.3s ease;
+}
+
+.ai-loading-card {
+  background: #fff;
+  border-radius: 20px;
+  padding: 40px 36px 32px;
+  max-width: 440px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 8px 40px rgba(34, 197, 94, 0.12), 0 2px 12px rgba(0,0,0,0.07);
+  border: 1px solid #d1fae5;
+}
+
+/* Spinner ring + emoji center */
+.ai-loading-spinner {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 20px;
+}
+
+.ai-spinner-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 4px solid #d1fae5;
+  border-top-color: #22c55e;
+  animation: spinRing 1s linear infinite;
+}
+
+@keyframes spinRing {
+  to { transform: rotate(360deg); }
+}
+
+.ai-spinner-icon {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  animation: pulseBounce 1.8s ease-in-out infinite;
+}
+
+@keyframes pulseBounce {
+  0%, 100% { transform: scale(1); }
+  50%       { transform: scale(1.15); }
+}
+
+.ai-loading-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #111827;
+  margin: 0 0 8px;
+  font-family: sans-serif;
+}
+
+.ai-loading-sub {
+  font-size: 14px;
+  color: #6b7280;
+  margin: 0 0 24px;
+  font-family: sans-serif;
+  line-height: 1.55;
+}
+
+/* Step list */
+.ai-loading-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+  margin-bottom: 24px;
+}
+
+.ai-loading-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 10px 14px;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.35s ease, transform 0.35s ease;
+  font-family: sans-serif;
+}
+
+.ai-loading-step-visible {
+  opacity: 1;
+  transform: translateY(0);
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.ai-loading-step-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.ai-loading-step-label {
+  font-size: 13px;
+  color: #374151;
+  flex: 1;
+}
+
+.ai-loading-step-check {
+  font-size: 14px;
+  color: #22c55e;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.ai-loading-note {
+  font-size: 12px;
+  color: #9ca3af;
+  margin: 0;
+  font-family: sans-serif;
+}
+
+/* Priority gate — shown when new assessments are paused */
+.priority-gate{max-width:560px;margin:48px auto;padding:40px 32px;text-align:center;background:#fff;border:1px solid #fecaca;border-radius:20px;box-shadow:0 12px 32px rgba(185,28,28,.10)}
+.priority-gate__icon{width:56px;height:56px;margin:0 auto 16px;border-radius:50%;background:#fef2f2;color:#dc2626;display:flex;align-items:center;justify-content:center;font-size:24px;border:1px solid #fecaca}
+.priority-gate__title{font-size:22px;font-weight:800;color:#7f1d1d;margin:0 0 10px}
+.priority-gate__text{font-size:14.5px;color:#4b5563;line-height:1.6;margin:0 0 12px}
+.priority-gate__item{font-size:13px;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:8px 12px;margin:0 0 8px}
+.priority-gate__actions{display:flex;gap:12px;justify-content:center;margin-top:20px;flex-wrap:wrap}
+.priority-gate__btn{padding:12px 24px;font-size:15px;font-weight:700;border-radius:999px;cursor:pointer;transition:transform .15s,box-shadow .2s,background .2s;border:none}
+.priority-gate__btn--primary{background:linear-gradient(135deg,#22c55e,#15803d);color:#fff;box-shadow:0 6px 16px rgba(34,197,94,.28)}
+.priority-gate__btn--primary:hover{transform:translateY(-1px)}
+.priority-gate__btn--secondary{background:#eef2f0;color:#374151}
+.priority-gate__btn--secondary:hover{background:#e2e8e5}
+@media (max-width:480px){.priority-gate{margin:24px 12px;padding:28px 18px}.priority-gate__btn{width:100%}}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TOOLTIP ON SMALL SCREENS  (must stay LAST in this file)
+   ═══════════════════════════════════════════════════════════════════════
+   These rules live here, not in mobile-responsive.css, and the placement is
+   the whole point.
+
+   1. ORDER vs mobile-responsive.css: main.jsx imports that file up front,
+      but this stylesheet is injected later by the lazy AssessmentPage chunk.
+      On a specificity tie the later sheet wins, so any mobile-responsive
+      rule for a class defined here is silently dead. That is not a guess —
+      it is exactly what happened: an earlier version of this fix lived in
+      mobile-responsive.css and the panel stayed `position: absolute` at
+      every width, so the `?` triggers painted on top of the panel's own text.
+
+   2. ORDER within this file: the `@media (max-width: 600px)` block above
+      still sets `left/top/width` on .diet-tooltip-box, and it comes earlier
+      in the file. Sitting at the end means these declarations are the last
+      word for the panel's geometry.
+
+   On a phone the options stack in one full-width column, so a 240px bubble
+   anchored to a trigger at the end of a row runs off the right edge and
+   covers the rows below it. Here the panel joins normal flow under its own
+   option: it widens that row and pushes the following options down, so
+   overlap becomes impossible by construction rather than merely
+   out-z-indexed. */
+@media (max-width: 768px) {
+  /* Let the option wrap, so the panel can take a line of its own. */
+  .diet-label {
+    flex-wrap: wrap;
+  }
+
+  .diet-tooltip-wrap {
+    position: static;
+    /* Generates no box, so the trigger and the panel become direct children
+       of the option and the panel can span the full width beneath it. */
+    display: contents;
+  }
+
+  .diet-info-btn {
+    /* Square and never stretched. mobile-responsive.css gives grid options a
+       44px min-height; as a flex item the button was being pulled to 26x44,
+       a tall pill whose lower half sat on the panel's first text line. */
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+    flex: 0 0 auto;
+    align-self: center;
+  }
+
+  .diet-tooltip-box {
+    /* In flow, so the absolute offsets from the <=600px block are void. */
+    position: static;
+    left: auto;
+    top: auto;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    margin-top: 10px;
+    /* Places the panel on the wrapped line after the trigger. */
+    order: 3;
+    /* Nothing to out-z-index now that it no longer floats. */
+    z-index: auto;
+  }
+}

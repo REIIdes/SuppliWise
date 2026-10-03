@@ -1,0 +1,230 @@
+/* ── Overlay ─────────────────────────────────────────────────────────── */
+.mam-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(6, 40, 28, 0.55);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100;
+  padding: 20px;
+  animation: mam-fade 0.2s ease;
+}
+
+@keyframes mam-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ── Dialog box ──────────────────────────────────────────────────────── */
+.mam-content {
+  background: #fff;
+  border-radius: 20px;
+  width: min(92vw, 480px);
+  box-shadow: 0 24px 64px rgba(6, 95, 70, 0.25), 0 2px 8px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+  animation: mam-pop 0.28s cubic-bezier(0.34, 1.4, 0.64, 1);
+  border: 1px solid #d1fae5;
+  position: relative;
+}
+
+/* Vibrant gradient ribbon across the top of the dialog */
+.mam-content::before {
+  content: '';
+  display: block;
+  height: 6px;
+  background: linear-gradient(90deg, #34d399, #059669 45%, #0d9488 75%, #f59e0b);
+}
+
+@keyframes mam-pop {
+  from { opacity: 0; transform: scale(0.94) translateY(14px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* ── Header ──────────────────────────────────────────────────────────── */
+.mam-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.mam-title {
+  font-size: 1.4rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  margin: 0;
+  background: linear-gradient(92deg, #065f46, #059669 60%, #0d9488);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.mam-close {
+  background: #f3f4f6;
+  border: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  font-size: 1.3rem;
+  line-height: 1;
+  color: #6b7280;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s, transform 0.15s;
+}
+.mam-close:hover {
+  background: #fee2e2;
+  color: #b91c1c;
+  transform: rotate(90deg);
+}
+
+/* ── Body ────────────────────────────────────────────────────────────── */
+.mam-body {
+  padding: 20px 24px 24px;
+}
+
+.mam-sub {
+  font-size: 0.9rem;
+  color: #6b7280;
+  margin: 0 0 20px;
+}
+
+/* ── Feedback banners ────────────────────────────────────────────────── */
+.mam-alert {
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  margin-bottom: 16px;
+}
+.mam-alert--error {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fca5a5;
+}
+.mam-alert--success {
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #86efac;
+}
+
+/* ── Action buttons stack ────────────────────────────────────────────── */
+.mam-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Base button — vibrant pill */
+.mam-btn {
+  width: 100%;
+  min-height: 52px;
+  padding: 14px 20px;
+  border-radius: 999px;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+  border: 2px solid transparent;
+  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  /* `backwards` not `both`: a filled `to { transform }` outranks normal author
+     rules, so `both` permanently killed the :hover / :active feedback below. */
+  animation: mam-rise 0.35s ease backwards;
+}
+.mam-actions .mam-btn:nth-child(2) { animation-delay: 0.06s; }
+.mam-actions .mam-btn:nth-child(3) { animation-delay: 0.12s; }
+
+@keyframes mam-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.mam-btn:hover:not(:disabled)  { transform: translateY(-2px); }
+.mam-btn:active:not(:disabled) { transform: scale(0.98); }
+.mam-btn:focus-visible {
+  outline: 3px solid #6ee7b7;
+  outline-offset: 2px;
+}
+.mam-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Set as Priority — amber glow (inactive) */
+.mam-btn--outline {
+  background: linear-gradient(180deg, #fffbeb, #fef3c7);
+  color: #92400e;
+  border-color: #f59e0b;
+  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.18);
+}
+.mam-btn--outline:hover:not(:disabled) {
+  background: linear-gradient(180deg, #fef3c7, #fde68a);
+  box-shadow: 0 8px 22px rgba(245, 158, 11, 0.32);
+}
+
+/* Set as Priority — when this IS the current priority */
+.mam-btn--active-priority {
+  background: linear-gradient(135deg, #fbbf24, #f59e0b 55%, #ea580c);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 8px 22px rgba(245, 158, 11, 0.42);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+.mam-btn--active-priority:hover:not(:disabled) {
+  box-shadow: 0 12px 28px rgba(245, 158, 11, 0.5);
+}
+
+/* Set as Standard — emerald glow */
+.mam-btn--green {
+  background: linear-gradient(180deg, #ffffff, #ecfdf5);
+  color: #065f46;
+  border-color: #10b981;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.16);
+}
+.mam-btn--green:hover:not(:disabled) {
+  background: linear-gradient(180deg, #ecfdf5, #d1fae5);
+  box-shadow: 0 8px 22px rgba(16, 185, 129, 0.3);
+}
+
+/* Set as Standard — when already standard (current) */
+.mam-btn--active-standard {
+  background: linear-gradient(135deg, #34d399, #059669 60%, #0d9488);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 8px 22px rgba(16, 185, 129, 0.42);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+.mam-btn--active-standard:hover:not(:disabled) {
+  box-shadow: 0 12px 28px rgba(16, 185, 129, 0.5);
+}
+
+/* Delete — rose tint, fills red on hover */
+.mam-btn--delete {
+  background: linear-gradient(180deg, #fff1f2, #ffe4e6);
+  color: #dc2626;
+  border-color: #fda4af;
+  box-shadow: 0 4px 14px rgba(225, 29, 72, 0.12);
+}
+.mam-btn--delete:hover:not(:disabled) {
+  background: linear-gradient(135deg, #f43f5e, #dc2626 60%, #b91c1c);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 8px 22px rgba(225, 29, 72, 0.4);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+
+/* Calm everything down for reduced-motion users */
+@media (prefers-reduced-motion: reduce) {
+  .mam-overlay, .mam-content, .mam-btn { animation: none; }
+  .mam-btn, .mam-close { transition: none; }
+}

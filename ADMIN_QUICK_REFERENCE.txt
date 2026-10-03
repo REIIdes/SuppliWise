@@ -1,0 +1,120 @@
+═══════════════════════════════════════════════════════════════════
+  SUPPLIWISE - ADMIN LOGIN QUICK REFERENCE
+═══════════════════════════════════════════════════════════════════
+
+📋 NEW ADMIN CREDENTIALS (After Reset)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Username: AdminDevs  →  Password: Devs101
+Username: AdminPoli  →  Password: Poli101
+Username: AdminJoma  →  Password: Joma101
+Username: AdminJohn  →  Password: John101
+Username: AdminRaNe  →  Password: RaNe101
+Username: AdminShMa  →  Password: ShMa101
+
+⚠️  All passwords are CASE-SENSITIVE!
+
+═══════════════════════════════════════════════════════════════════
+  SETUP STEPS (One Time)
+═══════════════════════════════════════════════════════════════════
+
+1. SETUP TOTP (Authenticator App)
+   → Open: server/admin-totp-setup-NEW.html
+   → Scan QR code for your admin account
+   → Save in authenticator app
+
+2. START SERVER
+   → cd server
+   → npm start
+   → Wait for: "Server running on port 5000"
+
+3. LOGIN
+   → URL: http://localhost:5173/admin/login
+   → Enter username (e.g., AdminPoli)
+   → Enter password (e.g., Poli101)
+   → Enter 6-digit TOTP code from authenticator
+   → Click "Sign In"
+
+═══════════════════════════════════════════════════════════════════
+  WHAT WAS DONE
+═══════════════════════════════════════════════════════════════════
+
+✅ Database Reset:
+   - Deleted 6 old admin accounts
+   - Users and other data UNTOUCHED (3 users preserved)
+   - AdminAccount collection cleared
+
+✅ New Credentials:
+   - Fresh Argon2id password hashes
+   - New TOTP secrets (32 chars each)
+   - All passwords verified working
+
+✅ Configuration:
+   - Updated server/.env with ADMIN_ACCOUNTS
+   - Server loads accounts successfully
+   - No errors or bugs detected
+
+═══════════════════════════════════════════════════════════════════
+  VERIFICATION STATUS
+═══════════════════════════════════════════════════════════════════
+
+✅ All 6 passwords verified working
+✅ All TOTP secrets configured
+✅ Server starts without errors
+✅ Admin accounts load from .env
+✅ Database reset successful
+✅ User data preserved
+✅ No errors detected
+
+═══════════════════════════════════════════════════════════════════
+  SECURITY REMINDERS
+═══════════════════════════════════════════════════════════════════
+
+⚠️  DELETE these files after setup:
+   - server/admin-totp-setup-NEW.html
+   - server/admin-credentials.json
+   - server/all-admins-totp-setup.html (old)
+   - server/admin-totp-setup.html (old)
+
+✓  Keep secure:
+   - server/.env (already in .gitignore)
+   - Authenticator app backups
+   - Password manager entries
+
+═══════════════════════════════════════════════════════════════════
+  TROUBLESHOOTING
+═══════════════════════════════════════════════════════════════════
+
+❌ "Invalid credentials"
+   → Check username/password case-sensitivity
+   → Verify server restarted after .env update
+   → Make sure TOTP code is current (30 sec refresh)
+
+❌ "Invalid authenticator code"
+   → Check device clock is synchronized
+   → Wait for next code (30 seconds)
+   → Verify you scanned correct QR for your account
+
+❌ Account locked
+   → Wait 15 minutes after 3 failed attempts
+   → Or restart server to clear locks (dev only)
+
+═══════════════════════════════════════════════════════════════════
+  USEFUL COMMANDS
+═══════════════════════════════════════════════════════════════════
+
+Verify credentials:
+  cd server
+  node verify-admin-credentials.js
+
+Check server syntax:
+  cd server
+  node -c index.js
+
+View configured admins:
+  cd server
+  node -e "require('dotenv').config(); const { configuredAdminAccounts } = require('./utils/adminAccounts'); console.log(configuredAdminAccounts());"
+
+═══════════════════════════════════════════════════════════════════
+  STATUS: ✅ READY TO USE - NO ERRORS OR BUGS
+═══════════════════════════════════════════════════════════════════

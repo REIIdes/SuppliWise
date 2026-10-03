@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PWA Icon Generator for SuppliWise</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            border-radius: 16px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #667eea;
+            margin-top: 0;
+        }
+        .icon-preview {
+            display: flex;
+            gap: 20px;
+            margin: 30px 0;
+            flex-wrap: wrap;
+        }
+        canvas {
+            border: 2px solid #e5e7eb;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-right: 10px;
+            margin-top: 10px;
+            transition: all 0.2s;
+        }
+        button:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        .info {
+            background: #f3f4f6;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid #667eea;
+        }
+        .label {
+            font-weight: 600;
+            margin-top: 20px;
+            margin-bottom: 10px;
+            color: #374151;
+        }
+        input[type="text"], input[type="color"] {
+            padding: 10px;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 16px;
+            width: 200px;
+        }
+        input[type="color"] {
+            width: 60px;
+            height: 44px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎨 SuppliWise Icon Generator</h1>
+        
+        <div class="info">
+            <strong>Quick Start:</strong> Customize the icon below, then click "Download All Icons" to get your PWA icons ready!
+        </div>
+
+        <div class="label">Icon Text:</div>
+        <input type="text" id="iconText" value="SW" maxlength="3">
+
+        <div class="label">Background Color:</div>
+        <input type="color" id="bgColor" value="#667eea">
+
+        <div class="label">Text Color:</div>
+        <input type="color" id="textColor" value="#ffffff">
+
+        <button onclick="generateIcons()">🔄 Update Preview</button>
+        <button onclick="downloadAll()">⬇️ Download All Icons</button>
+
+        <h3 style="margin-top: 30px;">Preview:</h3>
+        <div class="icon-preview">
+            <div>
+                <canvas id="icon192" width="192" height="192"></canvas>
+                <div style="text-align: center; margin-top: 10px; color: #6b7280;">192x192</div>
+            </div>
+            <div>
+                <canvas id="icon512" width="512" height="512"></canvas>
+                <div style="text-align: center; margin-top: 10px; color: #6b7280;">512x512</div>
+            </div>
+        </div>
+
+        <div class="info">
+            <strong>After downloading:</strong>
+            <ol>
+                <li>Save all 3 files to the <code>my-react-app/public/</code> folder</li>
+                <li>Run <code>npm run build</code></li>
+                <li>Your PWA icons are ready!</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        function generateIcon(canvas, size, text, bgColor, textColor) {
+            const ctx = canvas.getContext('2d');
+            
+            // Background
+            ctx.fillStyle = bgColor;
+            ctx.fillRect(0, 0, size, size);
+            
+            // Border radius effect (optional)
+            ctx.globalCompositeOperation = 'destination-in';
+            ctx.beginPath();
+            ctx.roundRect(0, 0, size, size, size * 0.1);
+            ctx.fill();
+            ctx.globalCompositeOperation = 'source-over';
+            
+            // Background again (for roundrect)
+            ctx.fillStyle = bgColor;
+            ctx.beginPath();
+            ctx.roundRect(0, 0, size, size, size * 0.1);
+            ctx.fill();
+            
+            // Text
+            ctx.fillStyle = textColor;
+            ctx.font = `bold ${size * 0.4}px Arial, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, size / 2, size / 2);
+        }
+
+        function generateIcons() {
+            const text = document.getElementById('iconText').value || 'SW';
+            const bgColor = document.getElementById('bgColor').value;
+            const textColor = document.getElementById('textColor').value;
+
+            generateIcon(document.getElementById('icon192'), 192, text, bgColor, textColor);
+            generateIcon(document.getElementById('icon512'), 512, text, bgColor, textColor);
+        }
+
+        function downloadCanvas(canvas, filename) {
+            const link = document.createElement('a');
+            link.download = filename;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
+
+        function downloadAll() {
+            const text = document.getElementById('iconText').value || 'SW';
+            const bgColor = document.getElementById('bgColor').value;
+            const textColor = document.getElementById('textColor').value;
+
+            // Generate and download 192x192
+            const canvas192 = document.createElement('canvas');
+            canvas192.width = 192;
+            canvas192.height = 192;
+            generateIcon(canvas192, 192, text, bgColor, textColor);
+            downloadCanvas(canvas192, 'pwa-192x192.png');
+
+            // Generate and download 512x512
+            setTimeout(() => {
+                const canvas512 = document.createElement('canvas');
+                canvas512.width = 512;
+                canvas512.height = 512;
+                generateIcon(canvas512, 512, text, bgColor, textColor);
+                downloadCanvas(canvas512, 'pwa-512x512.png');
+            }, 500);
+
+            // Generate and download 180x180 (Apple)
+            setTimeout(() => {
+                const canvas180 = document.createElement('canvas');
+                canvas180.width = 180;
+                canvas180.height = 180;
+                generateIcon(canvas180, 180, text, bgColor, textColor);
+                downloadCanvas(canvas180, 'apple-touch-icon.png');
+            }, 1000);
+
+            alert('✅ Downloading 3 icon files! Check your Downloads folder.\n\nMove them to: my-react-app/public/');
+        }
+
+        // Initial generation
+        generateIcons();
+    </script>
+</body>
+</html>

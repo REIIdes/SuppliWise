@@ -1,0 +1,15 @@
+{
+  "appId": "com.suppliwise.app",
+  "appName": "SuppliWise",
+  "webDir": "dist",
+  "server": {
+    "cleartext": true,
+    "androidScheme": "http"
+  },
+  "android": {
+    "buildOptions": {
+      "keystorePath": "",
+      "keystoreAlias": ""
+    }
+  }
+}

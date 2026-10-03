@@ -1,0 +1,75 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   SUPPORT PAGE — the /support shell.
+
+   This is an APP SHELL, and the `height` is load-bearing in a way that looks
+   removable but is not.
+
+   The inbox wants the two panes to fill whatever height is left under the
+   navbar and the hero, so the reply box is on screen without scrolling. That
+   only works if the chain of boxes from here down to the panes is DEFINITE —
+   a row of `1fr` or `flex: 1` sizes against a definite parent, and
+   `min-height: 100vh` is not one: it is a floor, so the page is sized by its
+   CONTENT, there is no free space to hand out, and every box in the chain
+   silently fell back to its content height. The transcript — whose content is
+   the entire conversation — then became the page height.
+
+   So the page is `height: 100dvh` with `overflow: hidden`, and the scroll
+   happens on __main instead. The consequences are all improvements here:
+
+     • the panes fill the screen, and the reply box never needs a scroll;
+     • the navbar can no longer be scrolled away, which is what you want on a
+       page you are waiting for a reply on;
+     • when the new-conversation form is open and the content genuinely is
+       taller than the window, only __main scrolls — the navbar stays put and
+       the form's own submit button stays reachable.
+
+   `100dvh` tracks the mobile URL bar collapsing; `100vh` is the fallback for
+   engines that do not know `dvh`.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.support-page {
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background:
+    radial-gradient(900px 420px at 8% -6%, rgba(16, 185, 129, 0.14), transparent 60%),
+    radial-gradient(820px 400px at 96% 2%, rgba(99, 102, 241, 0.13), transparent 62%),
+    radial-gradient(700px 500px at 50% 118%, rgba(14, 165, 233, 0.11), transparent 65%),
+    linear-gradient(180deg, #f6fdfa 0%, #eef7f3 100%);
+  /* Painted on the viewport, and the viewport no longer scrolls, so scrolling
+     __main can never expose a seam or restart the pattern. */
+  background-attachment: fixed;
+}
+
+.support-page__main {
+  flex: 1 1 auto;
+  /* min-height:0 is what lets this shrink; the default min-height:auto refuses
+     to go below the content's height and would put the scroll back on <body>. */
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 26px 22px 26px;
+  overflow-y: auto;
+  /* Do not hand the leftover scroll on to the document behind us. */
+  overscroll-behavior-y: contain;
+  /* Momentum scrolling on a box that gets the gesture first reads as jank on
+     iOS otherwise. */
+  -webkit-overflow-scrolling: touch;
+}
+
+/* The navbar is a flex item of this page, where the default is
+   `flex-shrink: 1`. It has intrinsic content height and never needs to give
+   any of it up, so it is pinned rather than left to be squeezed. */
+.support-page > .navbar { flex: 0 0 auto; }
+
+@media (max-width: 640px) {
+  .support-page__main { padding: 16px 14px 20px; }
+  /* Fixed attachment is janky on iOS, and the viewport no longer scrolls
+     anyway, so pinning the gradient buys nothing here. */
+  .support-page { background-attachment: scroll; }
+}

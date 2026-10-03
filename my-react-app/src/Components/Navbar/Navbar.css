@@ -1,0 +1,340 @@
+/* ═══════════════════════════════════════════════════════════════════
+   NAVBAR — vibrant refresh (shared by every user-facing page)
+   White glass bar with an animated rainbow gradient underline, a
+   gradient logo tile + brand wordmark, pill hover states for nav
+   links, a ringed gradient avatar and a gradient Sign In CTA that
+   matches the auth pages.
+
+   PINNED, AND LIFTED ONCE SCROLLED
+   The bar is `position: sticky; top: 0` and stays put, but `useScrolledPast`
+   adds `.navbar--scrolled` past 10px of scroll: the divider under it gets
+   crisper and the drop shadow deepens, so the bar reads as lifted off the
+   page. Return to the top and both ease back. The surface itself never
+   changes, and the wordmark, the links and the Sign In pill keep exactly the
+   colours they had.
+
+   ⚠ THE SURFACE MUST BE FULLY OPAQUE. It was `transparent` here, and that is
+   the one value a sticky bar cannot survive: page content scrolls UNDER it, so
+   the dashboard's coloured cards and the pricing page's hero copy and plan
+   cards were all painted straight through the wordmark and the nav links, i.e.
+   the two halves of the header drawn on top of each other.
+
+   A translucent veil was tried next and is NOT enough. On the light pages 6%
+   bleed is faint, but the dark Pricing page puts light grey body text on a
+   near-black bar, and 12% of that is still plainly readable through it. There
+   is no alpha below 1 that is safe on both, and none above ~0.9 that looks
+   like glass rather than a bug. Opaque it is; the scroll affordance is carried
+   by the shadow instead. A frosted look would need `backdrop-filter`, which
+   the warning below rules out.
+
+   navbarSurface.test.js fails the build if any of this regresses, in any of
+   the three files that style this bar.
+
+   ⚠ No `transform` / `backdrop-filter` / `opacity<1` (persistent) on
+   .navbar itself: the notifications panel rendered inside it is
+   position: fixed and JS-anchored to the viewport — those properties
+   would turn the navbar into its containing block and break it.
+   The entrance animation below is opacity-only and ends at 1, and the
+   scroll transition is box-shadow only, so both are safe.
+   ═══════════════════════════════════════════════════════════════════ */
+
+.navbar {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-sizing: border-box;
+  padding: 10px 24px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  /* ONE opaque layer, by contract (see the header above) — so the brand tint
+     is folded into the ramp as solid stops rather than stacked as translucent
+     layers, which the navbarSurface test correctly rejects. */
+  background: linear-gradient(100deg, #ffffff 0%, #f4fdf9 42%, #f2fbff 72%, #f7f5ff 100%);
+  box-shadow:
+    0 1px 0 rgba(16, 185, 129, 0.14),
+    0 10px 28px -22px rgba(6, 95, 70, 0.55);
+  animation: nav-fade 0.4s ease both;
+  /* Only the shadow animates. This is safe under the warning above:
+     box-shadow creates no containing block, and a transition is not a
+     persistent opacity. `background` is deliberately NOT in this list: it is
+     identical in both states, so transitioning it could only ever invite
+     someone to make the surface translucent again. */
+  transition: box-shadow 0.25s ease;
+}
+
+/* Scrolled: same solid surface, crisper divider, deeper lift.
+   The background is repeated verbatim rather than left to inherit, so that
+   this reads as a deliberate decision and not as an oversight. */
+.navbar--scrolled {
+  background: linear-gradient(100deg, #ffffff 0%, #f4fdf9 42%, #f2fbff 72%, #f7f5ff 100%);
+  box-shadow:
+    0 1px 0 rgba(16, 185, 129, 0.22),
+    0 10px 30px -18px rgba(6, 95, 70, 0.55);
+}
+
+/* Animated rainbow underline — echoes the auth card ribbon */
+.navbar::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #34d399, #22d3ee, #818cf8, #fbbf24, #34d399);
+  background-size: 300% 100%;
+  animation: nav-ribbon 12s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes nav-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes nav-ribbon {
+  from { background-position: 0% 50%; }
+  to   { background-position: 300% 50%; }
+}
+
+.navbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  min-width: 0;
+  /* The brand below is `white-space: nowrap`, and a nowrap flex child with the
+     default `min-width: auto` refuses to shrink below its text — so on a
+     narrow phone the left cluster stayed at its full width and spilled over
+     the right-hand icons and the account pill, drawing them on top of each
+     other. `overflow: hidden` lets the cluster actually shrink; the brand
+     ellipsises inside it rather than pushing anything out of the row. */
+  overflow: hidden;
+}
+
+/* ── Logo tile: gradient shadow + playful hover wiggle on the svg ─── */
+.navbar-logo-box {
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.navbar-logo-box svg {
+  filter: drop-shadow(0 5px 12px rgba(16, 185, 129, 0.5));
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.navbar-logo-box:hover svg {
+  transform: rotate(-6deg) scale(1.08);
+}
+
+/* ── Brand wordmark: emerald → teal → cyan gradient text ──────────── */
+.navbar-brand {
+  font-size: 21px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  text-decoration: none;
+  font-family: sans-serif;
+  white-space: nowrap;
+  /* See .navbar-left: these three lines are what let the wordmark give up width
+     instead of shoving the right-hand cluster off the end of the bar. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: linear-gradient(92deg, #059669 0%, #0d9488 55%, #0891b2 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  transition: filter 0.2s ease;
+}
+
+.navbar-brand:hover {
+  filter: brightness(0.92) saturate(1.15);
+}
+
+.navbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  /* The right-hand cluster holds the controls (notifications, history, support,
+     Plans, the account pill). Those must never be compressed or clipped, so
+     this side holds its width and the wordmark is what gives way — see
+     .navbar-left. */
+  flex-shrink: 0;
+}
+
+/* ── History link (legacy class, kept for safety) ─────────────────── */
+.navbar-history-link {
+  font-size: 14px;
+  font-weight: 500;
+  color: #374151;
+  text-decoration: none;
+  padding: 6px 4px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 10px;
+  transition: color 0.2s, background 0.2s;
+}
+
+.navbar-history-link:hover,
+.navbar-history-link.active {
+  color: #047857;
+  background: linear-gradient(135deg, #d9f7ea, #d3f0fb);
+}
+
+/* ── Nav links: tinted pill on hover / active ─────────────────────── */
+/* Each icon sits in a tinted tile rather than floating as bare line-art, so
+   the right-hand cluster reads as a row of controls instead of a row of loose
+   glyphs competing with the wordmark. */
+.navbar-nav-link {
+  position: relative;
+  font-size: 14px;
+  font-weight: 600;
+  color: #334155;
+  text-decoration: none;
+  padding: 7px 11px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 12px;
+  transition: color 0.2s ease, background 0.2s ease, transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.navbar-nav-link::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.16), rgba(34, 211, 238, 0.13));
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+.navbar-nav-link > * { position: relative; }
+
+.navbar-nav-link svg {
+  transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.navbar-nav-link:hover {
+  color: #047857;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px -8px rgba(6, 95, 70, 0.6);
+}
+.navbar-nav-link:hover::before { opacity: 1; }
+.navbar-nav-link:hover svg { transform: scale(1.12); }
+
+.navbar-nav-link:active {
+  transform: translateY(0);
+}
+
+.navbar-nav-link.active {
+  color: #047857;
+}
+.navbar-nav-link.active::before { opacity: 1; }
+.navbar-nav-link.active svg { transform: scale(1.06); }
+
+/* Plans link: the one nav item with a text label, because "Plans" is the word
+   people look for — an unlabelled icon reads as "settings" or "packages".
+   The label collapses to the icon on narrow screens, where the row is tight. */
+.navbar-nav-link--plans {
+  color: #334155;
+  font-weight: 700;
+}
+
+.navbar-nav-text {
+  font-size: 14px;
+}
+
+@media (max-width: 520px) {
+  /* Keep the bar uncluttered: the icon still reaches /pricing, and the
+     accessible name comes from the element's title. */
+  .navbar-nav-text { display: none; }
+}
+
+.navbar-nav-link:focus-visible {
+  outline: 2px solid #10b981;
+  outline-offset: 1px;
+}
+
+/* The profile chip used to be a <NavLink> with its own avatar + username
+   styles here. It is now ProfileActionsMenu's pill trigger, which owns its own
+   avatar/label styling — so these rules went away with the markup. The
+   `.navbar-nav-label` rules went too: the Web3 / Market / DAO text labels they
+   collapsed are now menu items, and History is icon-only. */
+
+/* ── Sign In CTA: vibrant gradient pill matching the auth pages ───── */
+.navbar-signin-btn {
+  padding: 9px 22px;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #10b981 0%, #059669 55%, #0d9488 100%);
+  background-size: 160% 160%;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  text-decoration: none;
+  font-family: sans-serif;
+  white-space: nowrap;
+  box-shadow: 0 10px 22px -10px rgba(16, 185, 129, 0.65);
+  transition: transform 0.18s ease, box-shadow 0.22s ease, background-position 0.3s ease;
+}
+
+.navbar-signin-btn:hover {
+  background-position: 100% 50%;
+  transform: translateY(-2px);
+  box-shadow: 0 14px 26px -10px rgba(13, 148, 136, 0.6);
+  color: #fff;
+}
+
+.navbar-signin-btn:active {
+  transform: translateY(0);
+}
+
+.navbar-signin-btn:focus-visible {
+  outline: 3px solid rgba(16, 185, 129, 0.45);
+  outline-offset: 2px;
+}
+
+/* ── Reduced motion: keep the design, drop the animation ──────────── */
+@media (prefers-reduced-motion: reduce) {
+  .navbar,
+  .navbar::after {
+    animation: none !important;
+  }
+  /* The scrolled state is a colour change, not a movement, so it still
+     happens — it just arrives instantly instead of fading. */
+  .navbar { transition: none; }
+  .navbar-nav-link,
+  .navbar-nav-link::before,
+  .navbar-nav-link svg,
+  .navbar-signin-btn,
+  .navbar-logo-box svg,
+  .navbar-brand,
+  .navbar-history-link {
+    transition: none;
+  }
+  .navbar-nav-link:hover,
+  .navbar-nav-link:active,
+  .navbar-nav-link:hover svg,
+  .navbar-nav-link.active svg {
+    transform: none;
+  }
+  .navbar-signin-btn:hover,
+  .navbar-signin-btn:active {
+    transform: none;
+  }
+  .navbar-logo-box:hover svg {
+    transform: none;
+  }
+}

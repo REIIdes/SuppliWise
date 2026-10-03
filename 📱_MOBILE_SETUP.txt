@@ -1,0 +1,66 @@
+╔══════════════════════════════════════════════════════════════╗
+║                                                              ║
+║     📱 HOW TO OPEN SUPPLIWISE ON YOUR PHONE 📱              ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝
+
+🎯 EASIEST METHOD:
+═══════════════════
+
+  Double-click: START_FOR_MOBILE.bat
+  
+  This will:
+  ✅ Start your backend server
+  ✅ Start your frontend server
+  ✅ Show you the URL to open on your phone
+
+
+📱 ON YOUR PHONE:
+═══════════════════
+
+  1. Connect to the SAME WiFi as your computer
+  
+  2. Open your phone's browser (Chrome, Safari, etc.)
+  
+  3. Type this URL:
+     
+     ┌─────────────────────────────────┐
+     │  http://192.168.0.102:5173      │
+     └─────────────────────────────────┘
+  
+  4. That's it! The app will load! 🎉
+
+
+⚠️ IMPORTANT:
+═══════════════════
+
+  • Phone and computer MUST be on same WiFi
+  • Keep both server windows open while testing
+  • Full PWA features (offline mode) need HTTPS deployment
+
+
+🚀 FOR FULL PWA (Install to Home Screen):
+═══════════════════════════════════════════
+
+  Deploy to internet (free options):
+  
+  • Vercel: Run "vercel" in my-react-app folder
+  • Netlify: Connect your GitHub repo
+  • Railway: Import from GitHub
+  
+  See QUICK_START_PWA.md for details!
+
+
+📚 MORE HELP:
+═══════════════════
+
+  • OPEN_ON_PHONE.md - Detailed instructions
+  • QUICK_START_PWA.md - Deploy to internet guide
+  • PWA_SETUP.md - Full PWA documentation
+
+
+═══════════════════════════════════════════════════════════════
+
+Your Local URL:  http://192.168.0.102:5173
+
+═══════════════════════════════════════════════════════════════

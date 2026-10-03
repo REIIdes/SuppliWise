@@ -1,0 +1,154 @@
+/* StepUpDialog — "confirm it's really you". Deliberately modal and
+   deliberately plain: this is a security checkpoint, not a feature. */
+
+.psud-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.psud,
+.psud * { box-sizing: border-box; }
+
+.psud {
+  width: 100%;
+  max-width: 420px;
+  padding: 26px 24px 22px;
+  text-align: center;
+  background: #fff;
+  border-radius: 18px;
+  box-shadow: 0 24px 60px -20px rgba(15, 23, 42, 0.45);
+}
+
+.psud__badge {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  margin: 0 auto 12px;
+  border-radius: 14px;
+  color: #fff;
+  background: linear-gradient(140deg, #10b981, #4f46e5);
+  box-shadow: 0 10px 22px -8px rgba(79, 70, 229, 0.6);
+}
+
+.psud__title {
+  margin: 0 0 6px;
+  font-size: 19px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.psud__lede {
+  margin: 0 0 18px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #475569;
+}
+
+.psud__error {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  color: #991b1b;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  text-align: left;
+}
+
+.psud__label {
+  display: block;
+  margin: 0 0 6px;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.psud__input {
+  width: 100%;
+  margin-bottom: 14px;
+  padding: 11px 13px;
+  font: inherit;
+  font-size: 14px;
+  color: #0f172a;
+  background: #fff;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 11px;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.psud__input:focus {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+}
+
+.psud__input--otp {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 19px;
+  letter-spacing: 0.32em;
+  text-align: center;
+}
+
+.psud__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.psud__btn {
+  flex: 1 1 0;
+  padding: 11px 18px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.psud__btn:focus-visible {
+  outline: 3px solid rgba(79, 70, 229, 0.5);
+  outline-offset: 2px;
+}
+
+.psud__btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.psud__btn--primary {
+  color: #fff;
+  background: linear-gradient(112deg, #10b981, #14b8a6 40%, #4f46e5);
+  box-shadow: 0 10px 20px -9px rgba(20, 184, 166, 0.7);
+}
+
+.psud__btn--ghost {
+  color: #334155;
+  background: #fff;
+  border-color: #cbd5e1;
+}
+
+.psud__btn--ghost:hover:not(:disabled) {
+  background: #f8fafc;
+}
+
+.psud__note {
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: #64748b;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .psud__btn,
+  .psud__input { transition: none; }
+}

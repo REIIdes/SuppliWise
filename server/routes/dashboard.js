@@ -1,0 +1,1339 @@
+const express = require('express');
+const mongoose = require('mongoose');
+const router = express.Router();
+const { protect } = require('../middleware/auth');
+const Assessment = require('../models/Assessment');
+const IntakeRecord = require('../models/IntakeRecord');
+const DashboardMetrics = require('../models/DashboardMetrics');
+const { notExpiredFilter, expiryFromCreatedAt } = require('../utils/assessments');
+const { can } = require('../utils/plan');
+const { selfHealOpenPriority } = require('../utils/priorityGate');
+const { buildScheduleSlotIndex, resolveTimeSlot } = require('../utils/dailyScheduleSlots');
+
+// Coerce any JSON value to a plain string for DB equality filters.
+// Objects (e.g. {"$ne": "x"}) would otherwise become NoSQL operators and
+// match/delete the wrong records — String() neutralizes them to literals.
+const str = (value) => (typeof value === 'string' ? value : value == null ? '' : String(value));
+// Strip any HTML/markup first (defense-in-depth: React escapes on render, but
+// the API must never persist or echo raw markup back to a client).
+const cleanSupplementName = (value) => str(value).replace(/<[^>]*>/g, '').trim().slice(0, 200);
+
+// Helper: Get today's date in YYYY-MM-DD format
+const getTodayKey = () => {
+  const now = new Date();
+  return now.toISOString().split('T')[0];
+};
+
+// Helper: Calculate adherence percentage
+const calculateAdherence = (taken, total) => {
+  if (total === 0) return 0;
+  return Math.round((taken / total) * 100);
+};
+
+// Helper: Calculate wellness score
+const calculateWellnessScore = (baseline, adherence, streak, missedDays = 0, missedTotal = 0) => {
+  // baseline: 0-30 (from AI analysis of health state)
+  // adherence: 0-100 → contributes 0-50 points
+  // streak: capped at 30 days → contributes 0-20 points
+  // missedDays: number of days with missed supplements → deduction
+  // missedTotal: total missed supplements → additional deduction
+  
+  const adherencePoints = Math.round(adherence * 0.5);
+  const streakPoints = Math.min(Math.round(streak * 0.67), 20);
+  
+  // Deduction for missed supplements:
+  // - 2 points per day with missed supplements (encourages daily completion)
+  // - 0.5 points per individual missed supplement (granular tracking)
+  const missedDaysDeduction = Math.min(missedDays * 2, 20); // Cap at 20 points
+  const missedTotalDeduction = Math.min(Math.round(missedTotal * 0.5), 15); // Cap at 15 points
+  
+  // Calculate final score with deductions
+  const rawScore = baseline + adherencePoints + streakPoints - missedDaysDeduction - missedTotalDeduction;
+  
+  // Ensure score stays within 0-100 range
+  return Math.max(0, Math.min(rawScore, 100));
+};
+
+// Helper: Get wellness baseline from assessment
+const getWellnessBaseline = (assessment) => {
+  // Try to get baseline from AI results
+  if (assessment && assessment.aiResults && typeof assessment.aiResults.wellnessBaseline === 'number') {
+    return Math.max(0, Math.min(30, assessment.aiResults.wellnessBaseline));
+  }
+  // Default baseline if not available (neutral starting point)
+  return 15;
+};
+
+// Helper: Check and mark missed supplements from previous days
+const checkAndMarkMissedSupplements = async (userId, assessmentId, metrics) => {
+  const todayKey = getTodayKey();
+  
+  // If this is the first check or we're on a new day, check for missed supplements
+  if (!metrics.lastMissedCheckDate || metrics.lastMissedCheckDate !== todayKey) {
+    // Determine which day to check
+    let dayToCheck = null;
+    
+    if (!metrics.lastMissedCheckDate) {
+      // First time checking - check yesterday
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      dayToCheck = yesterday.toISOString().split('T')[0];
+    } else {
+      // Check the day after the last checked date
+      const lastChecked = new Date(metrics.lastMissedCheckDate + 'T00:00:00');
+      lastChecked.setDate(lastChecked.getDate() + 1);
+      const nextDay = lastChecked.toISOString().split('T')[0];
+      
+      // Only check if nextDay is before today (don't check today yet)
+      if (nextDay < todayKey) {
+        dayToCheck = nextDay;
+      }
+    }
+    
+    // Check all missed days between lastMissedCheckDate and yesterday
+    if (dayToCheck) {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayKey = yesterday.toISOString().split('T')[0];
+      
+      let currentCheck = dayToCheck;
+      let loopCount = 0;
+      const MAX_DAYS_TO_CHECK = 90; // Safety limit: don't check more than 90 days
+      
+      // Check all days from dayToCheck up to yesterday
+      while (currentCheck <= yesterdayKey && loopCount < MAX_DAYS_TO_CHECK) {
+        loopCount++;
+        const dayRecords = await IntakeRecord.find({
+          user: userId,
+          assessment: assessmentId,
+          dayKey: currentCheck
+        }).lean();
+        
+        if (dayRecords.length > 0) {
+          const missedCount = dayRecords.filter(r => !r.taken).length;
+          
+          if (missedCount > 0) {
+            // Increment missed supplements tracking
+            metrics.missedSupplementsTotal += missedCount;
+            metrics.missedSupplementsDays += 1;
+          }
+        }
+        
+        // Move to next day
+        const nextDate = new Date(currentCheck + 'T00:00:00');
+        nextDate.setDate(nextDate.getDate() + 1);
+        currentCheck = nextDate.toISOString().split('T')[0];
+      }
+    }
+    
+    // Update the last check date to today
+    metrics.lastMissedCheckDate = todayKey;
+    await metrics.save();
+  }
+  
+  return metrics;
+};
+
+// Helper: Validate and reset streak if previous day was missed
+const validateStreak = async (userId, assessmentId, metrics) => {
+  const todayKey = getTodayKey();
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayKey = yesterday.toISOString().split('T')[0];
+  
+  // Check if we crossed into a new day
+  if (metrics.lastTrackedDate && metrics.lastTrackedDate !== todayKey) {
+    // New day has started - evaluate yesterday's completion
+    
+    if (metrics.lastCompletedDay === metrics.lastTrackedDate) {
+      // Yesterday finished with 100% completion - keep streak
+      metrics.streakAwardedToday = false; // Reset for new day
+      await metrics.save();
+    } else {
+      // Yesterday finished incomplete - reset streak
+      metrics.currentStreak = 0;
+      metrics.streakAwardedToday = false;
+      metrics.lastCompletedDay = null;
+      metrics.lastTrackedDate = todayKey;
+      await metrics.save();
+    }
+  }
+  
+  return metrics.currentStreak;
+};
+
+/**
+ * Recompute today's progress and persist everything that depends on it
+ * (adherence, streak, wellness score and the priority flag lifecycle) after one
+ * or more intake records changed.
+ *
+ * This used to live inline inside POST /intake, which meant the bulk endpoint
+ * could only have been written by copying ~180 lines of streak/priority
+ * bookkeeping — and the priority auto-lift has to fire on exactly the change
+ * that completes the day, so a copy that drifted by one branch would award or
+ * revoke the review without the plan actually being complete. One function, one
+ * copy of the rules, called by both endpoints.
+ *
+ * @returns {Promise<{priorityLifted: boolean, priorityReflagged: boolean, stats: object|null}>}
+ *   `stats` is null when the user has no metrics row for this assessment, which
+ *   is the only case where there is nothing to write.
+ */
+const finalizeIntakeChange = async (req, assessmentId) => {
+  const todayKey = getTodayKey();
+
+  // Update metrics — independent reads run in parallel
+  const [todayRecords, metrics, totals, assessmentDoc] = await Promise.all([
+    IntakeRecord.find({ user: req.user._id, assessment: assessmentId, dayKey: todayKey }).select('taken').lean(),
+    DashboardMetrics.findOne({ user: req.user._id, assessment: assessmentId }),
+    Promise.all([
+      IntakeRecord.countDocuments({ user: req.user._id, assessment: assessmentId }),
+      IntakeRecord.countDocuments({ user: req.user._id, assessment: assessmentId, taken: true }),
+    ]),
+    // Only the slices needed downstream (wellness baseline + priority state)
+    Assessment.findById(assessmentId).select('aiResults.wellnessBaseline priority resolvedReason').lean(),
+  ]);
+
+  const totalToday = todayRecords.length;
+  const takenToday = todayRecords.filter(r => r.taken).length;
+  const todayAdherence = calculateAdherence(takenToday, totalToday);
+
+  // Overall adherence via counted aggregation (no full-history load)
+  const [totalAll, takenAll] = totals;
+  const overallAdherence = calculateAdherence(takenAll, totalAll);
+
+  if (!metrics) {
+    return { priorityLifted: false, priorityReflagged: false, stats: null };
+  }
+
+  const today = todayKey;
+  const yesterday = new Date(new Date().setDate(new Date().getDate() - 1))
+    .toISOString().split('T')[0];
+
+  // MIDNIGHT CHECK: Evaluate if we crossed into a new day
+  if (metrics.lastTrackedDate && metrics.lastTrackedDate !== today) {
+    // New day has started - check if yesterday was completed
+    if (metrics.lastCompletedDay === metrics.lastTrackedDate) {
+      // Yesterday finished with 100% - keep streak
+      // Reset daily flag for new day
+      metrics.streakAwardedToday = false;
+    } else {
+      // Yesterday finished incomplete - break streak
+      metrics.currentStreak = 0;
+      metrics.streakAwardedToday = false;
+      metrics.lastCompletedDay = null;
+    }
+  }
+
+  // CURRENT DAY LOGIC: Update streak based on current completion state
+  if (takenToday === totalToday && totalToday > 0) {
+    // User has 100% completion RIGHT NOW
+
+    if (!metrics.streakAwardedToday) {
+      // First time completing 100% today - award streak
+      metrics.currentStreak += 1;
+      metrics.streakAwardedToday = true;
+      metrics.lastCompletedDay = today;
+
+      if (metrics.currentStreak > metrics.longestStreak) {
+        metrics.longestStreak = metrics.currentStreak;
+      }
+    } else {
+      // Already awarded streak today, just mark completion
+      metrics.lastCompletedDay = today;
+    }
+  } else if (takenToday < totalToday && totalToday > 0) {
+    // User does NOT have 100% completion right now
+
+    if (metrics.streakAwardedToday && metrics.lastCompletedDay === today && metrics.currentStreak > 0) {
+      // They had completed today but just undid - remove today's streak
+      // Only decrement if streak is greater than 0 to prevent negative values
+      metrics.currentStreak -= 1;
+      metrics.lastCompletedDay = null; // Today is no longer completed
+      metrics.streakAwardedToday = false; // Reset flag to allow re-awarding if they complete again
+    }
+  }
+
+  metrics.lastTrackedDate = today;
+  metrics.overallAdherence = overallAdherence;
+
+  // Auto-lift: all of today's AI-suggested supplements taken on a
+  // Priority assessment finishes its review (strict two-way gate below).
+  // Both directions are premium bookkeeping (the re-flag also notifies), so
+  // they follow the same entitlement as the pause itself: after a downgrade
+  // a stale Priority document must stay untouched instead of being resolved
+  // and then reinstated behind the user's back.
+  let priorityLifted = false;
+  let priorityReflagged = false;
+  const priorityEntitled = can(req.user, 'priorityAssessment');
+  const completedNow = takenToday === totalToday && totalToday > 0;
+  if (priorityEntitled && completedNow && assessmentDoc && assessmentDoc.priority === 'Priority') {
+    try {
+      await Assessment.findByIdAndUpdate(assessmentId, {
+        // Resolved by completion: Standard again, with the normal 5-year
+        // window counted from CREATION. It used to set expiresAt to "now",
+        // which retired the record the instant the user finished their
+        // priority review and showed "Expired <today>" in history.
+        $set: {
+          priority: 'Standard',
+          resolvedAt: new Date(),
+          resolvedReason: 'intake-complete',
+          expiresAt: expiryFromCreatedAt(assessmentDoc.createdAt),
+        },
+      });
+      priorityLifted = true;
+      const UserNotification = require('../models/UserNotification');
+      const AdminEvent = require('../models/AdminEvent');
+      await UserNotification.create({
+        user: req.user._id,
+        type: 'info',
+        title: 'Priority review completed',
+        detail: 'All of today\u2019s supplements were taken, so the priority review on your assessment is finished. You can start a new assessment any time.',
+        assessmentId,
+      }).catch(() => {});
+      await AdminEvent.create({
+        type: 'resolved',
+        title: 'Priority auto-resolved (intake complete)',
+        detail: `User ${req.user._id} completed all of today\u2019s supplements for assessment ${assessmentId}. Flag lifted automatically.`,
+        user: req.user._id,
+        assessmentId,
+        linkUserId: req.user._id,
+      }).catch(() => {});
+    } catch (liftError) {
+      console.error('[dashboard intake] priority auto-lift failed:', liftError.message);
+    }
+  } else if (priorityEntitled && !completedNow && assessmentDoc && assessmentDoc.priority === 'Standard' && assessmentDoc.resolvedReason === 'intake-complete') {
+    // Strict gate: undoing after an auto-lift breaks 100% completion,
+    // so the restriction comes back. Admin-resolved flags are never touched.
+    try {
+      await Assessment.findByIdAndUpdate(assessmentId, {
+        $set: {
+          priority: 'Priority',
+          flaggedAt: new Date(),
+          resolvedAt: null,
+          resolvedReason: '',
+          expiresAt: null,
+          flagReasons: ['Intake undone after auto-resolve — review reinstated'],
+        },
+      });
+      priorityReflagged = true;
+      const UserNotification = require('../models/UserNotification');
+      const AdminEvent = require('../models/AdminEvent');
+      await UserNotification.create({
+        user: req.user._id,
+        type: 'severe-flag',
+        title: 'Priority review reinstated',
+        detail: 'A supplement was marked not taken, so today\u2019s plan is incomplete again. The priority review is back in effect and new assessments are paused until it is finished.',
+        assessmentId,
+      }).catch(() => {});
+      await AdminEvent.create({
+        type: 'severe-flag',
+        title: 'Priority re-flagged (intake undone)',
+        detail: `User ${req.user._id} undid a supplement for assessment ${assessmentId} after auto-resolve. Restriction reinstated.`,
+        user: req.user._id,
+        assessmentId,
+        linkUserId: req.user._id,
+      }).catch(() => {});
+    } catch (reflagError) {
+      console.error('[dashboard intake] priority re-flag failed:', reflagError.message);
+    }
+  }
+
+  // Wellness baseline from the already-fetched assessment slice
+  const wellnessBaseline = getWellnessBaseline(assessmentDoc);
+
+  metrics.wellnessScore = calculateWellnessScore(
+    wellnessBaseline,
+    overallAdherence,
+    metrics.currentStreak,
+    metrics.missedSupplementsDays || 0,
+    metrics.missedSupplementsTotal || 0
+  );
+  await metrics.save();
+
+  return {
+    priorityLifted,
+    priorityReflagged,
+    stats: {
+      todaysProgress: {
+        taken: takenToday,
+        total: totalToday,
+        percentage: todayAdherence,
+      },
+      overallAdherence: metrics.overallAdherence,
+      daysStreak: metrics.currentStreak,
+      wellnessScore: metrics.wellnessScore,
+    },
+  };
+};
+
+// @route   GET /api/dashboard
+// @desc    Get complete dashboard data for the user's active assessment
+// @access  Private
+router.get('/', protect, async (req, res) => {
+  try {
+    // Track first dashboard visit
+    const User = require('../models/User');
+    const isFirstVisit = !req.user.hasVisitedDashboard;
+    
+    if (isFirstVisit) {
+      await User.findByIdAndUpdate(req.user._id, { hasVisitedDashboard: true });
+    }
+
+    // Get the latest assessment
+    const latestAssessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
+      .sort({ createdAt: -1 });
+
+    if (!latestAssessment) {
+      // Return empty dashboard data for new users without assessment
+      return res.json({
+        hasAssessment: false,
+        isFirstVisit,
+        priorityBlock: { blocked: false, count: 0 },
+        priorityAssessments: [],
+        assessment: null,
+        todaysSupplements: [],
+        stats: {
+          wellnessScore: 0,
+          daysStreak: 0,
+          longestStreak: 0,
+          adherenceRate: 0,
+          energyLevel: 'Medium',
+          todaysProgress: {
+            taken: 0,
+            total: 0,
+            percentage: 0,
+          },
+        },
+        insights: null,
+      });
+    }
+
+    // Metrics + today's records are independent — fetch in parallel (Atlas RTT ~0.5s each)
+    const todayKey = getTodayKey();
+    let [metrics, todayIntakeRecords] = await Promise.all([
+      DashboardMetrics.findOne({ user: req.user._id, assessment: latestAssessment._id }),
+      IntakeRecord.find({ user: req.user._id, assessment: latestAssessment._id, dayKey: todayKey }).lean(),
+    ]);
+
+    if (!metrics) {
+      // Create initial metrics for this assessment
+      metrics = await DashboardMetrics.create({
+        user: req.user._id,
+        assessment: latestAssessment._id,
+        assessmentStartDate: latestAssessment.createdAt,
+        isActive: true,
+        currentStreak: 0,
+        overallAdherence: 0,
+        wellnessScore: 0,
+      });
+    }
+
+    // Validate streak on page load - reset if previous day was missed
+    const validatedStreak = await validateStreak(req.user._id, latestAssessment._id, metrics);
+    
+    // Check and mark missed supplements from previous days
+    await checkAndMarkMissedSupplements(req.user._id, latestAssessment._id, metrics);
+
+    // Get today's supplements from assessment recommendations
+    const recommendations = latestAssessment.aiResults?.recommendations || [];
+    const dailySchedule = latestAssessment.aiResults?.dailySchedule || [];
+
+    // Morning / Afternoon / Evening buckets, taken from the AI daily schedule
+    // (the same grouping the results page renders) so the tracker and the
+    // results page can never disagree about which stack a supplement belongs to.
+    const scheduleSlotIndex = buildScheduleSlotIndex(dailySchedule);
+
+    // Daily plan snapshot: on the first load of a day with an empty plan,
+    // seed today's records from the AI recommendations so the day always
+    // lists what needed to be taken. Untouched days automatically read as
+    // MISSED (red) in the calendar and day-detail views.
+    if (todayIntakeRecords.length === 0 && recommendations.length > 0) {
+      const seeds = recommendations.slice(0, 20)
+        .map(rec => {
+          const name = rec.name || rec.supplement;
+          // Schedule time first, recommendation timing second — same order the
+          // response mapping below uses, so a record never drifts from its card.
+          const slot = resolveTimeSlot({ name, timing: rec.timing }, scheduleSlotIndex);
+          return {
+            user: req.user._id,
+            assessment: latestAssessment._id,
+            supplementName: name,
+            dosage: rec.dosage || '',
+            priority: ['High', 'Medium', 'Low'].includes(rec.priority) ? rec.priority : 'Medium',
+            scheduledTime: slot.timeLabel || rec.timing || 'Anytime',
+            taken: false,
+            date: new Date(),
+            dayKey: todayKey,
+          };
+        })
+        .filter(doc => doc.supplementName);
+      if (seeds.length > 0) {
+        // Bulk upsert: one round-trip instead of N (was a major bottleneck
+        // for users with 15+ supplements — each upsert was a separate DB call)
+        await IntakeRecord.bulkWrite(
+          seeds.map(doc => ({
+            updateOne: {
+              filter: { user: doc.user, assessment: doc.assessment, supplementName: doc.supplementName, dayKey: doc.dayKey },
+              update: { $setOnInsert: doc },
+              upsert: true,
+            },
+          })),
+          { ordered: false } // continue on error — one failure shouldn't block the rest
+        );
+        todayIntakeRecords = await IntakeRecord.find({
+          user: req.user._id,
+          assessment: latestAssessment._id,
+          dayKey: todayKey,
+        }).lean();
+      }
+    }
+
+    // Get wellness baseline from assessment
+    const wellnessBaseline = getWellnessBaseline(latestAssessment);
+
+    // Calculate today's progress
+    const totalToday = todayIntakeRecords.length;
+    const takenToday = todayIntakeRecords.filter(r => r.taken).length;
+    const todayAdherence = calculateAdherence(takenToday, totalToday);
+
+    // Update wellness score
+    const wellnessScore = calculateWellnessScore(
+      wellnessBaseline,
+      metrics.overallAdherence,
+      validatedStreak,
+      metrics.missedSupplementsDays || 0,
+      metrics.missedSupplementsTotal || 0
+    );
+
+    // Update metrics if changed
+    if (metrics.wellnessScore !== wellnessScore) {
+      metrics.wellnessScore = wellnessScore;
+      await metrics.save();
+    }
+
+    // Get AI insights from assessment
+    const aiInsights = latestAssessment.aiResults?.actionPlan || [];
+    const currentPhase = aiInsights.length > 0 ? aiInsights[0] : null;
+
+    // Priority assessments needing review (cap 3, own recommendations each).
+    // These block new assessments until resolved and are surfaced on the dashboard.
+    //
+    // Gated on the CURRENT plan: Priority Assessment is a premium entitlement,
+    // so a user who downgraded keeps the flagged assessment (history badge, admin
+    // view) but is no longer paused — the banner and the "Paused" card must not
+    // be produced for them, or the dashboard keeps selling a premium lockout
+    // the API no longer enforces.
+    let priorityDocs = [];
+    if (can(req.user, 'priorityAssessment')) {
+      // Same repair as GET /api/assessment/priority-status. Without it the two
+      // endpoints could disagree: the assessment screen released a completed
+      // flag while the dashboard still counted it and showed "New Assessments
+      // Paused", so the user could not tell whether they were blocked at all.
+      try {
+        const healed = await selfHealOpenPriority(req.user._id);
+        if (healed.released.length > 0) {
+          console.warn(`[dashboard GET /] released ${healed.released.length} completed priority flag(s) for user ${req.user._id}`);
+        }
+      } catch (healError) {
+        console.error('[dashboard GET /] priority self-heal failed:', healError.message);
+      }
+      priorityDocs = await Assessment.find({ user: req.user._id, priority: 'Priority' })
+        .sort({ createdAt: -1 })
+        .limit(3)
+        .select('createdAt flagReasons flaggedAt aiResults.recommendations')
+        .lean();
+    }
+    const priorityAssessments = (priorityDocs || []).map(doc => ({
+      id: doc._id,
+      createdAt: doc.createdAt,
+      flaggedAt: doc.flaggedAt,
+      reasons: doc.flagReasons || [],
+      recommendations: (doc.aiResults?.recommendations || []).slice(0, 12).map(rec => ({
+        name: rec.name || rec.supplement,
+        dosage: rec.dosage || '',
+        priority: rec.priority || 'Medium',
+        timing: rec.timing || 'Anytime',
+      })),
+    }));
+
+    // Map priority and timing from recommendations to intake records
+    const priorityMap = {};
+    const timingMap = {};
+    recommendations.forEach(rec => {
+      priorityMap[rec.name] = rec.priority || 'Medium';
+      timingMap[rec.name] = rec.timing || 'Anytime';
+    });
+
+    // Response - always use priority and timing from recommendations, not from stored record
+    res.json({
+      hasAssessment: true,
+      isFirstVisit,
+      priorityBlock: {
+        blocked: priorityAssessments.length > 0,
+        count: priorityAssessments.length,
+      },
+      priorityAssessments,
+      assessment: {
+        id: latestAssessment._id,
+        createdAt: latestAssessment.createdAt,
+        summary: latestAssessment.aiResults?.simplifiedSummary || latestAssessment.aiResults?.summary || '',
+      },
+      todaysSupplements: todayIntakeRecords.map(rec => {
+        const timing = timingMap[rec.supplementName] || rec.scheduledTime || 'Anytime';
+        const slot = resolveTimeSlot({ name: rec.supplementName, timing }, scheduleSlotIndex);
+        return {
+          id: rec._id,
+          name: rec.supplementName,
+          dosage: rec.dosage,
+          priority: priorityMap[rec.supplementName] || rec.priority || 'Medium', // Use recommendation priority first
+          scheduledTime: timing, // Use recommendation timing first
+          // Grouping for the tracker: which part of the day this belongs to.
+          timeSlot: slot.key,
+          timeSlotLabel: slot.label,
+          timeSlotOrder: slot.order,
+          scheduleTime: slot.timeLabel,
+          taken: rec.taken,
+          takenAt: rec.takenAt,
+        };
+      }),
+      stats: {
+        wellnessScore: metrics.wellnessScore,
+        daysStreak: validatedStreak,
+        longestStreak: metrics.longestStreak || 0,
+        adherenceRate: metrics.overallAdherence,
+        energyLevel: metrics.energyLevel,
+        todaysProgress: {
+          taken: takenToday,
+          total: totalToday,
+          percentage: todayAdherence,
+        },
+      },
+      insights: currentPhase ? {
+        phase: currentPhase.phase,
+        focus: currentPhase.focus,
+        steps: currentPhase.steps,
+        expectedChanges: currentPhase.expectedChanges,
+      } : null,
+    });
+  } catch (error) {
+    console.error('[dashboard GET]', error.message);
+    res.status(500).json({ message: 'Could not load dashboard data. Please try again.' });
+  }
+});
+
+// @route   POST /api/dashboard/intake
+// @desc    Mark a supplement as taken or undo
+// @access  Private
+router.post('/intake', protect, async (req, res) => {
+  try {
+    const { recordId, taken } = req.body;
+
+    if (!recordId || typeof taken !== 'boolean') {
+      return res.status(400).json({ message: 'Record ID and taken status are required.' });
+    }
+    // Reject operator objects before they reach the _id filter (CastError → 500)
+    if (!mongoose.isValidObjectId(recordId)) {
+      return res.status(400).json({ message: 'Invalid record.' });
+    }
+
+    const record = await IntakeRecord.findOne({
+      _id: recordId,
+      user: req.user._id,
+    });
+
+    if (!record) {
+      return res.status(404).json({ message: 'Intake record not found.' });
+    }
+
+    // Allow marking supplements as taken even from past days (late is okay!)
+    // The missed supplement deduction was already applied when the day ended,
+    // but taking it late still improves overall adherence
+    // Only restriction: can't modify records older than 7 days for data integrity
+    const recordDate = new Date(record.date);
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    
+    if (recordDate < sevenDaysAgo) {
+      return res.status(400).json({ message: 'Supplements older than 7 days cannot be modified.' });
+    }
+
+    record.taken = taken;
+    record.takenAt = taken ? new Date() : null;
+    await record.save();
+
+    const outcome = await finalizeIntakeChange(req, record.assessment);
+
+    res.json({
+      message: 'Intake updated',
+      record: {
+        id: record._id,
+        taken: record.taken,
+        takenAt: record.takenAt,
+      },
+      ...outcome,
+    });
+  } catch (error) {
+    console.error('[dashboard POST /intake]', error.message);
+    res.status(500).json({ message: 'Could not update intake. Please try again.' });
+  }
+});
+
+// @route   POST /api/dashboard/intake/bulk
+// @desc    Mark a whole time slot (Morning / Afternoon / Evening) taken in one press
+// @access  Private
+router.post('/intake/bulk', protect, async (req, res) => {
+  try {
+    const { recordIds, taken } = req.body;
+
+    if (!Array.isArray(recordIds) || recordIds.length === 0) {
+      return res.status(400).json({ message: 'Choose at least one supplement to update.' });
+    }
+    if (typeof taken !== 'boolean') {
+      return res.status(400).json({ message: 'Taken status is required.' });
+    }
+    // A slot is at most a handful of rows; anything larger is a client bug, and
+    // an unbounded $in is the sort of thing that quietly times out.
+    if (recordIds.length > 60) {
+      return res.status(400).json({ message: 'Too many supplements in one update.' });
+    }
+
+    // Reject non-ObjectId values before they reach the $in filter (CastError → 500)
+    const ids = [...new Set(recordIds.filter(id => typeof id === 'string' && mongoose.isValidObjectId(id)))];
+    if (ids.length === 0) {
+      return res.status(400).json({ message: 'No valid supplements to update.' });
+    }
+
+    const todayKey = getTodayKey();
+    const records = await IntakeRecord.find({
+      _id: { $in: ids },
+      user: req.user._id,
+    }).select('_id assessment dayKey date').lean();
+
+    if (records.length === 0) {
+      return res.status(404).json({ message: 'Intake records not found.' });
+    }
+
+    // One plan per request: the metrics recompute below is per assessment, so a
+    // mixed batch would silently report only the first plan's numbers.
+    const assessments = new Set(records.map(rec => String(rec.assessment)));
+    if (assessments.size > 1) {
+      return res.status(400).json({ message: 'Those supplements come from different plans. Refresh and try again.' });
+    }
+
+    // Allow bulk updates for recent supplements (within 7 days)
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    
+    const recentRecords = records.filter(rec => new Date(rec.date) >= sevenDaysAgo);
+    if (recentRecords.length === 0) {
+      return res.status(400).json({ message: 'Supplements older than 7 days cannot be modified.' });
+    }
+
+    const takenAt = taken ? new Date() : null;
+    await IntakeRecord.updateMany(
+      { _id: { $in: recentRecords.map(rec => rec._id) } },
+      { $set: { taken, takenAt } }
+    );
+
+    const outcome = await finalizeIntakeChange(req, recentRecords[0].assessment);
+
+    res.json({
+      message: taken ? 'Supplements marked as taken' : 'Supplements marked as not taken',
+      updated: recentRecords.length,
+      skipped: records.length - recentRecords.length,
+      ...outcome,
+    });
+  } catch (error) {
+    console.error('[dashboard POST /intake/bulk]', error.message);
+    res.status(500).json({ message: 'Could not update intake. Please try again.' });
+  }
+});
+
+// @route   POST /api/dashboard/energy
+// @desc    Update energy level for today (DEPRECATED - energy no longer affects wellness score)
+// @access  Private
+router.post('/energy', protect, async (req, res) => {
+  try {
+    const { energyLevel } = req.body;
+
+    if (!['Low', 'Medium', 'High'].includes(energyLevel)) {
+      return res.status(400).json({ message: 'Invalid energy level.' });
+    }
+
+    // Get latest assessment
+    const latestAssessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
+      .sort({ createdAt: -1 });
+
+    if (!latestAssessment) {
+      return res.status(404).json({ message: 'No assessment found.' });
+    }
+
+    // Update metrics - energy level is stored but doesn't affect score anymore
+    const metrics = await DashboardMetrics.findOne({
+      user: req.user._id,
+      assessment: latestAssessment._id,
+    });
+
+    if (!metrics) {
+      return res.status(404).json({ message: 'Metrics not found.' });
+    }
+
+    metrics.energyLevel = energyLevel;
+    
+    // Wellness score is now calculated from baseline + adherence + streak - missed supplements
+    const wellnessBaseline = getWellnessBaseline(latestAssessment);
+    metrics.wellnessScore = calculateWellnessScore(
+      wellnessBaseline,
+      metrics.overallAdherence,
+      metrics.currentStreak,
+      metrics.missedSupplementsDays || 0,
+      metrics.missedSupplementsTotal || 0
+    );
+    await metrics.save();
+
+    res.json({
+      message: 'Energy level updated',
+      energyLevel: metrics.energyLevel,
+      wellnessScore: metrics.wellnessScore,
+    });
+  } catch (error) {
+    console.error('[dashboard POST /energy]', error.message);
+    res.status(500).json({ message: 'Could not update energy level. Please try again.' });
+  }
+});
+
+// @route   POST /api/dashboard/reset
+// @desc    Reset dashboard when a new assessment is taken (deactivate old metrics)
+// @access  Private
+router.post('/reset', protect, async (req, res) => {
+  try {
+    const { assessmentId } = req.body;
+
+    if (!assessmentId) {
+      return res.status(400).json({ message: 'Assessment ID is required.' });
+    }
+    // Reject operator objects before they reach the document reference
+    if (!mongoose.isValidObjectId(assessmentId)) {
+      return res.status(400).json({ message: 'Invalid assessment.' });
+    }
+
+    // Ownership check: the referenced assessment must belong to the caller.
+    // Without it, any authenticated user could bind their dashboard metrics
+    // to another account's assessment id (broken object-level authorization).
+    const owned = await Assessment.findOne({ _id: assessmentId, user: req.user._id })
+      .select('_id')
+      .lean();
+    if (!owned) {
+      return res.status(404).json({ message: 'Assessment not found.' });
+    }
+
+    // Deactivate all previous metrics
+    await DashboardMetrics.updateMany(
+      { user: req.user._id, isActive: true },
+      { isActive: false }
+    );
+
+    // Create new metrics for the new assessment
+    const newMetrics = await DashboardMetrics.create({
+      user: req.user._id,
+      assessment: assessmentId,
+      assessmentStartDate: new Date(),
+      isActive: true,
+      currentStreak: 0,
+      overallAdherence: 0,
+      wellnessScore: 0,
+    });
+
+    res.json({
+      message: 'Dashboard reset successfully',
+      metrics: newMetrics,
+    });
+  } catch (error) {
+    console.error('[dashboard POST /reset]', error.message);
+    res.status(500).json({ message: 'Could not reset dashboard. Please try again.' });
+  }
+});
+
+// @route   GET /api/dashboard/day/:dayKey
+// @desc    Full intake records for one day (YYYY-MM-DD) — powers the
+//          interactive calendar day-detail view. Read-only history; toggling
+//          past days is intentionally unsupported (protects streak integrity).
+// @access  Private
+router.get('/day/:dayKey', protect, async (req, res) => {
+  try {
+    const { dayKey } = req.params;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey || '')) {
+      return res.status(400).json({ message: 'Invalid date. Use YYYY-MM-DD.' });
+    }
+    const todayKey = getTodayKey();
+    if (dayKey > todayKey) {
+      return res.status(400).json({ message: 'Future dates have no records yet.' });
+    }
+
+    const latestAssessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
+      .sort({ createdAt: -1 })
+      .select('_id')
+      .lean();
+    if (!latestAssessment) {
+      return res.json({ dayKey, records: [] });
+    }
+
+    const records = await IntakeRecord.find({
+      user: req.user._id,
+      assessment: latestAssessment._id,
+      dayKey,
+    })
+      .select('supplementName dosage priority scheduledTime taken takenAt')
+      .sort({ scheduledTime: 1 })
+      .lean();
+
+    res.json({
+      dayKey,
+      records: records.map(rec => ({
+        id: rec._id,
+        name: rec.supplementName,
+        dosage: rec.dosage,
+        priority: rec.priority || 'Medium',
+        scheduledTime: rec.scheduledTime || 'Anytime',
+        taken: !!rec.taken,
+        takenAt: rec.takenAt,
+      })),
+    });
+  } catch (error) {
+    console.error('[dashboard GET /day/:dayKey]', error.message);
+    res.status(500).json({ message: 'Could not load that day. Please try again.' });
+  }
+});
+
+// @route   GET /api/dashboard/calendar/:year/:month
+// @desc    Get completion history for a specific month
+// @access  Private
+router.get('/calendar/:year/:month', protect, async (req, res) => {
+  try {
+    const { year, month } = req.params;
+    
+    // Validate year and month.
+    // The year is also clamped to a sane window: an unbounded value builds an
+    // Invalid Date whose toISOString() throws, turning a crafted URL into a
+    // 500 instead of an empty result.
+    const yearNum = parseInt(year, 10);
+    const monthNum = parseInt(month, 10);
+    const currentYear = new Date().getFullYear();
+
+    if (
+      isNaN(yearNum) || isNaN(monthNum) ||
+      monthNum < 1 || monthNum > 12 ||
+      yearNum < 2000 || yearNum > currentYear + 1
+    ) {
+      return res.status(400).json({ message: 'Invalid year or month.' });
+    }
+
+    // Get the latest assessment
+    const latestAssessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
+      .sort({ createdAt: -1 });
+
+    if (!latestAssessment) {
+      return res.json({ completionData: {} });
+    }
+
+    // Get first and last day of the month
+    const firstDay = new Date(yearNum, monthNum - 1, 1);
+    const lastDay = new Date(yearNum, monthNum, 0);
+    
+    // Format as YYYY-MM-DD for comparison
+    const startKey = firstDay.toISOString().split('T')[0];
+    const endKey = lastDay.toISOString().split('T')[0];
+
+    // Get all intake records for this month (lean + minimal fields)
+    const records = await IntakeRecord.find({
+      user: req.user._id,
+      assessment: latestAssessment._id,
+      dayKey: { $gte: startKey, $lte: endKey },
+    }).select('dayKey taken').lean();
+
+    // Group by day and calculate completion percentage
+    const completionData = {};
+    
+    records.forEach(record => {
+      if (!completionData[record.dayKey]) {
+        completionData[record.dayKey] = {
+          total: 0,
+          taken: 0,
+        };
+      }
+      
+      completionData[record.dayKey].total += 1;
+      if (record.taken) {
+        completionData[record.dayKey].taken += 1;
+      }
+    });
+
+    // Calculate percentages
+    const result = {};
+    Object.keys(completionData).forEach(dayKey => {
+      const data = completionData[dayKey];
+      const percentage = data.total > 0 ? Math.round((data.taken / data.total) * 100) : 0;
+      
+      // Extract day number from YYYY-MM-DD
+      const day = parseInt(dayKey.split('-')[2]);
+      
+      result[day] = {
+        percentage,
+        taken: data.taken,
+        total: data.total,
+      };
+    });
+
+    res.json({ completionData: result });
+  } catch (error) {
+    console.error('[dashboard GET /calendar/:year/:month]', error.message);
+    res.status(500).json({ message: 'Could not load calendar data. Please try again.' });
+  }
+});
+
+// @route   GET /api/dashboard/weekly-adherence
+// @desc    Get adherence data for the current week
+// @access  Private
+router.get('/weekly-adherence', protect, async (req, res) => {
+  try {
+    // Get the latest assessment
+    const latestAssessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
+      .sort({ createdAt: -1 });
+
+    if (!latestAssessment) {
+      return res.json({ weeklyDays: [], overallAdherence: 0 });
+    }
+
+    // Get the current week (last 7 days)
+    const today = new Date();
+    const dayKeys = [];
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date(today);
+      date.setDate(date.getDate() - i);
+      dayKeys.push({
+        dayKey: date.toISOString().split('T')[0],
+        dayName: date.toLocaleDateString('en-US', { weekday: 'short' }),
+      });
+    }
+
+    // Single query for the whole week (avoids 7 sequential round-trips)
+    const records = await IntakeRecord.find({
+      user: req.user._id,
+      assessment: latestAssessment._id,
+      dayKey: { $in: dayKeys.map(d => d.dayKey) },
+    }).select('dayKey taken').lean();
+
+    const byDay = new Map();
+    for (const record of records) {
+      const entry = byDay.get(record.dayKey) || { total: 0, taken: 0 };
+      entry.total += 1;
+      if (record.taken) entry.taken += 1;
+      byDay.set(record.dayKey, entry);
+    }
+
+    const weekData = dayKeys.map(({ dayKey, dayName }) => {
+      const entry = byDay.get(dayKey) || { total: 0, taken: 0 };
+      return {
+        day: dayName,
+        date: dayKey,
+        completed: entry.taken,
+        total: entry.total,
+        percentage: entry.total > 0 ? Math.round((entry.taken / entry.total) * 100) : 0,
+      };
+    });
+
+    // Calculate overall adherence
+    const totalSupplements = weekData.reduce((sum, day) => sum + day.total, 0);
+    const totalTaken = weekData.reduce((sum, day) => sum + day.completed, 0);
+    const overallAdherence = totalSupplements > 0 ? Math.round((totalTaken / totalSupplements) * 100) : 0;
+
+    res.json({
+      weeklyDays: weekData,
+      overallAdherence: overallAdherence,
+    });
+  } catch (error) {
+    console.error('[dashboard GET /weekly-adherence]', error.message);
+    res.status(500).json({ message: 'Could not load weekly adherence data. Please try again.' });
+  }
+});
+
+// @route   POST /api/dashboard/add-supplement
+// @desc    Add a supplement to user's daily plan
+// @access  Private
+router.post('/add-supplement', protect, async (req, res) => {
+  try {
+    const { dosage, timing, priority } = req.body;
+    const name = cleanSupplementName(req.body.name);
+    // Coerce/whitelist before Mongoose sees them: an object dosage → CastError,
+    // and a non-enum priority (e.g. {"$gt": ""}) → ValidationError — both 500s.
+    const safeDosage = str(dosage).trim().slice(0, 100);
+    const safeTiming = str(timing).trim().slice(0, 50);
+    const safePriority = ['High', 'Medium', 'Low'].includes(priority) ? priority : 'Medium';
+
+    if (!name) {
+      return res.status(400).json({ message: 'Supplement name is required.' });
+    }
+
+    // Get the latest assessment
+    const latestAssessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
+      .sort({ createdAt: -1 });
+
+    if (!latestAssessment) {
+      return res.status(404).json({ message: 'No assessment found. Please complete an assessment first.' });
+    }
+
+    // Check if supplement already exists in today's plan
+    const todayKey = getTodayKey();
+    const existingRecord = await IntakeRecord.findOne({
+      user: req.user._id,
+      assessment: latestAssessment._id,
+      supplementName: name,
+      dayKey: todayKey,
+    });
+
+    if (existingRecord) {
+      return res.status(400).json({ message: 'This supplement is already in your plan for today.' });
+    }
+
+    // Create new intake record for today
+    const newRecord = await IntakeRecord.create({
+      user: req.user._id,
+      assessment: latestAssessment._id,
+      supplementName: name,
+      dosage: safeDosage,
+      priority: safePriority,
+      scheduledTime: safeTiming || 'Anytime',
+      taken: false,
+      date: new Date(),
+      dayKey: todayKey,
+    });
+
+    // Update metrics - adding a new supplement breaks 100% completion
+    const metrics = await DashboardMetrics.findOne({
+      user: req.user._id,
+      assessment: latestAssessment._id,
+    });
+
+    if (metrics) {
+      const today = todayKey;
+      
+      // Get all today's records including the new one
+      const todayRecords = await IntakeRecord.find({
+        user: req.user._id,
+        assessment: latestAssessment._id,
+        dayKey: todayKey,
+      });
+
+      const totalToday = todayRecords.length;
+      const takenToday = todayRecords.filter(r => r.taken).length;
+
+      // If user had completed today (100%) and just added a new supplement, they no longer have 100%
+      if (metrics.streakAwardedToday && metrics.lastCompletedDay === today && takenToday < totalToday) {
+        // Break the streak - remove today's contribution
+        if (metrics.currentStreak > 0) {
+          metrics.currentStreak -= 1;
+        }
+        metrics.lastCompletedDay = null; // Today is no longer completed
+        metrics.streakAwardedToday = false; // Reset flag to allow re-awarding when they complete all
+      }
+
+      // Recalculate overall adherence via counted aggregation (no full-history load)
+      const [totalAll, takenAll] = await Promise.all([
+        IntakeRecord.countDocuments({ user: req.user._id, assessment: latestAssessment._id }),
+        IntakeRecord.countDocuments({ user: req.user._id, assessment: latestAssessment._id, taken: true }),
+      ]);
+      metrics.overallAdherence = calculateAdherence(takenAll, totalAll);
+
+      // Recalculate wellness score
+      const wellnessBaseline = getWellnessBaseline(latestAssessment);
+      metrics.wellnessScore = calculateWellnessScore(
+        wellnessBaseline,
+        metrics.overallAdherence,
+        metrics.currentStreak,
+        metrics.missedSupplementsDays || 0,
+        metrics.missedSupplementsTotal || 0
+      );
+
+      await metrics.save();
+    }
+
+    res.json({
+      message: 'Supplement added to your plan',
+      supplement: {
+        id: newRecord._id,
+        name: newRecord.supplementName,
+        dosage: newRecord.dosage,
+        priority: newRecord.priority,
+        scheduledTime: newRecord.scheduledTime,
+        taken: newRecord.taken,
+      },
+    });
+  } catch (error) {
+    console.error('[dashboard POST /add-supplement]', error.message);
+    res.status(500).json({ message: 'Could not add supplement. Please try again.' });
+  }
+});
+
+// @route   POST /api/dashboard/remove-supplement
+// @desc    Remove a supplement from user's daily plan
+// @access  Private
+router.post('/remove-supplement', protect, async (req, res) => {
+  try {
+    const supplementName = cleanSupplementName(req.body.supplementName);
+
+    if (!supplementName) {
+      return res.status(400).json({ message: 'Supplement name is required.' });
+    }
+
+    // Get the latest assessment
+    const latestAssessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
+      .sort({ createdAt: -1 });
+
+    if (!latestAssessment) {
+      return res.status(404).json({ message: 'No assessment found.' });
+    }
+
+    // Remove from today's plan
+    const todayKey = getTodayKey();
+    const result = await IntakeRecord.deleteMany({
+      user: req.user._id,
+      assessment: latestAssessment._id,
+      supplementName: supplementName,
+      dayKey: todayKey,
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ message: 'Supplement not found in your plan.' });
+    }
+
+    res.json({
+      message: 'Supplement removed from your plan',
+      supplementName,
+    });
+  } catch (error) {
+    console.error('[dashboard POST /remove-supplement]', error.message);
+    res.status(500).json({ message: 'Could not remove supplement. Please try again.' });
+  }
+});
+
+// @route   GET /api/dashboard/my-plan
+// @desc    Get user's personalized supplement plan (today's supplements)
+// @access  Private
+router.get('/my-plan', protect, async (req, res) => {
+  try {
+    // Get the latest assessment
+    const latestAssessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
+      .sort({ createdAt: -1 });
+
+    if (!latestAssessment) {
+      return res.json({ 
+        supplements: [],
+        message: 'No assessment found.',
+      });
+    }
+
+    // Get today's supplements
+    const todayKey = getTodayKey();
+    const todaySupplements = await IntakeRecord.find({
+      user: req.user._id,
+      assessment: latestAssessment._id,
+      dayKey: todayKey,
+    });
+
+    // Same Morning/Afternoon/Evening buckets the dashboard returns, so both
+    // readers of "the plan" group identically.
+    const scheduleSlotIndex = buildScheduleSlotIndex(latestAssessment.aiResults?.dailySchedule || []);
+
+    res.json({
+      supplements: todaySupplements.map(rec => {
+        const slot = resolveTimeSlot({ name: rec.supplementName, timing: rec.scheduledTime }, scheduleSlotIndex);
+        return {
+          id: rec._id,
+          name: rec.supplementName,
+          dosage: rec.dosage,
+          priority: rec.priority,
+          scheduledTime: rec.scheduledTime,
+          timeSlot: slot.key,
+          timeSlotLabel: slot.label,
+          timeSlotOrder: slot.order,
+          scheduleTime: slot.timeLabel,
+          taken: rec.taken,
+          takenAt: rec.takenAt,
+        };
+      }),
+    });
+  } catch (error) {
+    console.error('[dashboard GET /my-plan]', error.message);
+    res.status(500).json({ message: 'Could not load your plan. Please try again.' });
+  }
+});
+
+// @route   GET /api/dashboard/current-supplements
+// @desc    What the user is already taking, to pre-fill the assessment's
+//          "Currently Taking Supplements?" question
+// @access  Private
+//
+// WHY THIS IS A READ, NOT A WRITE
+// A returning user retaking the assessment has to answer "are you taking any
+// supplements?" about themselves, and the honest answer is already in the
+// database: the plan they are tracking right now. Re-typing it is both tedious
+// and a source of silent drift — a user who answers "No" here while their
+// dashboard shows five supplements in the morning stack gets recommendations
+// that contradict the plan they are actually following.
+//
+// WHAT COUNTS AS "TAKING SOMETHING"
+// Two independent signals, either of which is enough:
+//   1. a supplement ticked as taken today — the strongest, they demonstrably
+//      did it today;
+//   2. any supplement on today's plan at all — they were prescribed it, even
+//      if today's tick is still outstanding.
+//
+// Both are read from IntakeRecords rather than from the assessment's own
+// `takingSupplements` answer, because that answer is what we are trying to
+// pre-fill and copying it back would only ever echo a stale value.
+router.get('/current-supplements', protect, async (req, res) => {
+  try {
+    const latestAssessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
+      .sort({ createdAt: -1 })
+      .select('_id aiResults.recommendations');
+
+    if (!latestAssessment) {
+      // No assessment yet: nothing to detect, and the client leaves the
+      // question blank for the user to answer.
+      return res.json({ hasPlan: false, takingSupplements: false, supplements: [], takenCount: 0 });
+    }
+
+    const todayKey = getTodayKey();
+    const records = await IntakeRecord.find({
+      user: req.user._id,
+      assessment: latestAssessment._id,
+      dayKey: todayKey,
+    }).select('supplementName dosage taken').lean();
+
+    const takenCount = records.filter(rec => rec.taken).length;
+
+    // Names from the plan the user is tracking; fall back to the assessment's
+    // recommendations so a plan that was never opened still counts.
+    const names = records
+      .map(rec => str(rec.supplementName).trim())
+      .filter(Boolean);
+    if (names.length === 0) {
+      for (const rec of (latestAssessment.aiResults?.recommendations || []).slice(0, 20)) {
+        const name = str(rec && (rec.name || rec.supplement)).trim();
+        if (name && !names.includes(name)) names.push(name);
+      }
+    }
+
+    res.json({
+      hasPlan: names.length > 0,
+      takingSupplements: names.length > 0,
+      supplements: names.slice(0, 20),
+      takenCount,
+    });
+  } catch (error) {
+    console.error('[dashboard GET /current-supplements]', error.message);
+    res.status(500).json({ message: 'Could not load your current supplements.' });
+  }
+});
+
+module.exports = router;

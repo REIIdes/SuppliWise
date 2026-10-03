@@ -1,0 +1,387 @@
+/**
+ * Shared text sanitization utility.
+ * Used by assessment.js (before saving to DB) and recommend.js (before sending to AI).
+ */
+
+const SPELLING_FIXES = {
+  tireed: 'tired', tierd: 'tired',
+  fatige: 'fatigue', fatique: 'fatigue',
+  vitamen: 'vitamin', vitamn: 'vitamin',
+  suppliment: 'supplement', supplment: 'supplement',
+  magneseum: 'magnesium', magnezium: 'magnesium',
+  omaga: 'omega', omego: 'omega',
+  protien: 'protein', protine: 'protein',
+  calicum: 'calcium', calcuim: 'calcium',
+  probiotik: 'probiotic',
+  alergy: 'allergy',
+  medecine: 'medicine', medicin: 'medicine',
+  diabetis: 'diabetes', diabeetus: 'diabetes',
+  thyriod: 'thyroid', thryoid: 'thyroid',
+  anaemia: 'anemia',
+  diarrea: 'diarrhea', diarhea: 'diarrhea',
+  nausious: 'nauseous',
+  migranes: 'migraine', migrains: 'migraine',
+  insomia: 'insomnia',
+  anxeity: 'anxiety', anixety: 'anxiety',
+  depresion: 'depression', deppression: 'depression',
+  excersize: 'exercise', excercise: 'exercise',
+  'sea food': 'seafood', 'sea foods': 'seafood',
+  diary: 'dairy', 'diary products': 'dairy products',
+  shelfish: 'shellfish', 'shell fish': 'shellfish',
+  'pea nuts': 'peanuts', 'pea nut': 'peanut',
+  'tree nut': 'tree nuts',
+  'soy bean': 'soy', soya: 'soy',
+  headche: 'headache', headach: 'headache',
+  stomache: 'stomach', stomack: 'stomach',
+  dizyness: 'dizziness', dizzines: 'dizziness',
+  inflamation: 'inflammation',
+  sweling: 'swelling', swolen: 'swollen',
+  numbnes: 'numbness', numness: 'numbness',
+  weekness: 'weakness', weaknes: 'weakness',
+  constipaton: 'constipation', constipasion: 'constipation',
+  diareah: 'diarrhea',
+  vommiting: 'vomiting', vomitting: 'vomiting',
+  nausia: 'nausea',
+  masakit: 'pain', sumasakit: 'painful',
+  nahihilo: 'dizziness', pagod: 'fatigue', napapagod: 'fatigue',
+  gutom: 'hunger', uhaw: 'thirst',
+  nilalagnat: 'fever', lagnat: 'fever',
+  sipon: 'runny nose', ubo: 'cough',
+  sakit: 'pain', 'may sakit': 'illness',
+  hirap: 'difficulty', mahirap: 'difficulty',
+  naiinis: 'irritability', inis: 'irritability',
+  takot: 'anxiety', kinakabahan: 'nervousness',
+};
+
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Pre-compiled replacement rules (built once at module load so hot-path
+// sanitize calls don't rebuild ~100 RegExp objects on every request).
+function buildRules(map) {
+  return Object.entries(map)
+    .sort((a, b) => b[0].length - a[0].length)
+    .map(([from, to]) => ({ regex: new RegExp(`\\b${escapeRegExp(from)}\\b`, 'gi'), to }));
+}
+
+let SPELLING_RULES = null;
+let SLANG_RULES = null;
+function getRules() {
+  if (!SPELLING_RULES) SPELLING_RULES = buildRules(SPELLING_FIXES);
+  if (!SLANG_RULES) SLANG_RULES = buildRules(SLANG_TO_CLINICAL);
+  return { SPELLING_RULES, SLANG_RULES };
+}
+
+function applyRules(cleaned, rules) {
+  for (const { regex, to } of rules) {
+    cleaned = cleaned.replace(regex, to);
+  }
+  return cleaned;
+}
+
+const SLANG_TO_CLINICAL = {
+  'super tired': 'significant fatigue',
+  'really tired': 'significant fatigue',
+  'so tired': 'excessive fatigue',
+  'very tired': 'significant fatigue',
+  'extremely tired': 'severe fatigue',
+  exhausted: 'severe fatigue',
+  'wiped out': 'extreme fatigue',
+  'worn out': 'fatigued',
+  drained: 'depleted energy',
+  'burnt out': 'burnout symptoms',
+  'no energy': 'lack of energy',
+  'zero energy': 'severe fatigue',
+  'low energy': 'reduced energy',
+  sluggish: 'lethargy',
+  "can't sleep": 'insomnia',
+  'cant sleep': 'insomnia',
+  'cannot sleep': 'insomnia',
+  'trouble sleeping': 'sleep disturbance',
+  'hard to sleep': 'difficulty initiating sleep',
+  'brain fog': 'cognitive impairment',
+  'foggy brain': 'cognitive impairment',
+  foggy: 'cognitive impairment',
+  "can't focus": 'difficulty concentrating',
+  'cant focus': 'difficulty concentrating',
+  'hard to focus': 'difficulty concentrating',
+  forgetful: 'memory difficulties',
+  'stressed out': 'experiencing stress',
+  anxious: 'experiencing anxiety',
+  worried: 'experiencing anxiety',
+  moody: 'mood fluctuations',
+  irritable: 'irritability',
+  grumpy: 'irritability',
+  depressed: 'depressive symptoms',
+  'feeling down': 'low mood',
+  tummy: 'stomach',
+  'tummy ache': 'abdominal pain',
+  'stomach ache': 'abdominal pain',
+  constipated: 'constipation',
+  'throwing up': 'vomiting',
+  puking: 'vomiting',
+  nauseous: 'nausea',
+  queasy: 'nausea',
+  bloated: 'abdominal bloating',
+  gassy: 'flatulence',
+  dizzy: 'dizziness',
+  lightheaded: 'lightheadedness',
+  achy: 'body aches',
+  sore: 'muscle soreness',
+  stiff: 'joint stiffness',
+  hurts: 'pain',
+  painful: 'pain',
+  weak: 'muscle weakness',
+  shaky: 'tremors',
+  'stuffy nose': 'nasal congestion',
+  'runny nose': 'rhinorrhea',
+  'sore throat': 'pharyngitis',
+  'dry skin': 'xerosis',
+  itchy: 'pruritus',
+  breakouts: 'acne',
+  pimples: 'acne',
+  'hair falling out': 'hair loss',
+  'losing hair': 'hair loss',
+};
+
+// ── Common English words (enough to detect real sentences) ─────────────────
+// If a text has NONE of these, it's likely nonsense
+const COMMON_WORDS = new Set([
+  'i','im','ive','my','me','the','a','an','is','am','are','was','were','be',
+  'been','have','has','had','do','does','did','will','would','could','should',
+  'can','may','might','shall','not','no','yes','and','or','but','so','if',
+  'in','on','at','to','for','of','with','by','from','up','about','into',
+  'feel','feeling','felt','pain','ache','hurt','hurts','tired','fatigue',
+  'sick','ill','weak','dizzy','nausea','headache','stomach','back','chest',
+  'sleep','sleeping','slept','eat','eating','ate','drink','drinking','drank',
+  'body','head','leg','arm','hand','foot','eye','ear','nose','throat','skin',
+  'blood','heart','lung','liver','kidney','bone','muscle','joint','nerve',
+  'health','medical','doctor','hospital','medicine','medication','drug',
+  'vitamin','supplement','allergy','allergic','condition','disease','symptom',
+  'weight','height','age','diet','exercise','stress','anxiety','depression',
+  'always','often','sometimes','never','daily','every','since','after','before',
+  'very','really','quite','much','more','less','little','lot','some','any',
+  'been','getting','having','taking','using','trying','started','stopped',
+  'worse','better','severe','mild','moderate','chronic','acute',
+  // Tagalog common words
+  'ako','ko','ng','sa','na','at','ay','ang','mga','ito','iyon','siya',
+  'niya','namin','natin','nila','kami','kayo','sila','hindi','oo','wala',
+  'mahal','mabuti','masama','malaki','maliit','bago','luma','puti','itim',
+]);
+
+/**
+ * Checks if a string of words contains at least one recognizable word.
+ * "Niduwahjkwd" → false (no real words)
+ * "I feel tired" → true
+ */
+function hasRealWords(text) {
+  const words = text.toLowerCase().replace(/[^a-z\s]/g, '').split(/\s+/).filter(Boolean);
+  if (words.length === 0) return false;
+
+  // Check against known words
+  const knownCount = words.filter(w => COMMON_WORDS.has(w)).length;
+  if (knownCount > 0) return true;
+
+  // Also accept if any word is 3+ chars and looks like a real word
+  // (not random consonant clusters like "nkwdjf")
+  // Real words tend to have vowels
+  const hasVowelWord = words.some(w => {
+    if (w.length < 3) return false;
+    const vowels = (w.match(/[aeiou]/g) || []).length;
+    const vowelRatio = vowels / w.length;
+    // Real words typically have 20-60% vowels
+    return vowelRatio >= 0.2 && vowelRatio <= 0.7;
+  });
+
+  return hasVowelWord;
+}
+
+/**
+ * Detects if text is garbage (button mashing, symbols, nonsense, random strings).
+ * Returns true if the text should be rejected/cleared.
+ */
+function isGarbage(text) {
+  if (!text || !text.trim()) return false;
+  const t = text.trim();
+  if (t.length < 3) return true;
+
+  // All same character: "aaaaaaa", "!!!!!!"
+  if (/^(.)\1{4,}$/.test(t)) return true;
+
+  // Only symbols/numbers, no letters
+  if (/^[^a-zA-Z]+$/.test(t)) return true;
+
+  // Keyboard mashing patterns
+  if (/^(asdf|qwerty|zxcv|hjkl|uiop|bnm|1234|abcd)/i.test(t)) return true;
+
+  // Repeated word spam: "test test test test"
+  if (/^(\w+\s+)\1{3,}$/.test(t)) return true;
+
+  // Less than 20% actual letters
+  const letters = (t.match(/[a-zA-Z]/g) || []).length;
+  if (letters / t.length < 0.2) return true;
+
+  // ── Mixed alphanumeric nonsense: letters and digits jumbled with no spaces ──
+  // e.g. "sad12312asd", "abc123xyz456", "hello123world"
+  // Real text doesn't embed numbers inside words like this
+  const words = t.split(/\s+/);
+  const mixedAlphanumericWords = words.filter(w => /[a-zA-Z]/.test(w) && /[0-9]/.test(w));
+  // If MORE than half the words are mixed alphanumeric, it's garbage
+  if (words.length > 0 && mixedAlphanumericWords.length / words.length > 0.5) return true;
+  // Single word that mixes letters and numbers = garbage
+  if (words.length === 1 && /[a-zA-Z]/.test(words[0]) && /[0-9]/.test(words[0])) return true;
+
+  // ── Single word checks ──
+  if (words.length === 1) {
+    const w = words[0].toLowerCase();
+    const vowels = (w.match(/[aeiou]/g) || []).length;
+    const vowelRatio = vowels / w.length;
+    // Single word with < 15% vowels is almost certainly random
+    if (vowelRatio < 0.15) return true;
+    // Single word > 12 chars with no spaces is suspicious unless it's a known word
+    if (w.length > 12 && !COMMON_WORDS.has(w)) return true;
+  }
+
+  // Multi-word: if NO word is recognizable, it's garbage
+  if (!hasRealWords(t)) return true;
+
+  return false;
+}
+
+/**
+ * Sanitizes a free-text field:
+ * - Returns { value: '', garbage: true } if garbage detected
+ * - Returns { value: cleanedText, garbage: false } otherwise
+ */
+// Strip HTML/XML tags so stored text can never carry markup into admin
+// views, PDFs, or AI prompts (stored-XSS defense in depth — React already
+// escapes on render, but stored data should be clean too).
+function stripTags(text) {
+  return String(text).replace(/<[^>]*>/g, '');
+}
+
+// Removes prototype-pollution keys from parsed JSON bodies before they are
+// persisted (e.g. Mixed aiResults blobs). Also strips MongoDB operator keys
+// ($-leading) and dotted keys: both are illegal as field names (dotted keys
+// crash the write with a 500) and must never reach an update document.
+// Mutates nothing outside `value`.
+//
+// The depth guard is applied to VALUES, never used as an early return for the
+// node being examined. The old `if (depth > 10 || ...) return value` bailed out
+// on the whole subtree, so a `$`-prefixed or dotted key nested 11+ levels deep
+// was returned UNscrubbed and persisted — reintroducing exactly the
+// operator-injection hazard this function exists to remove. A 1 MB request body
+// reaches that depth easily. Now the walk continues to a depth that a 1 MB body
+// cannot meaningfully exceed, and cycles are tracked so a self-referential
+// object cannot spin forever.
+const SCRUB_MAX_DEPTH = 512;
+function scrubKeys(value, depth = 0, seen = new WeakSet()) {
+  if (value === null || typeof value !== 'object') return value;
+  if (depth > SCRUB_MAX_DEPTH) {
+    // Too deep to be legitimate data inside a 1 MB body. Drop rather than
+    // return unscrubbed.
+    return null;
+  }
+  if (seen.has(value)) return null; // cycle
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) value[i] = scrubKeys(value[i], depth + 1, seen);
+    return value;
+  }
+  for (const key of Object.keys(value)) {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype' ||
+        key.startsWith('$') || key.includes('.')) {
+      delete value[key];
+    } else {
+      value[key] = scrubKeys(value[key], depth + 1, seen);
+    }
+  }
+  return value;
+}
+
+function sanitizeTextField(text) {
+  if (!text || typeof text !== 'string') return { value: '', garbage: false };
+  const trimmed = stripTags(text).trim();
+  if (!trimmed) return { value: '', garbage: false };
+  if (isGarbage(trimmed)) return { value: '', garbage: true };
+
+  let cleaned = trimmed.replace(/\s+/g, ' ');
+
+  // Remove filler words
+  cleaned = cleaned.replace(/\b(like|um|uh|you know|basically|literally)\b/gi, '');
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+
+  // Apply spelling fixes (longer phrases first)
+  cleaned = applyRules(cleaned, getRules().SPELLING_RULES);
+
+  // Apply slang → clinical (longer phrases first)
+  cleaned = applyRules(cleaned, getRules().SLANG_RULES);
+
+  // Remove repeated characters (sooooo → so)
+  cleaned = cleaned.replace(/(.)\1{3,}/g, '$1$1');
+
+  // Capitalize first letter of sentences
+  cleaned = cleaned.replace(/(^\w|[.!?]\s+\w)/g, m => m.toUpperCase());
+
+  return { value: cleaned.trim(), garbage: false };
+}
+
+/**
+ * Sanitizes a short field (medications, allergies, supplements).
+ */
+function sanitizeShortField(text) {
+  if (!text || typeof text !== 'string') return { value: text || '', garbage: false };
+  const trimmed = stripTags(text).trim();
+  if (!trimmed) return { value: '', garbage: false };
+  if (isGarbage(trimmed)) return { value: '', garbage: true };
+
+  let cleaned = trimmed.replace(/\s+/g, ' ');
+
+  cleaned = applyRules(cleaned, getRules().SPELLING_RULES);
+
+  return { value: cleaned.trim(), garbage: false };
+}
+
+module.exports = { sanitizeTextField, sanitizeShortField, isGarbage, preprocessUserInput, sanitizeMedicalField, stripTags, scrubKeys };
+
+// ── preprocessUserInput ────────────────────────────────────────────────────
+// Normalises free-text before it is sent to the AI prompt.
+// Fixes spelling, converts slang/Tagalog to clinical English, strips garbage.
+function preprocessUserInput(text) {
+  if (!text || typeof text !== 'string') return '';
+
+  let cleaned = stripTags(text).trim();
+  cleaned = cleaned.replace(/\s+/g, ' ');
+
+  // Remove filler words
+  cleaned = cleaned.replace(/\b(like|um|uh|you know|basically|literally|actually)\b/gi, '');
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+
+  // Apply spelling fixes (longer phrases first to avoid partial matches)
+  cleaned = applyRules(cleaned, getRules().SPELLING_RULES);
+
+  // Apply slang → clinical (longer phrases first)
+  cleaned = applyRules(cleaned, getRules().SLANG_RULES);
+
+  // Collapse repeated characters (sooooo → so)
+  cleaned = cleaned.replace(/(.)\1{3,}/g, '$1$1');
+
+  // Capitalise first letter of sentences
+  cleaned = cleaned.replace(/(^\w|[.!?]\s+\w)/g, m => m.toUpperCase());
+
+  // Reject pure garbage patterns
+  if (/^(.)\1{4,}$/.test(cleaned)) return '[unspecified]';
+  if (/^[^a-zA-Z0-9]+$/.test(cleaned)) return '[unspecified]';
+  if (cleaned.length < 3) return '[unspecified]';
+
+  return cleaned;
+}
+
+// ── sanitizeMedicalField ───────────────────────────────────────────────────
+// Wraps preprocessUserInput for short medical fields (medications, allergies,
+// supplements). Returns 'Not specified' when the result is unreadable.
+function sanitizeMedicalField(text) {
+  if (!text || typeof text !== 'string') return '';
+  const cleaned = preprocessUserInput(text);
+  if (cleaned === '[unspecified]' || cleaned.trim().length < 2) return 'Not specified';
+  return cleaned;
+}

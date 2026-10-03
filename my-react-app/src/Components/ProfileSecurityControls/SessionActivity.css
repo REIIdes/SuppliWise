@@ -1,0 +1,163 @@
+/* SessionActivity — signed-in devices + login/security history. */
+
+.psc-card,
+.psc-card * { box-sizing: border-box; }
+
+.psc-muted {
+  margin: 0;
+  font-size: 13.5px;
+  color: #64748b;
+}
+
+.psc-note {
+  padding: 11px 14px;
+  border-radius: 12px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #475569;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  margin: 0 0 14px;
+}
+
+.psc-btn--sm { padding: 8px 14px; font-size: 13px; }
+.psc-btn--mt { margin-top: 14px; }
+
+/* ── Devices ──────────────────────────────────────────────────────────── */
+
+.psc-devices {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.psc-device {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.psc-device__main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+.psc-device__label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.psc-chip {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #475569;
+  background: #e2e8f0;
+}
+
+.psc-chip--current {
+  color: #047857;
+  background: #d1fae5;
+}
+
+.psc-device__meta,
+.psc-device__times {
+  font-size: 12.5px;
+  color: #64748b;
+  overflow-wrap: anywhere;
+}
+
+/* ── Events ───────────────────────────────────────────────────────────── */
+
+.psc-events {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.psc-event {
+  display: flex;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.psc-event:last-child { border-bottom: none; }
+
+.psc-event__dot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
+}
+
+/* A rejected event is shown as rejected — not styled as "malicious". */
+.psc-event--failed .psc-event__dot {
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.18);
+}
+
+.psc-event--notable .psc-event__dot {
+  background: #4f46e5;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.16);
+}
+
+.psc-event__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.psc-event__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.psc-event__status {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #b45309;
+  background: #fef3c7;
+}
+
+.psc-event__reason { font-size: 13px; color: #475569; }
+.psc-event__meta { font-size: 12px; color: #94a3b8; overflow-wrap: anywhere; }
+
+@media (max-width: 560px) {
+  .psc-device { align-items: flex-start; }
+  .psc-device .psc-btn { width: 100%; }
+}

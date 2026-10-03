@@ -1,0 +1,69 @@
+const mongoose = require('mongoose');
+
+const assessmentSchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+    },
+    // Step 1 - Basic Information
+    age: { type: Number },
+    gender: { type: String, enum: ['Male', 'Female'] },
+    weight: { type: Number },
+    height: { type: Number },
+    activityLevel: { type: String },
+    // Step 2 - Diet & Health Goals
+    dietType: { type: String },
+    healthGoals: [{ type: String }],
+    // Step 3 - Current Symptoms
+    symptoms: [{ type: String }],
+    symptomSeverity: { type: mongoose.Schema.Types.Mixed },
+    stressLevel: { type: String },
+    sleepQuality: { type: String },
+    waterIntake: { type: String },
+    // Step 4 - Medical Information
+    medicalConditions: [{ type: String }],
+    currentMedications: { type: String },
+    allergies: { type: String },
+    feelingDescription: { type: String },
+    lifestyleHabits: [{ type: String }],
+    pregnancyStatus: { type: String },
+    takingSupplements: { type: String },
+    currentSupplements: { type: String },
+    recentBloodTest: { type: String },
+    // AI Results stored with assessment
+    aiResults: { type: mongoose.Schema.Types.Mixed },
+    // New fields
+    sunExposure: { type: String },
+    fitnessFocus: { type: String },
+    proteinIntake: { type: String },
+    bloodTestResults: { type: String },
+    recreationalDrugTypes: { type: String },
+    // 5 CALENDAR years after creation (shared helper — same math as the UI).
+    // The create route sets this explicitly; the default keeps any other insert
+    // on the standard retention window instead of "never expires".
+    // Priority assessments null this while flagged (never expire while under
+    // review) and restore it from createdAt when resolved.
+    expiresAt: {
+      type: Date,
+      default: () => require('../utils/assessments').expiryDateFromNow(),
+    },
+    // Admin-set priority flag
+    priority: { type: String, enum: ['Priority', 'Standard'], default: 'Standard' },
+    // Flagging lifecycle (user-visible history of auto-detection + resolution)
+    flagReasons: [{ type: String }],
+    flaggedAt: { type: Date, default: null },
+    resolvedAt: { type: Date, default: null },
+    resolvedReason: { type: String, default: '' },
+    // User info snapshot (for easy identification in DB)
+    userEmail: { type: String },
+    userName: { type: String },
+  },
+  { timestamps: true }
+);
+
+// Hot paths query newest-first per user — index them (dashboard, insights, assessment routes)
+assessmentSchema.index({ user: 1, createdAt: -1 });
+
+module.exports = mongoose.model('Assessment', assessmentSchema);

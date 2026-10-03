@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin TOTP Setup - SuppliWise</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .info {
+            background: #f9f9f9;
+            padding: 15px;
+            border-left: 4px solid #4CAF50;
+            margin: 20px 0;
+        }
+        .secret {
+            font-family: monospace;
+            font-size: 18px;
+            color: #d32f2f;
+            font-weight: bold;
+            word-break: break-all;
+        }
+        .qr-container {
+            text-align: center;
+            margin: 20px 0;
+        }
+        #qrcode {
+            display: inline-block;
+        }
+        .credentials {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        .warning {
+            background: #fff3cd;
+            border-left: 4px solid #ff9800;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        code {
+            background: #f5f5f5;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 Admin TOTP Setup - SuppliWise</h1>
+        
+        <div class="credentials">
+            <h2>Admin Credentials</h2>
+            <p><strong>Username/Alias:</strong> AdminPoli</p>
+            <p><strong>Password:</strong> Poli101</p>
+        </div>
+
+        <div class="info">
+            <h3>Two-Factor Authentication Setup</h3>
+            <p>Scan this QR code with your authenticator app (Google Authenticator, Authy, Microsoft Authenticator, etc.)</p>
+        </div>
+
+        <div class="qr-container">
+            <div id="qrcode"></div>
+        </div>
+
+        <div class="info">
+            <h3>Or Enter Manually</h3>
+            <p><strong>Secret Key:</strong></p>
+            <p class="secret">IY7UOXKRIRMGGXJRFR6TSPCWNRJCIQ2R</p>
+            <p style="margin-top: 10px;"><small>Account: SuppliWise (AdminPoli)</small></p>
+        </div>
+
+        <div class="warning">
+            <h3>⚠️ Security Notice</h3>
+            <ul>
+                <li>Delete this file after setting up your authenticator app</li>
+                <li>Never commit this file to version control</li>
+                <li>Keep your TOTP secret secure</li>
+                <li>The .env file is already in .gitignore</li>
+            </ul>
+        </div>
+
+        <div class="info">
+            <h3>How to Login</h3>
+            <ol>
+                <li>Navigate to <code>/admin/login</code> in your application</li>
+                <li>Enter username: <strong>AdminPoli</strong></li>
+                <li>Enter password: <strong>Poli101</strong></li>
+                <li>Enter the 6-digit code from your authenticator app</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        // Generate QR code
+        const otpauthUrl = 'otpauth://totp/SuppliWise%20(AdminPoli)?secret=IY7UOXKRIRMGGXJRFR6TSPCWNRJCIQ2R&issuer=SuppliWise';
+        QRCode.toCanvas(document.createElement('canvas'), otpauthUrl, {
+            width: 256,
+            margin: 2
+        }, function (error, canvas) {
+            if (error) {
+                console.error(error);
+                document.getElementById('qrcode').innerHTML = '<p style="color: red;">Error generating QR code</p>';
+            } else {
+                document.getElementById('qrcode').appendChild(canvas);
+            }
+        });
+    </script>
+</body>
+</html>

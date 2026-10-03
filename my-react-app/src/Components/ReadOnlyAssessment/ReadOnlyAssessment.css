@@ -1,0 +1,286 @@
+/* ══════════════════════════════════════════════════════════════════
+   ReadOnlyAssessment  (ro- prefix)
+══════════════════════════════════════════════════════════════════ */
+
+/* ── Modal box ──────────────────────────────────────────────────── */
+/* Fluid width (never wider than its container) so the box can never clip:
+   - inside .am-modal__content (820px + padding) in Assessment Management
+   - inline in the History page flow (the `inline` prop) */
+.ro-box {
+  width: 100%;
+  max-width: 860px;
+  margin-left: auto;
+  margin-right: auto;
+  box-sizing: border-box;
+  max-height: 88vh;
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(2, 6, 23, 0.22);
+  display: flex;
+  flex-direction: column;
+}
+
+/* Inline (in-page) rendering — History page: no modal height cap or scroll */
+.ro-box--inline {
+  max-height: none;
+  overflow: visible;
+  margin-bottom: 24px;
+}
+
+/* ── Header ─────────────────────────────────────────────────────── */
+.ro-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid #e5e7eb;
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 2;
+}
+.ro-header h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: #111827;
+  font-family: Arial, sans-serif;
+}
+.ro-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  background: none;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  font-size: 16px;
+  color: #6b7280;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  line-height: 1;
+}
+.ro-close:hover { background: #f3f4f6; color: #111827; }
+
+/* ── Body ───────────────────────────────────────────────────────── */
+.step-body {
+  padding: 20px 24px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* ── Step heading ───────────────────────────────────────────────── */
+.ro-step-heading {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #d46b35;
+  margin: 20px 0 10px;
+}
+.ro-step-heading:first-child { margin-top: 0; }
+
+.ro-divider {
+  height: 1px;
+  background: #e5e7eb;
+  margin-bottom: 14px;
+}
+
+/* ── Cards row ──────────────────────────────────────────────────── */
+.info-cards-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.info-card {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 14px 16px;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* ── Card header ────────────────────────────────────────────────── */
+.card-header { margin-bottom: 10px; }
+.card-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #18342a;
+}
+
+/* ── Field row ──────────────────────────────────────────────────── */
+.card-field {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+.card-field:last-child { border-bottom: none; }
+
+.card-field label {
+  flex-shrink: 0;
+  width: 140px;
+  font: 600 12px/1.4 Arial, sans-serif;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.field-value {
+  flex: 1;
+  min-width: 0;
+  font: 13px/1.5 Arial, sans-serif;
+  color: #111827;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* ── Severity badge ─────────────────────────────────────────────── */
+.severity-badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 20px;
+  font: 700 11px/1.6 Arial, sans-serif;
+}
+.severity-badge--mild     { background: #fef3c7; color: #92400e; }
+.severity-badge--moderate { background: #fed7aa; color: #9a3412; }
+.severity-badge--severe   { background: #fecaca; color: #991b1b; }
+.severity-badge--default  { background: #f3f4f6; color: #374151; }
+
+/* ── Empty / italic note ────────────────────────────────────────── */
+.ro-empty-note {
+  font: italic 13px Arial, sans-serif;
+  color: #9ca3af;
+  padding: 4px 0;
+}
+
+/* ── Responsive ─────────────────────────────────────────────────── */
+@media (max-width: 600px) {
+  .ro-box { max-height: 95vh; border-radius: 8px; }
+  .ro-header { padding: 14px 16px 12px; }
+  .step-body { padding: 14px 16px 20px; }
+  .card-field { flex-direction: column; gap: 2px; }
+  .card-field label { width: auto; }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   VIBRANT THEME REFRESH (scoped under .ro-box — never leaks)
+   ════════════════════════════════════════════════════════════════════ */
+.ro-box {
+  border-radius: 20px;
+  border: 1px solid #bbf7d0;
+  box-shadow: 0 28px 70px rgba(6, 95, 70, 0.22);
+  animation: ro-pop 0.3s cubic-bezier(0.34, 1.3, 0.64, 1) both;
+}
+@keyframes ro-pop {
+  from { opacity: 0; transform: translateY(14px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.ro-box .ro-header {
+  background: linear-gradient(120deg, #ecfdf5 0%, #d1fae5 55%, #e0f2fe 100%);
+  border-bottom: 1px solid #a7f3d0;
+  border-radius: 20px 20px 0 0;
+}
+.ro-box .ro-header h3 {
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  background: linear-gradient(92deg, #065f46, #059669 60%, #2563eb);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.ro-box .ro-close {
+  border-radius: 50%;
+  border: 1.5px solid #a7f3d0;
+  background: #fff;
+  color: #059669;
+  transition: transform 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.ro-box .ro-close:hover {
+  background: #fee2e2;
+  color: #b91c1c;
+  border-color: #fca5a5;
+  transform: rotate(90deg);
+}
+.ro-box .ro-step-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #b45309;
+}
+.ro-box .ro-step-heading::after {
+  content: '';
+  flex: 1;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #f59e0b, #fbbf24 40%, transparent);
+}
+.ro-box .ro-divider { display: none; }
+.ro-box .info-card {
+  background: linear-gradient(180deg, #ffffff, #f6fdf8);
+  border: 1px solid #d9efe1;
+  border-radius: 14px;
+  box-shadow: 0 3px 12px rgba(6, 95, 70, 0.06);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  /* `backwards` not `both`: a filled `to { transform }` outranks normal author
+     rules, which would permanently kill the :hover lift below. */
+  animation: ro-card-in 0.35s ease backwards;
+}
+.ro-box .info-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 22px rgba(6, 95, 70, 0.12);
+}
+@keyframes ro-card-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.ro-box .card-title {
+  color: #065f46;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ro-box .card-title::before {
+  content: '';
+  width: 5px;
+  height: 16px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #22c55e, #0d9488);
+  flex-shrink: 0;
+}
+.ro-box .card-field label { color: #059669; }
+.ro-box .field-value { font-weight: 600; color: #0f172a; }
+.ro-box .severity-badge { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5); }
+.ro-box .severity-badge--severe {
+  background: linear-gradient(135deg, #ef4444, #b91c1c);
+  color: #fff;
+  box-shadow: 0 4px 10px rgba(220, 38, 38, 0.30);
+}
+.ro-box .severity-badge--moderate {
+  background: linear-gradient(135deg, #fbbf24, #d97706);
+  color: #fff;
+  box-shadow: 0 4px 10px rgba(217, 119, 6, 0.30);
+}
+.ro-box .severity-badge--mild {
+  background: linear-gradient(135deg, #6ee7b7, #10b981);
+  color: #fff;
+  box-shadow: 0 4px 10px rgba(16, 185, 129, 0.30);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ro-box, .ro-box .info-card { animation: none; }
+  .ro-box .ro-close, .ro-box .info-card { transition: none; }
+}
