@@ -163,7 +163,10 @@ SuppliWise has four tiers. The stored plan ids (`free`, `monthly`, `annual`, `cu
 | **Premium** | `annual` | + Priority Assessment, 5-Year Record History |
 | **Ultimate** | `custom` | + AI Chat Assistant — every feature SuppliWise has |
 
-Plus a **Team** band: the Premium tier shared across **2–500 seats**, with a single computed total.
+There are exactly four plans. A fifth "Team" band was removed on purpose: it was priced
+per seat but granted exactly what Premium already granted, it was not a real tier (there is
+no `team` plan id), and no account could ever hold a second seat — there was no invitation
+or membership mechanism. `plan-catalogue.test.js` enforces its absence.
 
 ### How the billing model actually works
 
@@ -309,7 +312,7 @@ A separate identity space at `/admin`, guarded by `protect` + `adminOnly` and a 
 - Per-user panel: grant / re-grant, add days, deduct days, extend or set expiry, make permanent, change plan
 - **Two-layer display** — effective state vs. the user's own paid subscription vs. admin override
 - Restore original (captures and returns the user's exact prior paid state), clear override, remove subscription
-- Team seat count editing (1–500) with history, paid-month recording, and a full change log with actor, note and plan transition
+- Full change log with actor, note and plan transition
 
 ### Administrator credential tooling
 
@@ -420,18 +423,20 @@ The admin Security Center runs **45 probes** (25 core + 20 blockchain) every 30 
 
 Features are dispatched through **one routing table** (`server/utils/aiRouter.js`) rather than by hard-coding a vendor inside each route:
 
-| Purpose | Provider | Default model |
-|---|---|---|
-| `assessment` | **OpenRouter** (default) | `deepseek/deepseek-v4-flash-0731` |
-| `chat` | **Anthropic** | `claude-haiku-4-5-20251001` |
-| `polish` | **OpenRouter** (default) | `deepseek/deepseek-v4-flash-0731` |
-| `supplementDetail` | **OpenRouter** (default) | `deepseek/deepseek-v4-flash-0731` |
-| `systemDetection` | **Groq** | `openai/gpt-oss-120b` |
-| `priorityFlagging` | **Anthropic** | `claude-haiku-4-5-20251001` |
+| Purpose | Provider | Fallback | Default model |
+|---|---|---|---|
+| `assessment` | **OpenRouter** (default) | — | `deepseek/deepseek-v4-flash-0731` |
+| `chat` | **Anthropic** | OpenRouter | `claude-haiku-4-5-20251001` |
+| `polish` | **OpenAI** | OpenRouter | `gpt-5.4-nano` |
+| `supplementDetail` | **OpenRouter** (default) | — | `deepseek/deepseek-v4-flash-0731` |
+| `systemDetection` | **Groq** | — | `openai/gpt-oss-120b` |
+| `priorityFlagging` | **Anthropic** | — | `claude-haiku-4-5-20251001` |
 
-The features that generate a member's health content — assessment, polish, detail mode — stay on OpenRouter. System detection and threat prediction — short, structured, latency-sensitive, and running on a timer — go to Groq. The chat assistant and priority assessment flagging go to Anthropic.
+The features that generate a member's health plan — assessment and detail mode — stay on OpenRouter. `polish` is deliberately **not** on the default: it is the busiest call in the product (every assessment submit polishes a free-text description first) and the shortest job, so a nano-class model on its own provider is the right shape and keeps it off the shared quota. System detection and threat prediction — short, structured, latency-sensitive, and running on a timer — go to Groq. The chat assistant and priority assessment flagging go to Anthropic.
 
-`chat` is the one purpose with a **fallback** (OpenRouter). This is load-bearing, not decoration: a provider key can be perfectly valid and still unable to serve a single completion, because Anthropic answers an exhausted balance as a 400 that the model-list health probe cannot see. Without a fallback, moving chat to an unfunded account would put every user on the canned offline reply. The primary is still tried first; the fallback is reached only when it genuinely cannot answer, and `source` in the response names the provider that *actually* replied.
+`chat` and `polish` are the two purposes with a **fallback** (OpenRouter). This is load-bearing, not decoration: a provider key can be perfectly valid and still unable to serve a single completion, because Anthropic answers an exhausted balance as a 400 that the model-list health probe cannot see. Without a fallback, moving chat to an unfunded account would put every user on the canned offline reply. The primary is still tried first; the fallback is reached only when it genuinely cannot answer, and `source` in the response names the provider that *actually* replied.
+
+A **declared fallback** (reached when the primary genuinely cannot answer) is a different thing from the **default provider standing in** for a purpose whose own provider is entirely unconfigured; the latter is tagged `viaDefault: true` so the admin panel can report a substitution that actually happened.
 
 To change the split, edit `AI_ROUTES` in `aiRouter.js`. Nothing else needs to know.
 

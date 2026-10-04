@@ -416,8 +416,10 @@ const SECURITY_AUDIT = {
       web3Flows: 'PASS — 81/81',
       sessionFlows: 'PASS — all checks',
       subscriptionFlows: 'PASS — exit 0',
-      subscriptionAdmin: 'PASS — 66/66',
-      subscriptionTeams: 'PASS — 54/54',
+      subscriptionAdmin: 'PASS - 66/66',
+      // `test-subscription-teams.js` was deleted along with the per-seat Team
+      // plan it exercised. There is no longer a script by that name to report on.
+      subscriptionTeams: 'REMOVED - the per-seat Team plan no longer exists',
       ddosResilience: 'PASS — 3432 requests, 0 5xx, 0 connection errors, 0 timeouts, recovered unaided',
       adminUserIsolation: 'PASS — 13/13',
       supportChat: 'PASS — 74/74',

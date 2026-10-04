@@ -348,19 +348,21 @@ test('cancelling now returns a Premium account to Free', async () => {
   assert.equal(stored.subscriptionRecord.paid.plan, 'free');
 });
 
-test('cancelling now strips a Team seat count back to one', async () => {
-  const team = seedPaidPlan();
-  // A Team purchase writes the TIER its seats grant, plus the seat count.
-  const bought = subState.applyAction(team.subscriptionRecord, 'setPaid', {
-    actor: 'test', plan: 'annual', seats: 10, days: 30, note: 'team',
+test('cancelling now leaves nothing of the old plan behind', async () => {
+  const user = seedPaidPlan();
+  const bought = subState.applyAction(user.subscriptionRecord, 'setPaid', {
+    actor: 'test', plan: 'annual', days: 30, note: 'premium',
   }, new Date());
   assert.ok(bought.ok);
-  db.users.set(team._id, { ...team, subscriptionRecord: bought.record, ...bought.patch });
+  db.users.set(user._id, { ...user, subscriptionRecord: bought.record, ...bought.patch });
 
-  const res = await call(downgrade, { user: asUser(team) });
+  const res = await call(downgrade, { user: asUser(user) });
   assert.equal(res.statusCode, 200);
   assert.equal(res.payload.subscription.currentPlan, 'free');
-  assert.equal(res.payload.subscription.subscriptionSeats, 1);
+  // No seat count survives anywhere on the payload — the removed Team concept
+  // must not reappear as a leftover field on the Free state.
+  assert.equal('subscriptionSeats' in res.payload.subscription, false);
+  assert.equal('subscriptionIsTeam' in res.payload.subscription, false);
 });
 
 test('cancelling now records an auditable row marked applied', async () => {
@@ -423,16 +425,18 @@ test('asking for review rings the admin bell', async () => {
   assert.match(bell.detail, /Nothing has changed yet/);
 });
 
-test('a Team cancellation is labelled by seat count, not by bare tier', async () => {
-  const team = seedPaidPlan();
-  const bought = subState.applyAction(team.subscriptionRecord, 'setPaid', {
-    actor: 'test', plan: 'annual', seats: 10, days: 30, note: 'team',
+test('a cancellation is labelled by its plan, with no seat data attached', async () => {
+  const user = seedPaidPlan();
+  const bought = subState.applyAction(user.subscriptionRecord, 'setPaid', {
+    actor: 'test', plan: 'annual', days: 30, note: 'premium',
   }, new Date());
-  db.users.set(team._id, { ...team, subscriptionRecord: bought.record, ...bought.patch });
+  db.users.set(user._id, { ...user, subscriptionRecord: bought.record, ...bought.patch });
 
-  const res = await ask({}, team);
-  assert.equal(res.payload.request.planLabel, '10× Team');
-  assert.equal(res.payload.request.seats, 10);
+  const res = await ask({}, user);
+  assert.equal(res.payload.request.planLabel, 'PREMIUM');
+  // The queue row is one account on one plan now, so it carries no seat count.
+  assert.equal('seats' in res.payload.request, false);
+  assert.equal('isTeam' in res.payload.request, false);
 });
 
 test('a mode the client invented is refused, never defaulted', async () => {

@@ -168,8 +168,11 @@ test('the catalogue is internally consistent for whichever currency is asked for
       assert.ok(plan.pricing.formatted.monthly.startsWith(payload.symbol), `${plan.label} symbol`);
       // The base figures travel alongside, so an invoice can be reconciled.
       assert.ok(Number.isFinite(plan.pricing.php.monthly), `${plan.label} base monthly`);
+      // No plan may carry a seat count or a per-seat price: every published plan
+      // is one account on one tier.
+      assert.equal('seats' in plan.pricing, false, `${plan.label} published a seat count`);
+      assert.equal('perSeatPhp' in plan.pricing, false, `${plan.label} published a per-seat price`);
     }
-    assert.equal(payload.team.pricing.currency, code);
   }
 });
 
@@ -260,83 +263,63 @@ test('the currency list offered to the UI is complete and ordered', () => {
   for (const entry of list) assert.ok(C.CURRENCIES[entry.code], entry.code);
 });
 
-test('the Team band is priced and labelled off the new plan names', () => {
+// The Team band was removed: it was priced per seat but granted exactly what
+// Premium granted, and no account could ever hold a second seat. These tests
+// replace it with the guarantee that it can never come back by accident.
+
+test('there is no Team band in the published catalogue', () => {
   const payload = C.cataloguePayload('PHP');
-  assert.equal(payload.team.label, 'Team');
-  assert.equal(payload.team.pricing.formatted.monthly, '₱699');
-  assert.equal(payload.team.pricing.formatted.yearly, '₱1,700');
-  assert.match(payload.team.tagline, /Premium/);
-  assert.doesNotMatch(payload.team.tagline, /Pro\+/, 'the old plan name must be gone');
+  assert.equal('team' in payload, false, 'the catalogue must not publish a Team band');
+  assert.equal(payload.plans.length, 4, 'exactly the four real plans');
+  assert.equal(payload.plans.some((p) => p.id === 'team'), false);
 });
 
-// ══════════════════════════════════════════════════════════════════════════
-// 4. Team seats
-// ══════════════════════════════════════════════════════════════════════════
-
-test('Team is a purchasable entry mapping to the Premium tier, not a fifth tier', () => {
-  const team = C.resolvePurchasable('team');
-  assert.ok(team, 'Team must resolve');
-  assert.equal(team.isTeam, true);
-  assert.equal(team.tier, 'annual', 'a seat grants exactly what Premium grants');
-  // …and it is NOT a stored plan id, so no entitlement gate can be confused by it.
-  assert.equal(C.PLAN_CATALOGUE.some((p) => p.id === 'team'), false);
-  assert.equal(C.normalizePlanId('team'), null, 'team must not become a tier');
-  // The individual plans still resolve normally.
-  assert.equal(C.resolvePurchasable('annual').tier, 'annual');
-  assert.equal(C.resolvePurchasable('premium').tier, 'annual', 'aliases still work');
-  assert.equal(C.resolvePurchasable('platinum'), null);
-  assert.equal(C.resolvePurchasable(''), null);
-  assert.equal(C.resolvePurchasable(null), null);
-});
-
-test('a seat total is the per-seat price multiplied by the seat count', () => {
-  assert.equal(C.teamTotal(699, 5), 3495);
-  assert.equal(C.teamTotal(1700, 10), 17000);
-  // Nonsense input must not put a NaN on an invoice.
-  assert.equal(C.teamTotal(699, 0), 699, 'fewer than one seat bills as one');
-  assert.equal(C.teamTotal(699, -5), 699);
-  assert.equal(C.teamTotal(699, undefined), 699);
-  assert.equal(C.teamTotal(699, 'x'), 699);
-  assert.equal(C.teamTotal(699, 2.6), 699 * 3, 'rounds to a whole seat');
-});
-
-test('the catalogue pre-computes seat totals in the requested currency', () => {
-  for (const code of ['PHP', 'USD', 'JPY']) {
-    const team = C.cataloguePayload(code).team;
-    assert.ok(Array.isArray(team.pricing.seatTotals) && team.pricing.seatTotals.length > 0, code);
-    const symbol = C.CURRENCIES[code].symbol;
-    for (const row of team.pricing.seatTotals) {
-      assert.ok(row.seats >= team.minSeats, `${code} ${row.seats} below the minimum`);
-      assert.ok(row.seats <= team.maxSeats, `${code} ${row.seats} above the maximum`);
-      assert.ok(row.monthly.startsWith(symbol) && row.yearly.startsWith(symbol), `${code} symbol`);
-    }
-    // Ascending, with no duplicates — the quick-pick buttons render in order.
-    const counts = team.pricing.seatTotals.map((r) => r.seats);
-    assert.deepEqual(counts, [...counts].sort((a, b) => a - b), `${code} not ascending`);
-    assert.equal(new Set(counts).size, counts.length, `${code} has duplicate seat counts`);
+test('the removed seat helpers are gone from the public surface', () => {
+  // They are not merely unused: `teamTotal` multiplied money, so a caller that
+  // still reached for it would be pricing an order the server cannot fulfil.
+  for (const name of ['teamTotal', 'TEAM_PLAN', 'TEAM_TIER', 'TEAM_TOTAL_SEATS']) {
+    assert.equal(C[name], undefined, `${name} is still exported`);
+  }
+  const S = require('../utils/subscriptionState');
+  for (const name of ['MIN_SEATS', 'MAX_SEATS', 'normalizeSeats', 'parseSeatCount']) {
+    assert.equal(S[name], undefined, `${name} is still exported`);
   }
 });
 
-test('Team seat bounds are sane and agree with the engine', () => {
-  const S = require('../utils/subscriptionState');
-  assert.ok(C.TEAM_PLAN.minSeats >= 2, 'a Team plan starts at more than one seat');
-  assert.equal(C.TEAM_PLAN.maxSeats, S.MAX_SEATS, 'the catalogue and the engine must share a ceiling');
-  assert.equal(S.MIN_SEATS, 1, 'an individual plan is one seat');
+test('team is refused as a plan id, exactly like any other unknown one', () => {
+  // It used to short-circuit normalizePlanId. Now it takes the normal path, so
+  // there is no second, hand-maintained way for a plan name to enter the system.
+  assert.equal(C.normalizePlanId('team'), null);
+  assert.equal(C.resolvePurchasable('team'), null);
+  assert.equal(C.resolvePurchasable('Team'), null);
+  // The four real plans, and their aliases, still resolve.
+  assert.equal(C.resolvePurchasable('monthly').tier, 'monthly');
+  assert.equal(C.resolvePurchasable('premium').tier, 'annual');
+  assert.equal(C.resolvePurchasable('ultimate').tier, 'custom');
 });
 
-test('seats are always a whole number of at least one', () => {
-  const S = require('../utils/subscriptionState');
-  assert.equal(S.normalizeSeats(1), 1);
-  assert.equal(S.normalizeSeats('12'), 12);
-  assert.equal(S.normalizeSeats(2.6), 3);
-  assert.equal(S.normalizeSeats(0), 1, 'zero seats is not a plan');
-  assert.equal(S.normalizeSeats(-9), 1);
-  assert.equal(S.normalizeSeats(99999), S.MAX_SEATS, 'clamped to the ceiling');
-  assert.equal(S.normalizeSeats('abc'), null);
-  assert.equal(S.normalizeSeats(''), null);
-  assert.equal(S.normalizeSeats(null), null);
-  assert.equal(S.normalizeSeats(undefined), null);
-  assert.equal(S.normalizeSeats({}), null);
+test('no plan card carries a seat flag or per-seat price', () => {
+  for (const entry of C.PLAN_CATALOGUE) {
+    assert.equal('seat' in entry, false, `${entry.id} still has a seat flag`);
+    assert.equal('perSeatMonthly' in entry, false, `${entry.id} has a per-seat price`);
+    assert.equal('perSeatYearly' in entry, false, `${entry.id} has a per-seat price`);
+  }
+});
+
+test('a plan missing a price fails loudly instead of publishing itself as free', () => {
+  // pricingFor used to fall back to a second pair of keys and finally to 0, so a
+  // mispriced entry became a card reading "Free". That is the worst possible
+  // failure for a price list, so it is now an error rather than a number.
+  assert.throws(
+    () => C.pricingFor({ id: 'broken', label: 'Broken', yearly: 100 }),
+    /missing a monthly or yearly amount/,
+  );
+  assert.throws(
+    () => C.pricingFor({ id: 'broken', label: 'Broken', monthly: 100 }),
+    /missing a monthly or yearly amount/,
+  );
+  // A well-formed entry still prices.
+  assert.equal(C.pricingFor({ id: 'ok', monthly: 100, yearly: 1200 }).monthly, 100);
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -402,7 +385,6 @@ test('no card promises a usage multiplier the product does not implement', () =>
   for (const plan of payload.plans) {
     copy.push(plan.tagline, ...plan.features.map((f) => `${f.label} ${f.description || ''}`), ...plan.limits);
   }
-  copy.push(payload.team.tagline, ...payload.team.features);
   for (const line of copy) {
     assert.ok(!/more usage/i.test(line), `the catalogue still claims a usage multiplier: "${line}"`);
   }
@@ -413,15 +395,15 @@ test('no displayed copy names a plan that no longer exists', () => {
   // renamed to Deluxe/Premium. Any plan name in copy must be a live tier name.
   const payload = C.cataloguePayload('PHP');
   const live = new Set(payload.plans.map((p) => p.label));
-  live.add(payload.team.label);
   assert.ok(live.has('Deluxe') && live.has('Premium') && live.has('Ultimate'));
+  // "Team" is no longer a purchasable name, so it must not appear in copy either.
+  assert.equal(live.has('Team'), false);
 
   const copy = [];
   for (const plan of payload.plans) {
     copy.push(plan.tagline, ...plan.features.map((f) => `${f.label} ${f.description || ''}`), ...plan.limits);
   }
-  copy.push(payload.team.tagline, ...payload.team.features);
-  for (const name of ['Pro+', 'Pro', 'Basic', 'Standard', 'Enterprise']) {
+  for (const name of ['Pro+', 'Pro', 'Basic', 'Standard', 'Enterprise', 'Team']) {
     for (const line of copy) {
       assert.ok(
         !new RegExp(`\\b${name}\\b`).test(line),
@@ -431,14 +413,6 @@ test('no displayed copy names a plan that no longer exists', () => {
   }
 });
 
-test('the Team band lists the real gated features of the tier a seat grants', () => {
-  const team = C.cataloguePayload('PHP').team;
-  // Every real feature the seat tier unlocks must appear, or the band understates
-  // what a seat buys.
-  for (const feature of C.featuresForTier(team.tier)) {
-    assert.ok(team.features.includes(feature.label), `the Team band omits "${feature.label}"`);
-  }
-});
 
 test('card claims do not change with the currency', () => {
   // A shape guard rather than a text one: features and limits must be identical

@@ -45,13 +45,14 @@ function waited(value) {
 }
 
 /**
- * A Team request stores the tier its seats grant (so approving it is an ordinary
- * subscription write), so the name has to be rebuilt from isTeam + seats — the
- * same reasoning the admin queue uses.
+ * What a request was for, by name.
+ *
+ * The server sends `planLabel` on every row, computed by the same rule the admin
+ * queue and the bell use — so a member reads exactly what the reviewer sees. The
+ * local fallback exists only for a row that predates that field.
  */
 function label(row) {
-  if (row.isTeam === true) return `${row.seats > 1 ? `${row.seats}× ` : ''}Team`;
-  return planDisplayName(row.plan) || row.plan;
+  return row.planLabel || planDisplayName(row.plan) || row.plan;
 }
 
 export default function MyPlanRequests() {

@@ -81,6 +81,29 @@ export default defineConfig(({ command }) => ({
       // the initial bundle for the majority of people who never touch a passkey.
       '@simplewebauthn/browser',
     ],
+    // Node-only packages, reachable solely from `src/**/*.test.js` (those run
+    // under `node --test`; only RecoveryPanel.test.js needs these).
+    //
+    // Excluded because a TEST FILE LIVING INSIDE src/ is enough to pull them
+    // into the BROWSER dep cache: anything that makes the dev server transform
+    // that file — the dep scanner, a tooling script that walks src/ — registers
+    // `vite` and `react-dom/server` as newly discovered browser deps, forces a
+    // re-optimize, and moves `browserHash`. Every `?v=` URL a live page holds
+    // then 504s, which is the "Failed to fetch dynamically imported module" the
+    // note above keeps documenting.
+    //
+    // Observed doing exactly that: both sat in the committed `_metadata.json`
+    // beside the real app deps. Nothing in the browser graph imports them, so
+    // excluding changes nothing the app loads.
+    //
+    // NOTE: excluding is NOT sufficient on its own. The far larger share of this
+    // breakage came from that same test file sharing the dev server's CACHE —
+    // fixed at the source in RecoveryPanel.test.js and guarded by
+    // src/utils/viteCacheIsolation.test.js. This is the second line of defence.
+    exclude: [
+      'vite',
+      'react-dom/server',
+    ],
   },
   plugins: [
     react(),

@@ -1,10 +1,18 @@
 /* ── Shell ─────────────────────────────────────────────────────────────
    The shared mesh backdrop, fixed and clipped so it reads as light across the
-   page rather than as content, and cannot open a horizontal scrollbar. */
+   page rather than as content, and cannot open a horizontal scrollbar.
+
+   `overflow-x` is declared twice on purpose: `hidden` would make this element
+   a scroll container, and a sticky element resolves against the NEAREST
+   ancestor scroll container — so it would pull the sticky Navbar off the
+   viewport and the header would scroll away with the page. `clip` contains the
+   overflow without creating a scrollport. See PricingPage.css for the same
+   note. `hidden` first, for engines without `clip`. */
 .track-intake-wrapper {
   min-height: 100vh;
   position: relative;
   overflow-x: hidden;
+  overflow-x: clip;
   color: var(--sw-ink, #0d2b23);
   background: var(--sw-mesh, linear-gradient(168deg, #eefcf5, #f5f0ff));
   background-attachment: fixed;

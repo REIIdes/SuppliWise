@@ -107,7 +107,13 @@
   background: var(--sw-mesh, linear-gradient(168deg, #eefcf5, #f5f0ff));
   background-attachment: fixed;
   color: var(--sw-ink, #0d2b23);
+  /* Declared twice on purpose: `hidden` would make this element a scroll
+     container, and a sticky element resolves against the NEAREST ancestor
+     scroll container — so anything sticky inside (the Navbar) would be pulled
+     off the viewport and scroll away with the page. `clip` contains the same
+     overflow without creating a scrollport. See PricingPage.css. */
   overflow-x: hidden;
+  overflow-x: clip;
 }
 
 .sw-container {

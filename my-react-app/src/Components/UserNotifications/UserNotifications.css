@@ -17,12 +17,20 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.2s;
+  transition: background 0.2s, transform 0.16s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .user-notif__bell:hover {
   background: #f0fdf4;
   color: #16a34a;
+}
+
+/* Press. The bell is the one control in the bar that gave no click feedback.
+   Safe to transform: the panel below is a SIBLING of this button, not a
+   descendant, so the button cannot become the containing block for the
+   `position: fixed` panel that is JS-anchored to the viewport. */
+.user-notif__bell:active {
+  transform: scale(0.88);
 }
 
 .user-notif__badge {
@@ -356,5 +364,14 @@
   .user-notif__panel,
   .user-notif__item {
     animation: none;
+  }
+  /* The bell's press and hover tint are movement/colour feedback, not content:
+     the tint stays (it is the only signal that the control is live) but the
+     scale does not. */
+  .user-notif__bell {
+    transition: background 0.2s;
+  }
+  .user-notif__bell:active {
+    transform: none;
   }
 }

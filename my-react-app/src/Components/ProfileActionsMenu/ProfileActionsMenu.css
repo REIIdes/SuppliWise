@@ -100,6 +100,9 @@
   transition: transform 0.16s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
 .pam--pill .pam-trigger:hover { border-color: #a5b4fc; }
+/* Press, matching the rest of the bar. The pill already transitioned
+   `transform`, so the cost here is one rule. */
+.pam--pill .pam-trigger:active { transform: scale(0.97); }
 .pam--pill .pam-trigger__avatar {
   width: 34px;
   height: 34px;
@@ -317,6 +320,7 @@
   .pam-item,
   .pam-item__icon { transition: none; }
   .pam-trigger:hover,
+  .pam-trigger:active,
   .pam-item:hover,
   .pam-item:focus-visible { transform: none; }
 }

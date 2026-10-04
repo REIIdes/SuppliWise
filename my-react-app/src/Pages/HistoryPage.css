@@ -157,7 +157,13 @@
   display: flex;
   flex-direction: column;
   font-family: inherit;
+  /* Declared twice on purpose: `hidden` would make this element a scroll
+     container, and a sticky element resolves against the NEAREST ancestor
+     scroll container — so it would pull the sticky Navbar off the viewport and
+     the header would scroll away with the page. `clip` contains the same
+     overflow without creating a scrollport. See PricingPage.css. */
   overflow-x: hidden;
+  overflow-x: clip;
 }
 
 .history-container {

@@ -67,7 +67,15 @@
     linear-gradient(168deg, #eefcf5 0%, #ecf4ff 50%, #f5f0ff 100%);
   background-attachment: fixed;
   position: relative;
+  /* Declared twice on purpose, for the same reason as PricingPage.css.
+     `hidden` turns this element into a SCROLL CONTAINER, and the scrollport a
+     sticky element resolves against is the nearest ancestor scroll container —
+     so `overflow-x: hidden` here silently detached the Navbar from the
+     viewport and the header scrolled away with the page. `clip` contains the
+     same horizontal overflow (the fixed blobs would otherwise open a scrollbar)
+     without creating a scrollport. `hidden` first, for engines without `clip`. */
   overflow-x: hidden;
+  overflow-x: clip;
 }
 
 .dashboard-wrapper .dashboard-container {
@@ -1174,6 +1182,39 @@
 }
 .dashboard-wrapper .score-caption strong { color: var(--d-ink); }
 
+/* Today's contribution to the score. Sits directly under the caption so the
+   number and the reason for it read as one thing — a score that changes with no
+   stated cause reads as a glitch. Two tones only: something has cost points, or
+   it has not. */
+.dashboard-wrapper .score-sync {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  width: 100%;
+  margin: -6px 0 0;
+  padding: 9px 11px;
+  border-radius: 12px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  text-align: left;
+  color: #065f46;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+}
+.dashboard-wrapper .score-sync[data-tone='penalty'] {
+  color: #9f1239;
+  background: #fff1f2;
+  border-color: #fecdd3;
+}
+.dashboard-wrapper .score-sync__dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
 /* The explainer. A real popover now — it opens on click, takes focus, closes on
    Escape and on a click outside. It was a `:hover` panel, so it was unreachable
    by keyboard and by touch. */
@@ -1190,6 +1231,15 @@
   background: #fff;
   box-shadow: 0 20px 44px -18px rgba(9, 78, 58, 0.45);
   animation: pop-in 0.16s ease both;
+  /* The panel grew a row for each verdict a dose can get, and it is anchored to
+     a heading that can sit anywhere down a scrolled page — without a cap it runs
+     off the bottom of a short viewport and the last rule is the one nobody reads.
+     58vh rather than 70: it has to clear the ~180px of heading above it as well
+     as the space below, and the overflow scroll means a shorter panel costs
+     nothing but a scroll. */
+  max-height: min(58vh, 440px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 @keyframes pop-in {
@@ -1232,6 +1282,50 @@
   color: #374151;
 }
 .dashboard-wrapper .wellness-info-note strong { color: #059669; }
+
+/* The four verdicts a dose can get, in the order the server applies them. A
+   list rather than prose because the difference between "late" and "missed" is
+   the whole feature, and a paragraph is where that gets lost. */
+.dashboard-wrapper .wellness-info-rules {
+  margin: 0 0 10px;
+  padding: 10px;
+  border: 1px dashed var(--d-line-strong);
+  border-radius: 10px;
+}
+.dashboard-wrapper .wellness-info-rules > strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 11.5px;
+  color: var(--d-ink);
+}
+.dashboard-wrapper .wellness-info-rules ul {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.dashboard-wrapper .wellness-info-rules li {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--d-ink-soft);
+}
+.dashboard-wrapper .wellness-info-rules li span {
+  display: inline-block;
+  min-width: 58px;
+  margin-right: 5px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  text-align: center;
+}
+.dashboard-wrapper .wellness-info-rules .is-ok { background: #d1fae5; color: #047857; }
+.dashboard-wrapper .wellness-info-rules .is-open { background: #fef3c7; color: #b45309; }
+.dashboard-wrapper .wellness-info-rules .is-bad { background: #ffe4e6; color: #be123c; }
 
 /* ── Quick stats ──────────────────────────────────────────────────────── */
 

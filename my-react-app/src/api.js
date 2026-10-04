@@ -726,6 +726,29 @@ const authHeader = () => {
   return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
+// The browser's own IANA timezone, sent on every request.
+//
+// WHY THE SERVER NEEDS IT
+// A dose's time window belongs to the user's day, so "has the morning window
+// closed?" has to be asked in THEIR clock. Without this the server falls back to
+// UTC, which for anyone west of Greenwich closes every window hours early —
+// enough to mark a dose missed before the user has had the chance to take it, and
+// to charge them for it. (The same zone also decides which PLAN DAY the records
+// belong to — see server/utils/planDay.js.)
+//
+// Fails soft: an unavailable Intl, or a browser that withholds the zone for
+// privacy, sends no header, and the server then uses the zone it last stored or
+// UTC. Every rule downstream fails OPEN in that case, so the cost of this being
+// absent is a late penalty rather than a wrongful one.
+const clientTimeZoneHeader = () => {
+  try {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return zone ? { 'X-Client-Timezone': zone } : {};
+  } catch {
+    return {};
+  }
+};
+
 // Safely parse JSON — returns null if body is empty or unparseable
 export const parseJSON = async (res) => {
   const text = await res.text();
@@ -748,7 +771,13 @@ const apiFetch = async (path, options = {}, timeoutMs = 30000) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const res = await fetch(`${BASE_URL}${path}`, { ...options, signal: controller.signal });
+      const res = await fetch(`${BASE_URL}${path}`, {
+        ...options,
+        // Merged, not replaced: a caller that sets the header itself still wins,
+        // and `options.headers` is never mutated across the retry.
+        headers: { ...clientTimeZoneHeader(), ...options.headers },
+        signal: controller.signal,
+      });
       clearTimeout(timer);
       return res;
     } catch (err) {
@@ -1064,14 +1093,40 @@ export const sendChatMessage = async (message, history = []) => {
 };
 
 // Fetch detailed supplement information (assessment-aware)
+//
+// Three-way timeout budget, and all three parts have to line up or the browser
+// gives up on a server that is still working:
+//     server.requestTimeout  150 s  (server/index.js)
+//     route generation budget 90 s  (GENERATION_TIMEOUT_MS, utils/supplementGuideStore.js)
+//     this timeout           120 s
+//
+// At 45 s this fired while the provider was still generating, and the abort
+// surfaced to the reader as a failure even though the guide — written, stored,
+// and ready on the next tap — came back fine. It has to sit ABOVE the route's
+// own budget, and the server's ceiling has to sit above both.
 export const getSupplementDetail = async (supplementName, context = null) => {
   const res = await apiFetch('/supplement-detail', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
     body: JSON.stringify({ supplementName, context }),
-  }, 45000);
+  }, 120000);
   const data = await parseJSON(res);
-  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  if (!res.ok) {
+    // `retryable` is the route vouching that its message is written for a
+    // reader — no provider name, no key, no stack. `friendlyError` otherwise
+    // replaces EVERY 5xx message with "Something went wrong on our end",
+    // which is what turned a slow provider into a dead-end panel: the reader was
+    // told the service was broken and given nothing to act on. Trusting the
+    // message only where the route has marked it safe keeps that guarantee for
+    // every other endpoint, where a 500 may still carry internals.
+    if (data?.retryable && data?.message) {
+      const err = new Error(data.message);
+      err.status = res.status;
+      err.retryable = true;
+      throw err;
+    }
+    throw new Error(friendlyError(res.status, data?.message));
+  }
   return data;
 };
 
@@ -1533,49 +1588,27 @@ export const getMySubscription = async () => {
  * renews early never loses the days they already paid for.
  */
 /**
- * Price one specific order WITHOUT buying it.
- *
- * The checkout's seat stepper can reach any seat count, so the catalogue's
- * pre-computed totals (2, 3, 5, 10, 20, 50) only cover the presets. This asks
- * the server for the exact figure, because the alternative is the browser
- * multiplying money — and a total the visitor confirms must be the total the
- * purchase endpoint charges. Returns null if the quote cannot be fetched, so the
- * caller shows a placeholder rather than a wrong number.
- */
-export const quotePlan = async (plan, { months = 1, seats = null, currency = null } = {}) => {
-  const query = new URLSearchParams({ plan: String(plan), months: String(months) });
-  if (seats) query.set('seats', String(seats));
-  if (currency) query.set('currency', currency);
-  try {
-    const res = await apiFetch(`/subscription/quote?${query.toString()}`);
-    if (!res.ok) return null;
-    const data = await parseJSON(res);
-    return data || null;
-  } catch {
-    return null;
-  }
-};
-
-/**
  * Buy or renew a plan. Writes the account's PAID subscription layer and returns
  * the fresh authoritative state, so the caller can commit it to the shared store
- * immediately — entitlements unlock without a refresh.
+ * immediately - entitlements unlock without a refresh.
  *
- * A renewal extends from the end of the window already paid for, so a user who
- * renews early never loses the days they already paid for.
+ * RENEWAL vs REPLACEMENT, decided by the server by comparing plans:
+ *   same plan → the term runs from the end of the window already paid for, so
+ *               renewing early never loses paid days;
+ *   new plan  → the term runs from today and the days left on the old plan are
+ *               forfeited.
+ * The response's `receipt` reports which happened (`replaced`, `forfeitedDays`)
+ * so the UI can say so rather than the term silently shortening.
  *
- * `seats` only applies to the Team plan (Premium entitlements shared across N
- * people). The SERVER computes the total from its own price list, so the value
- * here selects the quantity — it cannot set a price.
+ * `currency` is a DISPLAY preference only. The server prices from its own
+ * catalogue and returns the receipt, so a tampered value can never change what is
+ * actually charged - it only picks how the receipt is shown.
  */
-export const purchasePlan = async (plan, months = 1, { currency = null, seats = null } = {}) => {
+export const purchasePlan = async (plan, months = 1, { currency = null } = {}) => {
   const res = await apiFetch('/subscription/purchase', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
-    // `currency` is a DISPLAY preference only: the server prices from its own
-    // catalogue and returns the receipt, so a tampered value can never change
-    // what is actually charged — it only picks how the receipt is shown.
-    body: JSON.stringify({ plan, months, ...(currency ? { currency } : {}), ...(seats ? { seats } : {}) }),
+    body: JSON.stringify({ plan, months, ...(currency ? { currency } : {}) }),
   });
   const data = await parseJSON(res);
   if (!res.ok) throwFriendly(res.status, data);
@@ -1585,7 +1618,7 @@ export const purchasePlan = async (plan, months = 1, { currency = null, seats = 
 // ── Plan requests with proof of payment ─────────────────────────────────
 // The manual path a user takes from the pricing page: pick a plan, attach a
 // screenshot of the transfer, and an administrator reviews and activates it.
-// Distinct from purchasePlan(), which activates immediately — this one only
+// Distinct from purchasePlan(), which activates immediately - this one only
 // queues work for the admin.
 //
 // `proof` is a base64 data URL produced by FileReader. It is deliberately large
@@ -1593,25 +1626,20 @@ export const purchasePlan = async (plan, months = 1, { currency = null, seats = 
 // limit for exactly this path; do not route it through anything with a 1 MB
 // guard.
 export const submitPlanRequest = async ({
-  plan, months = 1, seats = null, currency = null, reference = '', note = '', proof,
+  plan, months = 1, currency = null, reference = '', note = '', proof,
 }) => {
   const res = await apiFetch('/subscription/requests', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
     // `currency` only decides which currency the request is RECORDED in - the
     // server prices it from its own catalogue, so it can never change the
-    // amount actually owed. `seats` only applies to the Team plan.
-    body: JSON.stringify({
-      plan, months, reference, note, proof,
-      ...(currency ? { currency } : {}),
-      ...(seats ? { seats } : {}),
-    }),
+    // amount actually owed.
+    body: JSON.stringify({ plan, months, reference, note, proof, ...(currency ? { currency } : {}) }),
   });
   const data = await parseJSON(res);
   if (!res.ok) throwFriendly(res.status, data);
   return data; // { message, request }
 };
-
 // My requests and where each one stands (pending / approved / rejected).
 // The proof image is NOT included here — see getMyPlanRequest.
 export const getMyPlanRequests = async (limit = 10) => {

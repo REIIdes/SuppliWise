@@ -28,7 +28,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, relative } from 'node:path';
 
@@ -263,4 +263,147 @@ test('the stripper preserves line count', () => {
   const src = 'a\n/* one\ntwo\nthree\n*/\nb';
   const stripped = stripComments(src);
   assert.equal(stripped.split('\n').length, src.split('\n').length);
+});
+
+// ── A package only a TEST file imports must be in `optimizeDeps.exclude` ────
+//
+// Observed failure this guards, verbatim from a dev server log:
+//
+//   [optimizer] dependencies optimized: react-dom/server, vite
+//   optimized dependencies changed. reloading
+//
+// Test files live under src/, so anything that makes the dev server transform
+// one — the dep scanner, a tooling script that walks src/ and fetches each path
+// — registers that file's imports as newly discovered dependencies. Here that
+// was RecoveryPanel.test.js importing `react-dom/server` and `createServer`
+// from `vite`: two Node-only packages pulled into the BROWSER dependency cache,
+// which forces a re-optimize, moves `browserHash`, and 504s every `?v=` URL the
+// open page holds — the exact failure this file exists to prevent.
+//
+// The invariant is derived, not hardcoded: anything reachable ONLY from a test
+// has to be excluded. A future test file gets the same protection for free, and
+// a hardcoded pair would quietly stop covering the next one.
+
+/** The package list in `optimizeDeps.exclude`, read from the config as text. */
+function configuredExcludes() {
+  const block = /optimizeDeps:\s*\{[\s\S]*?exclude:\s*\[([\s\S]*?)\]/.exec(viteConfig);
+  assert.ok(block, 'optimizeDeps.exclude is still declared as an array literal');
+  return [...block[1].matchAll(/'([^']+)'|"([^"]+)"/g)]
+    .map((m) => m[1] || m[2])
+    .filter(Boolean);
+}
+
+/**
+ * Every bare package specifier imported by `source`, static or dynamic.
+ *
+ * Sub-paths are kept INTACT (`react-dom/server` stays distinct from
+ * `react-dom/client`), because `optimizeDeps.exclude` is keyed on the specifier
+ * Vite resolves. Collapsing them to the package name would hide the exact case
+ * that matters here: the app imports `react-dom/client`, so a collapsed
+ * `react-dom` looks app-reachable, and the test-only `react-dom/server` — the
+ * specifier that actually needs excluding — would sail through unchecked.
+ *
+ * `node:` builtins are dropped: Vite externalizes them, so they are never
+ * pre-bundled and cannot cause this failure.
+ */
+function bareImportedPackages(source) {
+  const found = new Set();
+  const code = stripComments(source);
+  const specifiers = [
+    ...code.matchAll(/\bfrom\s*(['"])([^'"]+)\1/g),
+    ...code.matchAll(/\bimport\s*\(\s*(['"])([^'"]+)\1\s*\)/g),
+    ...code.matchAll(/\bimport\s+(['"])([^'"]+)\1/g),
+  ];
+  for (const m of specifiers) {
+    const specifier = m[2];
+    if (specifier.startsWith('.') || specifier.startsWith('/')) continue;
+    if (specifier.startsWith('node:')) continue;
+    found.add(specifier);
+  }
+  return found;
+}
+
+/**
+ * True when `specifier` is really installed, so it could actually be pre-bundled.
+ *
+ * Necessary because scanning text cannot tell code from prose. `stripComments`
+ * keeps string contents verbatim (a documented limitation above), so the
+ * `import('ghost')` / `import('real-pkg')` samples in this very file read as
+ * real imports. None of those exist in node_modules, and a package that is not
+ * installed cannot be pre-bundled, so requiring resolution removes every false
+ * positive while leaving `vite` and `react-dom/server` — both installed — in.
+ *
+ * Sub-paths resolve against their package root: `react-dom/server` is installed
+ * exactly when `node_modules/react-dom` exists.
+ */
+function isInstalled(specifier) {
+  const pkg = specifier.startsWith('@')
+    ? specifier.split('/').slice(0, 2).join('/')
+    : specifier.split('/')[0];
+  return existsSync(join(repoRoot, 'my-react-app', 'node_modules', pkg, 'package.json'));
+}
+
+/** Every .test.js/.test.jsx file under src/ — app-source tests, not build output. */
+function testFiles(dir, out = []) {
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) testFiles(full, out);
+    else if (/\.test\.jsx?$/.test(entry)) out.push(full);
+  }
+  return out;
+}
+
+test('a package only a test file imports is excluded from the browser dep cache', () => {
+  const appPackages = new Set();
+  for (const file of sourceFiles(srcDir)) {
+    for (const pkg of bareImportedPackages(read(file))) appPackages.add(pkg);
+  }
+
+  const testPackages = new Set();
+  for (const file of testFiles(srcDir)) {
+    for (const pkg of bareImportedPackages(read(file))) testPackages.add(pkg);
+  }
+
+  const excludes = configuredExcludes();
+  const offenders = [];
+  for (const pkg of [...testPackages].sort()) {
+    // The app imports it too, so it legitimately belongs in the browser bundle.
+    if (appPackages.has(pkg)) continue;
+    if (!isInstalled(pkg)) continue;
+    if (!excludes.includes(pkg)) offenders.push(pkg);
+  }
+
+  assert.deepEqual(
+    offenders,
+    [],
+    'these packages are imported only by test files under src/, so no browser '
+    + 'module reaches them. Left out of optimizeDeps.exclude they get pulled '
+    + 'into the browser dependency cache the moment anything transforms a test '
+    + 'file, which re-optimizes, moves browserHash, and 504s every module URL the '
+    + 'open page holds. Add each to optimizeDeps.exclude in vite.config.js:\n  '
+    + offenders.join('\n  '),
+  );
+});
+
+test('the test-file scan really can find a Node-only package', () => {
+  // If the scanner above stopped matching, the test before it would pass
+  // forever by finding nothing. `react-dom/server` is the real offender that
+  // caused the outage, so assert the machinery still reports it.
+  const appPackages = new Set();
+  for (const file of sourceFiles(srcDir)) {
+    for (const pkg of bareImportedPackages(read(file))) appPackages.add(pkg);
+  }
+  assert.ok(!appPackages.has('vite'), 'no app module imports vite');
+  assert.ok(
+    appPackages.has('react-dom/client') && !appPackages.has('react-dom/server'),
+    'the app imports react-dom/client but not react-dom/server',
+  );
+
+  const testPackages = new Set();
+  for (const file of testFiles(srcDir)) {
+    for (const pkg of bareImportedPackages(read(file))) testPackages.add(pkg);
+  }
+  assert.ok(testPackages.has('vite'), 'a test file does import vite');
+  assert.ok(testPackages.has('react-dom/server'), 'and react-dom/server');
+  assert.ok(isInstalled('vite'), 'which is installed, so it could be pre-bundled');
 });

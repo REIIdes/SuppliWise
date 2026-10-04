@@ -60,14 +60,40 @@ const check = (label, ok, extra = '') => {
   ok ? pass += 1 : fail += 1;
 };
 
+/**
+ * App source files, excluding test files.
+ *
+ * The test exclusion is load-bearing, not tidiness — this script FETCHES every
+ * path it returns from the dev server, and fetching a module makes Vite
+ * transform it and register its imports as newly discovered dependencies.
+ *
+ * `src/**\/*.test.js` files run under `node --test` and import Node-only
+ * packages. RecoveryPanel.test.js imports `react-dom/server` and `createServer`
+ * from `vite`; requesting it therefore pulls both into the browser dependency
+ * cache and forces a re-optimize, which changes `browserHash` and invalidates
+ * every `?v=` URL the loaded page holds.
+ *
+ * So walking test files made this script CAUSE the exact churn it exists to
+ * detect, poisoned the cache with `vite`, and made its own stability assertion
+ * report a hash move it had just caused. Test files are excluded for the same
+ * reason `optimizeDepsInclude.test.js` excludes them: they are not app code.
+ */
 function sourceFiles(dir, out = []) {
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) sourceFiles(full, out);
-    else if (/\.(js|jsx)$/.test(entry)) out.push(full);
+    else if (/\.(js|jsx)$/.test(entry) && !/\.test\.jsx?$/.test(entry)) out.push(full);
   }
   return out;
 }
+
+/**
+ * Packages that must never appear in the browser dependency cache.
+ *
+ * Each is reachable only from a `node --test` file. If one shows up in
+ * `_metadata.json`, something transformed a test file through the dev server.
+ */
+const NODE_ONLY_PACKAGES = ['vite', 'react-dom/server'];
 
 const files = sourceFiles(srcDir).map(
   (f) => '/' + relative(appRoot, f).replace(/\\/g, '/'),
@@ -175,6 +201,21 @@ if (metadata) {
     discoveredLate.length
       ? `discovered late, not by the startup scan: ${discoveredLate.join(', ')}`
       : `${optimized.size} deps pre-bundled, including all ${DYNAMIC_PACKAGES.length} dynamic ones`,
+  );
+
+  // Regression guard for the cause this script used to be: walking `src/**`
+  // included `*.test.js`, and fetching one transformed a file importing
+  // Node-only packages. That pre-bundled `vite` and `react-dom/server` into the
+  // BROWSER cache and moved `browserHash` mid-session — reproducing the very
+  // stale-`?v=` failure the script exists to detect. Asserting their absence
+  // makes the cause visible instead of leaving it to be rediscovered.
+  const leaked = NODE_ONLY_PACKAGES.filter((pkg) => optimized.has(pkg));
+  check(
+    'no Node-only package leaked into the browser dep cache',
+    leaked.length === 0,
+    leaked.length
+      ? `pre-bundled but unreachable from the app (a test file was transformed): ${leaked.join(', ')}`
+      : `${NODE_ONLY_PACKAGES.length} Node-only packages correctly absent`,
   );
 } else {
   check('every dynamically-imported package is pre-bundled at startup', false, `${METADATA_PATH} not found`);

@@ -603,8 +603,22 @@ mongoose
           // for headers and 300 s for a whole body, so a flood of half-open
           // sockets can pin an fd for minutes each; these bound it. Node
           // warns if headersTimeout <= keepAliveTimeout, hence the ordering.
+          //
+          // `headersTimeout` still bounds how long a client may take to send its
+          // HEADERS, and is deliberately left tight — that is the Slowloris
+          // surface. `requestTimeout` is a different thing: it bounds the whole
+          // exchange INCLUDING our own handler's runtime, so it has to outlast
+          // the slowest legitimate AI generation.
+          //
+          // It was 60 s while a supplement guide is given a 90 s generation
+          // budget, which is a contradiction with a very specific symptom: the
+          // socket is torn down mid-generation, so a provider that was about to
+          // answer is reported to the browser as a network error instead of a
+          // guide. Raising the budget without raising this makes that failure
+          // MORE likely, not less. 150 s leaves 60 s of headroom to actually
+          // format and send the response. Asserted in supplement-guide-store.test.js.
           server.headersTimeout = 15 * 1000;
-          server.requestTimeout = 60 * 1000;
+          server.requestTimeout = 150 * 1000;
           server.keepAliveTimeout = 5 * 1000;
           console.log(`Server running on port ${PORT}`);
           resolve(server);

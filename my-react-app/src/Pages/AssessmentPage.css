@@ -1,10 +1,18 @@
 /* ── Assessment Page ── */
 /* The shared mesh backdrop. Fixed so the colour reads as light across the
-   page, and clipped so it can never open a horizontal scrollbar. */
+   page, and clipped so it can never open a horizontal scrollbar.
+
+   `overflow-x` is declared twice on purpose: `hidden` would make this element
+   a scroll container, and a sticky element resolves against the NEAREST
+   ancestor scroll container — so it would pull the sticky Navbar off the
+   viewport and the header would scroll away with the page. `clip` contains the
+   overflow without creating a scrollport. See PricingPage.css for the same
+   note. `hidden` first, for engines without `clip`. */
 .assessment-wrapper {
   min-height: 100vh;
   position: relative;
   overflow-x: hidden;
+  overflow-x: clip;
   display: flex;
   flex-direction: column;
   font-family: sans-serif;

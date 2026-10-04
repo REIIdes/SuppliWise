@@ -3,10 +3,13 @@
    action buttons. Everything else (.psc-card, .psc-device, .psc-btn, .psc-chip)
    is defined in ProfileSecurityControls.css and deliberately not duplicated. */
 
+/* Paired actions ("Rename" / "Remove") sit opposite the device name. Centred,
+   not hung from the top: the device block is three lines tall, so top-aligning
+   the buttons left them floating against its first line. */
 .psc-device__actions {
   display: flex;
   gap: 8px;
-  align-items: flex-start;
+  align-items: center;
   flex-shrink: 0;
 }
 
@@ -24,11 +27,6 @@
   min-width: 140px;
   padding: 6px 10px;
   font-size: 0.9rem;
-}
-
-.psc-btn--sm {
-  padding: 5px 12px;
-  font-size: 0.8rem;
 }
 
 .psc-device__label {
@@ -55,7 +53,10 @@
 }
 
 @media (max-width: 640px) {
+  /* Wrapped, not squeezed: on a narrow screen the pair drops to its own line
+     rather than compressing against the device name. */
   .psc-device__actions {
+    flex-wrap: wrap;
     width: 100%;
     margin-top: 8px;
   }

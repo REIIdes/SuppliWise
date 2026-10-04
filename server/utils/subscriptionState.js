@@ -116,58 +116,22 @@ function clampDays(days) {
   return Math.max(0, Math.min(MAX_ADMIN_DAYS, Math.round(days)));
 }
 
-/**
- * How many seats a subscription carries.
- *
- * One seat is an individual plan — the account holder. More than one is a Team
- * subscription: the same Premium entitlements, shared by N people. Seats are
- * therefore BILLING metadata and not a tier; adding a `team` tier instead would
- * have meant touching the rank order, every feature gate and every limit mapping
- * in the app, for something that unlocks nothing extra.
- *
- * Always at least 1: a subscription with zero seats would be a plan nobody can
- * use, and multiplying a per-seat price by it would produce a total of 0.
- */
-const MIN_SEATS = 1;
-const MAX_SEATS = 500;
-
-/**
- * Normalize a requested seat count, or null when it names no real number.
- *
- * This CLAMPS rather than rejecting, which is the right rule for a value read
- * back out of storage: a record written with an older, higher ceiling must
- * still resolve to something usable instead of becoming unreadable.
- *
- * It is therefore the WRONG function for a seat count a customer is about to be
- * charged for. `parseSeatCount` is that one — clamping here meant a request for
- * 9999 seats resolved to 500 and was accepted, so the caller's "refuse anything
- * over the cap" check was comparing an already-clamped value against the cap
- * and could never fire.
- */
-function normalizeSeats(value) {
-  if (value === null || value === undefined || value === '') return null;
-  const n = typeof value === 'number' ? value : Number(String(value).trim());
-  if (!Number.isFinite(n)) return null;
-  return Math.max(MIN_SEATS, Math.min(MAX_SEATS, Math.round(n)));
-}
-
-/**
- * Parse a seat count a CUSTOMER is choosing, without silently changing it.
- *
- * Returns null for anything that is not a whole number inside [min, max]. The
- * difference from `normalizeSeats` is the whole point: a price is about to be
- * multiplied by this number, and quietly turning 9999 into 500 (or 0 into 1)
- * would put an invoice in front of the customer that they never agreed to. A
- * refusal they can see and correct beats a coercion they cannot.
- */
-function parseSeatCount(value, { min = MIN_SEATS, max = MAX_SEATS } = {}) {
-  if (value === null || value === undefined || value === '') return null;
-  const n = typeof value === 'number' ? value : Number(String(value).trim());
-  if (!Number.isFinite(n)) return null;
-  if (!Number.isInteger(n)) return null;   // a fraction of a seat is not a seat
-  if (n < min || n > max) return null;
-  return n;
-}
+// ── Record shape ───────────────────────────────────────────────────────────
+// SEATS ARE GONE
+// ---------------
+// This engine used to carry a seat count on every subscription: one seat was an
+// individual plan and more than one was a "Team" subscription, priced per seat
+// and stored as `{ plan: 'annual', seats: N }`. It bought nothing — a seat
+// granted exactly the tier its plan already granted — and nothing could ever
+// consume a second one. So the number was pure liability: it appeared in the
+// purchase receipt, the admin queue, the audit trail and the version signature,
+// and none of those places could do anything with it.
+//
+// Everything below therefore describes one account on one plan. The removed
+// helpers were `MIN_SEATS`/`MAX_SEATS`, `normalizeSeats` (clamped on read) and
+// `parseSeatCount` (refused on customer input) — the split existed only because
+// a per-seat price multiplied by a silently-clamped number is an invoice the
+// customer never agreed to, and with no per-seat price that hazard is gone.
 
 // ── Record shape ───────────────────────────────────────────────────────────
 /** A fresh, empty record. Every field is explicit so the mongoose schema and
@@ -183,8 +147,6 @@ function emptyRecord() {
       updatedAt: null,
       updatedBy: 'system',
       periodDays: null,
-      // Every account is one seat until it buys more.
-      seats: MIN_SEATS,
     },
     override: null,              // null when no admin layer is in force
     history: [],
@@ -235,9 +197,6 @@ function readRecord(user) {
       updatedAt: toDate(rawPaid.updatedAt),
       updatedBy: String(rawPaid.updatedBy || 'system').slice(0, 64),
       periodDays: Number.isFinite(rawPaid.periodDays) ? rawPaid.periodDays : null,
-      // A record written before seats existed has none; that is an individual
-      // plan, i.e. one seat.
-      seats: normalizeSeats(rawPaid.seats) ?? MIN_SEATS,
     };
   } else if (legacyPlan !== 'free' || legacyActive) {
     // Pre-upgrade account: promote the raw fields to the paid layer verbatim.
@@ -251,8 +210,6 @@ function readRecord(user) {
       updatedAt: toDate(user.subscriptionUpdatedAt),
       updatedBy: 'system:migrated',
       periodDays: null,
-      // Every pre-seats account is an individual plan.
-      seats: MIN_SEATS,
     };
   }
 
@@ -286,15 +243,8 @@ function readRecord(user) {
             ? rawOverride.restore.capturedDaysRemaining
             : null,
           periodDays: Number.isFinite(rawOverride.restore.periodDays) ? rawOverride.restore.periodDays : null,
-          // The seat count the paid layer had when the override began, so
-          // "restore" also puts the right number of seats back.
-          seats: normalizeSeats(rawOverride.restore.seats) ?? MIN_SEATS,
         }
         : null,
-      // An override never changes seats: an admin grant is about access, and
-      // silently changing how many paid seats someone has would be surprising.
-      // It inherits the paid count until an admin edits it deliberately.
-      seats: base.paid.seats,
     };
   }
 
@@ -329,7 +279,6 @@ function describeLayerState(layer) {
     expiresAt: permanent ? null : toIso(layer.expiresAt),
     // Carried into the audit row so a seat change is visible in the log, not
     // just in the current state.
-    seats: normalizeSeats(layer.seats) ?? MIN_SEATS,
   };
 }
 
@@ -361,9 +310,6 @@ function resolveLayer(layer, now = Date.now()) {
     remainingMs,
     daysRemaining: remainingMs === null ? null : daysRemainingFrom(expiresAt, now),
     periodDays: Number.isFinite(layer.periodDays) ? layer.periodDays : null,
-    // Seats are reported even for a free/expired layer: the record of what a
-    // lapsed Team subscription had is exactly what an admin needs to see.
-    seats: normalizeSeats(layer.seats) ?? MIN_SEATS,
   };
 }
 
@@ -403,10 +349,6 @@ function effectiveState(record, now = Date.now()) {
     rank: PLAN_RANK[granting ? paid.plan : 'free'],
     label: PLAN_LABELS[granting ? paid.plan : 'free'],
     recordedPlan: paid.plan,
-    // A subscription that grants nothing is a single account again, so it must
-    // never keep reporting the seats a lapsed Team plan had — otherwise an
-    // expired 20-seat subscription would still bill as 20 seats.
-    seats: granting ? paid.seats : MIN_SEATS,
     source: granting ? 'payment' : 'free',
     overridden: false,
     override,
@@ -458,9 +400,6 @@ function captureRestore(record, now) {
     capturedAt: now,
     capturedDaysRemaining: paid.permanent ? null : daysRemainingFrom(paid.expiresAt, now.getTime()),
     periodDays: paid.periodDays,
-    // Seats are part of what the user bought, so they are frozen with the rest
-    // of it — a Team subscription must come back with the same seat count.
-    seats: normalizeSeats(paid.seats) ?? MIN_SEATS,
   };
 }
 
@@ -485,9 +424,6 @@ function projectEffective(record, now = new Date()) {
       : (effective.active ? null : now),
     subscriptionPermanent: effective.active && effective.permanent === true,
     subscriptionSource: effective.source,
-    // Denormalized alongside the rest so a page can render "12 seats" straight
-    // from the cached user document, without a second round-trip.
-    subscriptionSeats: effective.seats,
     subscriptionUpdatedAt: now,
   };
 }
@@ -660,6 +596,12 @@ function applyAction(inputRecord, action, options = {}, nowInput = new Date()) {
   // final state can express (e.g. "+7 days" needs the number that was added).
   let defaultNote = '';
 
+  // Set by the `setPaid` case and read after the switch, because a `case` with
+  // braces is its own block: anything declared inside it is unreachable once the
+  // switch ends. These two are what make the replacement outcome reportable.
+  let replacedPlan = false;
+  let forfeitedDays = 0;
+
   switch (action) {
     // ── Grant ────────────────────────────────────────────────────────────
     case 'grant': {
@@ -796,8 +738,7 @@ function applyAction(inputRecord, action, options = {}, nowInput = new Date()) {
         periodDays: snap.periodDays,
         // Restoring brings back the seat count too — a 10-seat subscription that
         // came back as 1 seat would be a silent downgrade.
-        seats: normalizeSeats(snap.seats) ?? MIN_SEATS,
-      };
+          };
       record.override = null;
       break;
     }
@@ -842,38 +783,30 @@ function applyAction(inputRecord, action, options = {}, nowInput = new Date()) {
         break;
       }
 
-      // Seats. `opts.seats` REPLACES the count (that is how seat-based billing
-      // works — you state how many seats you are renewing for), and omitting it
-      // resets to 1.
-      //
-      // That default matters: buying an individual plan must drop a lapsed Team
-      // subscription back to a single account, or a customer could pay for one
-      // Deluxe seat and keep 50.
-      //
-      // An out-of-range count is REFUSED, not clamped, so a caller that skipped
-      // its own validation cannot get 500 seats by asking for 9999. This is the
-      // last line before the number is stored and priced, so it is the one that
-      // must be strict.
-      const seatsWereGiven = opts.seats !== undefined && opts.seats !== null;
-      const parsedSeats = seatsWereGiven ? parseSeatCount(opts.seats) : null;
-      if (seatsWereGiven && parsedSeats === null) {
-        return fail(400, `Seats must be a whole number between ${MIN_SEATS} and ${MAX_SEATS}.`);
-      }
-      const seats = parsedSeats ?? MIN_SEATS;
-
       const explicitExpiry = toDate(opts.expiresAt);
-      // Did the caller say anything about the TERM? A seat count, a plan name or
-      // a bare "make it active" is not a purchase — it is an edit to the
-      // subscription that already exists. Defaulting those to a fresh 30 days
-      // meant an admin changing 6 seats to 12 silently granted a month of free
-      // access, and a "reactivate this lapsed plan" click invented time the
-      // customer never paid for.
+      // Is this the SAME plan the account is already on? This one flag decides
+      // both whether the new term stacks on top of the days already paid for and
+      // whether the days already paid for survive at all.
+      //
+      // Deliberately NOT gated on `wasActive`. A lapsed Deluxe window that an
+      // admin re-sends for Deluxe is still the same plan, and its (zero) remaining
+      // days must not become a fresh month nobody bought; tying this to "was
+      // active" would quietly turn every reactivation into 30 free days.
+      const samePlan = plan === record.paid.plan;
+
+      // Did the caller say anything about the TERM? A plan name or a bare "make
+      // it active" is not a purchase — it is an edit to the subscription that
+      // already exists. Defaulting those to a fresh 30 days meant an admin
+      // "correct the plan" click invented time the customer never paid for.
       const termWasGiven = opts.days !== undefined && opts.days !== null;
       // …but an explicit expiry, or a request to make it permanent, IS a term.
       const termIsExplicit = termWasGiven || explicitExpiry !== null || permanent === true;
       // Keep the window that is already paid for when the caller said nothing
-      // about length and there is one to keep.
+      // about length AND is not switching plans. The `samePlan` half is the
+      // replacement rule: switching to a different plan starts a fresh window
+      // from today rather than inheriting the days remaining on the old one.
       const keepExistingWindow = !termIsExplicit
+        && samePlan
         && record.paid.expiresAt !== null
         && record.paid.expiresAt !== undefined;
       const days = permanent
@@ -881,20 +814,47 @@ function applyAction(inputRecord, action, options = {}, nowInput = new Date()) {
         : (keepExistingWindow
           ? null
           : clampDays(toDays(opts.days) ?? STANDARD_PERIOD_DAYS));
-      // Renewals run from the end of the current window, not from today, so a
-      // renewal never silently discards the days already paid for.
+      // THE REPLACEMENT RULE.
+      //
+      //   same plan  → RENEWAL: the term runs from the end of the window already
+      //                paid for, so paying early never discards paid days.
+      //   new plan   → REPLACEMENT: the term runs from today and whatever was
+      //                left on the previous plan is forfeited. Buying Deluxe while
+      //                holding 300 unused days of Premium does not silently hand
+      //                back 330 days of Deluxe — the old plan is gone, and the new
+      //                one is exactly what was paid for.
+      //
+      // The `samePlan` guard is the whole change. Without it the old code read
+      // `record.paid.expiresAt` whenever one existed in the future, regardless
+      // of which plan wrote it, so EVERY plan change in the product was additive
+      // and a downgrade appeared to be an upgrade.
       const base = explicitExpiry
         ? new Date(Math.max(explicitExpiry.getTime(), nowMs))
-        : (record.paid.expiresAt && record.paid.expiresAt.getTime() > nowMs
+        : (samePlan && record.paid.expiresAt && record.paid.expiresAt.getTime() > nowMs
           ? record.paid.expiresAt
           : now);
-      const startedAt = plan === record.paid.plan && wasActive && record.paid.startedAt
+      // Reset on a plan change, so the new window's length is measured from the
+      // day it started rather than from the start of the plan it replaced.
+      const startedAt = samePlan && wasActive && record.paid.startedAt
         ? record.paid.startedAt
         : now;
       const expiresAt = permanent
         ? null
         : (explicitExpiry
           || (keepExistingWindow ? record.paid.expiresAt : addDays(base, days ?? STANDARD_PERIOD_DAYS)));
+
+      // Capture the outcome for the caller, BEFORE the paid layer is overwritten
+      // — `from` still describes the old plan at this point, which is the only
+      // place the forfeited day count can still be read from.
+      //
+      // `wasActive` is part of this test. A first purchase also differs from the
+      // empty record's 'free', and reporting that as a "replacement" would tell a
+      // brand-new customer they forfeited 0 days of a plan they never had.
+      // Replacing means: something they were actually using is being taken away.
+      replacedPlan = wasActive && !samePlan;
+      forfeitedDays = replacedPlan
+        ? Math.max(0, daysRemainingFrom(record.paid.expiresAt, nowMs) || 0)
+        : 0;
 
       record.paid = {
         plan,
@@ -912,7 +872,6 @@ function applyAction(inputRecord, action, options = {}, nowInput = new Date()) {
           : (days ?? (expiresAt && startedAt
             ? Math.max(1, Math.round((expiresAt.getTime() - startedAt.getTime()) / DAY_MS))
             : null)),
-        seats,
       };
       refreeze();
       break;
@@ -932,6 +891,8 @@ function applyAction(inputRecord, action, options = {}, nowInput = new Date()) {
     to,
   });
 
+  // Did this REPLACE a different plan rather than renew the one already held?
+  // `replacedPlan` / `forfeitedDays` were captured inside the `setPaid` case.
   return {
     ok: true,
     record,
@@ -940,6 +901,8 @@ function applyAction(inputRecord, action, options = {}, nowInput = new Date()) {
     from,
     to,
     patch: projectEffective(record, now),
+    replaced: replacedPlan,
+    forfeitedDays,
   };
 }
 
@@ -982,8 +945,7 @@ function describeRecord(user, nowInput = Date.now()) {
       return {
         plan: snap.plan,
         label: PLAN_LABELS[snap.plan] || PLAN_LABELS.free,
-        seats: normalizeSeats(snap.seats) ?? MIN_SEATS,
-        status: snap.status,
+            status: snap.status,
         permanent: snap.permanent === true,
         startedAt: toIso(snap.startedAt),
         expiresAt: toIso(snapExpiry),
@@ -1004,16 +966,11 @@ function describeRecord(user, nowInput = Date.now()) {
     effective: {
       plan: effective.plan,
       label: effective.label,
-      // How many seats this subscription covers. 1 = an individual plan; more
-      // means a Team subscription sharing the same entitlements.
-      seats: effective.seats,
-      isTeam: effective.active && effective.seats > MIN_SEATS,
       // The plan still recorded on the layer in force, even when it grants
       // nothing ("was PREMIUM, cancelled 3 days ago"). The admin panel shows
       // this so an expiring or cancelled subscription never looks like it never
       // existed.
       recordedPlan: effective.recordedPlan,
-      recordedSeats: paid.seats,
       recordedLabel: PLAN_LABELS[effective.recordedPlan] || PLAN_LABELS.free,
       status: effective.status,
       active: effective.active,
@@ -1038,8 +995,6 @@ function describeRecord(user, nowInput = Date.now()) {
       remainingMs: paid.remainingMs,
       durationLabel: durationLabel(paid),
       periodDays: record.paid.periodDays,
-      seats: paid.seats,
-      isTeam: paid.active && paid.seats > MIN_SEATS,
       updatedAt: toIso(record.paid.updatedAt),
       updatedBy: record.paid.updatedBy,
     },
@@ -1048,7 +1003,6 @@ function describeRecord(user, nowInput = Date.now()) {
         active: true,
         plan: override.plan,
         label: override.label,
-        seats: override.seats,
         permanent: override.permanent === true,
         startedAt: override.startedAt,
         expiresAt: override.expiresAt,
@@ -1066,10 +1020,6 @@ function describeRecord(user, nowInput = Date.now()) {
     canRestore: overrideActive && !!record.override.restore,
     restoreTarget,
     hasPaidSubscription: isPaidPlan(record.paid.plan),
-    // The entitlement tier a Team subscription grants. Team is not a tier of its
-    // own: it is Premium entitlements shared across N seats, so the admin panel
-    // and the receipt can both say what a seat actually unlocks.
-    teamTierPlan: 'annual',
     history: record.history,
   };
 }
@@ -1080,8 +1030,6 @@ module.exports = {
   STANDARD_PERIOD_DAYS,
   STANDARD_PERIOD_MONTHS,
   MAX_ADMIN_DAYS,
-  MIN_SEATS,
-  MAX_SEATS,
   ACTIONS,
   // plan vocabulary
   PLAN_RANK,
@@ -1096,8 +1044,6 @@ module.exports = {
   toIso,
   toDays,
   clampDays,
-  normalizeSeats,
-  parseSeatCount,
   addDays,
   daysRemainingFrom,
   durationLabel,

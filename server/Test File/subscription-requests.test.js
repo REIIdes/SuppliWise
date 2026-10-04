@@ -28,6 +28,16 @@ const PNG_1PX = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfF
 const NOW = new Date('2026-03-01T12:00:00.000Z');
 
 /**
+ * A peso amount as the catalogue formats it.
+ *
+ * The formatted string is produced by `formatAmount`, not retyped here: PHP has
+ * no minor unit, so it prints as `₱699`, and restating it with `toLocaleString`
+ * produced `?699` on a machine whose console cannot render the glyph — a test
+ * that fails on encoding rather than on behaviour.
+ */
+const formatPeso = (php) => C.formatAmount(php, 'PHP');
+
+/**
  * Apply a subscription action the way every route does. `applyAction` takes the
  * RECORD (not the user document) and builds the top-level patch itself, so a
  * route's whole write is `subscriptionRecord: result.record, ...result.patch`.
@@ -116,41 +126,27 @@ test('a missing or non-string proof is refused, never defaulted', () => {
   }
 });
 
-// ══════════════════════════════════════════════════════════════════════════
 // 2. What is being requested
-// ══════════════════════════════════════════════════════════════════════════
+//
+// A request is one account on one plan. The Team concept (a per-seat multiplier
+// on Premium) was removed, so there is no seat count to accept, reject, clamp
+// or bill — and `plan: 'team'` is now simply an unknown id.
 
-test('a Team request stores the tier its seats grant, not a "team" plan', () => {
-  const planned = R.resolveRequestedPlan('team', 5);
-  assert.equal(planned.ok, true);
-  assert.equal(planned.isTeam, true);
-  assert.equal(planned.plan, C.TEAM_PLAN.tier);
-  assert.equal(planned.plan, 'annual', 'a seat grants Premium entitlements');
-  assert.equal(planned.seats, 5);
-  // …and the stored plan id is one the subscription engine knows.
-  assert.ok(R.REQUESTABLE_PLANS.includes(planned.plan));
-});
-
-test('a Team request of one seat is refused rather than quietly upgraded', () => {
-  // Team starts at 2. Bumping a "1 seat" order to the minimum would bill for
-  // something the user did not ask for.
-  for (const seats of [0, 1, -4]) {
-    const planned = R.resolveRequestedPlan('team', seats);
-    assert.equal(planned.ok, false, `seats=${seats}`);
+test('the removed Team id is refused as an unknown plan', () => {
+  for (const input of ['team', 'Team', 'TEAM', ' team ', 'team', 'team-seats']) {
+    const planned = R.resolveRequestedPlan(input);
+    assert.equal(planned.ok, false, `${input} must not resolve`);
     assert.equal(planned.status, 400);
+    assert.match(planned.message, /valid plan/i);
   }
-  const bad = R.resolveRequestedPlan('team', 'abc');
-  assert.equal(bad.ok, false, 'a value that names no number is refused, not guessed');
 });
 
-test('seat counts above the ceiling are refused, not clamped into a big bill', () => {
-  // Silently turning 5000 into 500 would show an invoice the customer never
-  // agreed to, so the request is rejected and the UI can explain.
-  const over = R.resolveRequestedPlan('team', C.TEAM_PLAN.maxSeats + 1);
-  assert.equal(over.ok, false, 'one seat over the cap is a refusal, not a clamp');
-  const atCap = R.resolveRequestedPlan('team', C.TEAM_PLAN.maxSeats);
-  assert.equal(atCap.ok, true);
-  assert.equal(atCap.seats, C.TEAM_PLAN.maxSeats);
+test('a request carries no seat fields, whatever the body sent', () => {
+  const planned = R.resolveRequestedPlan('annual');
+  assert.equal(planned.ok, true);
+  assert.deepEqual(Object.keys(planned).sort(), ['ok', 'plan'], 'only a plan comes back');
+  assert.equal('isTeam' in planned, false);
+  assert.equal('seats' in planned, false);
 });
 
 test('individual plans resolve through their aliases, and free is refused clearly', () => {
@@ -163,18 +159,20 @@ test('individual plans resolve through their aliases, and free is refused clearl
     ['ultimate', 'custom'],
     ['  ANNUAL  ', 'annual'],
   ]) {
-    const planned = R.resolveRequestedPlan(input, 1);
+    const planned = R.resolveRequestedPlan(input);
     assert.equal(planned.ok, true, input);
     assert.equal(planned.plan, expected, input);
-    assert.equal(planned.isTeam, false, input);
-    assert.equal(planned.seats, 1, input);
+    // The stored id is one the subscription engine knows.
+    assert.ok(R.REQUESTABLE_PLANS.includes(planned.plan), input);
   }
-  const free = R.resolveRequestedPlan('free', 1);
+  const free = R.resolveRequestedPlan('free');
   assert.equal(free.ok, false);
-  assert.match(free.message, /already yours/i, 'free gets its own message, not "invalid plan"');
-  const nonsense = R.resolveRequestedPlan('platinum', 1);
-  assert.equal(nonsense.ok, false);
-  assert.match(nonsense.message, /valid plan/i);
+  assert.match(free.message, /already yours/i, 'free gets its own message, not \"invalid plan\"');
+  for (const junk of ['platinum', '', null, undefined, 0, {}]) {
+    const nonsense = R.resolveRequestedPlan(junk);
+    assert.equal(nonsense.ok, false, JSON.stringify(junk));
+    assert.match(nonsense.message, /valid plan/i);
+  }
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -194,85 +192,78 @@ test('the term is clamped to whole months inside [1, 12]', () => {
   assert.equal(R.clampMonths(9999), R.MAX_MONTHS);
 });
 
-// ══════════════════════════════════════════════════════════════════════════
-// 4. Pricing — derived, never read from the body
-// ══════════════════════════════════════════════════════════════════════════
+
+// 4. Pricing - derived, never read from the body
+//
+// The amount is looked up from the catalogue for the named plan and term. There
+// is no multiplier to apply, so a client-supplied `seats` can no longer change
+// what a request is worth even if the field is still sent by a stale client.
 
 test('a request is priced from the catalogue, and months > 1 bills yearly', () => {
   const entry = C.findEntry('annual');
-  const monthly = R.priceRequest('annual', 1, 'PHP', { isTeam: false, seats: 1 });
+  const monthly = R.priceRequest('annual', 1, 'PHP');
   assert.equal(monthly.amountPhp, entry.monthly);
-  assert.equal(monthly.formattedAmount, `₱${entry.monthly.toLocaleString('en-US')}`);
-  // Both halves of the per-seat pair are Team-only. Setting `perSeatPhp` here
-  // while `perSeatFormatted` stayed null made the admin queue's
-  // "₱3,495 (₱699 × 5)" line read "₱699 × 1" on a plan with no seats.
-  assert.equal(monthly.perSeatPhp, null);
-  assert.equal(monthly.perSeatFormatted, null);
+  assert.equal(monthly.formattedAmount, formatPeso(entry.monthly));
+  // No per-seat pair survives on the priced row.
+  assert.equal('perSeatPhp' in monthly, false);
+  assert.equal('perSeatFormatted' in monthly, false);
 
-  const yearly = R.priceRequest('annual', 12, 'PHP', { isTeam: false, seats: 1 });
+  const yearly = R.priceRequest('annual', 12, 'PHP');
   assert.equal(yearly.amountPhp, entry.yearly);
   assert.ok(yearly.amountPhp < entry.monthly * 12, 'the yearly rate is genuinely cheaper');
 });
 
-test('a Team request multiplies the per-seat price by the seat count', () => {
-  const row = R.priceRequest(C.TEAM_PLAN.tier, 1, 'PHP', { isTeam: true, seats: 5 });
-  assert.equal(row.perSeatPhp, C.TEAM_PLAN.perSeatMonthly);
-  assert.equal(row.amountPhp, C.teamTotal(C.TEAM_PLAN.perSeatMonthly, 5));
-  // The per-seat figure is kept so a reviewer can check the total at a glance.
-  assert.equal(row.perSeatFormatted, `₱${C.TEAM_PLAN.perSeatMonthly.toLocaleString('en-US')}`);
-  // And it agrees exactly with what POST /purchase would charge.
-  assert.equal(row.amountPhp, C.teamTotal(699, 5));
-});
-
-test('a request prices identically to a purchase of the same plan and seats', () => {
+test('every priced row is exactly the catalogue price for its plan and term', () => {
   // The whole point of the two paths agreeing: an admin checks a bank transfer
-  // against the figure on the receipt, and that figure must be the purchase
-  // price, not a second, drifting calculation.
-  for (const [plan, isTeam, seats] of [
-    ['monthly', false, 1],
-    ['annual', false, 1],
-    ['custom', false, 1],
-    [C.TEAM_PLAN.tier, true, 3],
-    [C.TEAM_PLAN.tier, true, 25],
-  ]) {
+  // against the figure on the receipt, and that figure must be the catalogue's
+  // number rather than a second calculation that can drift from it.
+  for (const plan of ['monthly', 'annual', 'custom']) {
     for (const [months, unit] of [[1, 'monthly'], [12, 'yearly']]) {
-      const request = R.priceRequest(plan, months, 'PHP', { isTeam, seats });
+      const request = R.priceRequest(plan, months, 'PHP');
       const entry = C.findEntry(plan);
-      const unitPhp = isTeam
-        ? (months > 1 ? C.TEAM_PLAN.perSeatYearly : C.TEAM_PLAN.perSeatMonthly)
-        : (months > 1 ? entry.yearly : entry.monthly);
-      assert.ok(request, `${isTeam ? `team x${seats}` : plan} ${unit} priced`);
-      assert.equal(
-        request.amountPhp,
-        C.teamTotal(unitPhp, isTeam ? seats : 1),
-        `${isTeam ? `team x${seats}` : plan} ${unit}`,
-      );
+      assert.ok(request, `${plan} ${unit} priced`);
+      assert.equal(request.amountPhp, entry[unit], `${plan} ${unit}`);
+      assert.equal(request.formattedAmount, formatPeso(entry[unit]), `${plan} ${unit}`);
     }
   }
 });
 
-test('a ₱0 request is refused, so a skipped validation cannot reach the queue', () => {
-  // The Free plan IS in the catalogue, so findEntry finds it — at ₱0. A ₱0 row
+test('a request prices identically to a purchase of the same plan and term', () => {
+  // Spelled out through the purchase route's own arithmetic rather than a shared
+  // helper, because the failure this guards is the two disagreeing.
+  for (const plan of ['monthly', 'annual', 'custom']) {
+    for (const [months, unit] of [[1, 'monthly'], [12, 'yearly']]) {
+      const entry = C.findEntry(plan);
+      const expectedPhp = months > 1 ? entry.yearly : entry.monthly;
+      const request = R.priceRequest(plan, months, 'PHP');
+      const purchase = months > 1 ? entry.yearly : entry.monthly;
+      assert.equal(request.amountPhp, expectedPhp, `${plan} ${unit} request`);
+      assert.equal(request.amountPhp, purchase, `${plan} ${unit} purchase`);
+    }
+  }
+});
+
+test('a zero-cost request is refused, so a skipped validation cannot reach the queue', () => {
+  // The Free plan IS in the catalogue, so findEntry finds it - at ?0. A ?0 row
   // in the admin queue looks like a real purchase that costs nothing, so
   // priceRequest refuses it rather than trusting every caller to have checked.
-  assert.equal(R.priceRequest('free', 1, 'PHP', {}), null);
-  assert.equal(R.priceRequest('platinum', 1, 'PHP', {}), null);
-  assert.equal(R.priceRequest(undefined, 1, 'PHP', {}), null);
-  assert.equal(R.priceRequest(null, 12, 'PHP', {}), null);
+  assert.equal(R.priceRequest('free', 1, 'PHP'), null);
+  assert.equal(R.priceRequest('platinum', 1, 'PHP'), null);
+  assert.equal(R.priceRequest(undefined, 1, 'PHP'), null);
+  assert.equal(R.priceRequest(null, 12, 'PHP'), null);
+  // …and the removed Team id lands in the same refusal.
+  assert.equal(R.priceRequest('team', 1, 'PHP'), null);
 });
 
 test('an unknown currency falls back to the default rather than pricing at 0', () => {
-  const priced = R.priceRequest('annual', 1, 'XYZ', { isTeam: false, seats: 1 });
-  assert.ok(priced, 'a bad currency must not make the request unpriceable');
-  assert.equal(priced.currency, C.DEFAULT_CURRENCY);
-  assert.equal(priced.amountPhp, C.findEntry('annual').monthly);
-  // A converted amount is present and sane, never NaN.
-  assert.ok(Number.isFinite(priced.amount) && priced.amount > 0);
-  assert.doesNotMatch(priced.formattedAmount, /NaN|Infinity|undefined/);
-  // A Team total in a bad currency is still a real number of seats' worth.
-  const team = R.priceRequest(C.TEAM_PLAN.tier, 1, 'XYZ', { isTeam: true, seats: 4 });
-  assert.equal(team.amountPhp, C.teamTotal(C.TEAM_PLAN.perSeatMonthly, 4));
-  assert.ok(Number.isFinite(team.amount) && team.amount > 0);
+  for (const plan of ['monthly', 'annual', 'custom']) {
+    const priced = R.priceRequest(plan, 1, 'XYZ');
+    assert.ok(priced, `${plan}: a bad currency must not make the request unpriceable`);
+    assert.equal(priced.currency, C.DEFAULT_CURRENCY, plan);
+    assert.equal(priced.amountPhp, C.findEntry(plan).monthly, plan);
+    assert.ok(Number.isFinite(priced.amount) && priced.amount > 0, plan);
+    assert.doesNotMatch(priced.formattedAmount, /NaN|Infinity|undefined/, plan);
+  }
 });
 
 test('free text is trimmed, collapsed and truncated to its cap', () => {
@@ -289,46 +280,23 @@ test('free text is trimmed, collapsed and truncated to its cap', () => {
   assert.equal(R.cleanText('a\n\n  b\tc', 100), 'a b c');
 });
 
-// ══════════════════════════════════════════════════════════════════════════
 // 5. Approval produces the same subscription the purchase would have
-// ══════════════════════════════════════════════════════════════════════════
 
 test('approving a monthly request grants exactly 30 days on that tier', () => {
-  const planned = R.resolveRequestedPlan('monthly', 1);
+  const planned = R.resolveRequestedPlan('monthly');
   const result = apply(null, 'setPaid', {
     actor: 'admin:Devs',
     plan: planned.plan,
     days: R.clampMonths(1) * S.STANDARD_PERIOD_DAYS,
-    seats: planned.isTeam ? planned.seats : 1,
   });
   assert.equal(result.ok, true);
   assert.equal(result.patch.subscriptionPlan, 'monthly');
   assert.equal(result.patch.subscriptionActive, true);
   const state = stateOf(result);
   assert.equal(state.daysRemaining, 30);
-  assert.equal(state.subscriptionSeats, 1);
-  assert.equal(state.subscriptionIsTeam, false);
-});
-
-test('approving a Team request grants Premium entitlements across its seats', () => {
-  const planned = R.resolveRequestedPlan('team', 8);
-  const result = apply(null, 'setPaid', {
-    actor: 'admin:Devs',
-    plan: planned.plan,
-    days: R.clampMonths(1) * S.STANDARD_PERIOD_DAYS,
-    seats: planned.seats,
-  });
-  assert.equal(result.ok, true);
-  assert.equal(result.patch.subscriptionPlan, 'annual', 'a Team seat grants Premium');
-  assert.equal(result.patch.subscriptionSeats, 8);
-
-  const state = stateOf(result);
-  assert.equal(state.currentPlan, 'annual');
-  assert.equal(state.entitlements.priorityAssessment, true);
-  assert.equal(state.entitlements.chat, false, 'a seat is not an Ultimate seat');
-  assert.equal(state.subscriptionSeats, 8);
-  assert.equal(state.subscriptionIsTeam, true);
-  assert.equal(state.daysRemaining, 30);
+  // No seat fields on the projected state an old client would still read.
+  assert.equal('subscriptionSeats' in state, false);
+  assert.equal('subscriptionIsTeam' in state, false);
 });
 
 test('a 12-month request grants 360 days, not 30', () => {
@@ -339,36 +307,62 @@ test('a 12-month request grants 360 days, not 30', () => {
 });
 
 test('an approved renewal extends the paid window instead of replacing it', () => {
-  // A user who paid, then sent a renewal request, must not lose the days they
-  // already paid for. This is the `setPaid` renewal rule, exercised on the
-  // request path so an approval cannot quietly truncate a paid subscription.
+  // A user who paid, then sent a renewal request for the SAME plan, must not lose
+  // the days they already paid for. This is the `setPaid` renewal rule,
+  // exercised on the request path so an approval cannot quietly truncate a paid
+  // subscription.
   const first = apply(null, 'setPaid', { actor: 'payment', plan: 'annual', days: 30 });
   const midway = new Date(NOW.getTime() + 10 * S.DAY_MS);
   const second = apply(first.record, 'setPaid', { actor: 'admin:Devs', plan: 'annual', days: 30 }, midway);
   // 30 paid, 20 still unspent on the old window, then 30 more granted.
   assert.equal(stateOf(second, midway).daysRemaining, 50);
+  assert.equal(second.replaced, false, 'renewing the same plan replaces nothing');
+});
+
+test('approving a request for a DIFFERENT plan replaces what was paid for', () => {
+  // The other half of the rule, on the path an admin actually presses. Approving
+  // a Deluxe request for someone holding 300 days of Ultimate gives 30 days of
+  // Deluxe — the reviewer granted exactly the plan on the receipt.
+  const paid = apply(null, 'setPaid', { actor: 'payment', plan: 'custom', days: 300 });
+  const midway = new Date(NOW.getTime() + 10 * S.DAY_MS);
+  const approved = apply(paid.record, 'setPaid', {
+    actor: 'admin:Devs', plan: 'monthly', days: 30,
+  }, midway);
+  const state = stateOf(approved, midway);
+  assert.equal(state.currentPlan, 'monthly');
+  assert.equal(state.daysRemaining, 30, '30 granted days, not 30 on top of 290');
+  assert.equal(approved.replaced, true);
+  assert.equal(approved.forfeitedDays, 290);
 });
 
 test('an approval on top of an admin override leaves the override restorable', () => {
   // Approving a payment is a PAID-layer write. If an admin override is in force
   // the effective state must stay the override's, and "restore original" must
   // still put the paid subscription back underneath it.
-  const paid = apply(null, 'setPaid', { actor: 'payment', plan: 'annual', days: 30, seats: 4 });
+  //
+  // The approval is for `custom`, which is the SAME plan the override granted —
+  // deliberately, so this test isolates the override mechanics from the
+  // replacement rule. Switching plans here would forfeit the 30 paid days and
+  // `restoreTarget` would correctly show 0, which is a different test.
+  const paid = apply(null, 'setPaid', { actor: 'payment', plan: 'custom', days: 30 });
   const granted = apply(paid.record, 'grant', { actor: 'admin:Devs', plan: 'custom', days: 10 });
   assert.equal(granted.ok, true);
 
   const approved = apply(granted.record, 'setPaid', {
-    actor: 'admin:Devs', plan: 'custom', days: 30, seats: 4,
+    actor: 'admin:Devs', plan: 'custom', days: 30,
   });
+  assert.equal(approved.replaced, false, 'renewing the same plan forfeits nothing');
   const during = S.describeRecord(
     { subscriptionRecord: approved.record, ...approved.patch }, NOW.getTime(),
   );
   assert.equal(during.override.active, true, 'the override still wins');
-  assert.equal(during.paid.seats, 4, 'the paid seats are untouched by the override');
   assert.equal(during.canRestore, true);
+  assert.equal(during.paid.daysRemaining, 60, 'the paid window is the approved one');
   // `restoreTarget` is the public shape of the frozen snapshot; the raw
-  // `restore` object is deliberately not part of the admin panel's payload.
-  assert.equal(during.restoreTarget.seats, 4, 'the restore target names the paid seats');
+  // `restore` object is deliberately not part of the admin panel's payload, so
+  // the remaining time is reported as the count captured when the override
+  // began rather than recomputed (which would decay as days pass).
+  assert.equal(during.restoreTarget.capturedDaysRemaining, 60, 'restore returns the paid window');
 
   const restored = apply(approved.record, 'restore', { actor: 'admin:Devs' });
   const after = S.describeRecord(
@@ -376,7 +370,6 @@ test('an approval on top of an admin override leaves the override restorable', (
   );
   assert.equal(after.override.active, false);
   assert.equal(after.effective.plan, 'custom');
-  assert.equal(after.effective.seats, 4);
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -425,16 +418,23 @@ test('the list projection does not select the proof image', () => {
   // The image's metadata is fine — it is kilobytes, not megabytes.
   assert.ok(fields.includes('proofMime'));
   assert.ok(fields.includes('proofBytes'));
-  for (const field of ['user', 'plan', 'months', 'isTeam', 'seats', 'formattedAmount', 'status']) {
+  for (const field of ['user', 'plan', 'months', 'formattedAmount', 'status', 'paymentRequired']) {
     assert.ok(fields.includes(field), `LIST_FIELDS is missing ${field}`);
+  }
+  // …and the removed per-seat fields are gone from the projection, so a queue
+  // render cannot still be reading a count the schema no longer stores.
+  for (const field of ['isTeam', 'seats', 'perSeatPhp', 'perSeatFormatted']) {
+    assert.equal(fields.includes(field), false, `LIST_FIELDS still selects ${field}`);
   }
 });
 
-test('the caps the catalogue and the request validator share cannot drift', () => {
-  // Three places mention the seat ceiling. If they drift, the pricing page
-  // offers a seat count the server refuses.
-  assert.equal(C.TEAM_PLAN.maxSeats, S.MAX_SEATS);
+test('the term cap is enforced identically in both places that read it', () => {
+  // `clampMonths` is what bounds a request, and `STANDARD_PERIOD_DAYS` is what
+  // turns it into days. If either moved alone, a 12-month request would promise
+  // a term the approval route could not grant.
   assert.equal(R.MAX_MONTHS, 12);
+  assert.equal(R.clampMonths(13), R.MAX_MONTHS, 'an over-long term clamps, it does not grow');
+  assert.equal(R.clampMonths(9999), R.MAX_MONTHS);
   assert.equal(S.MAX_ADMIN_DAYS, 3650, 'an approval can grant at most ten years');
   assert.equal(S.STANDARD_PERIOD_DAYS * R.MAX_MONTHS, 360);
 });

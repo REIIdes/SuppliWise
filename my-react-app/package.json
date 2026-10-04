@@ -4,7 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/healDepsCache.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/healDepsCache.mjs node_modules/.vite-build",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",

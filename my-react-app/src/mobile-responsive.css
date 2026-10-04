@@ -121,6 +121,13 @@
     text-overflow: ellipsis !important;
   }
 
+  /* The brand cluster is a link now, so it needs the focus ring on phones too:
+     a hardware-keyboard tablet and Switch Control both reach it by Tab. */
+  .navbar-left:focus-visible {
+    outline: 2px solid #10b981 !important;
+    outline-offset: 1px !important;
+  }
+
   .navbar-left {
     gap: 8px !important;
   }
@@ -2008,15 +2015,27 @@
   }
 
   body {
+    /* Declared twice on purpose: `hidden` makes <body> a scroll container, and
+       a sticky element resolves against the NEAREST ancestor scroll container —
+       so on a phone this detached the sticky Navbar from the viewport and the
+       header scrolled away with the page. `clip` contains the horizontal
+       overflow without creating a scrollport. `hidden` first, for engines
+       without `clip`. */
     overflow-x: hidden !important;
+    overflow-x: clip !important;
   }
 
-  /* Prevent horizontal scroll */
+  /* Prevent horizontal scroll.
+     `clip`, not `hidden`: these wrappers are the Navbar's parent, and `hidden`
+     would make each one a scroll container that the sticky header would then
+     resolve against instead of the viewport. `!important` repeats the important
+     flag on the second declaration so it actually beats the one above it. */
   .dashboard-wrapper,
   .recommendations-wrapper,
   .insights-wrapper,
   .history-wrapper {
     overflow-x: hidden !important;
+    overflow-x: clip !important;
     width: 100% !important;
   }
 }

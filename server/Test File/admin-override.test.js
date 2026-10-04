@@ -50,8 +50,28 @@ const assessmentRouter = require('../routes/assessment');
 
 const oid = () => new mongoose.Types.ObjectId();
 const key = (v) => (v === undefined || v === null ? null : String(v));
-const today = () => new Date().toISOString().split('T')[0];
-const daysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString().split('T')[0];
+/**
+ * Day keys, on the same rule the Priority gate reads them by.
+ *
+ * These were `new Date().toISOString().split('T')[0]` — the UTC calendar date —
+ * which no longer matches what the gate asks for. A plan day runs 04:00 → 04:00,
+ * so between midnight and 4 AM "today" is the PREVIOUS date, and seeding a
+ * half-finished plan under the UTC date made the gate read the wrong day entirely:
+ * the test below failed for four hours out of every eight for that reason alone.
+ *
+ * Derived from `planDayKey` rather than restated, so this suite cannot drift from
+ * the rule it is testing.
+ */
+const { planDayKey, previousDayKey } = require('../utils/planDay');
+
+const today = () => planDayKey(new Date());
+/** `n` plan days before the running one — "yesterday" is the previous PLAN day. */
+const daysAgo = (n) => shiftPlanDay(n);
+function shiftPlanDay(n) {
+  let key = today();
+  for (let i = 0; i < n; i += 1) key = previousDayKey(key);
+  return key;
+}
 
 /** Minimal Mongo filter matcher: enough for equality, $ne, $in, $gt. */
 function matches(doc, filter = {}) {

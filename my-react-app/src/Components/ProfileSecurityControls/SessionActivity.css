@@ -20,8 +20,9 @@
   margin: 0 0 14px;
 }
 
-.psc-btn--sm { padding: 8px 14px; font-size: 13px; }
-.psc-btn--mt { margin-top: 14px; }
+/* .psc-btn--sm and .psc-btn--mt are declared in ProfileSecurityControls.css,
+   next to the base .psc-btn they modify. They used to live here too, where the
+   --sm copy was bundled before the base rule and silently discarded. */
 
 /* ── Devices ──────────────────────────────────────────────────────────── */
 

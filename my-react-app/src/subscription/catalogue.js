@@ -103,30 +103,16 @@ export const PLAN_META = {
 
 /** Display order on the pricing grid. */
 export const PLAN_CARD_ORDER = ['free', 'monthly', 'annual', 'custom'];
+// There is no "Team" band.
+//
+// It used to sit under these four cards, priced per seat, where a seat granted
+// exactly what Premium grants. It is gone from the server catalogue, so it is
+// gone from here too. Nothing could ever consume a second seat -- there was no
+// invitation, no membership and no way to attach another person to the count --
+// so the number only ever multiplied a price. The removed exports were
+// `TEAM_META`, `canChooseSeats`, `seatBounds`, `clampSeats` and `orderKey`,
+// along with the seat-picker that used the last four.
 
-/**
- * The "Team" band under the individual cards.
- *
- * Team is not a fifth tier: it is the Premium tier shared across a number of
- * seats. A seat grants exactly what Premium grants, so `tier` is what a purchase
- * actually writes and no entitlement gate in the app changes with the count.
- *
- * Prices arrive from the server already converted, and a N-seat total is
- * computed there too — this page never multiplies money.
- */
-export const TEAM_META = {
-  id: 'team',
-  name: 'Team',
-  tagline: 'Everything in Premium for every seat, plus shared billing and seat management for a group of practitioners.',
-  tier: 'annual',
-  minSeats: 2,
-  maxSeats: 500,
-  cta: 'Choose Team',
-  // `features` is NOT here: the band lists the tier a seat actually grants,
-  // which the server derives from the gates and sends as `team.features`.
-  // "2× more usage than Deluxe" used to sit here and on the Premium card; no
-  // tier-aware usage quota exists in the product for it to be twice.
-};
 
 /**
  * The three explanatory columns under the grid.
@@ -149,8 +135,12 @@ export const TEAM_META = {
  * They are replaced with the period model, which is the part of this product
  * that genuinely surprises people and is genuinely implemented:
  *   - a purchase is exactly STANDARD_PERIOD_DAYS, and nothing renews on its own;
- *   - buying again EXTENDS the window rather than restarting it, so no paid day
- *     is ever discarded;
+ *   - buying the SAME plan again EXTENDS the window rather than restarting it,
+ *     so no paid day is ever discarded on a renewal;
+ *   - buying a DIFFERENT plan REPLACES it — a fresh term from today, with the days
+ *     left on the old plan forfeited. Stating this is not optional: the two rules
+ *     have opposite consequences, and a page that only explained the friendly one
+ *     would let a member lose a year of paid days by clicking the wrong card.
  *   - a plan change applies immediately, with no sign-out.
  *
  * `standardPeriodDays` is read off the server payload for the same reason the
@@ -196,10 +186,12 @@ export function buildInfoColumns(plans = [], standardPeriodDays = 30) {
     {
       id: 'renewal',
       icon: 'shield',
-      title: 'Paid days are never lost',
-      body: 'Buying again adds to the days you have left instead of restarting the '
-        + 'clock, so the time you have already paid for is never taken away. Changing '
-        + 'plan applies straight away — no signing out, no waiting.',
+      title: 'Renewing keeps your days. Changing plan replaces it.',
+      body: 'Buying the SAME plan again adds to the days you have left instead of '
+        + 'restarting the clock, so the time you have already paid for is never taken '
+        + 'away. Buying a DIFFERENT plan replaces it: a fresh term from today, and the '
+        + 'days left on your old plan are forfeited. The checkout tells you which one '
+        + 'applies before you pay.',
       action: { label: 'Change plan', to: '/pricing' },
     },
   ];

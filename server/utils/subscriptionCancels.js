@@ -26,7 +26,6 @@
  * engine directly.
  */
 const { PLAN_LABELS, subState } = require('./entitlements');
-const { TEAM_PLAN } = require('./planCatalogue');
 
 /** The statuses a cancellation can be in. */
 const CANCEL_STATUSES = ['pending', 'applied', 'rejected'];
@@ -51,7 +50,7 @@ const MAX_REASON_LENGTH = 500;
  * access currently comes from an admin override is still reported correctly:
  * the override is stripped too when the cancellation runs.
  *
- * @returns {{ok: true, plan: string, isTeam: boolean, seats: number, daysRemaining: number|null}
+ * @returns {{ok: true, plan: string, daysRemaining: number|null}
  *          |{ok: false, status: number, message: string}}
  */
 function resolveCancellable(state) {
@@ -64,14 +63,9 @@ function resolveCancellable(state) {
   if (!CANCELLABLE_PLANS.includes(plan)) {
     return { ok: false, status: 400, message: 'You are already on the Free plan — there is nothing to cancel.' };
   }
-  const isTeam = state.subscriptionIsTeam === true;
   return {
     ok: true,
     plan,
-    isTeam,
-    // A Team account's seat count is part of what is being given up, so the
-    // queue can say "10× Team" rather than a bare tier.
-    seats: isTeam ? Math.max(1, Math.round(Number(state.subscriptionSeats) || 1)) : 1,
     daysRemaining: Number.isFinite(state.daysRemaining) ? state.daysRemaining : null,
   };
 }
@@ -103,19 +97,13 @@ function cleanReason(raw) {
 /**
  * Human label for the plan being given up.
  *
- * A Team cancellation stores the TIER its seats grant, exactly as an upgrade
- * request does, so the label has to be rebuilt from `isTeam` + `seats` — or a
- * 10-seat cancellation would read "PREMIUM" and look like a single downgrade.
- *
  * One definition, used by the member's own list, the admin queue, the bell and
- * the outcome notification, so those four can never disagree.
+ * the outcome notification, so those four can never disagree. It used to rebuild
+ * "10× Team" from `isTeam` + `seats`; a cancellation is now always one account on
+ * one tier, so the tier's name is the whole story.
  */
 function planLabelFor(row) {
   const record = row && typeof row === 'object' ? row : { plan: row };
-  if (record.isTeam === true) {
-    const seats = Number(record.seats) > 1 ? `${Math.round(Number(record.seats))}× ` : '';
-    return `${seats}${TEAM_PLAN.label}`;
-  }
   return PLAN_LABELS[record.plan] || String(record.plan || '—');
 }
 
@@ -125,8 +113,6 @@ function toSummary(doc) {
   return {
     _id: doc._id,
     plan: doc.plan,
-    isTeam: doc.isTeam === true,
-    seats: Number(doc.seats) || 1,
     mode: doc.mode,
     reason: doc.reason || '',
     status: doc.status,
@@ -140,7 +126,7 @@ function toSummary(doc) {
 
 /** Projection for list queries. */
 const LIST_FIELDS = [
-  '_id', 'user', 'plan', 'isTeam', 'seats', 'mode', 'reason', 'status',
+  '_id', 'user', 'plan', 'mode', 'reason', 'status',
   'review', 'appliedPlan', 'appliedAt', 'createdAt', 'updatedAt',
 ].join(' ');
 

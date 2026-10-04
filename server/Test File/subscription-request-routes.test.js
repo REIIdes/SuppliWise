@@ -131,9 +131,8 @@ function asDoc(row) {
 /** Store a subscription request in the fake collection. */
 function seedRequest(fields = {}) {
   const row = {
-    _id: oid(), user: null, plan: 'annual', months: 1, isTeam: false, seats: 1,
+    _id: oid(), user: null, plan: 'annual', months: 1,
     currency: 'PHP', symbol: '₱', amountPhp: 699, amount: 699, formattedAmount: '₱699',
-    perSeatPhp: null, perSeatFormatted: null,
     reference: '', note: '', proof: PNG, proofMime: 'image/png',
     proofBytes: Buffer.byteLength(PNG, 'utf8'), status: 'pending',
     review: { by: '', at: null, note: '' },
@@ -304,15 +303,116 @@ test('a submitted request is stored, priced by the server, and granted nothing',
   assert.equal(res.payload.request.hasProof, true);
 });
 
-test('a request without a receipt is refused with a message that says what is missing', async () => {
-  resetDb();
-  const res = await newRequest({ proof: undefined });
-  assert.equal(res.statusCode, 400);
-  assert.match(res.payload.message, /screenshot|proof/i);
-  assert.equal(db.requests.size, 0);
+// ── The receipt requirement follows the payment destination ──
+//
+// Whether a receipt is MANDATORY is not a constant: it is the inverse of "is
+// there anywhere to send money" (paymentInstructions.receiptRequired). Both
+// halves matter, and this test used to assert only the one that made the flow
+// unusable.
+//
+// The old test asserted unconditionally that a proof-less request is a 400. That
+// is right when a bank account is configured and catastrophically wrong when one
+// is not: with no destination the pricing page tells the member "there is nothing
+// to transfer to, send an administrator a request" — and then refuses the request
+// because the receipt is missing. The member is blocked from sending the one
+// message the product asked them to send.
+
+/** Run `fn` with a transfer destination configured (receipt mandatory). */
+function withPaymentDestination(fn) {
+  const before = process.env.PAYMENT_ACCOUNT_NUMBER;
+  process.env.PAYMENT_ACCOUNT_NUMBER = '1234567890';
+  return Promise.resolve()
+    .then(fn)
+    .finally(() => {
+      if (before === undefined) delete process.env.PAYMENT_ACCOUNT_NUMBER;
+      else process.env.PAYMENT_ACCOUNT_NUMBER = before;
+    });
+}
+
+/** Run `fn` with no destination at all (receipt optional). */
+function withoutPaymentDestination(fn) {
+  const saved = ['PAYMENT_ACCOUNT_NUMBER', 'PAYMENT_INSTRUCTIONS'];
+  const before = saved.map((k) => [k, process.env[k]]);
+  saved.forEach((k) => { delete process.env[k]; });
+  return Promise.resolve()
+    .then(fn)
+    .finally(() => {
+      before.forEach(([k, v]) => {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      });
+    });
+}
+
+test('with a payment destination configured, a receipt is still mandatory', async () => {
+  await withPaymentDestination(async () => {
+    resetDb();
+    const res = await newRequest({ proof: undefined });
+    assert.equal(res.statusCode, 400);
+    assert.match(res.payload.message, /screenshot|proof/i);
+    assert.equal(db.requests.size, 0);
+  });
 });
 
-test('a non-image receipt, the Free plan and bad seats are each refused with 400', async () => {
+test('with NO payment destination, a proof-less request is accepted rather than dead-ending', async () => {
+  await withoutPaymentDestination(async () => {
+    resetDb();
+    const user = newUser();
+    db.users.set(user._id, user);
+
+    const res = await call(submit, { user, body: { plan: 'annual', months: 1 } });
+    assert.equal(res.statusCode, 201, 'the member must be able to send the request');
+    const row = db.requests.get(res.payload.request._id);
+    assert.equal(row.proof, '');
+    assert.equal(row.paymentRequired, false, 'the record explains why there is no receipt');
+    // Still grants nothing — a request is a request.
+    assert.equal(db.users.get(user._id).subscriptionActive, false);
+    // And it does not pretend a payment was reviewed.
+    assert.doesNotMatch(res.payload.message, /review your payment/i);
+  });
+});
+
+test('the no-destination path never loosens what a SUPPLIED receipt must be', async () => {
+  await withoutPaymentDestination(async () => {
+    resetDb();
+    const user = newUser();
+    db.users.set(user._id, user);
+
+    // An SVG is still refused: "no receipt required" must not become
+    // "anything goes".
+    const svg = await call(submit, { user, body: { plan: 'annual', proof: 'data:image/svg+xml;base64,PHN2Zz4=' } });
+    assert.equal(svg.statusCode, 400);
+    assert.equal(db.requests.size, 0);
+
+    // …and a genuine receipt is still accepted and still recorded as required=false
+    // so the reviewer can see it was voluntary.
+    const ok = await call(submit, { user, body: { plan: 'custom', proof: PNG } });
+    assert.equal(ok.statusCode, 201);
+    assert.equal(db.requests.get(ok.payload.request._id).paymentRequired, false);
+  });
+});
+
+test('a proof-less annual request still prices from the catalogue and still grants nothing', async () => {
+  await withoutPaymentDestination(async () => {
+    resetDb();
+    const user = newUser();
+    db.users.set(user._id, user);
+
+    const res = await call(submit, { user, body: { plan: 'annual', months: 1 } });
+    assert.equal(res.statusCode, 201);
+    const row = db.requests.get(res.payload.request._id);
+    // The amount is the catalogue's, computed server-side — never read from the
+    // body, so a client that posted its own figure could not change it.
+    const entry = require('../utils/planCatalogue').findEntry('annual');
+    assert.equal(row.amountPhp, entry.monthly);
+    assert.equal(row.formattedAmount, `₱${entry.monthly.toLocaleString('en-US')}`);
+    // A request is a CLAIM, not a purchase: submitting one grants nothing. The
+    // subscription only moves when an admin approves it.
+    assert.equal(db.users.get(user._id).subscriptionActive, false);
+  });
+});
+
+test('a non-image receipt, the Free plan and a removed Team id are each refused with 400', async () => {
   resetDb();
   const user = newUser();
   db.users.set(user._id, user);
@@ -324,9 +424,32 @@ test('a non-image receipt, the Free plan and bad seats are each refused with 400
   assert.equal(free.statusCode, 400);
   assert.match(free.payload.message, /already yours/);
 
-  const seats = await call(submit, { user, body: { plan: 'team', seats: 1, proof: PNG } });
-  assert.equal(seats.statusCode, 400);
+  // "team" is gone. A stale client must get a refusal, NOT a silently accepted
+  // single annual request — that would bill a five-seat order as one seat and
+  // queue it looking like a real purchase.
+  for (const seats of [1, 4, 25]) {
+    const team = await call(submit, { user, body: { plan: 'team', seats, proof: PNG } });
+    assert.equal(team.statusCode, 400, `seats=${seats}`);
+    assert.match(team.payload.message, /valid plan/i);
+  }
   assert.equal(db.requests.size, 0, 'a rejected request must not be stored');
+});
+
+test('a request body cannot smuggle a seat count past the validator', async () => {
+  // A stale client may still POST the old Team fields. They must be inert: the
+  // price comes from the catalogue for the named plan and nothing multiplies it,
+  // and none of the removed keys may be stored.
+  resetDb();
+  const user = newUser();
+  db.users.set(user._id, user);
+
+  const res = await call(submit, { user, body: { plan: 'annual', seats: 999, isTeam: true, proof: PNG } });
+  assert.equal(res.statusCode, 201);
+  const row = db.requests.get(res.payload.request._id);
+  const entry = require('../utils/planCatalogue').findEntry('annual');
+  assert.equal(row.amountPhp, entry.monthly, 'the seat count must not multiply the price');
+  assert.equal('seats' in row, false);
+  assert.equal('isTeam' in row, false);
 });
 
 test('a second open request for the same plan is refused, and names the plan', async () => {
@@ -340,10 +463,9 @@ test('a second open request for the same plan is refused, and names the plan', a
   assert.equal(second.payload.code, 'DUPLICATE_REQUEST');
   assert.equal(db.requests.size, 1);
 
-  // A DIFFERENT plan is a different request, and so is Team at the same tier —
-  // otherwise a pending Team order would block an individual Premium upgrade.
+  // A DIFFERENT plan is a different request.
   assert.equal((await newRequest({ plan: 'annual' }, user)).statusCode, 201);
-  assert.equal((await newRequest({ plan: 'team', seats: 4 }, user)).statusCode, 201);
+  assert.equal((await newRequest({ plan: 'custom' }, user)).statusCode, 201);
 });
 
 test('an admin token cannot submit a member request', async () => {
@@ -472,14 +594,20 @@ test('the single-request detail endpoint is the only response that carries the i
   assert.equal(res.payload.request.planLabel, 'PREMIUM');
 });
 
-test('a Team request is labelled with its seats, not with the tier it grants', async () => {
+test('a request is labelled by the tier it grants, never by a seat count', async () => {
+  // A reviewer approves on the strength of this label, so it must name the plan
+  // they are about to grant. It used to read "6× Team" for an order that stored
+  // `plan: 'annual'` — a label describing a product that no longer exists.
   resetDb();
   const user = newUser();
   db.users.set(user._id, user);
-  const row = seedRequest({ user: user._id, plan: 'annual', isTeam: true, seats: 6, formattedAmount: '₱4,194' });
+  const row = seedRequest({ user: user._id, plan: 'annual', formattedAmount: '₱4,194' });
 
   const res = await call(queueOne, { user: adminReq, params: { id: row._id } });
-  assert.equal(res.payload.request.planLabel, '6× Team');
+  assert.equal(res.payload.request.planLabel, 'PREMIUM');
+  // Not "6× Team", and not a label derived from any stored count: the reviewer
+  // is about to grant exactly what this label says.
+  assert.doesNotMatch(res.payload.request.planLabel, /Team|×/i);
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -532,7 +660,14 @@ test('an explicit day override is honoured but bounded', async () => {
   assert.equal(db.requests.get(row._id).grantedDays, 3650, 'an approval must not mint a decade');
 });
 
-test('a Team approval grants the seats the request asked for', async () => {
+test('an approval writes one plan and no seat count', async () => {
+  // Approval is the only thing that grants a plan, so it is the last place a
+  // removed field could still be written. Asserted on the stored record, not just
+  // the response: a field persisted here and read elsewhere is the failure mode
+  // the whole removal was meant to end.
+  //
+  // The seeded row deliberately carries the OLD Team fields, so this also proves
+  // the approve route ignores them rather than granting 8 seats.
   resetDb();
   const user = newUser();
   db.users.set(user._id, user);
@@ -540,7 +675,11 @@ test('a Team approval grants the seats the request asked for', async () => {
 
   const res = await call(approve, { user: adminReq, params: { id: row._id }, body: {} });
   assert.equal(res.statusCode, 200);
-  assert.equal(db.users.get(user._id).subscriptionRecord.paid.seats, 8);
+  const granted = db.users.get(user._id);
+  assert.equal(granted.subscriptionPlan, 'annual');
+  assert.equal('seats' in granted.subscriptionRecord.paid, false);
+  assert.equal('isTeam' in granted.subscriptionRecord.paid, false);
+  assert.equal('subscriptionSeats' in granted, false);
 });
 
 test('approving twice is refused, and the plan is granted exactly once', async () => {

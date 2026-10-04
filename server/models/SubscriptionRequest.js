@@ -34,14 +34,8 @@ const subscriptionRequestSchema = new mongoose.Schema({
   },
   // Only the paid tiers are requestable — the Free plan needs no purchase, and
   // allowing 'free' here would fill the queue with rows an admin must clear.
-  // A Team request stores the TIER its seats grant (TEAM_PLAN.tier) plus the seat
-  // count, so approving one is the same `setPaid` call an individual plan uses.
   plan: { type: String, enum: ['monthly', 'annual', 'custom'], required: true },
   months: { type: Number, default: 1, min: 1, max: 12 },
-  // Team is billing metadata on top of a tier, not a tier of its own — the same
-  // decision subscriptionState.js makes. isTeam + plan together say everything.
-  isTeam: { type: Boolean, default: false },
-  seats: { type: Number, default: 1, min: 1, max: 500 },
 
   // ── Server-priced snapshot of what the plan list charged ──
   currency: { type: String, default: 'PHP' },
@@ -49,10 +43,6 @@ const subscriptionRequestSchema = new mongoose.Schema({
   amountPhp: { type: Number, default: 0, min: 0 },
   amount: { type: Number, default: 0, min: 0 },
   formattedAmount: { type: String, default: '' },
-  // Team only: the per-seat unit price, so the queue can show "₱3,495 (₱699 × 5)"
-  // and a reviewer can sanity-check the total at a glance.
-  perSeatPhp: { type: Number, default: null },
-  perSeatFormatted: { type: String, default: null },
 
   // What the user typed alongside the picture.
   reference: { type: String, default: '', trim: true, maxlength: 80 },
@@ -61,9 +51,25 @@ const subscriptionRequestSchema = new mongoose.Schema({
   // ── The proof itself ──
   // A base64 data URL, exactly like the profile/banner pictures, so there is no
   // file host, no filesystem path and no orphan-file cleanup.
-  proof: { type: String, required: true },
-  proofMime: { type: String, required: true },
+  //
+  // NOT `required`. A deployment with no payment destination configured cannot
+  // receive a transfer, so there is no receipt to upload — and making the field
+  // mandatory meant the only route to a paid plan was unreachable (see
+  // utils/paymentInstructions.receiptRequired). Every record written before
+  // this change has a proof, so relaxing the constraint loses nothing.
+  //
+  // `paymentRequired` records WHY a proof may be missing, and it is stored rather
+  // than recomputed on read for the reason the price snapshot above is stored:
+  // the deployment can gain a destination tomorrow, and a reviewer looking at a
+  // request from yesterday must see the rule that applied when it was made, not
+  // the one in force now.
+  proof: { type: String, default: '' },
+  proofMime: { type: String, default: '' },
   proofBytes: { type: Number, default: 0, min: 0 },
+  // True when this request was supposed to carry a receipt (a transfer
+  // destination existed). False means the member asked for activation directly
+  // because there was nowhere to pay.
+  paymentRequired: { type: Boolean, default: true },
 
   status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
 

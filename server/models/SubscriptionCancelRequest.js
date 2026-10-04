@@ -49,10 +49,8 @@ const subscriptionCancelRequestSchema = new mongoose.Schema({
 
   // A snapshot of what was being given up, so the queue still reads correctly
   // after the account has been changed or the catalogue has moved on. `plan` is
-  // the TIER (Team stores the tier its seats grant, as everywhere else).
+  // the TIER the member was on.
   plan: { type: String, enum: ['monthly', 'annual', 'custom'], required: true },
-  isTeam: { type: Boolean, default: false },
-  seats: { type: Number, default: 1, min: 1, max: 500 },
 
   // Which door the member used. 'immediate' rows are already 'applied'.
   mode: { type: String, enum: ['immediate', 'review'], default: 'review', required: true },

@@ -116,7 +116,7 @@ function ProfilePage() {
     // only carries active/plan/entitlements, so reading it here showed a real
     // Premium subscriber as "FREE · 0 days". One source of truth, always current.
     end: liveEnd, start: liveStart, permanent: livePermanent,
-    source: liveSource, status: liveStatus, layers: liveLayers, seats: liveSeats,
+    source: liveSource, status: liveStatus, layers: liveLayers,
   } = useSubscription();
   const [subscription, setSubscription] = useState(() => {
     const resolved = planFromUser(storedUser);
@@ -322,7 +322,13 @@ function ProfilePage() {
   const [lastUrlEdit, setLastUrlEdit] = useState(false);
   if (urlEdit !== lastUrlEdit) {
     setLastUrlEdit(urlEdit);
-    if (urlEdit) setIsEditing(true);
+    if (urlEdit) {
+      setIsEditing(true);
+      // `?edit=1` arriving means a FRESH edit session. A "Profile updated
+      // successfully!" left over from the last save describes that save, not
+      // the draft now on screen, so it is cleared on the way in.
+      setSuccess('');
+    }
   }
 
   const startOtpExpiryTimer = () => {
@@ -779,17 +785,49 @@ function ProfilePage() {
         entitlements: live.entitlements,
       });
 
+      // The server response is now the authority for both pictures, so the
+      // component state AND the previews are re-based on it. Re-basing the
+      // previews is not cosmetic: both the next Cancel and the next Save treat
+      // `preview !== saved` as "unsaved picture here", so leaving the preview on
+      // the locally-read base64 after the server confirmed its own value makes
+      // the following Cancel or Save re-upload a picture that is already
+      // stored.
       setProfilePicture(data.profilePicture || '');
       setBannerPicture(data.bannerPicture || '');
+      setProfilePicturePreview(data.profilePicture || '');
+      setBannerPicturePreview(data.bannerPicture || '');
+
+      // Clear the file inputs too. Their `change` event only fires on a NEW
+      // selection, so a file left behind here makes the user unable to re-pick
+      // the same picture again after a save.
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (bannerInputRef.current) bannerInputRef.current.value = '';
 
       setPendingEmailChange('');
+
+      // Leave edit mode and drop `?edit=1` — the same pair Cancel does.
+      //
+      // The param has to go. Edit mode is entered by the `?edit=1` deep link,
+      // and the render-time rule at the top of this component re-engages it
+      // whenever that param is present on a fresh mount. This function used to
+      // end by scheduling a full page reload "to update the navbar", which
+      // re-mounted ProfilePage with `?edit=1` STILL in the URL — so the rule
+      // fired and threw the user straight back into the form they had just
+      // submitted, taking the success banner with it. That reload is the bug
+      // this whole block exists to prevent, so it is gone rather than merely
+      // reordered; see profileEditExit.test.js.
+      //
+      // It was also unnecessary: setStoredUser() above already emits
+      // AUTH_CHANGED_EVENT, which useAuth() subscribes to, so the navbar's name
+      // and avatar repaint from this save without a page load.
+      clearTransientParams();
+
+      // Set AFTER clearTransientParams() so the batch that leaves edit mode is
+      // already in flight — the banner then describes the card the user is
+      // left looking at. Nothing dismisses it on a timer; it stays until they
+      // do something else.
       setSuccess('Profile updated successfully! Changes will apply to future assessments.');
       setIsEditing(false);
-
-      // Refresh the page to update navbar
-      setTimeout(() => {
-        window.location.reload();
-      }, 2000);
     } catch (err) {
       setError(err.message || 'Something went wrong. Please try again.');
     } finally {
@@ -823,6 +861,11 @@ function ProfilePage() {
     // unsaved banner stayed on screen. Both previews are now reset together.
     setProfilePicturePreview(profilePicture);
     setBannerPicturePreview(bannerPicture);
+    // The previews are restored, so the `File` still sitting in the inputs is
+    // orphaned state — and because `change` only fires on a new selection, it
+    // would stop the user re-picking that same file. Discard it.
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (bannerInputRef.current) bannerInputRef.current.value = '';
 
     const user = getStoredUser();
     if (user) {
@@ -931,13 +974,18 @@ function ProfilePage() {
                 </svg>
               </button>
             )}
+            {/* Sits top-left so it mirrors the pencil at top-right. It used to
+                be pinned to the cover's bottom-left, which is exactly where the
+                avatar straddles the edge — the avatar's opaque 124px circle
+                painted over it and swallowed every click. The top strip is
+                clear of the avatar at all three cover heights (190/156/132px). */}
             {isEditing && bannerPicturePreview && (
               <button
                 type="button"
-                className="profile-remove-banner"
+                className="banner-remove-btn"
                 onClick={handleRemoveBannerPicture}
               >
-                Remove Banner
+                Remove banner
               </button>
             )}
           </div>
@@ -1313,24 +1361,6 @@ function ProfilePage() {
                   </span>
                 </div>
 
-                {/* Seats only matter when there is more than one, so a solo
-                    subscriber is not shown a row they cannot act on. */}
-                {liveActive && Number(liveSeats) > 1 && (
-                  <div className="billing-row">
-                    <dt>Seats</dt>
-                    <dd>
-                      {liveSeats} × Premium
-                      {' '}
-                      <button
-                        type="button"
-                        className="billing-link"
-                        onClick={() => navigate('/pricing')}
-                      >
-                        change
-                      </button>
-                    </dd>
-                  </div>
-                )}
 
                 <dl className="billing-rows">
                   <div className="billing-row">

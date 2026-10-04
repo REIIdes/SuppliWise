@@ -197,6 +197,22 @@ const FILTERS = [
 
 const MAX_MESSAGE = 2000; // server/utils/supportChat.js MAX_MESSAGE_LENGTH
 
+/**
+ * What an admin reply is labelled with on this side of the conversation.
+ *
+ * A support conversation is one channel to "Suppliwise", not a line to a named
+ * individual, so the transcript names the channel and never the operator behind
+ * it. See SUPPORT_AUTHOR_LABEL in server/routes/supportChat.js for why the
+ * admin alias is withheld.
+ *
+ * Deliberately NOT `m.authorName`: the server already substitutes this label, so
+ * reading the field would only add a second way for an alias to reach the
+ * screen if that substitution were ever reverted. Hardcoding it here means both
+ * halves fail the same way — to a generic name — rather than one half quietly
+ * reintroducing the disclosure.
+ */
+const SUPPORT_AUTHOR_LABEL = 'Suppliwise Support';
+
 function formatStamp(value) {
   if (!value) return '—';
   const d = new Date(value);
@@ -875,7 +891,7 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
                           <div className="sci-msg__col">
                             {showMeta && (
                               <div className="sci-msg__head">
-                                <span className="sci-msg__who">{mine ? 'You' : (m.authorName || 'Support team')}</span>
+                                <span className="sci-msg__who">{mine ? 'You' : SUPPORT_AUTHOR_LABEL}</span>
                                 <span className="sci-msg__time">{formatStamp(m.createdAt)}</span>
                               </div>
                             )}

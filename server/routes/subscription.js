@@ -28,12 +28,14 @@ const { describeSubscription, can, getFeature, PLAN_LABELS } = require('../utils
 const subState = require('../utils/subscriptionState');
 const { STANDARD_PERIOD_DAYS, STANDARD_PERIOD_MONTHS } = subState;
 const {
-  cataloguePayload, resolvePurchasable, teamTotal, formatAmount,
-  selfServeEnabled, normalizeCurrency, convertFromPhp, TEAM_PLAN,
+  cataloguePayload, resolvePurchasable, formatAmount,
+  selfServeEnabled, normalizeCurrency, convertFromPhp,
 } = require('../utils/planCatalogue');
 const bus = require('../utils/subscriptionBus');
 const requestRules = require('../utils/subscriptionRequests');
 const cancelRules = require('../utils/subscriptionCancels');
+// Owns "must this request carry a receipt?" — see the note on receiptRequired().
+const receiptRules = require('../utils/paymentInstructions');
 const rateLimit = require('express-rate-limit');
 
 const router = express.Router();
@@ -125,135 +127,35 @@ router.get('/plans', async (req, res) => {
   }
 });
 
-// @route  GET /api/subscription/quote
-// @desc   Price one specific order without buying it: `?plan=team&seats=7&months=1`.
-//
-//         The checkout needs an exact total for EVERY seat count, not just the
-//         handful the catalogue pre-computes, because the stepper reaches any
-//         number in one click. Doing that arithmetic in the browser would mean
-//         the client multiplying money, so the figure the visitor confirms could
-//         disagree with the figure the purchase endpoint charges.
-//
-//         Public and side-effect free: it reveals nothing but prices, which
-//         /plans already publishes in full.
-// @access Public
-router.get('/quote', async (req, res) => {
-  try {
-    const { resolveCurrencyForRequest } = require('../utils/currency');
-    const { normalizeCurrency, STANDARD_PERIOD_MONTHS } = require('../utils/planCatalogue');
-
-    const purchasable = resolvePurchasable(req.query.plan);
-    if (!purchasable) return res.status(400).json({ message: 'Choose a valid plan.' });
-    const { entry, isTeam, tier } = purchasable;
-    if (entry.id === 'free') {
-      return res.status(400).json({ message: 'The Free plan needs no purchase — it is already yours.' });
-    }
-
-    // Same bounded term rule as the purchase, so a quote can never promise more
-    // days than a purchase would actually grant.
-    const months = Math.min(
-      12,
-      Math.max(1, Math.round(Number(req.query.months) || STANDARD_PERIOD_MONTHS)),
-    );
-
-    // Seats are refused, never clamped — the same rule the purchase applies, so
-    // a quote and a purchase can never disagree about what "500" means.
-    let seats = 1;
-    if (isTeam) {
-      const parsed = subState.parseSeatCount(req.query.seats, {
-        min: TEAM_PLAN.minSeats,
-        max: TEAM_PLAN.maxSeats,
-      });
-      if (parsed === null) {
-        return res.status(400).json({
-          message: `Choose between ${TEAM_PLAN.minSeats} and ${TEAM_PLAN.maxSeats} seats.`,
-        });
-      }
-      seats = parsed;
-    }
-
-    const resolved = await resolveCurrencyForRequest(req, {
-      requested: normalizeCurrency(req.query.currency) || undefined,
-    });
-    const perSeatPhp = isTeam
-      ? (months > 1 ? TEAM_PLAN.perSeatYearly : TEAM_PLAN.perSeatMonthly)
-      : null;
-    const unitPhp = perSeatPhp ?? (months > 1 ? entry.yearly : entry.monthly);
-    const amountPhp = teamTotal(unitPhp, seats);
-
-    res.json({
-      plan: entry.id,
-      planLabel: entry.label,
-      isTeam,
-      tier,
-      seats,
-      months,
-      days: months * STANDARD_PERIOD_DAYS,
-      currency: resolved.code,
-      symbol: resolved.symbol,
-      perSeatPhp,
-      perSeatFormatted: perSeatPhp === null ? null : formatAmount(perSeatPhp, resolved.code),
-      baseAmountPhp: amountPhp,
-      amount: convertFromPhp(amountPhp, resolved.code),
-      formatted: formatAmount(amountPhp, resolved.code),
-    });
-  } catch (error) {
-    // A quote is an enhancement on the display. If it fails, the checkout shows
-    // a placeholder rather than a wrong number, and the purchase still works.
-    console.error('[subscription GET /quote]', error.message);
-    return res.status(500).json({ message: 'Could not price that order right now.' });
-  }
-});
-
 // @route  POST /api/subscription/purchase
 // @desc   Buy (or renew) a plan for the signed-in account. Writes the PAID layer
 //         only — a purchase can never touch an admin override, and paying can
-//         never create one. A purchase is normally one month (30 days); a
-//         renewal extends from the end of the window already paid for, so no
-//         paid day is ever discarded. Pushing the new state over SSE means the
-//         features unlock immediately.
+//         never create one.
+//
+//         RENEWAL vs REPLACEMENT is decided in the engine (subscriptionState
+//         `setPaid`) by comparing the plan being bought with the one already
+//         paid for:
+//           same plan → the term runs from the end of the window already paid
+//                       for, so paying early never discards paid days;
+//           new plan  → the term runs from today and the days left on the old
+//                       plan are forfeited. Buying Deluxe while holding 300
+//                       unused days of Premium gives 30 days of Deluxe, not 330.
+//
+//         A purchase is normally one month (30 days). Pushing the new state over
+//         SSE means the features unlock immediately.
 // @access Private (user)
 router.post('/purchase', purchaseLimiter, protect, async (req, res) => {
   try {
     if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
 
     const requested = (req.body || {}).plan;
-    // `resolvePurchasable` handles Team as well as the four stored plan ids. Team
-    // is not a plan id — it is the Premium tier with a seat count — so it cannot
-    // go through normalizePlanId() without inventing a fifth tier.
     const purchasable = resolvePurchasable(requested);
     // Validate the plan BEFORE the self-serve guard, so a bad request is a
     // clear 400 rather than being masked as "billing is switched off".
     if (!purchasable) return res.status(400).json({ message: 'Choose a valid plan.' });
-    const { entry, isTeam, tier } = purchasable;
+    const { entry, tier } = purchasable;
     if (entry.id === 'free') {
       return res.status(400).json({ message: 'The Free plan needs no purchase — it is already yours.' });
-    }
-
-    // Seats. Team defaults to its minimum; an individual plan is always one, and
-    // a `seats` value on one is ignored rather than silently billing extra.
-    const rawSeats = (req.body || {}).seats;
-    let seats = 1;
-    if (isTeam) {
-      if (rawSeats === undefined || rawSeats === null || rawSeats === '') {
-        seats = TEAM_PLAN.minSeats;
-      } else {
-        // Reject rather than clamp: silently turning "5000 seats" into 500 would
-        // show an invoice the customer did not agree to. This MUST use
-        // parseSeatCount, not normalizeSeats — the latter already clamps, so the
-        // bounds check below it would be comparing a clamped value to the cap and
-        // could never fire.
-        const parsed = subState.parseSeatCount(rawSeats, {
-          min: TEAM_PLAN.minSeats,
-          max: TEAM_PLAN.maxSeats,
-        });
-        if (parsed === null) {
-          return res.status(400).json({
-            message: `Choose between ${TEAM_PLAN.minSeats} and ${TEAM_PLAN.maxSeats} seats.`,
-          });
-        }
-        seats = parsed;
-      }
     }
 
     if (!selfServeEnabled()) {
@@ -275,14 +177,9 @@ router.post('/purchase', purchaseLimiter, protect, async (req, res) => {
 
     const result = subState.applyAction(user.subscriptionRecord, 'setPaid', {
       actor: 'payment',
-      // A Team purchase writes the TIER a seat grants plus the seat count, not a
-      // `team` plan id — which is why no entitlement gate in the app changes.
       plan: tier,
-      seats,
       days: months * STANDARD_PERIOD_DAYS,
-      note: isTeam
-        ? `Purchased Team — ${seats} seats, ${months} month${months === 1 ? '' : 's'}.`
-        : `Purchased ${entry.label} — ${months} month${months === 1 ? '' : 's'}.`,
+      note: `Purchased ${entry.label} — ${months} month${months === 1 ? '' : 's'}.`,
     }, new Date());
     if (!result.ok) return res.status(result.status || 400).json({ message: result.error });
 
@@ -297,23 +194,19 @@ router.post('/purchase', purchaseLimiter, protect, async (req, res) => {
     // Instant unlock: the open tab/phone/pill all re-render from this push.
     const delivered = bus.publish(String(user._id), state);
     console.log(
-      `[subscription/purchase] user ${user._id} -> ${state.currentPlan} (${state.daysRemaining} days, ${seats} seat${seats === 1 ? '' : 's'}); pushed to ${delivered} session(s)`,
+      `[subscription/purchase] user ${user._id} -> ${state.currentPlan} (${state.daysRemaining} days); pushed to ${delivered} session(s)`
+      + (result.replaced ? ' — replaced the previous plan' : ''),
     );
 
     // The receipt, priced in the currency the visitor was actually shown. The
     // amount is server-computed from the catalogue, never taken from the
-    // request, so a tampered client cannot "pay" ₱1 for Premium — or ₱1 per seat
-    // for a 50-seat Team subscription.
+    // request, so a tampered client cannot "pay" ₱1 for Premium.
     const { resolveCurrencyForRequest } = require('../utils/currency');
     const { formatAmount } = require('../utils/planCatalogue');
     const currency = await resolveCurrencyForRequest(req, {
       requested: normalizeCurrency((req.body || {}).currency) || undefined,
     });
-    const perSeatPhp = isTeam
-      ? (months > 1 ? TEAM_PLAN.perSeatYearly : TEAM_PLAN.perSeatMonthly)
-      : null;
-    const unitPhp = isTeam ? perSeatPhp : (months > 1 ? entry.yearly : entry.monthly);
-    const amountPhp = teamTotal(unitPhp, isTeam ? seats : 1);
+    const amountPhp = months > 1 ? entry.yearly : entry.monthly;
     const receipt = {
       currency: currency.code,
       symbol: currency.symbol,
@@ -323,13 +216,13 @@ router.post('/purchase', purchaseLimiter, protect, async (req, res) => {
       formatted: formatAmount(amountPhp, currency.code),
       plan: entry.id,
       planLabel: entry.label,
-      isTeam,
-      seats,
-      // What one seat costs, and what each seat of the subscription grants.
-      perSeatFormatted: isTeam ? formatAmount(perSeatPhp, currency.code) : null,
-      grantsPlanLabel: isTeam ? PLAN_LABELS[tier] : null,
       months,
       days: months * STANDARD_PERIOD_DAYS,
+      // Set when this purchase REPLACED a different plan rather than renewing
+      // the same one, so the UI can say plainly that the old days were forfeited
+      // rather than silently shortening someone's term.
+      replaced: result.replaced === true,
+      forfeitedDays: Number.isFinite(result.forfeitedDays) ? result.forfeitedDays : 0,
     };
     console.log(`[subscription/purchase] charged ${receipt.formatted} (PHP ${amountPhp}) for ${entry.label} x${months}`);
 
@@ -391,24 +284,30 @@ router.post('/requests', requestLimiter, protect, async (req, res) => {
 
     // Validate the image FIRST: it is the largest, most expensive part of the
     // request, and a 3 MB upload with a bad plan id should not get that far.
-    const proof = requestRules.parseProofImage(body.proof);
+    //
+    // Optional ONLY while this deployment has no transfer destination. With one
+    // configured the receipt is how the transfer gets verified, so an absent
+    // proof is refused exactly as before — `receiptRequired()` is the single
+    // owner of that decision (utils/paymentInstructions.js), and it is the same
+    // call the pricing page's copy is derived from, so what the sheet PROMISES
+    // and what this route ACCEPTS cannot drift apart.
+    const paymentRequired = receiptRules.receiptRequired();
+    const proof = requestRules.parseProofUpload(body.proof, { optional: !paymentRequired });
     if (!proof.ok) return res.status(proof.status).json({ message: proof.message });
 
-    const planned = requestRules.resolveRequestedPlan(body.plan, body.seats);
+    const planned = requestRules.resolveRequestedPlan(body.plan);
     if (!planned.ok) return res.status(planned.status).json({ message: planned.message });
 
     const months = requestRules.clampMonths(body.months);
-    const purchasable = resolvePurchasable(planned.isTeam ? 'team' : planned.plan);
+    const purchasable = resolvePurchasable(planned.plan);
     const entry = purchasable?.entry;
     if (!entry) return res.status(400).json({ message: 'Choose a valid plan.' });
 
     // One open request per plan per account. Without this a user whose upload
     // keeps failing validation (or a double-tapping client) fills the admin
     // queue with duplicates, and "pending count" stops meaning anything.
-    // isTeam is part of the key: a pending Team request must not block a
-    // Premium request for the same account, or the reverse.
     const existing = await SubscriptionRequest.findOne({
-      user: req.user._id, plan: planned.plan, isTeam: planned.isTeam, status: 'pending',
+      user: req.user._id, plan: planned.plan, status: 'pending',
     }).select('_id createdAt').lean();
     if (existing) {
       return res.status(409).json({
@@ -424,28 +323,32 @@ router.post('/requests', requestLimiter, protect, async (req, res) => {
     const currency = await resolveCurrencyForRequest(req, {
       requested: normalizeCurrency(body.currency) || undefined,
     });
-    const priced = requestRules.priceRequest(planned.plan, months, currency.code, planned);
+    const priced = requestRules.priceRequest(planned.plan, months, currency.code);
     if (!priced) return res.status(400).json({ message: 'Choose a valid plan.' });
 
     const request = await SubscriptionRequest.create({
       user: req.user._id,
       plan: planned.plan,
       months,
-      isTeam: planned.isTeam,
-      seats: planned.seats,
       ...priced,
       reference: requestRules.cleanText(body.reference, requestRules.MAX_REFERENCE_LENGTH),
       note: requestRules.cleanText(body.note, requestRules.MAX_NOTE_LENGTH),
       proof: proof.dataUrl,
       proofMime: proof.mime,
       proofBytes: proof.bytes,
+      paymentRequired,
     });
 
-    const seatNote = planned.isTeam ? ` x${planned.seats} seats` : '';
+    // "proof png 240 KB" vs "no receipt (no payment destination configured)".
+    // The reviewer has to be able to tell those apart at a glance, because only
+    // one of them is a gap worth chasing.
+    const proofNote = proof.provided
+      ? `proof ${proof.mime} ${(proof.bytes / 1024).toFixed(0)} KB`
+      : 'no receipt (no payment destination configured)';
     console.log(
-      `[subscription/request] user ${req.user._id} -> ${entry.label}${seatNote} x${months} `
-      + `(${priced.formattedAmount}, PHP ${priced.amountPhp}), proof ${proof.mime} `
-      + `${(proof.bytes / 1024).toFixed(0)} KB, request ${request._id}`,
+      `[subscription/request] user ${req.user._id} -> ${entry.label} x${months} `
+      + `(${priced.formattedAmount}, PHP ${priced.amountPhp}), ${proofNote}, `
+      + `request ${request._id}`,
     );
 
     // The admin bell. Fire-and-forget on purpose: a failed bell must not lose a
@@ -454,15 +357,24 @@ router.post('/requests', requestLimiter, protect, async (req, res) => {
     require('../models/AdminEvent').create({
       type: 'subscription-request',
       title: `${entry.label} upgrade request`,
-      detail: `New ${entry.label}${seatNote} request for ${months} month${months === 1 ? '' : 's'} (${priced.formattedAmount}). Proof of payment attached — review and approve to grant the plan.`,
+      detail: proof.provided
+        ? `New ${entry.label} request for ${months} month${months === 1 ? '' : 's'} (${priced.formattedAmount}). Proof of payment attached — review and approve to grant the plan.`
+        : `New ${entry.label} request for ${months} month${months === 1 ? '' : 's'} (${priced.formattedAmount}). No receipt — the deployment has no payment destination, so the member is asking you to activate it directly.`,
       user: req.user._id,
       linkUserId: req.user._id,
     }).catch((bellError) => {
       console.error('[subscription/request] admin bell', bellError.message);
     });
 
+    // The response says which of the two things happened, because they promise
+    // different follow-ups: a receipted request is waiting on a payment check,
+    // while a proof-less one is waiting on a person to decide. Telling both to
+    // "get notified when it's approved" and nothing else leaves a member who
+    // paid wondering why nobody looked at their transfer.
     return res.status(201).json({
-      message: `Your ${entry.label} request was sent. An administrator will review your payment and activate the plan — you will get a notification.`,
+      message: proof.provided
+        ? `Your ${entry.label} request was sent. An administrator will review your payment and activate the plan — you will get a notification.`
+        : `Your ${entry.label} request was sent. An administrator will activate the plan for you — you will get a notification when it is live.`,
       request: {
         ...requestRules.toSummary(request.toObject()),
         planLabel: requestRules.planLabelFor(request.toObject()),
@@ -495,8 +407,7 @@ router.get('/requests', protect, async (req, res) => {
 
     return res.json({
       // `planLabel` comes from the SAME rule the admin queue and the bell use, so
-      // the member sees the exact name an administrator sees — and a Team request
-      // reads "5× Team" rather than the tier its seats happen to grant.
+      // the member sees the exact name an administrator sees.
       requests: (rows || []).map((row) => ({
         ...requestRules.toSummary(row),
         planLabel: requestRules.planLabelFor(row),
@@ -645,8 +556,6 @@ router.post('/downgrade', cancelLimiter, protect, async (req, res) => {
     await SubscriptionCancelRequest.create({
       user: req.user._id,
       plan: outcome.from.plan,
-      isTeam: outcome.from.isTeam,
-      seats: outcome.from.seats,
       mode: 'immediate',
       reason,
       status: 'applied',
@@ -707,8 +616,6 @@ router.post('/cancel-requests', cancelLimiter, protect, async (req, res) => {
       await SubscriptionCancelRequest.create({
         user: req.user._id,
         plan: outcome.from.plan,
-        isTeam: outcome.from.isTeam,
-        seats: outcome.from.seats,
         mode: 'immediate',
         reason,
         status: 'applied',
@@ -732,8 +639,6 @@ router.post('/cancel-requests', cancelLimiter, protect, async (req, res) => {
     const request = await SubscriptionCancelRequest.create({
       user: req.user._id,
       plan: target.plan,
-      isTeam: target.isTeam,
-      seats: target.seats,
       mode: 'review',
       reason,
     });

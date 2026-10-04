@@ -95,11 +95,14 @@
 .banner-edit-btn:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
 .banner-edit-btn svg { display: block; }
 
-.profile-remove-banner {
+/* Destructive twin of the pencil above, mirrored to the opposite corner. The
+   cover's top strip is the one band the avatar can never reach — it only
+   intrudes upward by 58/46/40px at the 190/156/132px cover heights. */
+.banner-remove-btn {
   position: absolute;
+  top: 16px;
   left: 16px;
-  bottom: 16px;
-  z-index: 2;
+  z-index: 3;
   background: rgba(190, 18, 60, 0.55);
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
@@ -107,13 +110,18 @@
   color: #fff;
   padding: 8px 16px;
   border-radius: 999px;
+  font-family: inherit;
   font-size: 12.5px;
   font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
   cursor: pointer;
+  box-shadow: 0 10px 22px -12px rgba(0, 0, 0, 0.9);
   transition: background 0.2s, transform 0.2s;
 }
-.profile-remove-banner:hover { background: rgba(190, 18, 60, 0.8); transform: translateY(-2px); }
-.profile-remove-banner:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+.banner-remove-btn:hover { background: rgba(190, 18, 60, 0.82); transform: translateY(-2px); }
+.banner-remove-btn:active { transform: translateY(0) scale(0.97); }
+.banner-remove-btn:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
 
 /* ── Identity card ───────────────────────────────────────────────────
    The avatar straddles the cover edge: half on the artwork, half on the
@@ -714,14 +722,14 @@
   .profile-avatar-large,
   .profile-chip-btn,
   .banner-edit-btn,
-  .profile-remove-banner,
+  .banner-remove-btn,
   .profile-section,
   .profile-btn { transition: none; }
   .profile-section:hover,
   .profile-avatar-large:hover,
   .profile-chip-btn:hover,
   .banner-edit-btn:hover,
-  .profile-remove-banner:hover { transform: none; }
+  .banner-remove-btn:hover { transform: none; }
   .profile-section--flash { animation: none; }
 }
 

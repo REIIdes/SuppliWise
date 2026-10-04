@@ -4,7 +4,16 @@ import Navbar from '../Components/Navbar/Navbar';
 import Toast from '../Components/Toast/Toast';
 import ConfirmModal from '../Components/ConfirmModal/ConfirmModal';
 import { getDashboard, updateIntake, updateIntakeBulk, getToken, getStoredUser, getMyProfile, setStoredUser } from '../api';
+import { subscribeDashboardRefresh } from '../utils/dashboardRefresh';
 import useSubscription from '../hooks/useSubscription';
+import useNow from '../hooks/useNow';
+import { greetingFor } from '../utils/greeting.js';
+/* The running PLAN DAY (04:00 → 04:00, in the user's own zone) — not the calendar
+   date, which is the previous calendar date for four hours out of every eight. The
+   server names it in every response and `usePlanDay` watches for it changing, so a
+   page left open across the reset refetches instead of rendering yesterday's
+   finished plan. See utils/planDay.js. */
+import usePlanDay from '../hooks/usePlanDay.js';
 import './DashboardPage.css';
 
 /* ── Action cards ───────────────────────────────────────────────────────────
@@ -124,6 +133,12 @@ function scoreBand(score) {
   return { label: 'Getting started', tone: 'low' };
 }
 
+/* The sentence under the score. Formatting lives in utils/scoreSync.js so the
+   copy that names a penalty is testable without rendering anything — and so this
+   page only ever displays what the API decided, never derives a penalty itself.
+   See that file for the three-outcome rule it words. */
+import { scoreSyncLine, scoreSyncTone } from '../utils/scoreSync.js';
+
 const energyTone = (level) => {
   const key = String(level || '').toLowerCase();
   if (key === 'high') return 'high';
@@ -139,6 +154,9 @@ const EMPTY_STATS = Object.freeze({
   adherenceRate: 0,
   energyLevel: 'Medium',
   todaysProgress: Object.freeze({ taken: 0, total: 0 }),
+  wellnessToday: Object.freeze({
+    total: 0, taken: 0, missed: 0, awaiting: 0, decided: 0, adherence: 100, penaltyPoints: 0,
+  }),
 });
 
 function DashboardPage() {
@@ -178,16 +196,48 @@ function DashboardPage() {
   const priorityEntitled = canAccess('priorityAssessment');
   const priorityItems = priorityEntitled ? priorityAssessments : [];
   const priorityPaused = priorityEntitled && priorityBlock.blocked;
-  const [isFirstLogin, setIsFirstLogin] = useState(false);
+
+  /* The plan day the server is on. The heading below is built from this rather
+     than from `new Date()`, because at 2 AM the calendar date is the PREVIOUS day
+     and it used to print "Sunday 4 October" above doses belonging to the plan day
+     that opened on the 3rd. */
+  const [planDayKey, setPlanDayKey] = useState('');
 
   const scoreHelpRef = useRef(null);
   const scoreHelpBtnRef = useRef(null);
 
-  const fetchDashboardData = useCallback(async () => {
+  /* Has real content ever arrived? A ref, not state, on purpose:
+     `fetchDashboardData` is a `useCallback` with an empty dependency list and
+     must not grow one (every render would hand callers a new function, and the
+     refresh subscription below would re-attach on every data change), so it
+     cannot read this from state. It only ever needs the CURRENT value, and a
+     ref is exactly that. */
+  const hasContentRef = useRef(false);
+
+  const fetchDashboardData = useCallback(async (options) => {
+    /* A refresh the user asked for WHILE already looking at the dashboard must
+       not blank the page. `loading` gates a full-screen spinner that replaces
+       every card, so flipping it here swapped the whole dashboard out and back
+       — a spinner flash for data that lands in a couple of hundred ms, which
+       reads as a glitch rather than a refresh. `silent` keeps the current
+       content on screen and swaps the values underneath it.
+
+       It degrades to an ordinary load when there is nothing worth keeping: on
+       a first mount, or while the error / missing-profile screens are up. In
+       those states a spinner — or the retry that clears the error — is exactly
+       what the user needs, and `hasContentRef` is still false, so it happens. */
+    const silent = options?.silent === true && hasContentRef.current;
+
     try {
-      setLoading(true);
-      setError('');
+      if (!silent) {
+        setLoading(true);
+        setError('');
+      }
       const data = await getDashboard();
+      // Set before the branches below so the empty-state account (a brand new
+      // user with no assessment) counts as content: it is a real, settled page
+      // and a refresh over it should be silent too.
+      hasContentRef.current = true;
 
       // Token without a cached profile: pull the profile once from the API
       // instead of letting the !userData check below blank the page.
@@ -202,11 +252,6 @@ function DashboardPage() {
         } catch { /* falls through to the !userData fallback */ }
       }
 
-      // Set first visit flag from server response
-      if (data.isFirstVisit !== undefined) {
-        setIsFirstLogin(data.isFirstVisit);
-      }
-
       if (!data.hasAssessment) {
         // Set empty/default state for new users without assessment
         setTodaysSupplements([]);
@@ -217,6 +262,9 @@ function DashboardPage() {
         return;
       }
 
+      // Adopt the server's plan day BEFORE anything reads it, so the heading and
+      // the doses it labels are always the same day.
+      setPlanDayKey(data.planDay?.todayKey || '');
       setTodaysSupplements(sortPlan(data.todaysSupplements || []));
       setWellnessScore(data.stats.wellnessScore || 0);
       setQuickStats({
@@ -224,6 +272,9 @@ function DashboardPage() {
         adherenceRate: data.stats.adherenceRate || 0,
         energyLevel: data.stats.energyLevel || 'Medium',
         todaysProgress: data.stats.todaysProgress || { taken: 0, total: 0 },
+        // The window-aware split the score was computed from. An older server
+        // omits it, and scoreSyncLine() renders nothing rather than guessing.
+        wellnessToday: data.stats.wellnessToday || EMPTY_STATS.wellnessToday,
       });
       setPriorityBlock(data.priorityBlock || { blocked: false, count: 0 });
       setPriorityAssessments(data.priorityAssessments || []);
@@ -236,12 +287,20 @@ function DashboardPage() {
       const isSessionTeardown = err?.status === 401 && err?.code;
       if (!isSessionTeardown) {
         console.error('Error fetching dashboard:', err);
-        setError((err && err.message) || 'Failed to load dashboard data.');
+        // A failed SILENT refresh keeps what is on screen. Replacing a whole
+        // dashboard with an error page because a background refetch timed out
+        // would throw away the user's data over a transient network blip — and
+        // the click they made still did what they asked (scrolled to the top).
+        // The next ordinary load surfaces the failure like any other.
+        if (!silent) {
+          setError((err && err.message) || 'Failed to load dashboard data.');
+        }
       }
     } finally {
       // The spinner must ALWAYS clear — even if a handler above threw —
-      // otherwise the page sits on the loader forever.
-      setLoading(false);
+      // otherwise the page sits on the loader forever. A silent refresh never
+      // raised it, so it must not lower it either (that would blank the page).
+      if (!silent) setLoading(false);
     }
   }, []);
 
@@ -269,6 +328,26 @@ function DashboardPage() {
       document.removeEventListener('visibilitychange', handleVisible);
     };
   }, [navigate, fetchDashboardData]);
+
+  // The brand control in the Navbar, pressed while already on this page, has
+  // nowhere to navigate to — so it scrolls to the top and asks for a refresh
+  // from here instead. Silent, so the dashboard is not swapped for a spinner
+  // (see fetchDashboardData). Mounted only while this page is on screen, so the
+  // request costs nothing anywhere else.
+  useEffect(
+    () => subscribeDashboardRefresh(() => fetchDashboardData({ silent: true })),
+    [fetchDashboardData],
+  );
+
+  /* Watch the plan day. When it rolls over, everything on screen is yesterday's —
+     so refetch rather than leaving a finished plan up until the user reloads by
+     hand. Armed only once there is a plan to roll over INTO.
+     `usePlanDay` returns the day to render: the server's once it has answered,
+     and the local rule until then. */
+  const onPlanDayReset = useCallback(() => {
+    fetchDashboardData();
+  }, [fetchDashboardData]);
+  const todayKey = usePlanDay(planDayKey, onPlanDayReset, { enabled: todaysSupplements.length > 0 });
 
   // The score explainer opens and closes like any other popover: a click
   // anywhere outside closes it, Escape closes it and hands focus back to the
@@ -298,22 +377,15 @@ function DashboardPage() {
 
   /* The clock the time windows are judged against. Re-renders on a timer and on
      wake, so a window that closes while the page is open does not stay tickable
-     until a reload. See utils/slotSchedule.js for the windows themselves. */
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    const tick = () => setNow(new Date());
-    const interval = setInterval(tick, 30_000);
-    const onWake = () => {
-      if (document.visibilityState === 'visible') tick();
-    };
-    document.addEventListener('visibilitychange', onWake);
-    window.addEventListener('focus', tick);
-    return () => {
-      clearInterval(interval);
-      document.removeEventListener('visibilitychange', onWake);
-      window.removeEventListener('focus', tick);
-    };
-  }, []);
+     until a reload. See utils/slotSchedule.js for the windows themselves.
+
+     This used to be a private `useState` + interval pair written out inline, and
+     the greeting added a second reading of the clock to render alongside these
+     windows. Two readings is how "Good afternoon" ends up sitting above a locked
+     Night stack — they disagree for the length of a tick, and only on a boundary,
+     which is the worst time to be wrong. There is now one clock, and the greeting
+     below is handed it. */
+  const now = useNow();
 
   /* The page, laid out for the current moment: the one open frame, Anytime, and
      the tray of doses whose window has closed. The SAME function the tracker
@@ -332,6 +404,7 @@ function DashboardPage() {
       adherenceRate: result.stats.overallAdherence,
       daysStreak: result.stats.daysStreak,
       todaysProgress: result.stats.todaysProgress,
+      wellnessToday: result.stats.wellnessToday || prev.wellnessToday,
     }));
     setWellnessScore(result.stats.wellnessScore);
 
@@ -634,14 +707,37 @@ function DashboardPage() {
   };
 
   const band = scoreBand(wellnessScore);
-  const todayLabel = useMemo(
-    () => new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }),
-    [],
-  );
+  // What today is doing to the number, in the user's own terms.
+  const syncLine = useMemo(() => scoreSyncLine(quickStats.wellnessToday), [quickStats.wellnessToday]);
+  // The plan day, once the server has named one; the local rule covers the gap
+  // before the first response so the heading is never blank while loading.
+  /* The heading date, built from the PLAN DAY KEY the server sent.
+     It used to be `new Date().toLocaleDateString(...)` — the calendar date,
+     printed directly above doses belonging to the plan day. Between midnight and
+     4 AM those are different days, so it read as a fresh untouched morning above
+     yesterday's completed plan.
+
+     The key is split and reassembled on a UTC cursor rather than handed to
+     `new Date(key)`: a bare YYYY-MM-DD is parsed as UTC midnight and then
+     formatted in the HOST's zone, which is the wrong weekday west of Greenwich. */
+  const todayLabel = useMemo(() => {
+    const [y, m, d] = todayKey.split('-').map(Number);
+    if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return '';
+    const date = new Date(0);
+    date.setUTCFullYear(y, m - 1, d);
+    return date.toLocaleDateString('en-US', {
+      weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC',
+    });
+  }, [todayKey]);
   const hasPlan = todaysSupplements.length > 0;
 
-  const greeting = isFirstLogin ? 'Welcome' : 'Welcome back';
-  const firstName = userData?.firstName ? `, ${userData.firstName}` : '';
+  /* The heading is "<Time> <User>" — the part of day, and who is signed in here.
+     Two facts that arrive independently, so the punctuation between them is
+     decided once, in utils/greeting.js, rather than spliced onto the front of a
+     string in the markup. `now` is the same reading the dose windows above are
+     judged against, so the greeting cannot name one part of the day while the
+     page shows another. */
+  const greeting = useMemo(() => greetingFor(userData, now), [userData, now]);
 
   if (loading) {
     return (
@@ -771,9 +867,7 @@ function DashboardPage() {
             <span className="dashboard-eyebrow__dot" aria-hidden="true" />
             {todayLabel}
           </p>
-          <h1 className="dashboard-title">
-            {greeting}{firstName}!
-          </h1>
+          <h1 className="dashboard-title">{greeting}</h1>
           <p className="dashboard-subtitle">
             {hasPlan || wellnessScore > 0
               ? "Here's your personalized wellness dashboard"
@@ -1079,15 +1173,33 @@ function DashboardPage() {
                         </div>
                         <div className="wellness-info-item">
                           <strong>📊 Adherence (0-50)</strong>
-                          <p>Your supplement adherence percentage contributes up to 50 points.</p>
+                          <p>
+                            60% today, 40% all time &mdash; worth up to 50 points. Today counts only the
+                            doses you have actually had the chance to take.
+                          </p>
                         </div>
                         <div className="wellness-info-item">
                           <strong>🔥 Streak Bonus (0-20)</strong>
                           <p>Maintaining a daily streak contributes up to 20 points.</p>
                         </div>
                       </div>
+
+                      {/* The part people ask about, stated exactly as the server
+                          applies it: a window still open costs nothing, a window
+                          that closed unticked costs everything, and a late entry
+                          costs nothing either way. */}
+                      <div className="wellness-info-rules">
+                        <strong>How missed doses are judged</strong>
+                        <ul>
+                          <li><span className="is-ok">On time</span> ticked inside its window &mdash; full credit.</li>
+                          <li><span className="is-ok">Late</span> ticked after it closed &mdash; still full credit.</li>
+                          <li><span className="is-open">Still open</span> unticked, window not finished &mdash; costs nothing yet.</li>
+                          <li><span className="is-bad">Missed</span> unticked once its window closed &mdash; costs points, now.</li>
+                        </ul>
+                      </div>
+
                       <p className="wellness-info-note">
-                        <strong>Max: 100</strong> — Your score grows as you stay consistent!
+                        <strong>Max: 100</strong> &mdash; Your score grows as you stay consistent!
                       </p>
                     </div>
                   )}
@@ -1107,6 +1219,16 @@ function DashboardPage() {
                     ? 'finish an assessment to start scoring.'
                     : `you are in the ${band.label.toLowerCase()} band.`}
                 </p>
+                {/* Today's contribution, said out loud. A score that moves with
+                    nothing on screen to explain it reads as a glitch; this names
+                    the doses responsible. Hidden when there is nothing true to
+                    say, because "everything taken" means nothing on an empty plan. */}
+                {syncLine && (
+                  <p className="score-sync" data-tone={scoreSyncTone(quickStats.wellnessToday)}>
+                    <span className="score-sync__dot" aria-hidden="true" />
+                    {syncLine}
+                  </p>
+                )}
               </div>
             </section>
 

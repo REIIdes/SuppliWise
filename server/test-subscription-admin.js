@@ -165,14 +165,21 @@ async function rewind(userId, record, ms) {
     && Math.abs(annualConverted.monthly - annualPhp.monthly / rate) < 0.01,
   `status ${r.status} annual ${JSON.stringify(annualConverted)} rate ${rate}`);
   check('catalogue states the 30-day standard period', r.data.standardPeriodDays === 30);
-  // The Team band is priced per seat under `perSeatMonthly`/`perSeatYearly`
-  // rather than `monthly`/`yearly`. The converter has to fall back to those
-  // names — when it did not, the Team band priced at ZERO, i.e. a free seat.
-  check('catalogue carries the Team band at its real per-seat price',
-    !!r.data.team
-      && r.data.team.pricing.php.monthly === C.TEAM_PLAN.perSeatMonthly
-      && r.data.team.pricing.monthly > 0,
-  `team ${JSON.stringify(r.data.team?.pricing)}`);
+  // The per-seat "Team" band was removed — it granted exactly what Premium grants
+  // and no account could ever hold a second seat. Assert it cannot come back by
+  // accident, and that every published plan carries a real price (the converter
+  // used to fall back to per-seat keys and price that band at ZERO).
+  check('catalogue publishes no Team band', !('team' in r.data));
+  check('every published plan is priced above zero',
+    Array.isArray(r.data.plans)
+      && r.data.plans.length === 4
+      && r.data.plans
+        .filter((p) => p.id !== 'free')
+        .every((p) => p.pricing.php.monthly > 0 && p.pricing.php.yearly > 0),
+  `plans ${JSON.stringify(r.data.plans?.map((p) => [p.id, p.pricing?.php]))}`);
+  check('no plan carries a per-seat price or a seat flag',
+    Array.isArray(r.data.plans) && r.data.plans.every((p) => !('seat' in p)),
+  `plan keys ${JSON.stringify(r.data.plans?.map((p) => Object.keys(p)))}`);
 
   // Self-serve purchasing FAILS CLOSED: unless the deployment explicitly sets
   // SUBSCRIPTION_SELF_SERVE_PURCHASE, an authenticated FREE user must not be able

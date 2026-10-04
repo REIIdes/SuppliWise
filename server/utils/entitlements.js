@@ -214,12 +214,6 @@ function describeSubscription(user, now = Date.now(), options = {}) {
     // ── Duration read-out ──────────────────────────────────────────────
     subscriptionPermanent: resolved.permanent,
     subscriptionSource: resolved.source,
-    // Seats covered by this subscription: 1 for an individual plan, N for a
-    // Team subscription. Team is the same tier as Premium shared across N
-    // people, so this never changes what is unlocked — only how many people
-    // share it, which is what the receipt and the billing screen need to show.
-    subscriptionSeats: detail ? detail.effective.seats : 1,
-    subscriptionIsTeam: detail ? detail.effective.isTeam === true : false,
     subscriptionDuration: resolved.permanent
       ? 'PERMANENT'
       : (resolved.daysRemaining === null ? 'NONE' : `${resolved.daysRemaining} days`),
@@ -252,10 +246,6 @@ function describeSubscription(user, now = Date.now(), options = {}) {
       resolved.subscriptionEnd || '-',
       resolved.permanent ? 'perm' : '-',
       user?.subscriptionSource || '-',
-      // Seats are part of the state a client repaints for: a Team subscription
-      // going from 5 seats to 10 changes what the billing screen says, and the
-      // signature has to move or the re-render is skipped.
-      `s${detail ? detail.effective.seats : 1}`,
       user?.subscriptionUpdatedAt ? new Date(user.subscriptionUpdatedAt).getTime() : 0,
     ].join('|'),
   };

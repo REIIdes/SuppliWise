@@ -456,7 +456,13 @@
   /* isolate → the z-index:-1 orbs paint above our own background but
      below every piece of content (navbar, card, modals stay on top). */
   isolation: isolate;
+  /* Declared twice on purpose: `hidden` would make this element a scroll
+     container, and a sticky element resolves against the NEAREST ancestor
+     scroll container — so it would pull the sticky Navbar off the viewport and
+     the header would scroll away with the page. `clip` contains the drifting
+     orbs below without creating a scrollport. See PricingPage.css. */
   overflow-x: hidden;
+  overflow-x: clip;
   background:
     radial-gradient(1000px 620px at 8% -12%, rgba(16, 185, 129, 0.22), transparent 60%),
     radial-gradient(900px 700px at 112% 18%, rgba(56, 189, 248, 0.20), transparent 55%),

@@ -4,6 +4,10 @@ import Navbar from '../Components/Navbar/Navbar';
 import { getInsights, getToken } from '../api';
 import PlanLockedCard from '../Components/PlanLockedCard/PlanLockedCard';
 import { useSubscription, SUBSCRIPTION_EVENT } from '../hooks/useSubscription';
+/* The plan-day key is parsed by the shared helper, never by `new Date(key)`:
+   a bare YYYY-MM-DD is read as UTC midnight and then formatted in the HOST's
+   zone, which names the wrong weekday west of Greenwich. */
+import { parseDayKey } from '../utils/planDay.js';
 import './InsightsPage.css';
 
 function InsightsPage() {
@@ -28,6 +32,9 @@ function InsightsPage() {
   // Today's progress data
   const [todaysSupplements, setTodaysSupplements] = useState([]);
   const [todaysStats, setTodaysStats] = useState({ taken: 0, total: 0, percentage: 0 });
+  // The plan day the server counted, for the heading. Empty until the first
+  // response, which is when the whole card is a spinner anyway.
+  const [planDayKey, setPlanDayKey] = useState('');
 
   const fetchInsightsData = async () => {
     try {
@@ -97,6 +104,10 @@ function InsightsPage() {
 
       // Set today's progress data
       setTodaysSupplements(data.todaysSupplements || []);
+      // The day the server counted, so the heading below names it rather than
+      // re-deriving one — which for four hours out of every eight would be
+      // yesterday's, and the ring would be captioned with a day it never measured.
+      setPlanDayKey(data.planDay?.todayKey || '');
       const taken = (data.todaysSupplements || []).filter(s => s.taken).length;
       const total = (data.todaysSupplements || []).length;
       const percentage = total > 0 ? Math.round((taken / total) * 100) : 0;
@@ -318,11 +329,27 @@ function InsightsPage() {
     </>
   );
 
+  /* "Saturday, 3 October" for the plan-day key the server counted.
+     Shown only once there IS a key — an empty caption is worse than none, and the
+     card is a spinner until the first response arrives anyway. */
+  const planDayLabel = (() => {
+    const dayKey = planDayKey;
+    const parsed = parseDayKey(dayKey);
+    if (!parsed) return '';
+    const date = new Date(0);
+    date.setUTCFullYear(parsed.year, parsed.month - 1, parsed.day);
+    return date.toLocaleDateString('en-US', {
+      weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC',
+    });
+  })();
+
   const renderTodaysProgress = () => (
     <>
       {/* Progress Summary */}
       <div className="insights-section">
-        <h3 className="insights-section-title">Today's Supplement Progress</h3>
+        <h3 className="insights-section-title">
+          Today's Supplement Progress{planDayLabel ? ` — ${planDayLabel}` : ''}
+        </h3>
         
         {todaysSupplements.length === 0 ? (
           <div className="empty-state-progress">

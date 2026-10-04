@@ -280,7 +280,6 @@ const PLAN_CATALOGUE = [
     priceNote: 'No payment method required',
     cta: 'Start free',
     highlight: false,
-    seat: false,
   },
   {
     id: 'monthly',
@@ -294,7 +293,6 @@ const PLAN_CATALOGUE = [
     priceNote: 'Billed monthly',
     cta: 'Choose Deluxe',
     highlight: false,
-    seat: false,
     // Everything in Free, plus…
     inherits: 'free',
   },
@@ -310,7 +308,6 @@ const PLAN_CATALOGUE = [
     cta: 'Choose Premium',
     highlight: true, // the "Recommended" card
     badge: 'Recommended',
-    seat: false,
     inherits: 'monthly',
   },
   {
@@ -324,55 +321,25 @@ const PLAN_CATALOGUE = [
     priceNote: 'Billed monthly',
     cta: 'Choose Ultimate',
     highlight: false,
-    seat: false,
     inherits: 'annual',
   },
 ];
 
-/**
- * The "Team" band under the individual cards.
- *
- * Team is NOT a fifth tier — it is the Premium tier with a seat count. A seat
- * grants exactly what Premium grants, shared across N people, so there is no
- * `team` plan id and every entitlement gate is untouched by the count. Making it
- * a real tier instead would have meant changing the rank order and every feature
- * and limit mapping in the app, for something that unlocks nothing extra.
- *
- * `tier` is what a seat actually buys, and it is what the purchase writes to the
- * paid layer. `perSeat` prices are per seat, so a N-seat subscription costs
- * N × perSeat — computed on the SERVER, because a client-computed total is a
- * total the invoice will not match.
- */
-
-/** The tier a Team seat grants. Named once so the band and the engine agree. */
-const TEAM_TIER = 'annual';
-
-const TEAM_PLAN = {
-  id: 'team',
-  label: 'Team',
-  tagline: 'Everything in Premium for every seat, plus shared billing and seat management for a group of practitioners.',
-  // The stored plan id a seat grants.
-  tier: 'annual',  perSeatMonthly: 699,
-  perSeatYearly: 1700,
-  yearlySavingPct: 80,
-  minSeats: 2,
-  maxSeats: 500,
-  cta: 'Choose Team',
-  // A seat grants exactly the Premium tier, so the band's bullets are the real
-  // Premium additions — read from the same gates the cards use, not retyped.
-  // "2× more usage than Deluxe" was here for the same reason it was on the
-  // Premium card: no tier-aware usage quota exists to be twice anything.
-  features: [
-    ...featuresForTier(TEAM_TIER).map((feature) => feature.label),
-    'One shared billing account',
-    'A seat for each practitioner',
-  ],
-  featureKeys: [],
-};
-
-/** Seat counts the checkout pre-computes a total for. Any count is purchasable;
- *  these are just the ones shown without a round-trip. */
-const TEAM_TOTAL_SEATS = [2, 3, 5, 10, 20, 50];
+// ── There is no "Team" band, and there never should have been ──────────────
+//
+// This catalogue used to carry a fifth entry: "Team", priced PER SEAT, where a
+// seat granted exactly what Premium grants. It has been removed.
+//
+// It was not a tier (there is no `team` plan id — it stored `{ plan: 'annual',
+// seats: N }`), so it unlocked nothing Premium did not, and no account could ever
+// hold a second seat: there was no invitation, no membership, and no way to
+// attach another person to the count. The number multiplied a price and appeared
+// in receipts, queues and the audit trail, and nothing could consume it.
+//
+// Removed here: `TEAM_PLAN`, `TEAM_TIER`, `TEAM_TOTAL_SEATS` and `teamTotal()`.
+// `resolvePurchasable` below used to special-case the string 'team' ahead of
+// normalization, which is why `plan: 'team'` is now just an unknown plan id and
+// is refused with the same message as any other.
 
 /**
  * Compute both billing prices for a catalogue entry.
@@ -382,14 +349,20 @@ const TEAM_TOTAL_SEATS = [2, 3, 5, 10, 20, 50];
  */
 function pricingFor(entry, currencyCode = DEFAULT_CURRENCY) {
   const currency = CURRENCIES[currencyCode] ? currencyCode : DEFAULT_CURRENCY;
-  // Read `monthly`/`yearly`, falling back to the `perSeat*` names the Team band
-  // uses. Without that fallback the Team band silently priced at ZERO — the
-  // figure was right there under a different key, and `Number(undefined) || 0`
-  // turned a key mismatch into a free seat rather than a visible error.
-  const monthlyPhp = Number.isFinite(entry.monthly) ? entry.monthly
-    : (Number.isFinite(entry.perSeatMonthly) ? entry.perSeatMonthly : 0);
-  const yearlyPhp = Number.isFinite(entry.yearly) ? entry.yearly
-    : (Number.isFinite(entry.perSeatYearly) ? entry.perSeatYearly : 0);
+  // Both figures are read under ONE name each. They used to fall back to a second
+  // pair of keys (`perSeatMonthly`/`perSeatYearly`) that only the removed Team
+  // band used, which existed because a missing price here silently became 0 —
+  // a free plan rather than a visible error. That fallback is now unreachable
+  // dead weight, so a mispriced entry is a hard `NaN` in the payload instead of
+  // a card that quietly says "Free".
+  const monthlyPhp = Number(entry.monthly);
+  const yearlyPhp = Number(entry.yearly);
+  if (!Number.isFinite(monthlyPhp) || !Number.isFinite(yearlyPhp)) {
+    throw new Error(
+      `Pricing for "${entry && entry.id}" is missing a monthly or yearly amount. `
+      + 'A plan must declare both; it will not be published at a guessed price.',
+    );
+  }
   const format = (php) => formatAmount(php, currency);
   return {
     currency,
@@ -449,21 +422,6 @@ function cataloguePayload(currencyCode = DEFAULT_CURRENCY) {
     // writes exactly this many days.
     standardPeriodDays: STANDARD_PERIOD_DAYS,
     standardPeriodMonths: STANDARD_PERIOD_MONTHS,
-    team: {
-      ...TEAM_PLAN,
-      pricing: {
-        ...pricingFor(TEAM_PLAN, currency),
-        php: { monthly: TEAM_PLAN.perSeatMonthly, yearly: TEAM_PLAN.perSeatYearly },
-        // Pre-computed totals for the common seat counts, so the checkout sheet
-        // can show a real total the moment a seat count is chosen without
-        // waiting on a round-trip. The server recomputes it on purchase.
-        seatTotals: TEAM_TOTAL_SEATS.map((seats) => ({
-          seats,
-          monthly: formatAmount(TEAM_PLAN.perSeatMonthly * seats, currency),
-          yearly: formatAmount(TEAM_PLAN.perSeatYearly * seats, currency),
-        })),
-      },
-    },
     plans: PLAN_CATALOGUE.map((entry) => ({
       ...entry,
       // Derived, never hand-written: these are the features this tier's card is
@@ -495,32 +453,20 @@ function cataloguePayload(currencyCode = DEFAULT_CURRENCY) {
 /**
  * Resolve a purchasable entry from whatever the client sent.
  *
- * Unlike the individual plans, Team is NOT a stored plan id, so it cannot go
- * through normalizePlanId() (which would have to invent a fifth tier). It is
- * matched by its own id here and mapped to the tier a seat grants.
+ * `plan: 'team'` is now simply an unknown id: normalizePlanId refuses it and the
+ * caller answers "Choose a valid plan." There is no special case ahead of
+ * normalization any more, which is what "Team is purchasable but is not a plan
+ * id" used to require — and which meant a second, hand-maintained way for a
+ * plan name to enter the system.
  */
 function resolvePurchasable(plan) {
-  const raw = String(plan == null ? '' : plan).trim().toLowerCase();
-  if (raw === 'team') return { entry: TEAM_PLAN, isTeam: true, tier: TEAM_PLAN.tier };
-  const id = normalizePlanId(raw);
+  const id = normalizePlanId(plan);
   if (!id) return null;
   const entry = PLAN_CATALOGUE.find((p) => p.id === id);
-  return entry ? { entry, isTeam: false, tier: entry.id } : null;
-}
-
-/** Server-side seat total. The only place a Team price is ever computed. */
-function teamTotal(amountPhp, seats) {
-  const n = Math.max(1, Math.round(Number(seats) || 1));
-  return amountPhp * n;
+  return entry ? { entry, tier: entry.id } : null;
 }
 
 const findEntry = (planId) => PLAN_CATALOGUE.find((entry) => entry.id === planId) || null;
-
-/** Server-side seat total. The only place a Team price is ever computed. */
-function teamTotal(amountPhp, seats) {
-  const n = Math.max(1, Math.round(Number(seats) || 1));
-  return amountPhp * n;
-}
 
 /**
  * Is self-serve purchasing enabled for this deployment?
@@ -552,7 +498,6 @@ function selfServeEnabled() {
 
 module.exports = {
   PLAN_CATALOGUE,
-  TEAM_PLAN,
   CURRENCIES,
   COUNTRY_CURRENCY,
   CURRENCY_ORDER,
@@ -560,7 +505,7 @@ module.exports = {
   normalizeCountry,
   normalizeCurrency,
   // Re-exported so a caller can prove a name is NOT a tier without reaching into
-  // another module (notably: 'team' is purchasable but is not a plan id).
+  // another module.
   normalizePlanId,
   resolveCurrency,
   currencyFromAcceptLanguage,
@@ -574,8 +519,5 @@ module.exports = {
   featureKeysForTier,
   limitsForTier,
   resolvePurchasable,
-  teamTotal,
-  TEAM_TOTAL_SEATS,
-  TEAM_TIER,
   selfServeEnabled,
 };

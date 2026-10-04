@@ -85,6 +85,60 @@ function accountKey() {
   }
 }
 
+/**
+ * JSON with a deterministic key order.
+ *
+ * `JSON.stringify` emits properties in insertion order, so two objects holding
+ * the same profile can produce two different strings — which would silently
+ * split one reader's cache in two and cost a generation per half.
+ */
+function stableStringify(value) {
+  if (value === null || value === undefined) return 'null';
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (typeof value === 'object') {
+    return `{${Object.keys(value)
+      .sort()
+      .filter((key) => value[key] !== undefined)
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/**
+ * A short, stable fingerprint of the profile a guide is written against.
+ *
+ * WHY THIS IS PART OF THE CACHE KEY
+ * ---------------------------------
+ * The panel's own contract is that "a new assessment must not read a guide
+ * written against the old one". `assessmentId` was supposed to enforce that,
+ * but the recommendations screen passes the literal string `"recommendations"`
+ * — a constant, not an id. So its cache key was
+ * `…_recommendations_zinc picolinate` no matter how much the reader's health
+ * changed in between, and a guide written against last quarter's symptoms was
+ * served from localStorage without the server ever being asked. The reader sees
+ * advice addressed to a profile they no longer have.
+ *
+ * Keying on the profile ITSELF cannot go stale that way, and it is also the
+ * input the server keys on, so browser and server agree by construction: change
+ * the profile, both miss; keep it, both hit, and the tap costs nothing.
+ *
+ * Two independent 32-bit hashes rather than one, so a collision is not
+ * reachable in practice. This is a cache key and never a secret — the worst a
+ * collision could do is hand the reader their own stale guide.
+ */
+function profileFingerprint(context) {
+  const input = stableStringify(context);
+  let fnv = 0x811c9dc5;
+  let djb = 5381;
+  for (let i = 0; i < input.length; i += 1) {
+    const code = input.charCodeAt(i);
+    fnv = Math.imul(fnv ^ code, 0x01000193) >>> 0;
+    djb = (Math.imul(djb, 33) ^ code) >>> 0;
+  }
+  return `${fnv.toString(16).padStart(8, '0')}${djb.toString(16).padStart(8, '0')}`;
+}
+
 function DetailSection({ title, children }) {
   if (!children) return null;
   return (
@@ -114,9 +168,16 @@ export function SupplementDetailModal({ supplementName, assessmentId, context, c
   // cached guide — a personalized guide written against someone else's
   // symptoms and medications is worse than no cache at all — and making the
   // caller remember to scope it is how that regresses.
+  //
+  // So is the PROFILE the guide was written against. `assessmentId` alone is not
+  // enough: the recommendations screen passes a constant, so its key survived
+  // every new assessment and served the previous profile's guide. The
+  // fingerprint changes exactly when the guide's meaning changes. See
+  // profileFingerprint.
+  const profileScope = useMemo(() => profileFingerprint(context), [context]);
   const storageKey = useMemo(
-    () => `swdetail_${accountKey()}_${assessmentId || 'unknown'}_${String(supplementName || '').toLowerCase().trim()}`,
-    [assessmentId, supplementName],
+    () => `swdetail_${accountKey()}_${assessmentId || 'unknown'}_${profileScope}_${String(supplementName || '').toLowerCase().trim()}`,
+    [assessmentId, supplementName, profileScope],
   );
 
   // Resolve during init so a cached guide paints immediately. A panel that
@@ -140,6 +201,23 @@ export function SupplementDetailModal({ supplementName, assessmentId, context, c
   // "still waiting" test — otherwise a failed generation spins indefinitely.
   const loading = detail === null && !error;
 
+  /**
+   * Re-run the fetch after a failure.
+   *
+   * Every failure this panel can show is transient — a provider that was slow,
+   * a connection that dropped — so the message asks the reader to try again and
+   * the panel has to let them. A modal the reader can only escape by closing
+   * and hunting for the same card again is a dead end wearing a retry message.
+   *
+   * `setError('')` is what turns this back into the loading state; without it
+   * `loading` stays false and the retry silently does nothing visible.
+   */
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => {
+    setError('');
+    setAttempt((n) => n + 1);
+  }, []);
+
   const overlayRef = useRef(null);
   const titleRef = useRef(null);
 
@@ -161,7 +239,7 @@ export function SupplementDetailModal({ supplementName, assessmentId, context, c
         setError(err?.message || 'Could not load supplement details.');
       });
     return () => { cancelled = true; };
-  }, [supplementName, context, cache, storageKey, detail]);
+  }, [supplementName, context, cache, storageKey, detail, attempt]);
 
   // Move focus into the dialog so the keyboard is not left behind on the page
   // underneath, which is what makes a modal unusable without a mouse.
@@ -207,7 +285,12 @@ export function SupplementDetailModal({ supplementName, assessmentId, context, c
           {error && (
             <div className="swdetail__error" role="alert">
               <span aria-hidden="true">⚠️</span>
-              <p>{error}</p>
+              <div className="swdetail__error-body">
+                <p>{error}</p>
+                <button type="button" className="swdetail__retry" onClick={retry}>
+                  Try again
+                </button>
+              </div>
             </div>
           )}
 

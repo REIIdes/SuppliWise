@@ -370,6 +370,25 @@
     border-color 0.15s ease, color 0.15s ease;
 }
 
+/* Modifiers live here, next to the rule they modify. A child panel's
+   stylesheet is bundled BEFORE this one (see the import order in
+   ProfileSecurityControls.jsx), so a `.psc-btn--sm` declared over there is
+   same-specificity and silently loses — which is how both copies of it ended
+   up dead and every small button rendered at full size. */
+.psc-btn--sm {
+  padding: 6px 13px;
+  font-size: 13px;
+  /* Pins a floor so a longer label — "Remove" -> "Removing…" — cannot resize
+     the button and knock its neighbour off-centre in a row of paired actions. */
+  min-height: 30px;
+}
+
+/* Spacing belongs to a modifier the caller opts into, never to an appearance
+   variant: a variant cannot know whether it sits in a row or alone on a line. */
+.psc-btn--mt {
+  margin-top: 14px;
+}
+
 .psc-btn:focus-visible {
   outline: 3px solid rgba(79, 70, 229, 0.5);
   outline-offset: 2px;
@@ -415,12 +434,13 @@
   transform: translateY(-2px);
 }
 
+/* An appearance variant: no margin, no asymmetric padding. Both belonged to the
+   one place this variant stands alone on its own line, and both leaked into the
+   places where it shares a row with another button. */
 .psc-btn--danger-ghost {
-  margin-top: 14px;
   color: #be123c;
   background: transparent;
   border-color: transparent;
-  padding-left: 0;
 }
 
 .psc-btn--danger-ghost:hover:not(:disabled) {
@@ -437,6 +457,13 @@
 .psc-btn--ghost:hover:not(:disabled) {
   background: #f8fafc;
   border-color: #94a3b8;
+}
+
+/* "Turn off two-factor authentication" is the only danger-ghost that sits alone
+   directly in a card, so the offset it needs is scoped to exactly that shape.
+   Everywhere else the variant is in a row, where the row owns the spacing. */
+.psc-card > .psc-btn--danger-ghost {
+  margin-top: 14px;
 }
 
 /* ── Responsive ─────────────────────────────────────────────────────── */

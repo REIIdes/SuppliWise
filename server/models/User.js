@@ -89,6 +89,23 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    // IANA zone ("Europe/London") last reported by the browser, e.g.
+    // `Intl.DateTimeFormat().resolvedOptions().timeZone`.
+    //
+    // WHY IT IS NEEDED: a supplement's time window belongs to the user's day,
+    // so "has the morning window closed?" has to be asked in THEIR clock. The
+    // server's default is UTC, which for anyone west of Greenwich closes every
+    // window hours early and would mark a morning dose missed before the user
+    // had woken up. See utils/intakeWindows.js.
+    //
+    // Purely a hint: it is never used to authorise anything, and an empty value
+    // degrades to UTC with the penalty logic failing open (nothing marked
+    // missed) rather than closed.
+    timeZone: {
+      type: String,
+      default: '',
+      maxlength: 64,
+    },
     twoFactorEnabled: {
       type: Boolean,
       default: false,
@@ -206,16 +223,6 @@ const userSchema = new mongoose.Schema(
       default: 'free',
       enum: ['payment', 'admin', 'free'],
     },
-    // How many seats this subscription covers: 1 for an individual plan, N for
-    // a Team subscription sharing the same entitlements. Denormalized from
-    // subscriptionRecord.paid.seats so the cached user document can render it
-    // without another round-trip.
-    subscriptionSeats: {
-      type: Number,
-      default: 1,
-      min: 1,
-      max: 500,
-    },
     // ── The durable two-layer record ─────────────────────────────────────
     // The source of truth for "what did the user pay for" and "what has an
     // admin layered on top of it". Accounts created before this existed have no
@@ -239,11 +246,6 @@ const userSchema = new mongoose.Schema(
         // The days the last purchase/grant actually bought, so the UI can show
         // "30-day plan" without recomputing it from the calendar.
         periodDays: { type: Number, default: null },
-        // Seats this purchase covers. 1 = an individual plan; N = a Team
-        // subscription, which grants the SAME entitlements shared across N
-        // people. Seats are billing metadata, not a tier — there is no `team`
-        // plan id, so every entitlement gate is unaffected by the count.
-        seats: { type: Number, default: 1, min: 1, max: 500 },
       },
       // The ADMIN layer, active only while an override is in force. While it is
       // set, `paid` is frozen into `restore` so "Restore original subscription
@@ -270,9 +272,6 @@ const userSchema = new mongoose.Schema(
           capturedAt: { type: Date, default: null },
           capturedDaysRemaining: { type: Number, default: null },
           periodDays: { type: Number, default: null },
-          // The seat count at capture time, so a restore brings back both the
-          // expiry date AND how many seats were paid for.
-          seats: { type: Number, default: 1, min: 1, max: 500 },
         },
       },
       // Append-only audit trail: who changed what, when, and from which state to

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import Toast from '../Components/Toast/Toast';
@@ -16,6 +16,12 @@ const priorityTone = (priority) => PRIORITY_TONES[String(priority || '').toLower
    opens and closes at live in utils/slotSchedule.js. */
 import { groupBySlot, pendingIds, sortPlan } from '../utils/timeSlots.js';
 import { layoutPlan, isTakenLate, isDeadHour, DEAD_HOURS } from '../utils/slotSchedule.js';
+/* The running PLAN DAY (04:00 → 04:00, in the user's own zone), which is not the
+   calendar date for four hours out of every eight — see utils/planDay.js. The
+   server names it in every response, and `usePlanDay` watches for it changing so a
+   page left open across the reset refetches instead of showing yesterday's
+   finished plan. */
+import usePlanDay from '../hooks/usePlanDay.js';
 
 /* Section icons. Inline SVG rather than emoji so they inherit `currentColor`
    and stay legible next to the priority dots. */
@@ -79,10 +85,12 @@ function TrackIntakePage() {
   const [dayLoading, setDayLoading] = useState(false);
   const [dayError, setDayError] = useState('');
 
-  const todayKey = () => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  };
+  // The day the plan belongs to. The server names it; `usePlanDay` resolves it and
+  // watches for the rollover. It used to be built here from `new Date()`'s
+  // year/month/day — the CALENDAR date, which is the previous calendar date for
+  // four hours out of every eight, so this page and the server disagreed about
+  // which rows were editable.
+  const [planDayKey, setPlanDayKey] = useState('');
 
   // Morning / Afternoon / Evening sections, in fixed order. Memoised so the
   // grouping is computed once per plan change rather than on every render.
@@ -136,8 +144,10 @@ function TrackIntakePage() {
 
   const handleDayClick = (day) => {
     const key = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    // Today or future: no detail view (today uses the live list above)
-    if (key >= todayKey()) {
+    // Resolved against the PLAN DAY, so the live day and the "future" days are one
+    // decision. They used to come from two different dates — a cell could be marked
+    // "today" by one and refused as history by the other.
+    if (key >= todayKey) {
       setSelectedDay(null);
       setDayRecords([]);
       setDayError('');
@@ -153,7 +163,7 @@ function TrackIntakePage() {
     loadDay(key);
   };
 
-  const fetchCalendarData = async () => {
+  const fetchCalendarData = useCallback(async () => {
     try {
       const year = currentDate.getFullYear();
       const month = currentDate.getMonth() + 1; // JavaScript months are 0-indexed
@@ -164,9 +174,9 @@ function TrackIntakePage() {
       // Don't show error to user for calendar data, just fail silently
       setCompletionData({});
     }
-  };
+  }, [currentDate]);
 
-  const fetchTrackingData = async () => {
+  const fetchTrackingData = useCallback(async () => {
     try {
       setLoading(true);
       setError('');
@@ -185,6 +195,10 @@ function TrackIntakePage() {
 
       setHasAssessment(true);
 
+      // Adopt the server's day BEFORE anything reads it, so the calendar and the
+      // "is this today?" checks below are rendered against the same day the doses
+      // were loaded for.
+      setPlanDayKey(data.planDay?.todayKey || '');
       setTodaysSupplements(sortPlan(data.todaysSupplements || []));
       setStreak(data.stats.daysStreak || 0);
       setLongestStreak(data.stats.longestStreak || 0);
@@ -211,7 +225,7 @@ function TrackIntakePage() {
       setError(err.message || 'Failed to load tracking data.');
       setLoading(false);
     }
-  };
+  }, []);
 
   // Initial load on mount + auth guard + responsive toast
   useEffect(() => {
@@ -250,6 +264,17 @@ function TrackIntakePage() {
     fetchCalendarData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentDate]);
+
+  /* Watch the plan day. When it rolls over, everything above is yesterday's —
+     so refetch rather than leaving a finished plan on screen until the user
+     reloads by hand. Armed only once there is a plan to roll over INTO.
+     `usePlanDay` returns the day to render: the server's once it has answered,
+     and the local rule until then. */
+  const onPlanDayReset = useCallback(() => {
+    fetchTrackingData();
+    fetchCalendarData();
+  }, [fetchTrackingData, fetchCalendarData]);
+  const todayKey = usePlanDay(planDayKey, onPlanDayReset, { enabled: todaysSupplements.length > 0 });
 
 
   /* Shared post-update bookkeeping for both the single tick and the bulk tick.
@@ -522,14 +547,15 @@ function TrackIntakePage() {
     }
     
     // Actual days
-    const today = new Date();
-    const todayKeyStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    //
+    // "Today" is the CELL'S KEY compared to the plan day's key — not a field-by-field
+    // match against `new Date()`. That is what lets one key decide today, future and
+    // selectable at once; two derivations is how a cell ended up both today and
+    // history.
     for (let day = 1; day <= daysInMonth; day++) {
-      const isToday = day === today.getDate() &&
-                      month === today.getMonth() &&
-                      year === today.getFullYear();
       const cellKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      const isFuture = cellKey > todayKeyStr;
+      const isToday = cellKey === todayKey;
+      const isFuture = cellKey > todayKey;
       const isSelected = selectedDay === cellKey;
 
       // Check completion status for this day

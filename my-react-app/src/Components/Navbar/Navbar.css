@@ -97,11 +97,21 @@
   to   { background-position: 300% 50%; }
 }
 
+/* The brand cluster: the logo tile and the wordmark, wrapped in ONE link.
+   It is a single control with a single destination, so the whole cluster is
+   the hit area — the tile used to be a bare <div> that ignored clicks
+   entirely — and it is one tab stop rather than two for the same journey.
+
+   `display: flex` blockifies it, so the element type change from <div> to <a>
+   costs no layout; `cursor` and the focus ring below are what make it read as
+   the control it now is. */
 .navbar-left {
   display: flex;
   align-items: center;
   gap: 10px;
   text-decoration: none;
+  color: inherit;
+  cursor: pointer;
   min-width: 0;
   /* The brand below is `white-space: nowrap`, and a nowrap flex child with the
      default `min-width: auto` refuses to shrink below its text — so on a
@@ -110,6 +120,33 @@
      other. `overflow: hidden` lets the cluster actually shrink; the brand
      ellipsises inside it rather than pushing anything out of the row. */
   overflow: hidden;
+  /* Rounded so the focus ring below reads as a rect around the cluster rather
+     than a hard box tight against the bar's padding. */
+  border-radius: 12px;
+  /* The base ring is the SAME outline, only transparent. Giving :focus-visible
+     a real ring and nothing at rest makes the ring appear out of nothing; two
+     declarations of one animatable property make it fade up instead. */
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  transition:
+    transform 0.16s cubic-bezier(0.16, 1, 0.3, 1),
+    outline-color 0.18s ease;
+}
+
+/* Press. The nav links and the Sign In pill both had a press state and the brand
+   did not, so pressing the largest target in the bar was the one control that
+   gave no confirmation the click had landed. Scaled DOWN rather than up: a press
+   is the finger arriving, not the button celebrating. */
+.navbar-left:active {
+  transform: scale(0.965);
+}
+
+/* Keyboard focus. The wordmark is `background-clip: text` with a transparent
+   colour, so an outline is the only ring that can be seen here — and this link
+   is reachable by Tab, so it needs one. Only the COLOUR changes from the base
+   rule above, which is what lets it fade in. */
+.navbar-left:focus-visible {
+  outline-color: #10b981;
 }
 
 /* ── Logo tile: gradient shadow + playful hover wiggle on the svg ─── */
@@ -123,6 +160,14 @@
   background: transparent;
   overflow: hidden;
   flex-shrink: 0;
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* The tile lifts when the BRAND is hovered, not when the tile alone is. The two
+   are now one control, so a hover that only fired over the 44px square read as
+   a different element reacting than the one being pointed at. */
+.navbar-left:hover .navbar-logo-box {
+  transform: translateY(-1px) scale(1.04);
 }
 
 .navbar-logo-box svg {
@@ -154,7 +199,15 @@
   transition: filter 0.2s ease;
 }
 
-.navbar-brand:hover {
+/* The hover now hangs off the BRAND, so the mark and the wordmark react to the
+   same pointer the way they read — as one control.
+
+   A moving sheen was tried here and deliberately dropped: it needs
+   `background-size` wider than the text, and at rest that CROPPS the ramp, so
+   the wordmark would quietly stop being emerald→teal→cyan and read as
+   emerald→teal. A brand colour that changes when nobody is touching it is a
+   worse bug than a missing flourish. The gradient stays exactly as it was. */
+.navbar-left:hover .navbar-brand {
   filter: brightness(0.92) saturate(1.15);
 }
 
@@ -233,7 +286,9 @@
 .navbar-nav-link:hover svg { transform: scale(1.12); }
 
 .navbar-nav-link:active {
-  transform: translateY(0);
+  /* Down AND in: `translateY(0)` alone just cancelled the hover lift, which
+     reads as the link flattening rather than being pressed. */
+  transform: translateY(0) scale(0.95);
 }
 
 .navbar-nav-link.active {
@@ -298,7 +353,7 @@
 }
 
 .navbar-signin-btn:active {
-  transform: translateY(0);
+  transform: translateY(0) scale(0.97);
 }
 
 .navbar-signin-btn:focus-visible {
@@ -319,8 +374,10 @@
   .navbar-nav-link::before,
   .navbar-nav-link svg,
   .navbar-signin-btn,
+  .navbar-logo-box,
   .navbar-logo-box svg,
   .navbar-brand,
+  .navbar-left,
   .navbar-history-link {
     transition: none;
   }
@@ -335,6 +392,13 @@
     transform: none;
   }
   .navbar-logo-box:hover svg {
+    transform: none;
+  }
+  /* The brand's lift and press. `transition: none` above already stops them
+     easing, but that only means the change is instant — the element would still
+     END UP nudged and shrunk, so the transforms have to be cancelled too. */
+  .navbar-left:active,
+  .navbar-left:hover .navbar-logo-box {
     transform: none;
   }
 }

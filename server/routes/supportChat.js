@@ -54,12 +54,47 @@ const requireUserAccount = (req, res) => {
   return true;
 };
 
-/** Never let a stored document carry an unexpected author into a render. */
+/**
+ * What every admin reply is called on the MEMBER's side.
+ *
+ * Admin aliases (`AdminDevs`, `AdminJoma`, …) are operator identities, not
+ * something a member is entitled to. They name individuals behind what the
+ * product presents as one support channel, they come out of a server-side
+ * config file, and publishing one tells a member exactly which person is
+ * handling their billing and their account — which is nobody's business and is
+ * also a small, needlessly specific thing to aim at. So a member sees the
+ * channel, never the operator behind it.
+ *
+ * The alias is NOT discarded. It stays exactly where the work needs it —
+ * routes/adminSupportChats.js reads it straight off the document — so the
+ * console can still show who replied and who owns a thread. Only this router,
+ * which is the one a member can reach, replaces it.
+ *
+ * Enforced HERE, at the serialisation boundary, rather than in the component:
+ * the payload is what the member's browser (and any future mobile build) holds,
+ * so a label chosen in the UI would still ship `AdminDevs` over the wire and
+ * into any network tab, saved payload or log along the way.
+ *
+ * Mirrored — not shared — by SUPPORT_AUTHOR_LABEL in
+ * my-react-app/src/Components/SupportInbox/SupportInbox.jsx, which renders the
+ * same string rather than trusting the field, so a regression on either side
+ * degrades to a generic name instead of a name.
+ */
+const SUPPORT_AUTHOR_LABEL = 'Suppliwise Support';
+
+/**
+ * Never let a stored document carry an unexpected author into a render, and
+ * never let it carry an admin alias out of this router either.
+ */
 const toMessageView = (message) => ({
   _id: message._id,
   thread: message.thread,
   author: message.author,
-  authorName: message.authorName,
+  // A member's own name is theirs to see, so it passes through untouched. An
+  // admin's reply is attributed to the label above regardless of what the
+  // document says — including for messages written before this existed, which is
+  // why the substitution is here and not in the write path.
+  authorName: message.author === 'admin' ? SUPPORT_AUTHOR_LABEL : message.authorName,
   body: message.body,
   createdAt: message.createdAt,
 });
@@ -75,8 +110,17 @@ const toThreadView = (thread) => ({
   messageCount: thread.messageCount,
   unreadByUser: thread.unreadByUser,
   unreadByAdmin: thread.unreadByAdmin,
-  assignedTo: thread.assignedTo || '',
-  resolved: thread.resolved || { by: '', at: null },
+  // Which colleague has claimed a thread, and which one closed it, are both
+  // aliases and both internal. Blanked on the way out for the same reason the
+  // author name is (see SUPPORT_AUTHOR_LABEL). The keys are kept, and kept
+  // empty, so the response shape is unchanged for the client — a member cannot
+  // learn an admin's identity from the list endpoint any more than from the
+  // transcript. The console reads the real values from its own router, which
+  // has its own toThreadView for exactly this reason.
+  assignedTo: '',
+  // `at` survives because the member UI dates the resolution ("resolved Oct 3")
+  // and that is about their conversation, not about who closed it. `by` does not.
+  resolved: { by: '', at: thread.resolved?.at || null },
   createdAt: thread.createdAt,
   updatedAt: thread.updatedAt,
 });

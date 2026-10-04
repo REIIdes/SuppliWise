@@ -27,6 +27,9 @@
  */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer } from 'vite';
@@ -39,11 +42,39 @@ const MODULE = '/src/Components/ProfileSecurityControls/RecoveryPanel.jsx';
  * loaded through its SSR pipeline rather than adding a JSX toolchain to the
  * test suite. `middlewareMode` means nothing is served or watched — this is a
  * transform, not a second dev server.
+ *
+ * ── `cacheDir` is load-bearing, not tidiness ─────────────────────────────────
+ *
+ * This server shares the project root with `npm run dev`, so without an
+ * explicit `cacheDir` it defaults to `node_modules/.vite` — the SAME optimizer
+ * cache the dev server owns. A Vite server initialising there starts by
+ * deleting the committed dependency tree (its own log line: "removing old cache
+ * dir …/node_modules/.vite/deps"), so `npm test` — run constantly, and
+ * routinely alongside a dev server — silently wipes the dev server's
+ * pre-bundled dependencies.
+ *
+ * The dev server then 504s every dependency URL, which the browser reports as
+ *
+ *   Failed to fetch dynamically imported module:
+ *   http://localhost:5173/node_modules/.vite/deps/@simplewebauthn_browser.js?v=<hash>
+ *
+ * …with a dev-server log showing nothing wrong and the page refusing to render
+ * until someone stops the server, deletes the cache by hand and restarts.
+ * Observed here twice: 20 orphaned `deps_temp_*` directories with no committed
+ * `deps/` at all, and a dev server left idle-but-wedged (module requests
+ * hanging indefinitely while CPU stayed flat at zero).
+ *
+ * A fresh temp directory per run keeps the two caches separate by construction,
+ * and concurrent test runs from sharing one optimizer state. It is removed
+ * afterwards, because a throwaway cache has no business outliving its process.
  */
 let RecoveryPanel;
 let vite;
+let cacheDir;
 before(async () => {
+  cacheDir = mkdtempSync(join(tmpdir(), 'suppliwise-vitest-cache-'));
   vite = await createServer({
+    cacheDir,
     // hmr off: this is a transform, not a server, and an HMR socket would just
     // collide with the dev server's port.
     server: { middlewareMode: true, hmr: false },
@@ -52,7 +83,12 @@ before(async () => {
   });
   RecoveryPanel = await vite.ssrLoadModule(MODULE);
 });
-after(async () => { await vite?.close(); });
+after(async () => {
+  await vite?.close();
+  // close() first: deleting a cacheDir out from under a live server reproduces
+  // the exact half-written state this isolation exists to prevent.
+  if (cacheDir) rmSync(cacheDir, { recursive: true, force: true });
+});
 
 // Resolved per call rather than at module scope: the load happens in `before`,
 // which node:test runs AFTER the module body has been evaluated.

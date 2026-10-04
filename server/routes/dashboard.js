@@ -9,6 +9,27 @@ const { notExpiredFilter, expiryFromCreatedAt } = require('../utils/assessments'
 const { can } = require('../utils/plan');
 const { selfHealOpenPriority } = require('../utils/priorityGate');
 const { buildScheduleSlotIndex, resolveTimeSlot } = require('../utils/dailyScheduleSlots');
+// `cleanTimeZone` is re-exported by intakeWindows from utils/planDay.js, which
+// owns the one `Intl` reader in the server — so the day a record belongs to and
+// the window it was due in are read by the same clock, from the same zone.
+const { cleanTimeZone, evaluateToday } = require('../utils/intakeWindows');
+const {
+  getWellnessBaseline,
+  calculateWellnessScore,
+  penaltyForMisses,
+  describeToday,
+} = require('../utils/wellnessScore');
+// One definition of "today" for every handler here, and one definition of which
+// wall clock "today" is read on. Neither is duplicated in a route.
+const {
+  planDayKey,
+  previousDayKey,
+  shiftDayKey,
+  recentPlanDayKeys,
+  minutesToNextReset,
+  isInDeadHours,
+  PLAN_DAY_RESET_LABEL,
+} = require('../utils/planDay');
 
 // Coerce any JSON value to a plain string for DB equality filters.
 // Objects (e.g. {"$ne": "x"}) would otherwise become NoSQL operators and
@@ -18,11 +39,20 @@ const str = (value) => (typeof value === 'string' ? value : value == null ? '' :
 // the API must never persist or echo raw markup back to a client).
 const cleanSupplementName = (value) => str(value).replace(/<[^>]*>/g, '').trim().slice(0, 200);
 
-// Helper: Get today's date in YYYY-MM-DD format
-const getTodayKey = () => {
-  const now = new Date();
-  return now.toISOString().split('T')[0];
-};
+/**
+ * The running PLAN DAY as YYYY-MM-DD — 04:00 to 04:00 in the user's own zone.
+ *
+ * It used to be `new Date().toISOString().split('T')[0]`, which is the UTC
+ * calendar date. That rolls over at 00:00 UTC — 8:00 AM in Manila, 7:00 PM the
+ * previous evening in Los Angeles — so a plan was displayed for four hours after
+ * the reset it was meant to have, and the edits that display invited were refused
+ * ("only today's supplements"), because the read and the gate were on different
+ * days. See utils/planDay.js for the rule and why the boundary is 4 AM.
+ *
+ * Every caller must pass the same `timeZone` it is about to filter and score
+ * with; see `timezoneFor`.
+ */
+const getTodayKey = (timeZone = '', now = new Date()) => planDayKey(now, timeZone);
 
 // Helper: Calculate adherence percentage
 const calculateAdherence = (taken, total) => {
@@ -30,35 +60,119 @@ const calculateAdherence = (taken, total) => {
   return Math.round((taken / total) * 100);
 };
 
-// Helper: Calculate wellness score
-const calculateWellnessScore = (baseline, adherence, streak) => {
-  // baseline: 0-30 (from AI analysis of health state)
-  // adherence: 0-100 → contributes 0-50 points
-  // streak: capped at 30 days → contributes 0-20 points
-  
-  const adherencePoints = Math.round(adherence * 0.5);
-  const streakPoints = Math.min(Math.round(streak * 0.67), 20);
-  
-  return Math.min(baseline + adherencePoints + streakPoints, 100);
-};
+/**
+ * The user's IANA timezone, for judging when a dose's time window closes.
+ *
+ * ORDER OF TRUST
+ *   1. `X-Client-Timezone`, sent by api.js on every request from
+ *      `Intl.DateTimeFormat().resolvedOptions().timeZone`. This is the user's
+ *      actual clock, and it is what makes the penalty land at noon rather than
+ *      at midnight for anyone east or west of UTC.
+ *   2. `user.timeZone`, the last value the browser reported and the server
+ *      stored, for requests that carry no header (background jobs, Web3 reads).
+ *   3. UTC, the historical behaviour.
+ *
+ * WHY THE "ALREADY EQUALS" TEST IS IN THE FILTER
+ * The write happens on every dashboard call that carries a zone, so it is made a
+ * no-op in the DATABASE — not in this function — by putting the comparison in the
+ * query. Deciding it in JS instead would depend on `req.user` still holding the
+ * value we just wrote, which only survives as long as the 30s session cache does;
+ * a request that re-reads the user from Mongo would rewrite the same string on
+ * every poll. Same throttle as `heartbeatAdmin`.
+ *
+ * The header is used either way. The write is bookkeeping, not a precondition for
+ * scoring, and its failure is swallowed — a timezone is not worth failing a
+ * dashboard load over.
+ */
+const timezoneFor = async (req) => {
+  const header = cleanTimeZone(req.get('x-client-timezone'));
+  const stored = cleanTimeZone(req.user && req.user.timeZone);
 
-// Helper: Get wellness baseline from assessment
-const getWellnessBaseline = (assessment) => {
-  // Try to get baseline from AI results
-  if (assessment && assessment.aiResults && typeof assessment.aiResults.wellnessBaseline === 'number') {
-    return Math.max(0, Math.min(30, assessment.aiResults.wellnessBaseline));
+  if (header && header !== stored) {
+    try {
+      const User = require('../models/User');
+      await User.updateOne(
+        { _id: req.user._id, $or: [{ timeZone: { $ne: header } }, { timeZone: { $exists: false } }] },
+        { $set: { timeZone: header } },
+      );
+    } catch (error) {
+      console.error('[dashboard] could not store time zone:', error.message);
+    }
+    // This request is scored in the reported zone regardless of the write.
+    if (req.user) req.user.timeZone = header;
   }
-  // Default baseline if not available (neutral starting point)
-  return 15;
+  return header || stored || 'UTC';
 };
 
-// Helper: Validate and reset streak if previous day was missed
-const validateStreak = async (userId, assessmentId, metrics) => {
-  const todayKey = getTodayKey();
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  const yesterdayKey = yesterday.toISOString().split('T')[0];
-  
+/**
+ * Everything the wellness score needs about today, from one place.
+ *
+ * `finalizeIntakeChange` and `GET /` used to score the day themselves, which is
+ * how two readers of the same number drifted. One function, one rule: a dose
+ * counts against the user only once its window has closed, and a dose ticked
+ * late counts in full. See utils/intakeWindows.js for the rule and
+ * utils/wellnessScore.js for the arithmetic.
+ *
+ * @param {Array} records Today's intake records (lean or hydrated).
+ * @param {{now?: Date, timeZone?: string}} [options]
+ */
+const scoreToday = (records, { now = new Date(), timeZone = 'UTC' } = {}) =>
+  evaluateToday(records, { now, timeZone });
+
+/**
+ * The `stats.wellnessToday` block: today's progress split by the rule, plus the
+ * exact number of points the misses are costing. Derived from the same
+ * `calculateWellnessScore` the persisted score comes from, so the explanation can
+ * never drift from the number it explains.
+ */
+const buildWellnessToday = (today, { baseline, overallAdherence, streak }) => ({
+  ...describeToday(today),
+  penaltyPoints: penaltyForMisses({ baseline, overallAdherence, streak, today }).points,
+});
+
+/**
+ * "Mon", "Tue", … for a YYYY-MM-DD key.
+ *
+ * Read off the key with a UTC cursor so the label cannot drift a day from the
+ * column it names — the alternative, `new Date(key).toLocaleDateString()`, is
+ * parsed as UTC midnight and then formatted in the HOST's zone, which is a
+ * different weekday west of Greenwich.
+ */
+const weekdayName = (dayKey) => {
+  const [y, m, d] = str(dayKey).split('-').map(Number);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return '';
+  const cursor = new Date(0);
+  cursor.setUTCFullYear(y, m - 1, d);
+  if (cursor.getUTCMonth() !== m - 1 || cursor.getUTCDate() !== d) return '';
+  return cursor.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
+};
+
+/**
+ * The `planDay` block every dashboard endpoint returns.
+ *
+ * WHY IT IS IN THE PAYLOAD RATHER THAN ONLY BEING USED
+ * The client has its own copy of the 4 AM rule (my-react-app/src/utils/planDay.js,
+ * to draw the reset without waiting on the API), and two copies of one boundary
+ * drift. Handing it the server's answer — the key it actually used, and when the
+ * next reset lands — lets the page follow the server instead of re-deriving it.
+ */
+const planDayPayload = (now = new Date(), timeZone = 'UTC') => ({
+  todayKey: planDayKey(now, timeZone),
+  resetAt: PLAN_DAY_RESET_LABEL,
+  nextResetInMinutes: minutesToNextReset(now, timeZone),
+  inDeadHours: isInDeadHours(now, timeZone),
+  timeZone: cleanTimeZone(timeZone) || 'UTC',
+});
+
+/**
+ * Validate and reset the streak if the previous day was missed.
+ *
+ * `todayKey` is passed in rather than recomputed, so this watches for the
+ * rollover at exactly the boundary the rest of the request used. It used to build
+ * its own UTC date, which meant the streak was decided against a day the user
+ * could not see, and a page left open across the boundary kept yesterday's streak.
+ */
+const validateStreak = async (metrics, todayKey) => {
   // Check if we crossed into a new day
   if (metrics.lastTrackedDate && metrics.lastTrackedDate !== todayKey) {
     // New day has started - evaluate yesterday's completion
@@ -66,15 +180,22 @@ const validateStreak = async (userId, assessmentId, metrics) => {
     if (metrics.lastCompletedDay === metrics.lastTrackedDate) {
       // Yesterday finished with 100% completion - keep streak
       metrics.streakAwardedToday = false; // Reset for new day
-      await metrics.save();
     } else {
       // Yesterday finished incomplete - reset streak
       metrics.currentStreak = 0;
       metrics.streakAwardedToday = false;
       metrics.lastCompletedDay = null;
-      metrics.lastTrackedDate = todayKey;
-      await metrics.save();
     }
+
+    // ADVANCE THE POINTER — in BOTH branches.
+    //
+    // It used to advance only on the break branch, so a finished day left
+    // `lastTrackedDate` on the old key. `lastTrackedDate` IS the guard that stops
+    // the rollover re-running (see `finalizeIntakeChange`, which relies on the
+    // same pointer), so a kept streak made every subsequent dashboard load decide
+    // the same day again — awarding or revoking against a day long past.
+    metrics.lastTrackedDate = todayKey;
+    await metrics.save();
   }
   
   return metrics.currentStreak;
@@ -96,12 +217,21 @@ const validateStreak = async (userId, assessmentId, metrics) => {
  *   `stats` is null when the user has no metrics row for this assessment, which
  *   is the only case where there is nothing to write.
  */
-const finalizeIntakeChange = async (req, assessmentId) => {
-  const todayKey = getTodayKey();
+const finalizeIntakeChange = async (req, assessmentId, planDay = {}) => {
+  // One clock and one timezone for the whole recompute. Two `new Date()`s a few
+  // lines apart could straddle a window boundary — or the 4 AM reset — and score
+  // the same press two different ways. The caller resolves the day once and hands
+  // it in, so the streak, the records read and the score cannot disagree.
+  const { now = new Date(), timeZone = 'UTC', todayKey = '' } = planDay;
 
   // Update metrics — independent reads run in parallel
   const [todayRecords, metrics, totals, assessmentDoc] = await Promise.all([
-    IntakeRecord.find({ user: req.user._id, assessment: assessmentId, dayKey: todayKey }).select('taken').lean(),
+    // `timeSlot` / `scheduledTime` are the addition to the old `taken`-only
+    // projection: "is this dose missed?" is decided by whether its window has
+    // closed (utils/intakeWindows.js), and the wellness score below depends on it.
+    IntakeRecord.find({ user: req.user._id, assessment: assessmentId, dayKey: todayKey })
+      .select('taken timeSlot scheduledTime supplementName')
+      .lean(),
     DashboardMetrics.findOne({ user: req.user._id, assessment: assessmentId }),
     Promise.all([
       IntakeRecord.countDocuments({ user: req.user._id, assessment: assessmentId }),
@@ -123,11 +253,13 @@ const finalizeIntakeChange = async (req, assessmentId) => {
     return { priorityLifted: false, priorityReflagged: false, stats: null };
   }
 
-  const today = todayKey;
-  const yesterday = new Date(new Date().setDate(new Date().getDate() - 1))
-    .toISOString().split('T')[0];
+  // The window-aware view of today: `missed` is the only figure that costs
+  // points, and `awaiting` is those same rows one moment before they do.
+  const wellnessToday = scoreToday(todayRecords, { now, timeZone });
 
-  // MIDNIGHT CHECK: Evaluate if we crossed into a new day
+  const today = todayKey;
+
+  // RESET CHECK: Evaluate if we crossed into a new plan day
   if (metrics.lastTrackedDate && metrics.lastTrackedDate !== today) {
     // New day has started - check if yesterday was completed
     if (metrics.lastCompletedDay === metrics.lastTrackedDate) {
@@ -259,11 +391,12 @@ const finalizeIntakeChange = async (req, assessmentId) => {
   // Wellness baseline from the already-fetched assessment slice
   const wellnessBaseline = getWellnessBaseline(assessmentDoc);
 
-  metrics.wellnessScore = calculateWellnessScore(
-    wellnessBaseline,
+  metrics.wellnessScore = calculateWellnessScore({
+    baseline: wellnessBaseline,
     overallAdherence,
-    metrics.currentStreak
-  );
+    todayAdherence: wellnessToday.adherence,
+    streak: metrics.currentStreak,
+  });
   await metrics.save();
 
   return {
@@ -278,6 +411,11 @@ const finalizeIntakeChange = async (req, assessmentId) => {
       overallAdherence: metrics.overallAdherence,
       daysStreak: metrics.currentStreak,
       wellnessScore: metrics.wellnessScore,
+      wellnessToday: buildWellnessToday(wellnessToday, {
+        baseline: wellnessBaseline,
+        overallAdherence: metrics.overallAdherence,
+        streak: metrics.currentStreak,
+      }),
     },
   };
 };
@@ -295,6 +433,12 @@ router.get('/', protect, async (req, res) => {
       await User.findByIdAndUpdate(req.user._id, { hasVisitedDashboard: true });
     }
 
+    // One clock, one timezone and one plan day for the whole response — see
+    // finalizeIntakeChange. Everything below filters and scores with these three.
+    const now = new Date();
+    const timeZone = await timezoneFor(req);
+    const todayKey = getTodayKey(timeZone, now);
+
     // Get the latest assessment
     const latestAssessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
       .sort({ createdAt: -1 });
@@ -307,6 +451,7 @@ router.get('/', protect, async (req, res) => {
         priorityBlock: { blocked: false, count: 0 },
         priorityAssessments: [],
         assessment: null,
+        planDay: planDayPayload(now, timeZone),
         todaysSupplements: [],
         stats: {
           wellnessScore: 0,
@@ -319,13 +464,21 @@ router.get('/', protect, async (req, res) => {
             total: 0,
             percentage: 0,
           },
+          wellnessToday: {
+            total: 0,
+            taken: 0,
+            missed: 0,
+            awaiting: 0,
+            decided: 0,
+            adherence: 100,
+            penaltyPoints: 0,
+          },
         },
         insights: null,
       });
     }
 
     // Metrics + today's records are independent — fetch in parallel (Atlas RTT ~0.5s each)
-    const todayKey = getTodayKey();
     let [metrics, todayIntakeRecords] = await Promise.all([
       DashboardMetrics.findOne({ user: req.user._id, assessment: latestAssessment._id }),
       IntakeRecord.find({ user: req.user._id, assessment: latestAssessment._id, dayKey: todayKey }).lean(),
@@ -344,8 +497,10 @@ router.get('/', protect, async (req, res) => {
       });
     }
 
-    // Validate streak on page load - reset if previous day was missed
-    const validatedStreak = await validateStreak(req.user._id, latestAssessment._id, metrics);
+    // Validate streak on page load - reset if previous day was missed.
+    // The day is handed in rather than recomputed, so the rollover is judged
+    // against exactly the day whose records were just read.
+    const validatedStreak = await validateStreak(metrics, todayKey);
 
     // Get today's supplements from assessment recommendations
     const recommendations = latestAssessment.aiResults?.recommendations || [];
@@ -374,6 +529,11 @@ router.get('/', protect, async (req, res) => {
             dosage: rec.dosage || '',
             priority: ['High', 'Medium', 'Low'].includes(rec.priority) ? rec.priority : 'Medium',
             scheduledTime: slot.timeLabel || rec.timing || 'Anytime',
+            // Stored, not just derived: the wellness score needs to know when this
+            // dose's window closes, and re-deriving it from the schedule on every
+            // read is a fuzzy name match per row per request. Rows seeded before
+            // this field existed fall back to parsing `scheduledTime`.
+            timeSlot: slot.key,
             taken: false,
             date: new Date(),
             dayKey: todayKey,
@@ -409,12 +569,18 @@ router.get('/', protect, async (req, res) => {
     const takenToday = todayIntakeRecords.filter(r => r.taken).length;
     const todayAdherence = calculateAdherence(takenToday, totalToday);
 
+    // The window-aware view of today, judged in the user's own timezone. `now`
+    // and `timeZone` come from the top of the handler so the whole response is
+    // scored against one clock.
+    const wellnessToday = scoreToday(todayIntakeRecords, { now, timeZone });
+
     // Update wellness score
-    const wellnessScore = calculateWellnessScore(
-      wellnessBaseline,
-      metrics.overallAdherence,
-      validatedStreak
-    );
+    const wellnessScore = calculateWellnessScore({
+      baseline: wellnessBaseline,
+      overallAdherence: metrics.overallAdherence,
+      todayAdherence: wellnessToday.adherence,
+      streak: validatedStreak,
+    });
 
     // Update metrics if changed
     if (metrics.wellnessScore !== wellnessScore) {
@@ -489,6 +655,7 @@ router.get('/', protect, async (req, res) => {
         createdAt: latestAssessment.createdAt,
         summary: latestAssessment.aiResults?.simplifiedSummary || latestAssessment.aiResults?.summary || '',
       },
+      planDay: planDayPayload(now, timeZone),
       todaysSupplements: todayIntakeRecords.map(rec => {
         const timing = timingMap[rec.supplementName] || rec.scheduledTime || 'Anytime';
         const slot = resolveTimeSlot({ name: rec.supplementName, timing }, scheduleSlotIndex);
@@ -518,6 +685,14 @@ router.get('/', protect, async (req, res) => {
           total: totalToday,
           percentage: todayAdherence,
         },
+        // The sync the score is reading: how many of today's doses are ticked,
+        // how many closed unticked (and are costing points), and how many are
+        // still takeable on time (and are costing nothing yet).
+        wellnessToday: buildWellnessToday(wellnessToday, {
+          baseline: wellnessBaseline,
+          overallAdherence: metrics.overallAdherence,
+          streak: validatedStreak,
+        }),
       },
       insights: currentPhase ? {
         phase: currentPhase.phase,
@@ -556,9 +731,16 @@ router.post('/intake', protect, async (req, res) => {
       return res.status(404).json({ message: 'Intake record not found.' });
     }
 
-    // History is read-only: only today's records can change. This protects
+    // History is read-only: only the running plan day can change. This protects
     // streak integrity and the priority lift/reflag lifecycle from back-dated edits.
-    if (record.dayKey !== getTodayKey()) {
+    //
+    // Gated on the SAME plan day `GET /` served the row under. It used to compute
+    // its own UTC date, so between 00:00 and 04:00 UTC — 8:00 AM in Manila — the
+    // page showed yesterday's doses and then refused the user for ticking one.
+    const now = new Date();
+    const timeZone = await timezoneFor(req);
+    const todayKey = getTodayKey(timeZone, now);
+    if (record.dayKey !== todayKey) {
       return res.status(400).json({ message: 'Only today\u2019s supplements can be updated. Past days are read-only history.' });
     }
 
@@ -566,9 +748,10 @@ router.post('/intake', protect, async (req, res) => {
     record.takenAt = taken ? new Date() : null;
     await record.save();
 
-    const outcome = await finalizeIntakeChange(req, record.assessment);
+    const outcome = await finalizeIntakeChange(req, record.assessment, { now, timeZone, todayKey });
 
     res.json({
+      planDay: planDayPayload(now, timeZone),
       message: 'Intake updated',
       record: {
         id: record._id,
@@ -608,7 +791,12 @@ router.post('/intake/bulk', protect, async (req, res) => {
       return res.status(400).json({ message: 'No valid supplements to update.' });
     }
 
-    const todayKey = getTodayKey();
+    // The SAME plan day the single-record endpoint and `GET /` use — see the note
+    // there. A bulk press gated on a different day than the row it was offered
+    // for is the bug this closes.
+    const now = new Date();
+    const timeZone = await timezoneFor(req);
+    const todayKey = getTodayKey(timeZone, now);
     const records = await IntakeRecord.find({
       _id: { $in: ids },
       user: req.user._id,
@@ -637,9 +825,10 @@ router.post('/intake/bulk', protect, async (req, res) => {
       { $set: { taken, takenAt } }
     );
 
-    const outcome = await finalizeIntakeChange(req, todayRecords[0].assessment);
+    const outcome = await finalizeIntakeChange(req, todayRecords[0].assessment, { now, timeZone, todayKey });
 
     res.json({
+      planDay: planDayPayload(now, timeZone),
       message: taken ? 'Supplements marked as taken' : 'Supplements marked as not taken',
       updated: todayRecords.length,
       skipped: records.length - todayRecords.length,
@@ -681,14 +870,25 @@ router.post('/energy', protect, async (req, res) => {
     }
 
     metrics.energyLevel = energyLevel;
-    
-    // Wellness score is now calculated from baseline + adherence + streak only
+
+    // Wellness score is baseline + adherence + streak only. Today's term still
+    // needs the window-aware split, so energy cannot be allowed to score a day it
+    // knows nothing about.
+    const timeZone = await timezoneFor(req);
+    const now = new Date();
+    const todayRecords = await IntakeRecord.find({
+      user: req.user._id,
+      assessment: latestAssessment._id,
+      dayKey: getTodayKey(timeZone, now),
+    }).select('taken timeSlot scheduledTime').lean();
+    const today = scoreToday(todayRecords, { now, timeZone });
     const wellnessBaseline = getWellnessBaseline(latestAssessment);
-    metrics.wellnessScore = calculateWellnessScore(
-      wellnessBaseline,
-      metrics.overallAdherence,
-      metrics.currentStreak
-    );
+    metrics.wellnessScore = calculateWellnessScore({
+      baseline: wellnessBaseline,
+      overallAdherence: metrics.overallAdherence,
+      todayAdherence: today.adherence,
+      streak: metrics.currentStreak,
+    });
     await metrics.save();
 
     res.json({
@@ -765,7 +965,14 @@ router.get('/day/:dayKey', protect, async (req, res) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey || '')) {
       return res.status(400).json({ message: 'Invalid date. Use YYYY-MM-DD.' });
     }
-    const todayKey = getTodayKey();
+
+    // "Future" means after the RUNNING plan day, not after the UTC date. The
+    // calendar asks for this the moment a day is clicked, and it used to be
+    // handed 400 for the day the user was actually looking at whenever their
+    // clock was behind UTC's.
+    const now = new Date();
+    const timeZone = await timezoneFor(req);
+    const todayKey = getTodayKey(timeZone, now);
     if (dayKey > todayKey) {
       return res.status(400).json({ message: 'Future dates have no records yet.' });
     }
@@ -789,6 +996,8 @@ router.get('/day/:dayKey', protect, async (req, res) => {
 
     res.json({
       dayKey,
+      isToday: dayKey === todayKey,
+      planDay: planDayPayload(now, timeZone),
       records: records.map(rec => ({
         id: rec._id,
         name: rec.supplementName,
@@ -818,7 +1027,12 @@ router.get('/calendar/:year/:month', protect, async (req, res) => {
     // 500 instead of an empty result.
     const yearNum = parseInt(year, 10);
     const monthNum = parseInt(month, 10);
-    const currentYear = new Date().getFullYear();
+    const now = new Date();
+    const timeZone = await timezoneFor(req);
+    // Clamped in the USER's year, not the server's — a user east of UTC is already
+    // on tomorrow's date while the server is still on today's, and refusing their
+    // December because the host is in November would be indefensible.
+    const currentYear = Number(planDayKey(now, timeZone).slice(0, 4));
 
     if (
       isNaN(yearNum) || isNaN(monthNum) ||
@@ -832,17 +1046,25 @@ router.get('/calendar/:year/:month', protect, async (req, res) => {
     const latestAssessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
       .sort({ createdAt: -1 });
 
-    if (!latestAssessment) {
-      return res.json({ completionData: {} });
-    }
+    // Month bounds as plain calendar arithmetic.
+    //
+    // They were `new Date(y, m, 0).toISOString().split('T')[0]`, which converts
+    // local midnight to UTC — so on a host east of Greenwich the last day came back
+    // as the PREVIOUS date and the calendar silently stopped a day early. Both
+    // keys are formatted from numbers, so no zone can move them.
+    const daysInMonth = new Date(Date.UTC(yearNum, monthNum, 0)).getUTCDate();
+    const pad = (n) => String(n).padStart(2, '0');
+    const key = (d) => `${yearNum}-${pad(monthNum)}-${pad(d)}`;
+    const startKey = key(1);
+    const endKey = key(daysInMonth);
 
-    // Get first and last day of the month
-    const firstDay = new Date(yearNum, monthNum - 1, 1);
-    const lastDay = new Date(yearNum, monthNum, 0);
-    
-    // Format as YYYY-MM-DD for comparison
-    const startKey = firstDay.toISOString().split('T')[0];
-    const endKey = lastDay.toISOString().split('T')[0];
+    if (!latestAssessment) {
+      return res.json({
+        completionData: {},
+        month: { year: yearNum, month: monthNum, daysInMonth, startKey, endKey },
+        planDay: planDayPayload(now, timeZone),
+      });
+    }
 
     // Get all intake records for this month (lean + minimal fields)
     const records = await IntakeRecord.find({
@@ -884,7 +1106,14 @@ router.get('/calendar/:year/:month', protect, async (req, res) => {
       };
     });
 
-    res.json({ completionData: result });
+    res.json({
+      completionData: result,
+      // The month's shape and the running day are both returned, so the client
+      // highlights from the server's answer instead of its own calendar cursor —
+      // which is how it used to end up marking a day the server had never heard of.
+      month: { year: yearNum, month: monthNum, daysInMonth, startKey, endKey },
+      planDay: planDayPayload(now, timeZone),
+    });
   } catch (error) {
     console.error('[dashboard GET /calendar/:year/:month]', error.message);
     res.status(500).json({ message: 'Could not load calendar data. Please try again.' });
@@ -900,21 +1129,26 @@ router.get('/weekly-adherence', protect, async (req, res) => {
     const latestAssessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
       .sort({ createdAt: -1 });
 
+    const now = new Date();
+    const timeZone = await timezoneFor(req);
+    const todayKey = getTodayKey(timeZone, now);
+
     if (!latestAssessment) {
-      return res.json({ weeklyDays: [], overallAdherence: 0 });
+      return res.json({ weeklyDays: [], overallAdherence: 0, planDay: planDayPayload(now, timeZone) });
     }
 
-    // Get the current week (last 7 days)
-    const today = new Date();
-    const dayKeys = [];
-    for (let i = 6; i >= 0; i--) {
-      const date = new Date(today);
-      date.setDate(date.getDate() - i);
-      dayKeys.push({
-        dayKey: date.toISOString().split('T')[0],
-        dayName: date.toLocaleDateString('en-US', { weekday: 'short' }),
-      });
-    }
+    // The last 7 PLAN days, oldest first, ending on the running one.
+    //
+    // It used to walk the UTC calendar backwards from `new Date()`, so for anyone
+    // east of UTC the newest column was always yesterday and the day the user was
+    // living — the one with their doses in it — appeared nowhere on the chart.
+    const keys = recentPlanDayKeys(7, now, timeZone);
+    const dayKeys = keys.map((dayKey) => ({
+      dayKey,
+      // The weekday label is read off the key itself, not off a Date, so it cannot
+      // drift a day from the column it names.
+      dayName: weekdayName(dayKey),
+    }));
 
     // Single query for the whole week (avoids 7 sequential round-trips)
     const records = await IntakeRecord.find({
@@ -936,6 +1170,10 @@ router.get('/weekly-adherence', protect, async (req, res) => {
       return {
         day: dayName,
         date: dayKey,
+        // Which column is the running day. The client used to decide this from its
+        // own cursor, which is how a column could be highlighted while the server
+        // was serving a different day.
+        isToday: dayKey === todayKey,
         completed: entry.taken,
         total: entry.total,
         percentage: entry.total > 0 ? Math.round((entry.taken / entry.total) * 100) : 0,
@@ -950,6 +1188,7 @@ router.get('/weekly-adherence', protect, async (req, res) => {
     res.json({
       weeklyDays: weekData,
       overallAdherence: overallAdherence,
+      planDay: planDayPayload(now, timeZone),
     });
   } catch (error) {
     console.error('[dashboard GET /weekly-adherence]', error.message);
@@ -983,7 +1222,9 @@ router.post('/add-supplement', protect, async (req, res) => {
     }
 
     // Check if supplement already exists in today's plan
-    const todayKey = getTodayKey();
+    const now = new Date();
+    const timeZone = await timezoneFor(req);
+    const todayKey = getTodayKey(timeZone, now);
     const existingRecord = await IntakeRecord.findOne({
       user: req.user._id,
       assessment: latestAssessment._id,
@@ -995,7 +1236,14 @@ router.post('/add-supplement', protect, async (req, res) => {
       return res.status(400).json({ message: 'This supplement is already in your plan for today.' });
     }
 
-    // Create new intake record for today
+    // Create new intake record for today.
+    // The slot is resolved the same way the daily-plan seeder resolves it, so a
+    // hand-added dose is judged by the same window as every other row — and so
+    // the score can decide whether it has been missed yet.
+    const addedSlot = resolveTimeSlot(
+      { name, timing: safeTiming },
+      buildScheduleSlotIndex(latestAssessment.aiResults?.dailySchedule || [])
+    );
     const newRecord = await IntakeRecord.create({
       user: req.user._id,
       assessment: latestAssessment._id,
@@ -1003,6 +1251,7 @@ router.post('/add-supplement', protect, async (req, res) => {
       dosage: safeDosage,
       priority: safePriority,
       scheduledTime: safeTiming || 'Anytime',
+      timeSlot: addedSlot.key,
       taken: false,
       date: new Date(),
       dayKey: todayKey,
@@ -1046,11 +1295,14 @@ router.post('/add-supplement', protect, async (req, res) => {
 
       // Recalculate wellness score
       const wellnessBaseline = getWellnessBaseline(latestAssessment);
-      metrics.wellnessScore = calculateWellnessScore(
-        wellnessBaseline,
-        metrics.overallAdherence,
-        metrics.currentStreak
-      );
+      // Named `windowedToday` because `today` in this block is the dayKey string.
+      const windowedToday = scoreToday(todayRecords, { now, timeZone });
+      metrics.wellnessScore = calculateWellnessScore({
+        baseline: wellnessBaseline,
+        overallAdherence: metrics.overallAdherence,
+        todayAdherence: windowedToday.adherence,
+        streak: metrics.currentStreak,
+      });
 
       await metrics.save();
     }
@@ -1092,7 +1344,8 @@ router.post('/remove-supplement', protect, async (req, res) => {
     }
 
     // Remove from today's plan
-    const todayKey = getTodayKey();
+    const timeZone = await timezoneFor(req);
+    const todayKey = getTodayKey(timeZone);
     const result = await IntakeRecord.deleteMany({
       user: req.user._id,
       assessment: latestAssessment._id,
@@ -1119,19 +1372,23 @@ router.post('/remove-supplement', protect, async (req, res) => {
 // @access  Private
 router.get('/my-plan', protect, async (req, res) => {
   try {
+    const now = new Date();
+    const timeZone = await timezoneFor(req);
+
     // Get the latest assessment
     const latestAssessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
       .sort({ createdAt: -1 });
 
     if (!latestAssessment) {
-      return res.json({ 
+      return res.json({
         supplements: [],
         message: 'No assessment found.',
+        planDay: planDayPayload(now, timeZone),
       });
     }
 
     // Get today's supplements
-    const todayKey = getTodayKey();
+    const todayKey = getTodayKey(timeZone, now);
     const todaySupplements = await IntakeRecord.find({
       user: req.user._id,
       assessment: latestAssessment._id,
@@ -1143,6 +1400,7 @@ router.get('/my-plan', protect, async (req, res) => {
     const scheduleSlotIndex = buildScheduleSlotIndex(latestAssessment.aiResults?.dailySchedule || []);
 
     res.json({
+      planDay: planDayPayload(now, timeZone),
       supplements: todaySupplements.map(rec => {
         const slot = resolveTimeSlot({ name: rec.supplementName, timing: rec.scheduledTime }, scheduleSlotIndex);
         return {
@@ -1201,7 +1459,12 @@ router.get('/current-supplements', protect, async (req, res) => {
       return res.json({ hasPlan: false, takingSupplements: false, supplements: [], takenCount: 0 });
     }
 
-    const todayKey = getTodayKey();
+    const now = new Date();
+    const timeZone = await timezoneFor(req);
+    // The RUNNING plan day, so a tick the user just made is visible here. Reading a
+    // UTC day instead made the answer disagree with the dashboard by up to four
+    // hours, and this endpoint's whole job is to describe what they are taking.
+    const todayKey = getTodayKey(timeZone, now);
     const records = await IntakeRecord.find({
       user: req.user._id,
       assessment: latestAssessment._id,

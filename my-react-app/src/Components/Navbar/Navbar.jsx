@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import UserNotifications from '../UserNotifications/UserNotifications';
 import ProfileActionsMenu from '../ProfileActionsMenu/ProfileActionsMenu';
 import ConfirmLogoutModal from '../ConfirmLogoutModal/ConfirmLogoutModal';
@@ -7,8 +7,16 @@ import useAuth from '../../hooks/useAuth';
 import useSubscription from '../../hooks/useSubscription';
 import useScrolledPast from '../../hooks/useScrolledPast';
 import { PLAN_LABELS } from '../../subscription/features';
+import { requestDashboardRefresh } from '../../utils/dashboardRefresh';
 import { signOutCurrentAccount } from '../../api';
 import './Navbar.css';
+
+/**
+ * The signed-in home. Declared once because it is needed twice below — as the
+ * link's destination and as the test for "are we already there?" — and those
+ * two must not be allowed to drift apart.
+ */
+const DASHBOARD_PATH = '/dashboard';
 
 // Product destinations rendered inside the account menu. Module scope so the
 // array identity is stable — rebuilding it each render would hand the menu a
@@ -135,6 +143,44 @@ function Navbar() {
   // component knowing anything about it.
   const scrolled = useScrolledPast(10);
 
+  /* The brand mark is the app's "go to my dashboard" control, and it has to
+     answer when pressed FROM the dashboard too — which is exactly the moment a
+     plain <Link> does nothing, because React Router will not re-navigate to the
+     route already being displayed.
+
+     So the two cases are split here rather than papered over with a reload:
+
+       elsewhere  → return early and let the <Link> navigate. App.jsx's
+                    ScrollToTop scrolls to the top on the route change and
+                    DashboardPage fetches on mount, so there is nothing left to
+                    coordinate and no chance of a double fetch.
+       /dashboard → suppress the navigation and do the two things the user
+                    actually asked for, in place: scroll to the top and refetch.
+                    No remount, and (see DashboardPage) no spinner.
+
+     `preventDefault` rather than `navigate(path)`: navigating to the current
+     path is a no-op at best, and at worst pushes a duplicate history entry, so
+     the Back button would need two presses to leave the dashboard.
+
+     ⚠ THE ROUTE IS READ FROM `window.location`, NOT FROM `useLocation()`.
+     React Router's navigate() updates the address bar synchronously, but the
+     `useLocation()` value in this closure only catches up when React
+     re-renders — and the bar is rendered by the page, so right after a
+     navigation this component can still be holding the PREVIOUS route. A
+     click landing in that window read "/dashboard" while the user was already
+     on /history, took the refresh branch, and swallowed the navigation: the
+     brand silently did nothing. `window.location` is already current at that
+     instant, so it cannot be stale. */
+  const onBrandActivate = (event) => {
+    if (window.location.pathname !== DASHBOARD_PATH) return;
+    event.preventDefault();
+    // Instant, not smooth: ScrollToTop already scrolls instantly on a route
+    // change, so this keeps the two paths identical, and it matches the
+    // reduced-motion contract — a deliberate jump is never the wrong answer.
+    window.scrollTo(0, 0);
+    requestDashboardRefresh();
+  };
+
   const confirmSignOut = async () => {
     setSignOutPending(false);
     // Revoke this account's token server-side and forget it here. This is the
@@ -147,8 +193,28 @@ function Navbar() {
 
   return (
     <nav className={`navbar${scrolled ? ' navbar--scrolled' : ''}`}>
-      <div className="navbar-left">
-        <div className="navbar-logo-box">
+      {/* The logo tile AND the wordmark are one control, not two. They used to
+          be a bare <div> beside a separate <NavLink>, which left the tile
+          completely dead to clicks and gave keyboard users two stops for one
+          destination. Wrapping both in the single link makes the whole brand
+          area a target and keeps one tab stop.
+
+          <Link> rather than <NavLink>: this link is never styled by route, and
+          NavLink would append an `active` class to .navbar-left that no rule
+          matches — dead markup on the one route it fires on. */}
+      <Link
+        to={token ? DASHBOARD_PATH : '/'}
+        className="navbar-left"
+        onClick={onBrandActivate}
+        /* Names the destination, which the mark and the wordmark together do not
+            convey: "SuppliWise" reads as the app name, not as a place to go. An
+            aria-label rather than an extra visually-hidden span, so the bar gains
+            no new box to lay out - and it keeps the visible wordmark inside the
+            accessible name, which is what WCAG 2.5.3 (Label in Name) requires of
+            a control whose label is visible text. */
+        aria-label={token ? 'SuppliWise, go to dashboard' : 'SuppliWise home'}
+      >
+        <span className="navbar-logo-box">
           <svg width="30" height="30" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
             <defs>
               <linearGradient id="nav-logo-grad" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse">
@@ -162,9 +228,9 @@ function Navbar() {
               <line x1="50" y1="36" x2="50" y2="64" stroke="white" strokeWidth="6"/>
             </g>
           </svg>
-        </div>
-        <NavLink to={token ? "/dashboard" : "/"} className="navbar-brand">SuppliWise</NavLink>
-      </div>
+        </span>
+        <span className="navbar-brand">SuppliWise</span>
+      </Link>
       <div className="navbar-right">
         {showSession ? (
           <>

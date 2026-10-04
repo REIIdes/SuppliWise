@@ -19,7 +19,7 @@
 const { normalizePlanId, subState, PLAN_LABELS } = require('./entitlements');
 const {
   findEntry, formatAmount, convertFromPhp, resolvePurchasable,
-  teamTotal, TEAM_PLAN, CURRENCIES, DEFAULT_CURRENCY,
+  CURRENCIES, DEFAULT_CURRENCY,
 } = require('./planCatalogue');
 
 /** The individual paid tiers. The Free plan is already the default. */
@@ -99,46 +99,81 @@ function parseProofImage(value) {
 }
 
 /**
- * Normalise what is being requested.
+ * Validate the proof field, which is OPTIONAL when the deployment has nowhere to
+ * send a payment.
  *
- * Team is handled the same way the purchase endpoint handles it: `team` is not a
- * tier, it is a seat count on top of `TEAM_PLAN.tier`, so the stored record
- * keeps `{ plan: <tier>, isTeam: true, seats: N }` and approving it is the same
- * `setPaid` call an individual plan uses.
+ * This is the fix for the checkout dead end. The old contract was "a receipt is
+ * required", unconditionally — and it was enforced in two places, both of which
+ * had to be believed at once:
+ *
+ *   the UI  marked "Proof of payment **required**" and left the submit button
+ *           disabled until an image was attached, and
+ *   the API  called parseProofImage(), which returned 400 for an absent proof.
+ *
+ * With no payment destination configured (the state this repository ships in),
+ * that pair produced a flow nobody could finish: step 1 says "there is nothing to
+ * transfer to, send an administrator a request", step 2 makes a receipt
+ * mandatory, and the member is blocked from sending the request the product just
+ * asked for. Both branches were individually reasonable; together they were
+ * unusable.
+ *
+ * The rule now depends on whether a transfer is even possible (see
+ * paymentInstructions.receiptRequired, which owns that decision):
+ *
+ *   receipt required  → an absent proof is still a 400, exactly as before.
+ *   receipt optional  → an absent proof is accepted, and `provided: false` says
+ *                       so, so the admin queue can tell "no receipt because
+ *                       there was nowhere to pay" apart from "receipt failed to
+ *                       upload".
+ *
+ * A PRESENT proof is validated identically in both modes. Loosening what is
+ * accepted must not loosen how it is checked: a hand-built body that claims no
+ * receipt because there was nowhere to pay cannot smuggle in a 40 MB string, a
+ * `text/html` payload or a truncated base64 blob under the optional path.
+ *
+ * @param {unknown} value     raw string from the request body
+ * @param {object}  [opts]
+ * @param {boolean} [opts.optional] accept an absent proof (no destination)
+ * @returns {{ok: true, dataUrl: string, mime: string, bytes: number, provided: boolean}
+ *          |{ok: false, status: number, message: string}}
+ */
+function parseProofUpload(value, { optional = false } = {}) {
+  const isBlank = value === undefined || value === null
+    || (typeof value === 'string' && value.replace(/\s+/g, '').length === 0);
+
+  if (isBlank) {
+    if (!optional) return parseProofImage(value);
+    return { ok: true, dataUrl: '', mime: '', bytes: 0, provided: false };
+  }
+
+  const parsed = parseProofImage(value);
+  // Tag a supplied receipt so callers never have to infer "was one attached?"
+  // from the emptiness of a string.
+  return parsed.ok ? { ...parsed, provided: true } : parsed;
+}
+
+/**
+ * Normalise what is being requested.
  *
  * Aliases ("deluxe", "premium", "ultimate") resolve to their canonical ids, so
  * the queue can never contain a plan id the subscription engine does not know.
  * `free` is rejected with its own message: it is a real plan, just not a
  * requestable one, and "Choose a paid plan" beats "Invalid plan".
  *
- * @returns {{ok: true, plan: string, isTeam: boolean, seats: number}
+ * There is no seat count here and no `isTeam`: a request is one account on one
+ * plan, and `plan: 'team'` now fails as the unknown id it is.
+ *
+ * @returns {{ok: true, plan: string}
  *          |{ok: false, status: number, message: string}}
  */
-function resolveRequestedPlan(raw, rawSeats) {
+function resolveRequestedPlan(raw) {
   const purchasable = resolvePurchasable(raw);
   if (!purchasable) return { ok: false, status: 400, message: 'Choose a valid plan.' };
-  const { entry, isTeam, tier } = purchasable;
-  if (isTeam) {
-    // parseSeatCount refuses rather than clamps, exactly as the purchase endpoint
-    // does — normalizeSeats would have already turned 9999 into 500 and the
-    // bounds check under it could never fire. Team starts at 2, so quietly
-    // upgrading a "1 seat" order to the minimum would bill for something the
-    // user did not ask for.
-    const seats = subState.parseSeatCount(rawSeats, {
-      min: TEAM_PLAN.minSeats,
-      max: TEAM_PLAN.maxSeats,
-    });
-    if (seats === null) {
-      return { ok: false, status: 400, message: `Choose between ${TEAM_PLAN.minSeats} and ${TEAM_PLAN.maxSeats} seats.` };
-    }
-    return { ok: true, plan: tier, isTeam: true, seats };
-  }
+  const { tier } = purchasable;
   if (!REQUESTABLE_PLANS.includes(tier)) {
     return { ok: false, status: 400, message: 'The Free plan needs no purchase — it is already yours.' };
   }
-  // Seats are ignored on an individual plan rather than billed, which is exactly
-  // what the purchase endpoint does, so both paths agree.
-  return { ok: true, plan: tier, isTeam: false, seats: 1 };
+  return { ok: true, plan: tier };
 }
 
 /** Clamp the requested term to whole months inside [1, 12]. */
@@ -151,15 +186,15 @@ function clampMonths(raw) {
 /**
  * Price a request from the catalogue.
  *
- * `months > 1` is billed up front at the yearly price, and Team is priced per
- * seat — both exactly as POST /subscription/purchase computes them, so the
- * figure an admin checks against a bank transfer is the figure the receipt
- * says, and neither is ever read from the request body.
+ * `months > 1` is billed up front at the yearly price — exactly as
+ * POST /subscription/purchase computes it, so the figure an admin checks against
+ * a bank transfer is the figure the receipt says, and neither is ever read from
+ * the request body.
  *
  * Returns `null` for an unknown plan, so a caller that skipped validation cannot
  * quietly store a ₱0 request: the route turns that into a 400.
  */
-function priceRequest(plan, months, currencyCode, { isTeam = false, seats = 1 } = {}) {
+function priceRequest(plan, months, currencyCode) {
   const code = CURRENCIES[currencyCode] ? currencyCode : DEFAULT_CURRENCY;
   const entry = findEntry(plan);
   if (!entry) return null;
@@ -167,22 +202,14 @@ function priceRequest(plan, months, currencyCode, { isTeam = false, seats = 1 } 
   // request is the one thing that must never reach the admin queue, where it
   // would sit looking like a real purchase that happens to cost nothing, so it
   // is refused here rather than relying on every caller having validated first.
-  if (!isTeam && !(entry.monthly > 0)) return null;
-  const unitPhp = isTeam
-    ? (months > 1 ? TEAM_PLAN.perSeatYearly : TEAM_PLAN.perSeatMonthly)
-    : (months > 1 ? entry.yearly : entry.monthly);
-  const amountPhp = isTeam ? teamTotal(unitPhp, seats) : unitPhp;
-  // `perSeat*` is Team-only, and both halves say so. Setting `perSeatPhp` on an
-  // individual request while leaving `perSeatFormatted` null made the queue's
-  // "₱3,495 (₱699 × 5)" line read "₱699 × 1" on a plan with no seats at all.
+  if (!(entry.monthly > 0)) return null;
+  const amountPhp = months > 1 ? entry.yearly : entry.monthly;
   return {
     currency: code,
     symbol: CURRENCIES[code].symbol,
-    perSeatPhp: isTeam ? unitPhp : null,
     amountPhp,
     amount: convertFromPhp(amountPhp, code),
     formattedAmount: formatAmount(amountPhp, code),
-    perSeatFormatted: isTeam ? formatAmount(unitPhp, code) : null,
   };
 }
 
@@ -217,30 +244,24 @@ function toSummary(doc) {
 
 /** Projection for list queries — the same reason as toSummary. */
 const LIST_FIELDS = [
-  '_id', 'user', 'plan', 'months', 'isTeam', 'seats', 'currency', 'symbol',
-  'amountPhp', 'amount', 'perSeatPhp', 'perSeatFormatted',
-  'formattedAmount', 'reference', 'note', 'proofMime', 'proofBytes', 'status',
-  'review', 'grantedPlan', 'grantedDays', 'createdAt', 'updatedAt',
+  '_id', 'user', 'plan', 'months', 'currency', 'symbol',
+  'amountPhp', 'amount', 'formattedAmount',
+  'reference', 'note', 'proofMime', 'proofBytes', 'status',
+  'paymentRequired', 'review', 'grantedPlan', 'grantedDays', 'createdAt', 'updatedAt',
 ].join(' ');
 
 /**
  * Human label for what was requested.
  *
- * A Team request stores the TIER its seats grant (so approving it is a plain
- * `setPaid` the same as any individual plan), which means the label has to be
- * rebuilt from `isTeam` + `seats` — otherwise the queue would label a 5-seat
- * Team purchase "PREMIUM" and it would look like a single-seat upgrade.
- *
  * Lives here, not in a route, because the admin queue, the member's own request
  * list, the audit trail and the bell notification all print it. One definition
  * means those four can never disagree about what a request was for.
+ *
+ * It used to rebuild "5× Team" from `isTeam` + `seats`; with Team gone this is
+ * just the tier's name, which is all a request can be.
  */
 function planLabelFor(row) {
   const record = row && typeof row === 'object' ? row : { plan: row };
-  if (record.isTeam === true) {
-    const seats = Number(record.seats) > 1 ? `${Math.round(Number(record.seats))}× ` : '';
-    return `${seats}${TEAM_PLAN.label}`;
-  }
   return PLAN_LABELS[record.plan] || String(record.plan || '—');
 }
 
@@ -265,6 +286,7 @@ module.exports = {
   ALLOWED_PROOF_MIME,
   LIST_FIELDS,
   parseProofImage,
+  parseProofUpload,
   resolveRequestedPlan,
   clampMonths,
   priceRequest,

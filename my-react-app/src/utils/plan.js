@@ -87,10 +87,6 @@ function fromSnapshot(snap) {
   const active = !expired && snap.subscriptionActive === true && plan !== 'free';
   const permanent = active && snap.subscriptionPermanent === true;
   const daysRemaining = permanent ? null : (Number.isFinite(snap.daysRemaining) ? snap.daysRemaining : null);
-  // Seats: 1 for an individual plan, N for a Team subscription (the same tier,
-  // shared). Never below 1 — a zero here would read as "no seats" and break the
-  // Team band's own labelling.
-  const seats = active ? Math.max(1, Number(snap.subscriptionSeats) || 1) : 1;
   return {
     active,
     plan,
@@ -102,8 +98,6 @@ function fromSnapshot(snap) {
     permanent,
     daysRemaining,
     remainingMs: Number.isFinite(snap.remainingMs) ? snap.remainingMs : null,
-    seats,
-    isTeam: active && seats > 1,
     // 'PAID' | 'ADMIN' | 'FREE' — where the access in force came from.
     source: snap.subscriptionSource || (active ? 'payment' : 'free'),
     // The two layers, when the server sends them: what the user paid for and
@@ -136,7 +130,6 @@ export function planFromUser(user) {
   const active = plan !== 'free';
   const end = user?.subscriptionExpiresAt || null;
   const remainingMs = active && !permanent && end ? Math.max(0, new Date(end).getTime() - Date.now()) : null;
-  const seats = active ? Math.max(1, Number(user?.subscriptionSeats) || 1) : 1;
   return {
     active,
     plan,
@@ -148,8 +141,6 @@ export function planFromUser(user) {
     permanent,
     daysRemaining: active ? daysLeftFrom(end, nowMs()) : null,
     remainingMs,
-    seats,
-    isTeam: active && seats > 1,
     source: user?.subscriptionSource || (active ? 'payment' : 'free'),
     layers: null,
     version: null,
@@ -196,12 +187,10 @@ export function applyPlanToCache(fresh) {
     subscriptionSource: fresh?.subscriptionSource
       ?? (snap ? snap.subscriptionSource : cached.subscriptionSource)
       ?? null,
-    // Seats ride along in the raw fields too, so a page rendered from the
-    // CACHE (before its first network reply) still knows whether this is a Team
-    // subscription rather than guessing from a plan id.
-    subscriptionSeats: fresh?.subscriptionSeats
-      ?? (snap ? snap.subscriptionSeats : cached.subscriptionSeats)
-      ?? null,
+    // No seat count is cached any more. It was carried here so a page rendered
+    // from the cache could still tell a Team subscription from an individual one;
+    // with the plan gone there is nothing to tell apart, and keeping the key would
+    // let a stale cached value survive a server that no longer sends one.
     subscriptionUpdatedAt: fresh?.subscriptionUpdatedAt ?? cached.subscriptionUpdatedAt ?? null,
     subscription: nextSnap ?? null,
   };

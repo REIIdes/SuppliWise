@@ -71,6 +71,20 @@ async function makeUser(label) {
 async function makeAdminToken() {
   const admin = await AdminAccount.findOne({ enabled: true }).lean();
   assert.ok(admin, 'an enabled admin account must exist');
+
+  // Stamp `lastActivityAt` the way routes/auth.js does on a real admin login.
+  //
+  // `protect` runs an idle check against this stamp BEFORE anything else, and
+  // the heartbeat that would refresh it sits after that check — so an account
+  // that has not been signed into through the UI is rejected as idle no matter
+  // how fresh its token is. That is correct behaviour for the product (an admin
+  // who walked away must lose their session) and wrong for this test, which
+  // mints its own token and is therefore claiming a session that began just now.
+  // Without this, the run passes or fails depending on whether a human happened
+  // to open the admin dashboard recently — a 401 in section 6 has nothing to do
+  // with what this file is actually checking.
+  await AdminAccount.updateOne({ _id: admin._id }, { $set: { lastActivityAt: new Date() } });
+
   return jwt.sign(
     { id: String(admin._id), adminId: String(admin._id), role: 'admin' },
     process.env.JWT_SECRET,
@@ -207,6 +221,41 @@ async function makeAdminToken() {
   check('status is now pending (waiting on member)', r.data.thread.status === 'pending');
   r = await call(alice.token, '/support-chat');
   check('unreadCount back to 0 once read', r.data.unreadCount === 0);
+
+  // ── 8b. The member is shown the CHANNEL, never the operator ─────────────
+  // An admin reply is attributed to the alias the operator signed in with
+  // (`AdminDevs`, `AdminJoma`, …), which is an internal identity taken from
+  // server/.env. The member router substitutes a label for it on the way out,
+  // because a member asking about their billing is entitled to the support
+  // channel and not to which named person is holding it. The alias must still
+  // be on the document — the console needs it — so these assertions are about
+  // what CROSSES THE WIRE, and the next block checks the console still has it.
+  const SUPPORT_LABEL = 'Suppliwise Support';
+  r = await call(alice.token, `/support-chat/${threadId}`);
+  const adminReplies = (r.data.messages || []).filter((m) => m.author === 'admin');
+  check('the member has the admin reply to label', adminReplies.length === 1);
+  check(
+    'the member sees a support label, not the admin alias',
+    adminReplies[0].authorName === SUPPORT_LABEL,
+  );
+  check(
+    'and no message in the transcript carries an admin alias',
+    (r.data.messages || []).every(
+      (m) => m.author !== 'admin' || m.authorName === SUPPORT_LABEL
+    )
+  );
+  // The list endpoint is the other half of the payload — redacting only the
+  // transcript would still hand over the identity through the queue.
+  r = await call(alice.token, '/support-chat');
+  check(
+    'the member list never carries an assignee or a resolver',
+    (r.data.threads || []).every(
+      (t) => !t.assignedTo && !(t.resolved && t.resolved.by)
+    )
+  );
+  // …and the member still gets everything the UI actually renders, so this is
+  // a redaction rather than a field removal.
+  check('the resolution timestamp still reaches the member', r.data.threads.length > 0);
   await new Promise((res) => setTimeout(res, 400));
   const memberBell = await UserNotification.findOne({ user: alice.user._id, type: 'info' });
   check('member was notified of the reply', !!memberBell);
@@ -220,6 +269,18 @@ async function makeAdminToken() {
   r = await call(adminToken, `/admin/chats/${threadId}`);
   check('reading as admin zeroed unreadByAdmin', r.data.thread.unreadByAdmin === 0);
   check('three messages in transcript', r.data.messages.length === 3);
+
+  // The other half of the redaction: the CONSOLE must be unaffected, or the fix
+  // would just have cost the operators the ability to see who is handling what.
+  const consoleAdminReply = (r.data.messages || []).find((m) => m.author === 'admin');
+  check(
+    'the console still shows the real alias on an admin reply',
+    !!consoleAdminReply && consoleAdminReply.authorName !== SUPPORT_LABEL
+  );
+  check(
+    'and that alias is the one the operator actually signed in with',
+    !!consoleAdminReply && consoleAdminReply.authorName.length > 0
+  );
 
   // ── 10. Resolve is admin-only, and freezes the thread for both sides ────
   console.log('\n10. resolve is admin-only, and locks the thread');
@@ -244,6 +305,11 @@ async function makeAdminToken() {
   r = await call(alice.token, `/support-chat/${threadId}`);
   check('the refused sends left no messages behind', r.data.messages.length === 3);
   check('and the thread is still resolved', r.data.thread.status === 'resolved');
+  // The member is told WHEN it was closed, never WHO closed it — the UI dates
+  // the resolution but has no use for the resolver, so `by` stays empty here
+  // while the console (asserted above) keeps the alias.
+  check('the member sees the resolution date', !!r.data.thread.resolved.at);
+  check('but not the admin who resolved it', r.data.thread.resolved.by === '');
 
   // ── 11. Admin reopen is the only way back in ────────────────────────────
   console.log('\n11. admin reopen unfreezes the thread');

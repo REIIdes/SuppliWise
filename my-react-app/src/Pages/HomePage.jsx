@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
-import { PLAN_CARD_ORDER, PLAN_META, TEAM_META } from '../subscription/catalogue';
+import { PLAN_CARD_ORDER, PLAN_META } from '../subscription/catalogue';
 import './HomePage.css';
 
 function HomePage() {
@@ -191,9 +191,12 @@ function HomePage() {
               <path d="M5 12h14M13 6l6 6-6 6" />
             </svg>
           </button>
+          {/* Team was a per-seat plan on top of Premium, so "every paid plan includes Team
+              seat options" was never true of the pricing page. There are four plans
+              and the copy says so. */}
           <p className="plans-cta-note">
-            Prices are shown in your local currency, and every paid plan includes
-            {' '}{TEAM_META.name} seat options for clinics and practices.
+            Prices are shown in your local currency. A purchase is 30 days and never
+            renews on its own.
           </p>
         </div>
       </section>

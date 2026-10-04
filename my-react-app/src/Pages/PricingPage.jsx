@@ -4,7 +4,6 @@ import Navbar from '../Components/Navbar/Navbar';
 import {
   getPlanCatalogue,
   purchasePlan,
-  quotePlan,
   submitPlanRequest,
   getMyPlanRequests,
   downgradeToFree,
@@ -17,7 +16,6 @@ import { PLAN_RANK } from '../subscription/features';
 import {
   PLAN_CARD_ORDER,
   PLAN_META,
-  TEAM_META,
   buildInfoColumns,
   planDisplayName,
   requestedCurrency,
@@ -35,7 +33,6 @@ import {
   CANCEL_MODE_IMMEDIATE,
 } from '../subscription/cancelSheetActions';
 import { buildProofCopy } from '../subscription/paymentCopy';
-import { PLAN_LABELS } from '../subscription/features';
 import { daysLeftFrom } from '../utils/plan';
 // ── Icons (inline SVG, so they render identically on every platform) ───────
 import './PricingPage.css';
@@ -284,12 +281,7 @@ export default function PricingPage() {
   const [currencyChoice, setCurrencyChoice] = useState(() =>
     requestedCurrency(typeof window === 'undefined' ? '' : window.location.search),
   );
-  // { planId, months, seats, step: 'summary' | 'proof' }
-  // Team seat count for the checkout sheet. Kept outside `checkout` so changing
-  // it re-renders the sheet's total without re-opening it, and so the choice
-  // survives closing and re-opening the sheet.
   const [checkout, setCheckout] = useState(null);
-  const [seats, setSeats] = useState(TEAM_META.minSeats);
   const [busyPlan, setBusyPlan] = useState(null);
   // Proof-of-payment form state. Reset every time the sheet opens, so a failed
   // attempt never leaves the previous receipt in the box.
@@ -430,13 +422,9 @@ export default function PricingPage() {
       return { ...entry.pricing, ready: true };
     },
     [catalogue],
-    // ── Choosing a plan ─────────────────────────────────────────────────────
-    // `isTeam` opens the same checkout as any other plan, with a seat count — Team
-    // is a real purchasable plan (Premium entitlements across N seats), not a
-    // "contact us" band.
   );
   const choosePlan = useCallback(
-    (planId, { isTeam = false } = {}) => {
+    (planId) => {
       if (planId === 'free') {
         navigate(isSignedIn ? '/dashboard' : '/signup');
         return;
@@ -449,20 +437,13 @@ export default function PricingPage() {
         // silently dropped and the user would land on the dashboard instead.
         navigate('/login', { state: { redirectTo: '/pricing' } });
         return;
-      } // Start a Team checkout at whatever the account already has, so renewing
-      // does not silently drop a 10-seat practice back to the minimum.
-      const wanted = isTeam
-        ? Math.max(
-            TEAM_META.minSeats,
-            Math.min(TEAM_META.maxSeats, live.seats || TEAM_META.minSeats),
-          )
-        : 1;
+      }
       // Always start on the summary step. Where it goes from there depends on the
       // deployment: with self-serve billing on it can confirm instantly, and the
       // proof-of-payment form is one click away for anyone who paid by transfer.
-      // With it off, the proof form IS the route — that is the whole point of the
+      // With it off, the proof form IS the route - that is the whole point of the
       // sheet existing.
-      if (isTeam) setSeats(wanted);
+      //
       // Void any read still in flight, so an image cannot land in the NEXT plan's
       // sheet after the member has moved on. Bumping the ticket is what does that,
       // and a ref is stable, so choosePlan's identity does not change per render.
@@ -473,16 +454,10 @@ export default function PricingPage() {
       setDragOver(false);
       setReference('');
       setRequestNote('');
-      // `seats` is deliberately NOT stored on `checkout`. `checkout` is frozen for
-      // the life of the sheet, so a seat count kept there would be the value from
-      // the moment the sheet opened — a second, stale copy that a purchase could
-      // read by mistake and charge the wrong amount for. The single source of
-      // truth is the `seats` state above, which the stepper writes and the
-      // handlers read.
       setMyRequests([]);
       setCheckout({ planId, months: yearly ? 12 : 1, step: 'summary' });
     },
-    [isSignedIn, live.seats, navigate, yearly],
+    [isSignedIn, navigate, yearly],
   );
   const closeCheckout = useCallback(() => {
     setCheckout(null);
@@ -638,30 +613,23 @@ export default function PricingPage() {
     // disabled while busy, but that is UI politeness — this is the rule.
     if (!checkout || !catalogue?.selfServe) return;
     if (busyPlan) return;
-    const { planId, months } = checkout; // The seat count MUST come from the live `seats` state, not from
-    // `checkout.seats`. `checkout` is frozen when the sheet opens, while the
-    // stepper writes to `seats` — so reading it from `checkout` bought the
-    // opening count: the sheet showed "4 seats · ₱2,796", the confirm button sent
-    // 2, and the receipt said ₱1,398. The visitor agreed to one price and was
-    // charged another, which is the single worst thing a checkout can do.
-    const orderSeats = checkout.planId === TEAM_META.id ? seats : null;
+    const { planId, months } = checkout;
     setBusyPlan(planId);
     setSheetError('');
     try {
       const data = await purchasePlan(planId, months, {
         currency: currencyChoice,
-        seats: orderSeats,
-      }); // Publish the fresh server snapshot into the shared store FIRST, so the
+      });
+      // Publish the fresh server snapshot into the shared store FIRST, so the
       // whole app unlocks before this page even closes its sheet. Entitlement
       // changes need no refresh, no re-login.
       publishSubscription(data.subscription);
       setCheckout(null);
       const charged = data?.receipt?.formatted;
-      const seatNote = data?.receipt?.seats > 1 ? ` for ${data.receipt.seats} seats` : '';
       showToast(
         'ok',
         charged
-          ? `${data.message || `You are now on ${planDisplayName(planId)}.`} Charged ${charged}${seatNote}.`
+          ? `${data.message || `You are now on ${planDisplayName(planId)}.`} Charged ${charged}.`
           : data.message || `You are now on ${planDisplayName(planId)}.`,
       );
     } catch (error) {
@@ -669,7 +637,7 @@ export default function PricingPage() {
     } finally {
       setBusyPlan(null);
     }
-  }, [checkout, catalogue, showToast, busyPlan, currencyChoice, seats]); // ── Proof-of-payment attach ─────────────────────────────────────────────
+  }, [checkout, catalogue, showToast, busyPlan, currencyChoice]);
   //
   // One entry point for BOTH ways of choosing a receipt — the file picker and
   // drag-and-drop — so they cannot diverge in validation, in the size cap, or in
@@ -732,17 +700,13 @@ export default function PricingPage() {
       setSheetError('Attach a photo or screenshot of your payment to continue.');
       return;
     }
-    const { planId, months } = checkout; // Live seat count, not the frozen one on `checkout` — see confirmPurchase. A
-    // request that names the wrong seat count is one an admin approves for the
-    // wrong amount.
-    const orderSeats = planId === TEAM_META.id ? seats : null;
+    const { planId, months } = checkout;
     setBusyPlan(planId);
     setSheetError('');
     try {
       const data = await submitPlanRequest({
         plan: planId,
         months,
-        seats: orderSeats,
         currency: currencyChoice,
         reference,
         note: requestNote,
@@ -771,8 +735,6 @@ export default function PricingPage() {
     currencyChoice,
     showToast,
     clearProof,
-    seats,
-    // ── Derived view models ─────────────────────────────────────────────────
     // The card's bullets and the "Everything in X" preamble are read from the
     // SERVER, which derives them from the entitlement gates themselves. This page
     // used to carry its own copy of both, which is how the pricing page ended up
@@ -789,6 +751,17 @@ export default function PricingPage() {
         const isCurrent = planId === currentPlanId;
         const isUpgrade = (PLAN_RANK[planId] ?? 0) > currentRank;
         const isDowngrade = (PLAN_RANK[planId] ?? 0) < currentRank;
+        // Owning the plan you are buying again is a RENEWAL, not a dead end.
+        //
+        // This card used to be disabled outright while it was the current plan, so
+        // the one action a paying member wants most — extend before the days run
+        // out — was the only button on the page they could not press. It was
+        // styled as "your current plan", which reads as "nothing to do here", and
+        // the renewal path was reachable only from the billing screen.
+        //
+        // Free is exempt: it is the CANCEL button, and it opens the cancel sheet
+        // rather than a checkout, so it must keep its existing behaviour.
+        const canRenew = isCurrent && planId !== 'free';
         const period = yearly ? '/ year' : '/ month';
         const entry = catalogue?.plans?.find((p) => p.id === planId) || null; // The tier this card builds on, named by the server so the name can never
         // be a stale local string. Falls back to the local map only before the
@@ -815,47 +788,22 @@ export default function PricingPage() {
           features: entry?.features || null,
           featuresReady: !!entry,
           limits: entry?.limits || [],
+          canRenew,
         };
       }),
     [currentPlanId, currentRank, pricingFor, yearly, catalogue],
-    // The Team band is a separate object on the payload, not an entry in
-    // `plans`, so it does not go through `pricingFor`. It used to be read as
-    // `catalogue?.team?.pricing || null` and then dereferenced unguarded
-    // (`teamPricing.formatted.yearly`) a few lines below, while the section's
-    // own guard only checked that `catalogue` existed. So any response without a
-    // fully-formed `team.pricing` — an older server, a partial payload, a shape
-    // change — threw a TypeError and took the whole page down to a blank
-    // screen. Resolve it the same way as a plan: a neutral placeholder that says
-    // "—" rather than a made-up number or a crash.
   );
-  const teamPricing = useMemo(() => {
-    const entry = catalogue?.team?.pricing;
-    if (!entry?.formatted) {
-      return {
-        monthly: null,
-        yearly: null,
-        monthlyEquivalent: null,
-        savedPct: 0,
-        formatted: { monthly: '—', yearly: '—', monthlyEquivalent: '—' },
-        ready: false,
-      };
-    }
-    return { ...entry, ready: true };
-  }, [catalogue]); // The band's bullets and the info columns both quote server-owned facts, so
-  // both are built from the catalogue rather than from a local constant. The
-  // period length is passed in too: the column says "30 days" because the server
-  // says STANDARD_PERIOD_DAYS is 30, not because 30 was typed into a sentence.
-  const teamFeatures = catalogue?.team?.features || null;
+  // The info columns quote server-owned facts, so they are built from the
+  // catalogue rather than from a local constant. The period length is passed in
+  // too: the column says "30 days" because the server says
+  // STANDARD_PERIOD_DAYS is 30, not because 30 was typed into a sentence.
   const infoColumns = useMemo(
     () => buildInfoColumns(catalogue?.plans || [], catalogue?.standardPeriodDays),
     [catalogue],
   );
   const liveDays = live.permanent ? null : daysLeftFrom(live.end);
   const currentMeta = PLAN_META[currentPlanId];
-  // A Team subscription is the Premium tier with more than one seat, so the
-  // account is a Team customer exactly when its seat count says so.
   const activeCurrency = catalogue?.currency || 'PHP';
-  const liveIsTeam = liveActive && Number(live.seats) > 1;
   // The note under the plan dock: which currency is being charged, and why.
   // It names the currency AND the reason it was chosen, so the summary sheet
   // prints it as-is — an extra "Charged in PHP." prefix in front of it would
@@ -986,7 +934,6 @@ export default function PricingPage() {
                   </div>
                   <p className="pricing-current__period-note">
                     <strong>{periodMeter.left}</strong> of {periodMeter.total} days left
-                    {liveIsTeam ? ` · ${live.seats} seats` : ''}
                   </p>
                 </div>
               )}
@@ -1003,7 +950,7 @@ export default function PricingPage() {
         {/* ── Plan grid ────────────────────────────────────────────────── */}
         {/*          The title and the two controls share one sticky dock, so switching          Monthly/Yearly never means scrolling back up to see the effect. The caption          sits below the dock, outside it, because it is reference text and does not          need to follow the member down the page.         */}
         <div className="pricing-bar">
-          <h2 className="pricing-bar__title">Individual plans</h2>
+          <h2 className="pricing-bar__title">Plans</h2>
           <div className="pricing-bar__controls">
             <CurrencyPicker
               currencies={catalogue?.currencies || []}
@@ -1072,10 +1019,15 @@ export default function PricingPage() {
                 features,
                 featuresReady,
                 limits,
+                canRenew,
               }) => {
                 const busy = busyPlan === planId;
+                // A plan the account already holds shows "Renew <name>" rather
+                // than "Your current plan": buying it again extends the window
+                // (see the replacement rule), so the button is a real action, not
+                // a status label.
                 let ctaLabel = meta.cta;
-                if (isCurrent) ctaLabel = 'Your current plan';
+                if (isCurrent) ctaLabel = canRenew ? `Renew ${meta.name}` : 'Your current plan';
                 else if (isDowngrade) ctaLabel = `Switch to ${meta.name}`;
                 const Glyph = PLAN_GLYPHS[planId] || InfoIcon;
                 return (
@@ -1117,7 +1069,8 @@ export default function PricingPage() {
                     </p>
                     <button
                       type="button"
-                      className={`pricing-cta${isCurrent ? ' pricing-cta--current' : planId === 'free' && isDowngrade ? ' pricing-cta--danger' : meta.highlight ? ' pricing-cta--primary' : ''}`} // The Free card is the one plan that is not bought, so it does
+                      className={`pricing-cta${isCurrent ? ' pricing-cta--current' : planId === 'free' && isDowngrade ? ' pricing-cta--danger' : meta.highlight ? ' pricing-cta--primary' : ''}`}
+                      // The Free card is the one plan that is not bought, so it does
                       // not go through checkout. It is the CANCEL button: pressing
                       // it used to navigate to the dashboard and change nothing,
                       // which is why it read as dead. It now opens the cancel
@@ -1128,17 +1081,17 @@ export default function PricingPage() {
                       } // Only the current plan is inert. When billing is switched off
                       // the button stays live and opens the sheet that explains
                       // why — a dead CTA is worse than an honest one.
-                      disabled={isCurrent || busy}
+                      disabled={isCurrent && !canRenew ? true : busy}
                       aria-label={
-                        isCurrent
+                        isCurrent && !canRenew
                           ? `${meta.name} — your current plan`
                           : planId === 'free' && isDowngrade
                             ? `Cancel your plan and return to ${meta.name}`
-                            : `${ctaLabel}${isUpgrade ? ' (upgrade)' : ''}`
+                            : `${isCurrent ? `Renew ${meta.name}` : ctaLabel}${isUpgrade ? ' (upgrade)' : ''}`
                       }
                     >
                       {busy && <span className="pricing-cta__spinner" aria-hidden="true" />}
-                      {busy ? 'Activating…' : ctaLabel}
+                      {busy ? 'Activating…' : isCurrent && canRenew ? `Renew ${meta.name}` : ctaLabel}
                       {!busy && !isCurrent && planId !== 'free' && <ArrowIcon size={14} />}
                     </button>
                     <ul className="pricing-features">
@@ -1181,59 +1134,6 @@ export default function PricingPage() {
             )}
           </div>
         )}
-        {/*          ── Team band ────────────────────────────────────────────────── A real          purchasable plan, not a "contact us" band: it opens the same checkout as the          cards above, with a seat stepper.         */}
-        {catalogue && (
-          <section className="pricing-team" aria-label={TEAM_META.name}>
-            <div className="pricing-team__body">
-              <h2 className="pricing-team__name">
-                {TEAM_META.name}
-                {/*                  If this account already has a Team subscription, say so on the band —                  otherwise a 10-seat practice sees a "Choose Team" button that looks like it                  would halve them to one seat.                 */}
-                {liveActive && liveIsTeam && (
-                  <span className="pricing-team__current">
-                    {live.seats} seat{live.seats === 1 ? '' : 's'}
-                  </span>
-                )}
-              </h2>
-              <p className="pricing-team__tagline">{TEAM_META.tagline}</p>
-              <ul className="pricing-team__features">
-                {/*                  Server-derived: a seat grants exactly the Premium tier, so the band lists                  that tier's real gated features.                 */}
-                {(teamFeatures || []).map((feature) => (
-                  <li key={feature}>
-                    <CheckIcon size={14} />
-                    {feature}
-                  </li>
-                ))}
-                {!teamFeatures && (
-                  <li className="pricing-team__pending">Loading what&rsquo;s included…</li>
-                )}
-              </ul>
-            </div>
-            <div className="pricing-team__buy">
-              <div className="pricing-team__price">
-                <div className="pricing-team__amount">
-                  {yearly ? teamPricing.formatted.yearly : teamPricing.formatted.monthly}
-                </div>
-                <div className="pricing-team__unit">
-                  {yearly ? 'per seat / year' : 'per seat / month'}
-                  {yearly && teamPricing.savedPct > 0 ? ` · save ${teamPricing.savedPct}%` : ''}
-                </div>
-              </div>
-              <button
-                type="button"
-                className="pricing-cta pricing-cta--primary"
-                onClick={() => choosePlan(TEAM_META.id, { isTeam: true })}
-                disabled={busyPlan === TEAM_META.id}
-                aria-label={`${TEAM_META.cta} — Premium features per seat, from ${teamPricing.formatted.monthly} per seat per month`}
-              >
-                {busyPlan === TEAM_META.id && (
-                  <span className="pricing-cta__spinner" aria-hidden="true" />
-                )}
-                {busyPlan === TEAM_META.id ? 'Activating…' : TEAM_META.cta}
-                {busyPlan !== TEAM_META.id && <ArrowIcon size={14} />}
-              </button>
-            </div>
-          </section>
-        )}
         {/* ── Info columns ─────────────────────────────────────────────── */}
         <section className="pricing-info" aria-label="Plan details">
           {infoColumns.map((column) => {
@@ -1266,10 +1166,7 @@ export default function PricingPage() {
         <CheckoutSheet
           checkout={checkout}
           catalogue={catalogue}
-          pricing={checkout.planId === TEAM_META.id ? teamPricing : pricingFor(checkout.planId)}
-          isTeam={checkout.planId === TEAM_META.id}
-          seats={seats}
-          onSeats={setSeats}
+          pricing={pricingFor(checkout.planId)}
           currentPlanId={currentPlanId}
           currentDays={liveDays}
           currentPermanent={live.permanent}
@@ -1365,9 +1262,6 @@ function CurrencyPicker({ currencies, active, choice, onChange }) {
   checkout,
   catalogue,
   pricing,
-  isTeam,
-  seats,
-  onSeats,
   currentPlanId,
   currentDays,
   currentPermanent,
@@ -1396,98 +1290,44 @@ function CurrencyPicker({ currencies, active, choice, onChange }) {
   onClose,
   onContactSupport,
 }) {
-  const { planId, months, step } = checkout; // TEAM. The per-seat unit price and the N-seat total are BOTH server strings;
-  // this page never multiplies money. It used to look the seat count up in the
-  // catalogue's pre-computed `seatTotals` and fall back to the PER-SEAT price
-  // when the count was not one of the presets — so a "+1" step, or any typed
-  // number, showed "₱699" for a 11-seat order. The exact total is requested from
-  // the server instead; the pre-computed rows are only the instant answer while
-  // that request is in flight.
-  //
-  // The state and its effect sit ABOVE the early return below: a hook after a
-  // conditional return is not called on every render, and React tears the tree
-  // down when the hook order changes between renders.
-  // { seats, total, perSeat }
-  const [exactTotal, setExactTotal] = useState(null);
-  const seatIsPrecomputed = (pricing?.seatTotals || []).some((row) => row.seats === seats);
-  useEffect(() => {
-    // Not Team, or already known with no round-trip: nothing to ask for.
-    if (!isTeam || !planId || seatIsPrecomputed) return undefined;
-    // A short debounce, so holding "+" does not fire a request per seat.
-    let live = true;
-    const timer = window.setTimeout(() => {
-      quotePlan(planId, { months, seats, currency: catalogue.currency })
-        .then((data) => {
-          // `live` discards a reply that arrived after the sheet closed or the
-          // seat count moved on; the `seats` field it carries is what the reader
-          // matches against, so a slow reply for 3 seats cannot land on a sheet
-          // now showing 40.
-          if (!live || !data) return;
-          setExactTotal({
-            seats: data.seats,
-            total: data.formatted,
-            perSeat: data.perSeatFormatted,
-          });
-        })
-        .catch(() => {
-          /* leave the placeholder; a wrong figure is worse */
-        });
-    }, 180);
-    return () => {
-      live = false;
-      window.clearTimeout(timer);
-    };
-  }, [isTeam, planId, seats, months, seatIsPrecomputed, catalogue?.currency]); // Team has no entry in PLAN_META (it is not a tier), so it renders from
-  // TEAM_META — same shape, so nothing below has to special-case it.
-  const meta = PLAN_META[planId] || (isTeam ? TEAM_META : null);
-  // The total is the server's formatted string for this exact period, so the
+  const { planId, months, step } = checkout;
+  const meta = PLAN_META[planId];
+  // The total is the SERVER's formatted string for this exact period, so the
   // figure the visitor confirms is the figure the purchase endpoint charges.
+  // This page never multiplies money.
   if (!meta) return null;
-  const perSeat = months > 1 ? pricing?.formatted?.yearly : pricing?.formatted?.monthly;
-  const instantSeatTotal = isTeam
-    ? (pricing?.seatTotals || []).find((row) => row.seats === seats)
-    : null;
-  const total = isTeam
-    ? (exactTotal && exactTotal.seats === seats && exactTotal.total) ||
-      (instantSeatTotal
-        ? months > 1
-          ? instantSeatTotal.yearly
-          : instantSeatTotal.monthly
-        : null) || // Nothing to show yet — say so rather than print a number that might be
-      // wrong. A wrong total is worse than a missing one.
-      '—'
-    : months > 1
-      ? pricing.formatted.yearly
-      : pricing.formatted.monthly;
-  const perSeatShown = isTeam
-    ? exactTotal && exactTotal.seats === seats
-      ? exactTotal.perSeat
-      : perSeat
-    : null;
+  const total = months > 1 ? pricing.formatted.yearly : pricing.formatted.monthly;
+  const currentIsSamePlan = currentPlanId === planId;
   const renewing = currentPlanId !== 'free';
   const periodDays = catalogue.standardPeriodDays || 30;
-  const afterDays =
-    renewing && !currentPermanent && Number.isFinite(currentDays)
+  // How many days the account would have AFTER this purchase.
+  //
+  //   same plan  → renewal: stacks on top of the days already paid for.
+  //   new plan   → replacement: a fresh term from today, and whatever was left on
+  //                the old plan is forfeited. The number shown has to be that
+  //                number, or the summary promises days the engine will not grant.
+  const afterDays = currentIsSamePlan
+    ? (renewing && !currentPermanent && Number.isFinite(currentDays)
       ? currentDays + months * periodDays
-      : // Presets come from the server's own list, so the quick-pick buttons and the
-        // bounds the server enforces can never disagree.
-        months * periodDays;
-  const seatPresets = (pricing?.seatTotals || []).map((row) => row.seats);
-  const seatMin = TEAM_META.minSeats;
+      : months * periodDays)
+    : months * periodDays;
+  // What switching would cost them, so the sheet can say it out loud rather than
+  // quietly shortening someone's term.
+  const forfeitedDays = renewing && !currentIsSamePlan && !currentPermanent && Number.isFinite(currentDays)
+    ? Math.max(0, currentDays)
+    : 0;
+  // The plan being given up, by name. `planDisplayName` is imported in the page
+  // body, not the sheet, so the label is resolved here from the same helper the
+  // cancel sheet uses rather than restated.
+  const currentMetaName = renewing ? planDisplayName(currentPlanId) : '';
   // A request already waiting for THIS plan. One open request per plan is the
   // server's rule, so the form says so here instead of bouncing a 409 back
   // after the upload.
-  const seatMax = Math.min(TEAM_META.maxSeats, catalogue.team?.maxSeats || TEAM_META.maxSeats);
   const openForPlan = (myRequests || []).find(
-    (row) =>
-      row.plan === (isTeam ? TEAM_META.tier : planId) &&
-      row.isTeam === isTeam &&
-      row.status === 'pending',
+    (row) => row.plan === planId && row.status === 'pending',
   );
   const otherOpen = (myRequests || []).filter(
-    (row) =>
-      row.status === 'pending' &&
-      !(row.plan === (isTeam ? TEAM_META.tier : planId) && row.isTeam === isTeam),
+    (row) => row.status === 'pending' && row.plan !== planId,
   );
   // The action bar, as data. Derived in one place so the buttons that render
   // and the layout class that arranges them can never come from two different
@@ -1619,75 +1459,6 @@ function CurrencyPicker({ currencies, active, choice, onChange }) {
         <div className="pricing-sheet__body">
           {!atProofStep && (
             <>
-              {/*                ── Seat picker (Team only) ── Team is priced per seat, so the seat count IS                the order. A stepper plus the server's own preset list covers both the                common cases and the awkward one, without turning this into a spreadsheet.               */}
-              {isTeam && selfServe && (
-                <div className="pricing-seats">
-                  <div className="pricing-seats__head">
-                    <span className="pricing-seats__label" id="pricing-seats-label">
-                      How many seats?
-                    </span>
-                    <span className="pricing-seats__hint">
-                      Each seat is a full {PLAN_LABELS[TEAM_META.tier]} account
-                    </span>
-                  </div>
-                  <div className="pricing-seats__row">
-                    <button
-                      type="button"
-                      className="pricing-seats__step"
-                      onClick={() => onSeats(Math.max(seatMin, seats - 1))}
-                      disabled={seats <= seatMin}
-                      aria-label="Remove one seat"
-                    >
-                      &minus;
-                    </button>
-                    <input
-                      type="number"
-                      className="pricing-seats__input"
-                      value={seats}
-                      min={seatMin}
-                      max={seatMax}
-                      step={1}
-                      onChange={(event) => {
-                        // While the field is being emptied or mid-typing, keep the
-                        // last good value rather than snapping to the minimum —
-                        // otherwise deleting "10" to type "25" resets it to 2.
-                        const next = Number(event.target.value);
-                        if (!Number.isFinite(next)) return;
-                        onSeats(Math.max(seatMin, Math.min(seatMax, Math.round(next))));
-                      }}
-                      aria-labelledby="pricing-seats-label"
-                    />
-                    <button
-                      type="button"
-                      className="pricing-seats__step"
-                      onClick={() => onSeats(Math.min(seatMax, seats + 1))}
-                      disabled={seats >= seatMax}
-                      aria-label="Add one seat"
-                    >
-                      +
-                    </button>
-                  </div>
-                  {seatPresets.length > 0 && (
-                    <div
-                      className="pricing-seats__presets"
-                      role="group"
-                      aria-label="Common seat counts"
-                    >
-                      {seatPresets.map((count) => (
-                        <button
-                          key={count}
-                          type="button"
-                          className={`pricing-seats__preset${count === seats ? ' pricing-seats__preset--on' : ''}`}
-                          onClick={() => onSeats(count)}
-                          aria-pressed={count === seats}
-                        >
-                          {count}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
               <div className="pricing-summary">
                 <div className="pricing-summary__row">
                   <span>Billing period</span>
@@ -1696,22 +1467,6 @@ function CurrencyPicker({ currencies, active, choice, onChange }) {
                     {months > 1 ? ' (up front)' : ''}
                   </strong>
                 </div>
-                {isTeam && selfServe && (
-                  <>
-                    <div className="pricing-summary__row">
-                      <span>Seats</span>
-                      <strong>
-                        {seats} × {PLAN_LABELS[TEAM_META.tier]}
-                      </strong>
-                    </div>
-                    <div className="pricing-summary__row">
-                      <span>Price per seat</span>
-                      <strong>
-                        {perSeatShown || perSeat} / {months > 1 ? 'year' : 'month'}
-                      </strong>
-                    </div>
-                  </>
-                )}
                 <div className="pricing-summary__row">
                   <span>Access granted</span> <strong>{months * periodDays} days</strong>
                 </div>
@@ -1724,11 +1479,7 @@ function CurrencyPicker({ currencies, active, choice, onChange }) {
                   </div>
                 )}
                 <div className="pricing-summary__total">
-                  <span>
-                    {isTeam && selfServe
-                      ? `Total (${seats} seat${seats === 1 ? '' : 's'})`
-                      : 'Total'}
-                  </span>
+                  <span>Total</span>
                   <span className="pricing-summary__amount">{total}</span>
                 </div>
                 <p className="pricing-summary__currency">
@@ -1743,17 +1494,50 @@ function CurrencyPicker({ currencies, active, choice, onChange }) {
               <p className="pricing-sheet__note">
                 <InfoIcon size={15} />
                 <span>
-                  {/*                    Self-serve says only what happens on confirm. Everything else comes from                    buildProofCopy, which knows whether there is somewhere to send money at all                    — the old copy here promised to check a receipt while never saying where to                    send it, so a member had no way to pay.                   */}
-                  {selfServe
-                    ? isTeam
-                      ? `${seats} seats, each a full ${PLAN_LABELS[TEAM_META.tier]} account, for ${months * periodDays} days. ` +
-                        'Adjust the seat count any time — the total above updates with it.'
-                      : renewing
-                        ? `This extends your subscription — you will have about ${afterDays} days of access in total. Nothing you have already paid for is removed.`
-                        : `You will have ${months * periodDays} days of access from today, and your features unlock immediately.`
-                    : proofCopy.body}
+                  {/* Self-serve says only what happens on confirm. Everything else comes from
+                    buildProofCopy, which knows whether there is somewhere to send money
+                    at all — the old copy here promised to check a receipt while never
+                    saying where to send it, so a member had no way to pay.
+
+                    Switching plan is the one case that needs naming out loud: it
+                    REPLACES rather than extends, so the days already paid for go
+                    away. Saying so before the purchase is the difference between a
+                    customer who chose to switch and a customer who feels cheated. */}
+                  {forfeitedDays > 0
+                    ? `This REPLACES your current plan. The ${forfeitedDays} `
+                      + `day${forfeitedDays === 1 ? '' : 's'} you have left on it will not be `
+                      + 'carried over — you will get exactly '
+                      + `${months * periodDays} days of ${meta.name} from today.`
+                    : currentIsSamePlan
+                      // The renewal promise, on BOTH routes. It used to live inside
+                      // `selfServe`, so the default deployment — the proof-of-payment
+                      // path — fell through to `proofCopy.body` and said nothing at
+                      // all about what happens to the days already paid for. That is
+                      // the one fact a renewing member most needs before they send a
+                      // receipt, and the copy was describing the payment instead.
+                      ? `This extends your ${currentMetaName} subscription — you will have about `
+                        + `${afterDays} days of access in total. Nothing you have already paid for is removed.`
+                        + (selfServe ? ' Your features unlock immediately.' : '')
+                      : selfServe
+                        ? `You will have ${months * periodDays} days of access from today, and your features unlock immediately.`
+                        : proofCopy.body}
                 </span>
               </p>
+
+              {/* The same warning as a distinct, unmissable block, on the manual
+                  path where there is no toast to confirm it later. */}
+              {forfeitedDays > 0 && !selfServe && (
+                <p className="pricing-sheet__note pricing-sheet__note--warn" role="status">
+                  <InfoIcon size={15} />
+                  <span>
+                    <strong>
+                      This replaces your current plan, not adds to it.
+                    </strong>{' '}
+                    Switching forfeits the {forfeitedDays} remaining day
+                    {forfeitedDays === 1 ? '' : 's'} on {currentMetaName || 'your current plan'}.
+                  </span>
+                </p>
+              )}
 
               {payToBlock}
             </>
@@ -1761,11 +1545,11 @@ function CurrencyPicker({ currencies, active, choice, onChange }) {
           {/* ── Step 2: proof of payment ───────────────────────────────── */}
           {atProofStep && (
             <div className="pricing-proof">
-              {/*                The plan being requested stays on screen at every step: the whole point of a                receipt is that it is checked against a price, and "which plan?" must never                require remembering step 1.               */}
+              {/* The plan being requested stays on screen at every step: the whole point of a
+                  receipt is that it is checked against a price, and "which plan?" must never
+                  require remembering step 1. */}
               <div className="pricing-proof__summary">
-                <span>
-                  {isTeam ? `${seats} × ${PLAN_LABELS[TEAM_META.tier]} (Team)` : meta.name}
-                </span>
+                <span>{meta.name}</span>
                 <strong>{total}</strong>
                 <span className="pricing-proof__term">
                   {months} month{months === 1 ? '' : 's'} · {months * periodDays} days

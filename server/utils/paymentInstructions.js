@@ -123,8 +123,37 @@ function toPayload() {
   return getPaymentInstructions();
 }
 
+/**
+ * MUST this request carry a receipt?
+ *
+ * True exactly when there is somewhere to send money. That is the whole rule,
+ * and it is deliberately the INVERSE of `available`:
+ *
+ *   destination configured → the member was told an account number → a receipt is
+ *                           how that transfer gets verified, so requiring one is
+ *                           ordinary practice, not friction.
+ *
+ *   no destination          → the member was told there is nowhere to send money.
+ *                           Requiring proof of a payment that cannot be made is a
+ *                           dead end: the sheet says "ask an administrator" and
+ *                           then refuses to let them ask, because the only
+ *                           acceptable evidence is a receipt of a transfer this
+ *                           deployment cannot receive. The flow becomes literally
+ *                           uncompletable, which is exactly the bug this exists
+ *                           to remove.
+ *
+ * Expressed as its own predicate rather than re-derived per call site, so the
+ * route that ACCEPTS a proof-less request and the copy that PROMISES it cannot
+ * disagree — the failure mode when two places each test `available` is that one
+ * gets updated and the other does not, and the promise outruns the acceptance.
+ */
+function receiptRequired() {
+  return getPaymentInstructions().available === true;
+}
+
 module.exports = {
   getPaymentInstructions,
   toPayload,
   isUsableDestination,
+  receiptRequired,
 };

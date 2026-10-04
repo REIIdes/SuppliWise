@@ -1046,7 +1046,7 @@ const subscriptionFields = [
   'firstName', 'lastName', 'email',
   'subscriptionActive', 'subscriptionPlan', 'subscriptionStartedAt',
   'subscriptionExpiresAt', 'subscriptionPermanent', 'subscriptionSource',
-  'subscriptionSeats', 'subscriptionUpdatedAt', 'subscriptionRecord',
+  'subscriptionUpdatedAt', 'subscriptionRecord',
 ].join(' ');
 
 /** Who is performing the change, for the audit trail. */
@@ -1182,11 +1182,8 @@ router.post('/users/:id/subscription', async (req, res) => {
   const options = {};
   if (body.note !== undefined && body.note !== null) options.note = String(body.note).slice(0, 240);
   // Only forward keys the caller actually sent, so an absent field keeps the
-  // engine's own default instead of arriving as an explicit undefined. `seats`
-  // matters here: omitting it resets a Team subscription to one seat, so a
-  // panel that re-saves a plan must pass the current count through or it would
-  // quietly downgrade a 10-seat account.
-  for (const key of ['plan', 'days', 'permanent', 'expiresAt', 'scope', 'active', 'keepPlan', 'seats']) {
+  // engine's own default instead of arriving as an explicit undefined.
+  for (const key of ['plan', 'days', 'permanent', 'expiresAt', 'scope', 'active', 'keepPlan']) {
     if (body[key] !== undefined) options[key] = body[key];
   }
 
@@ -1267,10 +1264,6 @@ router.patch('/users/:id/subscription', async (req, res) => {
       } else {
         options.days = subState.STANDARD_PERIOD_DAYS;
       }
-      // Carry the existing seat count through. Omitting `seats` resets it to 1,
-      // so without this a legacy call on a 10-seat account would silently
-      // downgrade it to a single seat.
-      options.seats = live.seats;
     }
 
     return await runSubscriptionAction(req, res, {
@@ -1519,9 +1512,6 @@ router.post('/subscription-requests/:id/approve', async (req, res) => {
       options: {
         plan: existing.plan,
         days,
-        // Only meaningful for a Team request; harmless (and ignored) for an
-        // individual one, exactly as the purchase endpoint treats it.
-        seats: existing.isTeam ? (existing.seats || 2) : 1,
         note: `Payment approved: ${reviewNote}`.slice(0, 240),
       },
     });

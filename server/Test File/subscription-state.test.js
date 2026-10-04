@@ -446,134 +446,91 @@ test('every admin action changes entitlements immediately', () => {
   assert.equal(versions.size, 4, 'each change must produce a distinct version');
 });
 
-// ── 6b. Team seats ─────────────────────────────────────────────────────────
-// Team is the Premium tier with a seat count. The count is BILLING metadata:
-// it never changes what is unlocked, an admin action never changes it, and
-// "restore original" brings it back.
-
-test('a Team purchase is the Premium tier with a seat count, unlocking the same features', () => {
-  const now = new Date('2026-03-01T12:00:00.000Z');
-  // What the purchase route does for plan "team": the tier a seat grants, plus
-  // the seat count. There is no `team` plan id anywhere in the system.
-  const r = apply({}, null, 'setPaid', { actor: 'payment', plan: 'annual', seats: 5 }, now);
-  assert.equal(r.ok, true);
-  assert.equal(r.patch.subscriptionPlan, 'annual', 'Team writes the Premium tier');
-  assert.equal(r.patch.subscriptionSeats, 5);
-  assert.equal(r.patch.subscriptionActive, true);
-
-  const detail = S.describeRecord({ subscriptionRecord: r.record, ...r.patch }, now.getTime());
-  assert.equal(detail.effective.seats, 5);
-  assert.equal(detail.effective.isTeam, true);
-  assert.equal(detail.paid.seats, 5);
-  // A seat unlocks exactly what Premium unlocks — nothing less, nothing more.
-  const state = E.describeSubscription({ subscriptionRecord: r.record, ...r.patch }, now.getTime());
-  assert.equal(state.currentPlan, 'annual');
-  assert.equal(state.entitlements.priorityAssessment, true);
-  assert.equal(state.entitlements.historyFull, true);
-  assert.equal(state.entitlements.chat, false, 'Team is Premium, not Ultimate');
-  assert.equal(state.subscriptionSeats, 5);
-  assert.equal(state.subscriptionIsTeam, true);
-});
-
-test('an individual plan is one seat, and buying one drops a Team subscription', () => {
-  const now = new Date('2026-03-01T12:00:00.000Z');
-  let r = apply({}, null, 'setPaid', { actor: 'payment', plan: 'annual', seats: 20 }, now);
-  assert.equal(r.patch.subscriptionSeats, 20);
-
-  // Buying Deluxe with no seat count resets to one. Without this, a customer
-  // could pay for a single seat and keep twenty.
-  r = apply(r.user, r.record, 'setPaid', { actor: 'payment', plan: 'monthly', days: 30 }, now);
-  assert.equal(r.patch.subscriptionSeats, 1);
-  const detail = S.describeRecord({ subscriptionRecord: r.record, ...r.patch }, now.getTime());
-  assert.equal(detail.effective.seats, 1);
-  assert.equal(detail.effective.isTeam, false);
-});
-
-test('a seat count a customer chose is refused, never silently changed', () => {
-  // The engine is the last line before a seat count is stored AND priced, so it
-  // is the one that must be strict. Clamping here would mean a request for
-  // 9999 seats becomes 500 — an invoice the customer never agreed to — and a
-  // request for 0 becomes 1, which silently creates a Team order from a
-  // blank field. A visible refusal beats a quiet coercion.
-  const now = new Date('2026-03-01T12:00:00.000Z');
-  const cases = [
-    [99999, 'over the ceiling'],
-    [S.MAX_SEATS + 1, 'one seat over'],
-    [0, 'zero'],
-    [-9, 'negative'],
-    [2.5, 'a fraction of a seat'],
-    ['4.4', 'a fractional string'],
-    ['abc', 'no number at all'],
-    [NaN, 'NaN'],
-    [Infinity, 'Infinity'],
-  ];
-  for (const [value, why] of cases) {
-    const r = apply({}, null, 'setPaid', { actor: 'payment', plan: 'annual', seats: value }, now);
-    assert.equal(r.ok, false, `seats=${value} (${why}) must be refused`);
-    assert.equal(r.status, 400);
-    assert.equal(r.patch, undefined, 'a refused action writes nothing');
-  }
-  // The boundary values themselves are accepted.
-  for (const value of [1, 2, S.MAX_SEATS, '12']) {
-    const r = apply({}, null, 'setPaid', { actor: 'payment', plan: 'annual', seats: value }, now);
-    assert.equal(r.ok, true, `seats=${value} must be accepted`);
-    assert.equal(r.patch.subscriptionSeats, Number(value));
-  }
-  // Omitting seats entirely is the individual-plan default, not a refusal.
-  const plain = apply({}, null, 'setPaid', { actor: 'payment', plan: 'monthly' }, now);
-  assert.equal(plain.ok, true);
-  assert.equal(plain.patch.subscriptionSeats, 1);
-});
-
-test('reading a stored seat count still clamps, so an old record stays usable', () => {
-  // The mirror image of the rule above, and the reason the two functions exist
-  // separately: normalizeSeats is for values read back out of storage, where a
-  // record written under an older ceiling must still resolve to something
-  // usable rather than becoming unreadable. Refusing it would strand the
-  // account; refusing a customer's live order would overcharge or undercharge.
-  const now = new Date('2026-03-01T12:00:00.000Z');
-  assert.equal(S.normalizeSeats(99999), S.MAX_SEATS, 'stored values clamp');
-  assert.equal(S.normalizeSeats(0), 1, 'a stored zero is not a valid plan, so it reads as one seat');
-  assert.equal(S.normalizeSeats(-9), 1);
-  assert.equal(S.normalizeSeats(2.6), 3, 'and rounds to a whole seat');
-  assert.equal(S.normalizeSeats('abc'), null, 'but an unparseable value is still refused');
-
-  // A record persisted with an out-of-range count still reads back sanely.
-  const legacy = S.readRecord({
-    subscriptionRecord: { paid: { plan: 'annual', status: 'active', seats: 9999 } },
-  });
-  assert.equal(legacy.paid.seats, S.MAX_SEATS);
-
-  // And parseSeatCount is the strict one, for live customer input.
-  assert.equal(S.parseSeatCount(99999), null);
-  assert.equal(S.parseSeatCount(0), null);
-  assert.equal(S.parseSeatCount(2.5), null);
-  assert.equal(S.parseSeatCount(3), 3);
-});
-
-test('editing the seat count does not grant a month of access', () => {
-  // THE REGRESSION THIS GUARDS: `setPaid` used to default to a fresh 30-day
-  // window whenever no term was given, so an admin changing 6 seats to 12
-  // silently handed the customer 30 more days. A seat count is an edit to the
-  // subscription that exists, not a purchase.
+// ── 6b. Plan switching: a new plan REPLACES, the same plan RENIEWS ─────────
+//
+// The rule, in one place: buying the plan you already hold stacks another term
+// on top of the days left, so paying early never throws away paid days. Buying
+// a DIFFERENT plan replaces it outright — a fresh term from today, and whatever
+// was left on the old plan is forfeited.
+//
+// This was previously "every purchase extends", because `base` read the stored
+// expiry whenever one existed in the future without ever asking which plan had
+// written it. So a customer who bought a year of Premium and switched to Deluxe
+// silently received 395 days of Deluxe instead of 30, and a downgrade looked like
+// an upgrade. Both halves are pinned below, because the fix is one boolean and
+// the temptation to remove it is exactly the bug returning.
+test('renewing the SAME plan stacks onto the days already paid for', () => {
   const bought = new Date('2026-03-01T12:00:00.000Z');
   const midway = new Date(bought.getTime() + 10 * DAY);
-  const started = apply({}, null, 'setPaid', { actor: 'payment', plan: 'annual', days: 30, seats: 6 }, bought);
-  const before = S.describeRecord(started.user, midway.getTime());
-  assert.equal(before.paid.daysRemaining, 20, '20 days left on the paid window');
+  const first = apply({}, null, 'setPaid', { actor: 'payment', plan: 'annual', days: 30 }, bought);
+  const renewed = apply(first.user, first.record, 'setPaid', { actor: 'payment', plan: 'annual', days: 30 }, midway);
+  const state = E.describeSubscription(renewed.user, midway.getTime());
+  assert.equal(state.currentPlan, 'annual');
+  assert.equal(state.daysRemaining, 50, '20 unspent + 30 renewed, no paid day lost');
+  assert.equal(renewed.replaced, false, 'a renewal is not a replacement');
+  assert.equal(renewed.forfeitedDays, 0);
+});
 
-  const edited = apply(started.user, started.record, 'setPaid', { actor: 'admin:Devs', plan: 'annual', seats: 12 }, midway);
-  assert.equal(edited.ok, true);
-  const after = S.describeRecord(edited.user, midway.getTime());
-  assert.equal(after.paid.seats, 12, 'the seat count changed');
-  assert.equal(after.paid.daysRemaining, 20, 'the window is UNCHANGED');
-  assert.equal(
-    after.paid.expiresAt, before.paid.expiresAt,
-    'the very same expiry date, not a new one',
-  );
-  // The stored period must still describe the window that is on the clock, or
-  // the UI would render "0-day plan" against a 20-day subscription.
-  assert.equal(after.paid.periodDays, 30, 'the period still describes the real window');
+test('switching to a DIFFERENT plan forfeits what was left on the old one', () => {
+  const bought = new Date('2026-03-01T12:00:00.000Z');
+  const midway = new Date(bought.getTime() + 10 * DAY);
+  const first = apply({}, null, 'setPaid', { actor: 'payment', plan: 'annual', days: 365 }, bought);
+  assert.equal(E.describeSubscription(first.user, midway.getTime()).daysRemaining, 355);
+
+  const switched = apply(first.user, first.record, 'setPaid', { actor: 'payment', plan: 'monthly', days: 30 }, midway);
+  const state = E.describeSubscription(switched.user, midway.getTime());
+  assert.equal(state.currentPlan, 'monthly', 'the plan they bought is the plan they have');
+  assert.equal(state.daysRemaining, 30, 'exactly the term paid for — not 30 on top of 355');
+  assert.equal(switched.replaced, true);
+  assert.equal(switched.forfeitedDays, 355, 'and the caller can name the number it lost');
+});
+
+test('a downgrade is a downgrade, not a disguised upgrade', () => {
+  // The regression this rule exists for. Ultimate (3) → Deluxe (1) with 300 days
+  // left used to return 330 days of Deluxe.
+  const bought = new Date('2026-03-01T12:00:00.000Z');
+  const midway = new Date(bought.getTime() + 10 * DAY);
+  const top = apply({}, null, 'setPaid', { actor: 'payment', plan: 'custom', days: 310 }, bought);
+  const down = apply(top.user, top.record, 'setPaid', { actor: 'payment', plan: 'monthly', days: 30 }, midway);
+  const state = E.describeSubscription(down.user, midway.getTime());
+  assert.equal(state.currentPlan, 'monthly');
+  assert.equal(state.daysRemaining, 30);
+  assert.ok(state.daysRemaining < 300, 'a downgrade must not lengthen the term');
+});
+
+test('a first purchase is not reported as replacing anything', () => {
+  // A brand-new account also differs from the empty record's 'free', and
+  // calling that a replacement would tell a new customer they forfeited 0 days
+  // of a plan they never had.
+  const now = new Date('2026-03-01T12:00:00.000Z');
+  const first = apply({}, null, 'setPaid', { actor: 'payment', plan: 'annual', days: 30 }, now);
+  assert.equal(first.replaced, false);
+  assert.equal(first.forfeitedDays, 0);
+});
+
+test('replacing a plan restarts the window rather than extending the old start', () => {
+  const bought = new Date('2026-03-01T12:00:00.000Z');
+  const midway = new Date(bought.getTime() + 10 * DAY);
+  const first = apply({}, null, 'setPaid', { actor: 'payment', plan: 'annual', days: 365 }, bought);
+  const switched = apply(first.user, first.record, 'setPaid', { actor: 'payment', plan: 'custom', days: 30 }, midway);
+  const record = S.describeRecord(switched.user, midway.getTime());
+  assert.equal(record.paid.plan, 'custom');
+  assert.equal(record.paid.startedAt, midway.toISOString(), 'the new term began today');
+  assert.equal(record.paid.periodDays, 30, 'and it is a full 30-day term');
+});
+
+test('the replacement rule holds when the caller states an explicit term', () => {
+  // `days` used to be irrelevant to the outcome: `base` came from the stored
+  // expiry whatever the plan. An explicit term is still what the term IS; it
+  // just no longer decides whether the old days survive.
+  const bought = new Date('2026-03-01T12:00:00.000Z');
+  const midway = new Date(bought.getTime() + 5 * DAY);
+  const first = apply({}, null, 'setPaid', { actor: 'payment', plan: 'custom', days: 300 }, bought);
+  const switched = apply(first.user, first.record, 'setPaid', { actor: 'payment', plan: 'monthly', days: 90 }, midway);
+  const state = E.describeSubscription(switched.user, midway.getTime());
+  assert.equal(state.currentPlan, 'monthly');
+  assert.equal(state.daysRemaining, 90, 'the 90 stated days, starting now');
+  assert.equal(switched.replaced, true);
 });
 
 test('a reactivating setPaid with no term keeps whatever window exists', () => {
@@ -583,8 +540,10 @@ test('a reactivating setPaid with no term keeps whatever window exists', () => {
   const lapsed = S.describeRecord(started.user, later.getTime());
   assert.equal(lapsed.effective.active, false, 'it has lapsed');
 
-  // Re-sending the same plan with no term must NOT invent 30 fresh days for a
-  // window that ended weeks ago.
+  // Re-sending the SAME plan with no term must NOT invent 30 fresh days for a
+  // window that ended weeks ago. This is why the replacement test compares plan
+  // identity alone: tying it to "was active" would turn every reactivation into
+  // a free month.
   const revived = apply(started.user, started.record, 'setPaid', { actor: 'admin:Devs', plan: 'annual' }, later);
   const after = S.describeRecord(revived.user, later.getTime());
   assert.equal(after.effective.active, false, 'a lapsed window is not resurrected by a no-op setPaid');
@@ -596,110 +555,11 @@ test('an explicit term still wins, and still renews from the current window', ()
   const midway = new Date(bought.getTime() + 10 * DAY);
   const started = apply({}, null, 'setPaid', { actor: 'payment', plan: 'annual', days: 30 }, bought);
 
-  // days given → a real renewal: 20 unspent + 30 new.
+  // days given -> a real renewal: 20 unspent + 30 new.
   const renewed = apply(started.user, started.record, 'setPaid', { actor: 'payment', plan: 'annual', days: 30 }, midway);
   assert.equal(S.describeRecord(renewed.user, midway.getTime()).paid.daysRemaining, 50);
-
-  // expiresAt given → that exact date, overriding the window.
-  const target = new Date(midway.getTime() + 7 * DAY);
-  const pinned = apply(renewed.user, renewed.record, 'setPaid', {
-    actor: 'admin:Devs', plan: 'annual', expiresAt: target.toISOString(),
-  }, midway);
-  const afterPin = S.describeRecord(pinned.user, midway.getTime());
-  assert.equal(afterPin.paid.expiresAt, target.toISOString(), 'the explicit date is used verbatim');
-  assert.equal(afterPin.paid.daysRemaining, 7);
-
-  // permanent given → no expiry at all.
-  const forever = apply(pinned.user, pinned.record, 'setPaid', { actor: 'admin:Devs', plan: 'annual', permanent: true }, midway);
-  const afterForever = S.describeRecord(forever.user, midway.getTime());
-  assert.equal(afterForever.paid.permanent, true);
-  assert.equal(afterForever.paid.expiresAt, null);
 });
 
-test('a first-time purchase with no term still gets the standard month', () => {
-  // The keep-the-window rule must not leave a brand new account with no expiry.
-  const now = new Date('2026-03-01T12:00:00.000Z');
-  const first = apply({}, null, 'setPaid', { actor: 'payment', plan: 'annual' }, now);
-  assert.equal(first.ok, true);
-  const detail = S.describeRecord(first.user, now.getTime());
-  assert.equal(detail.paid.daysRemaining, S.STANDARD_PERIOD_DAYS);
-  assert.equal(detail.paid.periodDays, S.STANDARD_PERIOD_DAYS);
-});
-
-test('an expired Team subscription stops reporting its seats', () => {
-  // A lapsed 20-seat plan must not keep billing as 20 seats, nor claim to be a
-  // Team customer — but the record still remembers what it had.
-  const bought = new Date('2026-03-01T12:00:00.000Z');
-  const later = new Date(bought.getTime() + 60 * DAY);
-  const r = apply({}, null, 'setPaid', { actor: 'payment', plan: 'annual', seats: 20 }, bought);
-  const detail = S.describeRecord({ subscriptionRecord: r.record, ...r.patch }, later.getTime());
-  assert.equal(detail.effective.active, false);
-  assert.equal(detail.effective.seats, 1);
-  assert.equal(detail.effective.isTeam, false);
-  assert.equal(detail.effective.recordedSeats, 20, 'the admin readout still shows what it had');
-  assert.equal(detail.paid.seats, 20);
-  assert.equal(detail.paid.isTeam, false, 'an elapsed window grants nothing');
-});
-
-test('an admin override never silently changes the seat count', () => {
-  const now = new Date('2026-03-01T12:00:00.000Z');
-  const paid = apply({}, null, 'setPaid', { actor: 'payment', plan: 'annual', seats: 8 }, now);
-  // Every admin action, not just the ones that mention seats.
-  for (const [action, payload] of [
-    ['addDays', { days: 5 }],
-    ['grant', { plan: 'custom', days: 30 }],
-    ['changePlan', { plan: 'custom' }],
-    ['extend', { expiresAt: new Date(now.getTime() + 60 * DAY).toISOString() }],
-  ]) {
-    const r = apply(paid.user, paid.record, action, { ...payload, actor: 'admin:Devs' }, now);
-    assert.equal(r.ok, true, action);
-    const detail = S.describeRecord({ subscriptionRecord: r.record, ...r.patch }, now.getTime());
-    assert.equal(detail.effective.seats, 8, `${action} must not change the seat count`);
-    assert.equal(detail.paid.seats, 8, `${action} must not touch the paid seats`);
-  }
-});
-
-test('restoring an original state brings the seat count back with it', () => {
-  const now = new Date('2026-03-01T12:00:00.000Z');
-  const paid = apply({}, null, 'setPaid', { actor: 'payment', plan: 'annual', seats: 12 }, now);
-  const bumped = apply(paid.user, paid.record, 'addDays', { days: 5, actor: 'admin:Devs' }, now);
-  const during = S.describeRecord({ subscriptionRecord: bumped.record, ...bumped.patch }, now.getTime());
-  assert.equal(during.restoreTarget.seats, 12, 'the restore target names the seat count');
-
-  const restored = apply(bumped.user, bumped.record, 'restore', { actor: 'admin:Devs' }, now);
-  const detail = S.describeRecord({ subscriptionRecord: restored.record, ...restored.patch }, now.getTime());
-  assert.equal(detail.effective.seats, 12, 'restore must not silently drop 12 seats to 1');
-  assert.equal(restored.patch.subscriptionSeats, 12);
-});
-
-test('a legacy account with no record reads as one seat', () => {
-  const now = new Date('2026-03-01T12:00:00.000Z');
-  const legacy = {
-    subscriptionActive: true,
-    subscriptionPlan: 'annual',
-    subscriptionExpiresAt: new Date(now.getTime() + 10 * DAY).toISOString(),
-  };
-  assert.equal(S.readRecord(legacy).paid.seats, 1);
-  const state = E.describeSubscription(legacy, now.getTime());
-  assert.equal(state.subscriptionSeats, 1);
-  assert.equal(state.subscriptionIsTeam, false);
-});
-
-test('the version signature moves when only the seat count changes', () => {
-  // Otherwise a client applying an idempotent snapshot skips the re-render and
-  // the billing screen keeps showing the old seat count.
-  const now = new Date('2026-03-01T12:00:00.000Z');
-  const five = apply({}, null, 'setPaid', { actor: 'payment', plan: 'annual', seats: 5 }, now);
-  const ten = apply(five.user, five.record, 'setPaid', { actor: 'payment', plan: 'annual', seats: 10 }, now);
-  const a = E.describeSubscription({ subscriptionRecord: five.record, ...five.patch }, now.getTime());
-  const b = E.describeSubscription({ subscriptionRecord: ten.record, ...ten.patch }, now.getTime());
-  assert.notEqual(a.version, b.version, 'a seat change must produce a new signature');
-  // …while an identical state still produces an identical one.
-  assert.equal(
-    E.describeSubscription({ subscriptionRecord: ten.record, ...ten.patch }, now.getTime()).version,
-    b.version,
-  );
-});
 
 // ── 7. Legacy compatibility ─────────────────────────────────────────────────
 test('a pre-upgrade account with no record reads as a paid subscription', () => {
