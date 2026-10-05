@@ -3,9 +3,81 @@
 server/.env
 **/.env
 
+# Plaintext credential hand-off files. `*.local.*` is where a rotation writes
+# the generated TOTP setup keys and passwords once, for the operator to copy
+# into an authenticator app / password manager. They are untracked scratch by
+# definition - the whole point is that they hold live secrets in the clear, and
+# this repo has already had live secrets committed and published once.
+*.local.txt
+*.local.*
+*secrets*.txt
+*credentials*.txt
+
+# Backups/copies of the above. A timestamped `.env.bak-*` holds every live
+# admin password hash and TOTP seed, and the patterns above only match the
+# exact name `.env` - so a backup taken before an edit showed up as an
+# untracked, committable file. Since this repo has already had live secrets
+# committed and published once, the copy is treated as the secret it is.
+.env.*.bak*
+**/.env.*.bak*
+*.env.bak*
+*.env.old
+*.env.orig
+*.env.save
+
+# Example env files may only ever contain placeholders (an earlier revision
+# of server/.env.example shipped real secrets). Keep them tracked but never
+# secret-bearing.
+!.env.example
+!server/.env.example
+
+# Local-only credential material (AdminNames.md stays tracked ONLY because it
+# has been sanitized to placeholders — never put a live TOTP seed back in it).
+*credentials*
+*secrets.local*
+*.pem
+*.key
+
+# …but `*credentials*` is a FILENAME glob, so it also swallows source code whose
+# name merely contains the word. server/scripts/send-admin-credentials.js was
+# written and wired into package.json as `npm run send-admin-credentials`, and
+# this one line then dropped it from every clone — leaving a documented npm
+# script pointing at a file git refused to carry. Re-admit the code; the real
+# secret material (*.pem, *.key, sanitized AdminNames.md) stays excluded.
+!server/scripts/send-admin-credentials.js
+
+# Logs (server stdout/stderr can contain PII)
+*.log
+server/*.log
+server/server-*.log
+npm-debug.log*
+
 # Dependencies
 node_modules
 server/node_modules
 
 # Build output
 dist
+my-react-app/dist
+my-react-app/dev-dist
+
+# User-uploaded profile/banner images. These are served from disk at runtime
+# (server/utils/pictures.js) rather than stored inside the user document — a
+# multi-megabyte base64 string on the account made every sign-in read and
+# rewrite ~3 MB, which is what broke the login button. They are user content,
+# not source: never committed.
+server/uploads/
+
+# Editor / tooling state
+.qodo/
+.vscode/
+.idea/
+
+# Local test scratch
+Temp/
+.tmp/
+
+# Manual build intermediates. docs/build_manuals.py renders these HTML files on
+# its way to the PDFs; the PDFs themselves ARE deliverables and stay tracked.
+docs/_build/
+docs/__pycache__/

@@ -52,9 +52,12 @@ Added the ability for users to upload custom banner images for their profile pag
   - Black semi-transparent background
   - Hover scale effect
   
-- `.profile-remove-banner` - remove banner button
-  - Matches remove picture button styling
-  - White semi-transparent with border
+- `.banner-remove-btn` - remove banner button, pinned top-left to mirror the
+  edit icon (it cannot live bottom-left: the avatar straddles that edge and
+  would paint over it)
+  - 38x38px size
+  - Black semi-transparent background
+  - Hover scale effect
 
 ### 3. **Validation**
 - File type must be an image

@@ -1,17 +1,50 @@
-/* Recommendations Wrapper */
+/* ═══════════════════════════════════════════════════════════════════════
+   RECOMMENDATIONS — vibrant theme
+
+   Consumes the shared tokens and primitives from theme.css. The distinctive
+   choice here is a VIOLET/INDIGO page rather than the emerald every other
+   page uses: this is the one screen a member arrives at expecting the AI to
+   have done something, and giving it its own hue makes it obvious they have
+   landed somewhere new. The brand emerald is still the accent on the primary
+   actions, so the CTA and the page do not disagree.
+
+   The old file ended with a "VIBRANT THEME REFRESH" block that restated
+   `.recommendations-title` with `!important` to win against the rule above
+   it. That is a symptom of appending a correction instead of replacing the
+   original; there is one rule per selector here.
+   ═══════════════════════════════════════════════════════════════════════ */
+
 .recommendations-wrapper {
   min-height: 100vh;
-  background: linear-gradient(135deg, #f0faf0 0%, #e8f5e9 100%);
+  position: relative;
+  /* Declared twice on purpose: `hidden` would make this element a scroll
+     container, and a sticky element resolves against the NEAREST ancestor
+     scroll container — so it would pull the sticky Navbar off the viewport and
+     the header would scroll away with the page. `clip` contains the same
+     overflow without creating a scrollport. See PricingPage.css. */
+  overflow-x: hidden;
+  overflow-x: clip;
+  color: var(--sw-ink, #0d2b23);
+  /* Violet-to-indigo mesh. The same shape as the shared backdrop, retinted. */
+  background:
+    radial-gradient(820px 440px at 4% -8%, rgba(139, 92, 246, 0.32), transparent 62%),
+    radial-gradient(760px 400px at 99% -4%, rgba(56, 189, 248, 0.24), transparent 62%),
+    radial-gradient(880px 520px at 78% 36%, rgba(244, 114, 182, 0.16), transparent 64%),
+    radial-gradient(820px 560px at 14% 90%, rgba(16, 185, 129, 0.18), transparent 66%),
+    linear-gradient(168deg, #f4f2ff 0%, #eef4ff 50%, #f2fbff 100%);
+  background-attachment: fixed;
 }
 
-/* Container */
 .recommendations-container {
+  position: relative;
+  z-index: 1;
   max-width: 1000px;
   margin: 0 auto;
-  padding: 32px 24px;
+  padding: 36px 24px 64px;
 }
 
-/* Loading State */
+/* ── Loading / error ──────────────────────────────────────────────────── */
+
 .recommendations-loading {
   display: flex;
   flex-direction: column;
@@ -24,8 +57,8 @@
 .loading-spinner {
   width: 48px;
   height: 48px;
-  border: 4px solid #e0e0e0;
-  border-top-color: #3dbf8a;
+  border: 4px solid #e6e0fb;
+  border-top-color: var(--sw-violet, #a855f7);
   border-radius: 50%;
   animation: spin 1s linear infinite;
 }
@@ -35,12 +68,11 @@
 }
 
 .recommendations-loading p {
-  color: #374151;
+  color: var(--sw-ink-soft, #58736a);
   font-size: 16px;
   font-weight: 500;
 }
 
-/* Error State */
 .recommendations-error {
   display: flex;
   flex-direction: column;
@@ -52,69 +84,241 @@
   padding: 24px;
 }
 
-.error-icon {
-  font-size: 64px;
-}
+.error-icon { font-size: 64px; }
 
 .recommendations-error h2 {
   font-size: 24px;
   font-weight: 700;
-  color: #1f2937;
+  color: var(--sw-ink, #0d2b23);
   margin: 0;
 }
 
 .recommendations-error p {
   font-size: 16px;
-  color: #6b7280;
+  color: var(--sw-ink-soft, #58736a);
   max-width: 500px;
-  margin: 0 0 16px 0;
+  margin: 0 0 16px;
 }
 
 .btn-primary {
   padding: 12px 24px;
-  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-  color: white;
+  background: var(--sw-grad-brand, linear-gradient(135deg, #10b981, #0891b2));
+  color: #fff;
   border: none;
-  border-radius: 8px;
-  font-size: 16px;
-  font-weight: 600;
+  border-radius: var(--sw-radius-pill, 999px);
+  font-size: 15px;
+  font-weight: 700;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: 0 12px 24px -12px rgba(13, 148, 136, 1);
 }
-
 .btn-primary:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+  box-shadow: 0 16px 30px -12px rgba(13, 148, 136, 1);
+}
+.btn-primary:focus-visible {
+  outline: 3px solid var(--sw-teal, #0d9488);
+  outline-offset: 2px;
 }
 
-/* Header */
+/* ── Header ──────────────────────────────────────────────────────────── */
+
 .recommendations-header {
-  margin-bottom: 32px;
+  margin-bottom: 26px;
+  animation: sw-rise 0.5s var(--sw-ease, cubic-bezier(0.16, 1, 0.3, 1)) both;
+}
+
+/* Title on the left, detail-mode toggle on the right. The toggle was absent
+   here entirely, so a reader who chose Simplified on the results page was
+   shown clinical prose on this one and the setting looked broken. */
+.recommendations-header-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
 }
 
 .recommendations-title {
-  font-size: 32px;
-  font-weight: 700;
-  color: #1f2937;
-  margin: 0 0 8px 0;
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.14;
+  margin: 0 0 8px;
+  color: #5b21b6;
+  background: linear-gradient(96deg, #6d28d9 0%, #7c3aed 34%, #2563eb 70%, #0891b2 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .recommendations-title { color: transparent; }
 }
 
 .recommendations-subtitle {
-  font-size: 16px;
-  color: #6b7280;
+  font-size: 15.5px;
+  line-height: 1.55;
+  color: var(--sw-ink-soft, #58736a);
   margin: 0;
+  max-width: 64ch;
 }
 
-/* Professional Warning */
+/* Detail mode — the same two-button control and the same storage key the
+   results page uses, so the preference follows the reader between the two. */
+.detail-mode-toggle {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 3px;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid var(--sw-line, #e2f1ea);
+  border-radius: var(--sw-radius-md, 14px);
+}
+
+.detail-mode-btn {
+  padding: 8px 16px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--sw-ink-soft, #58736a);
+  background: transparent;
+  border: 0;
+  border-radius: var(--sw-radius-sm, 10px);
+  cursor: pointer;
+  transition: color var(--sw-dur, 0.24s) ease, background var(--sw-dur, 0.24s) ease;
+}
+.detail-mode-btn:hover:not(.active) { color: #5b21b6; background: rgba(139, 92, 246, 0.1); }
+.detail-mode-btn.active {
+  color: #fff;
+  background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+  box-shadow: 0 6px 14px -8px rgba(99, 102, 241, 0.9);
+}
+.detail-mode-btn:focus-visible { outline: 3px solid var(--sw-indigo, #6366f1); outline-offset: 2px; }
+
+/* Three numbers, so the reader knows whether the list below is worth scrolling
+   before they scroll it. */
+.recommendations-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.recommendations-summary__item {
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--sw-ink-soft, #58736a);
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid var(--sw-line, #e2f1ea);
+  border-radius: var(--sw-radius-pill, 999px);
+}
+.recommendations-summary__item strong {
+  margin-right: 4px;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--sw-ink, #0d2b23);
+}
+.recommendations-summary__item--high {
+  color: #047857;
+  background: #ecfdf5;
+  border-color: #6ee7b7;
+}
+.recommendations-summary__item--high strong { color: #047857; }
+
+/* ── Consult-doctor banner ──────────────────────────────────────────────
+   The one instruction in the plan that must not be skimmable, so it is a
+   banner above the filters rather than a note buried inside a card. */
+.rec-consult {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 18px;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, #fff1f2, #ffe4e6);
+  border: 1px solid #fda4af;
+  border-left: 4px solid var(--sw-rose, #f43f5e);
+  border-radius: var(--sw-radius-lg, 20px);
+}
+.rec-consult__icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  font-size: 16px;
+  color: #fff;
+  background: var(--sw-rose, #f43f5e);
+  border-radius: 50%;
+}
+.rec-consult strong { display: block; margin-bottom: 4px; font-size: 15px; color: #9f1239; }
+.rec-consult p { margin: 0; font-size: 13px; line-height: 1.6; color: #7f1d1d; }
+
+/* ── Toolbar: filters + search ─────────────────────────────────────────── */
+
+.rec-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.rec-search { flex: 1 1 200px; max-width: 300px; min-width: 0; }
+
+.rec-search input {
+  width: 100%;
+  padding: 10px 16px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--sw-ink, #0d2b23);
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid var(--sw-line-strong, #cbe7da);
+  border-radius: var(--sw-radius-pill, 999px);
+  transition: border-color var(--sw-dur, 0.24s) ease, box-shadow var(--sw-dur, 0.24s) ease;
+}
+.rec-search input::placeholder { color: var(--sw-ink-faint, #8aa39a); }
+.rec-search input:focus {
+  outline: none;
+  border-color: var(--sw-indigo, #6366f1);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+}
+
+/* Screen-reader-only. The label exists for assistive tech, not the layout. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.rec-result-count {
+  margin: 0 0 16px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--sw-ink-faint, #8aa39a);
+}
+
+/* ── Disclaimer ────────────────────────────────────────────────────────
+   Reads as a quiet advisory, not an alarm. It was a 2px #fbbf24 border on a
+   flat amber fill — at that weight it looked like a validation error. */
 .professional-warning {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  padding: 16px 20px;
-  background: #fef3c7;
-  border: 2px solid #fbbf24;
-  border-radius: 12px;
-  margin-bottom: 24px;
+  padding: 14px 18px;
+  margin-bottom: 22px;
+  border: 1px solid #fde68a;
+  border-left: 3px solid var(--sw-amber, #f59e0b);
+  border-radius: var(--sw-radius-md, 14px);
+  background: linear-gradient(100deg, #fffbeb, #fef3c7 70%);
 }
 
 .professional-warning svg {
@@ -125,155 +329,288 @@
 
 .professional-warning p {
   margin: 0;
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: 13.5px;
+  line-height: 1.55;
   color: #78350f;
   font-weight: 500;
 }
 
-/* Warning Banners */
+/* ── Warning banners ─────────────────────────────────────────────────── */
+
 .warnings-section {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  margin-bottom: 24px;
+  margin-bottom: 22px;
 }
 
 .warning-banner {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  padding: 16px 20px;
-  border-radius: 12px;
-  border: 2px solid;
+  padding: 14px 18px;
+  border-radius: var(--sw-radius-md, 14px);
+  border: 1px solid;
+  border-left-width: 3px;
 }
 
 .warning-red {
-  background: #fee2e2;
-  border-color: #fca5a5;
-  color: #991b1b;
+  background: #fff1f2;
+  border-color: #fda4af;
+  color: #9f1239;
 }
-
 .warning-yellow {
-  background: #fef3c7;
-  border-color: #fde047;
+  background: #fffbeb;
+  border-color: #fcd34d;
   color: #854d0e;
 }
+.warning-icon { flex-shrink: 0; margin-top: 2px; }
+.warning-banner p { margin: 0; font-size: 13.5px; line-height: 1.5; }
 
-.warning-icon {
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-
-.warning-banner p {
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-/* Filter Tabs */
+/* ── Filter tabs ───────────────────────────────────────────────────────
+   Now the shared segmented pill. Previously four flat 2px-outlined buttons
+   where the active one was solid green — the only difference between
+   "selected" and "not selected" was fill, which is easy to miss when the
+   four sit in a row. */
 .filter-tabs {
   display: flex;
-  gap: 8px;
+  gap: 4px;
+  padding: 5px;
   margin-bottom: 24px;
-  flex-wrap: wrap;
+  width: fit-content;
+  max-width: 100%;
+  border-radius: var(--sw-radius-pill, 999px);
+  background: rgba(255, 255, 255, 0.76);
+  border: 1px solid var(--sw-line, #e2f1ea);
+  box-shadow: var(--sw-shadow-sm, 0 1px 2px rgba(9, 78, 58, 0.06));
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+.filter-tabs::-webkit-scrollbar { display: none; }
 
 .filter-tab {
-  padding: 10px 20px;
-  background: white;
-  border: 2px solid #e5e7eb;
-  border-radius: 8px;
+  flex: 0 0 auto;
+  padding: 9px 20px;
+  border: 0;
+  border-radius: var(--sw-radius-pill, 999px);
+  background: transparent;
+  color: var(--sw-ink-soft, #58736a);
+  font: inherit;
   font-size: 14px;
-  font-weight: 500;
-  color: #374151;
+  font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: color 0.22s ease, background 0.22s ease, box-shadow 0.22s ease;
 }
 
-.filter-tab:hover {
-  border-color: #10b981;
-  background: #f0fdf4;
+.filter-tab:hover:not(.active) {
+  color: #5b21b6;
+  background: rgba(139, 92, 246, 0.12);
 }
 
 .filter-tab.active {
-  background: #10b981;
-  border-color: #10b981;
-  color: white;
+  color: #fff;
+  background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 55%, #4f46e5 100%);
+  box-shadow: 0 8px 18px -10px rgba(99, 102, 241, 0.9);
 }
 
-/* Recommendations List */
+/* The count on each tab. It is the reader's only warning that a filter will
+   come back empty, and it is computed from the same normalizer the filter
+   uses — a count that disagreed with the list would be worse than none. */
+.filter-tab__count {
+  display: inline-block;
+  margin-left: 7px;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.6;
+  color: var(--sw-ink-soft, #58736a);
+  background: rgba(15, 42, 35, 0.07);
+  border-radius: var(--sw-radius-pill, 999px);
+}
+.filter-tab.active .filter-tab__count {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.filter-tab:focus-visible {
+  outline: 3px solid var(--sw-indigo, #6366f1);
+  outline-offset: 2px;
+}
+
+/* ── List ────────────────────────────────────────────────────────────── */
+
 .recommendations-list {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 18px;
 }
 
 .no-results {
   text-align: center;
   padding: 48px 24px;
-  color: #6b7280;
+  color: var(--sw-ink-soft, #58736a);
   font-size: 16px;
 }
 
-/* Recommendation Card */
+/* ── Recommendation card ───────────────────────────────────────────────
+   The priority colour moves to a left rail and a soft tint, so a screen of
+   these can be scanned by priority without the 2px lime border that used to
+   outline every one of them identically. */
 .recommendation-card {
-  background: white;
-  border: 2px solid #86efac;
-  border-radius: 16px;
-  padding: 24px;
-  transition: all 0.3s ease;
+  position: relative;
+  padding: 22px 24px 22px 26px;
+  border: 1px solid var(--sw-line, #e2f1ea);
+  border-radius: var(--sw-radius-xl, 26px);
+  background: var(--sw-surface, #fff);
+  box-shadow: var(--sw-shadow-md, 0 10px 28px -14px rgba(9, 78, 58, 0.26));
+  overflow: hidden;
+  transition: transform 0.28s var(--sw-ease, ease), box-shadow 0.28s ease;
+}
+
+/* Tone is set on the card by a modifier class; the rail and the badge both
+   read it, so they cannot disagree about what "high priority" looks like. */
+.recommendation-card--high {
+  --rec-accent: linear-gradient(180deg, #34d399, #059669);
+  --rec-tint: #ecfdf5;
+}
+.recommendation-card--medium {
+  --rec-accent: linear-gradient(180deg, #fbbf24, #f59e0b);
+  --rec-tint: #fffbeb;
+}
+.recommendation-card--low {
+  --rec-accent: linear-gradient(180deg, #cbd5e1, #94a3b8);
+  --rec-tint: #f8fafc;
+}
+
+.recommendation-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  background: var(--rec-accent, linear-gradient(180deg, #cbd5e1, #94a3b8));
 }
 
 .recommendation-card:hover {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-  transform: translateY(-2px);
+  transform: translateY(-3px);
+  box-shadow: var(--sw-shadow-lg, 0 22px 46px -20px rgba(9, 78, 58, 0.34));
 }
 
 .recommendation-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
   gap: 16px;
 }
 
 .recommendation-title-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
   flex: 1;
+  min-width: 0;
 }
+
+.recommendation-icon { font-size: 24px; flex-shrink: 0; }
 
 .recommendation-name {
-  font-size: 22px;
+  font-size: 21px;
   font-weight: 700;
-  color: #1f2937;
+  letter-spacing: -0.02em;
+  color: var(--sw-ink, #0d2b23);
   margin: 0;
+  min-width: 0;
 }
 
-.priority-badge {
-  padding: 6px 12px;
-  border-radius: 6px;
-  font-size: 12px;
+/* The name is the affordance for the detail panel, so it has to LOOK like one
+   and behave like a button for a keyboard. */
+.recommendation-name-btn {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0;
+  font: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.recommendation-name-btn:hover { color: #5b21b6; }
+.recommendation-name-btn:focus-visible { outline: 3px solid var(--sw-indigo, #6366f1); outline-offset: 3px; border-radius: 4px; }
+
+.recommendation-name-hint {
+  font-size: 11px;
   font-weight: 600;
-  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--sw-emerald, #10b981);
+  opacity: 0;
+  transition: opacity var(--sw-dur, 0.24s) ease;
+}
+.recommendation-name-btn:hover .recommendation-name-hint,
+.recommendation-name-btn:focus-visible .recommendation-name-hint { opacity: 1; }
+
+/* Severity sits beside priority, not instead of it: priority is "how soon",
+   severity is "how bad is the thing driving it". */
+.severity-badge {
+  padding: 4px 10px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--sw-ink-soft, #58736a);
+  background: #f1f5f9;
+  border-radius: var(--sw-radius-pill, 999px);
+  box-shadow: inset 0 0 0 1px rgba(15, 42, 35, 0.07);
+}
+.severity-badge--high { color: #be123c; background: #fff1f2; }
+.severity-badge--medium { color: #b45309; background: #fffbeb; }
+.severity-badge--low { color: #0369a1; background: #f0f9ff; }
+.severity-badge--preventive { color: #15803d; background: #f0fdf4; }
+.severity-badge--none { display: none; }
+
+/* ── Confidence ──────────────────────────────────────────────────────────
+   The score decides the order within a priority band, so it is shown rather
+   than hidden. `role="meter"` is set in the markup; the fill width is
+   clamped in recommendationView so it is always a real percentage. */
+.rec-confidence {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 148px;
 }
 
-.priority-badge-high {
-  background: #10b981;
-  color: white;
+.rec-confidence__track {
+  flex: 1;
+  height: 8px;
+  overflow: hidden;
+  background: rgba(15, 42, 35, 0.09);
+  border-radius: var(--sw-radius-pill, 999px);
 }
 
-.priority-badge-medium {
-  background: #f59e0b;
-  color: white;
+.rec-confidence__fill {
+  height: 100%;
+  border-radius: var(--sw-radius-pill, 999px);
+  background: #94a3b8;
+  transition: width 0.7s var(--sw-ease, cubic-bezier(0.16, 1, 0.3, 1));
 }
+.rec-confidence[data-tone='high'] .rec-confidence__fill { background: linear-gradient(90deg, #34d399, #059669); }
+.rec-confidence[data-tone='medium'] .rec-confidence__fill { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
+.rec-confidence[data-tone='low'] .rec-confidence__fill { background: linear-gradient(90deg, #cbd5e1, #94a3b8); }
 
-.priority-badge-low {
-  background: #6b7280;
-  color: white;
+.rec-confidence__label {
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--sw-ink-soft, #58736a);
 }
 
 .recommendation-confidence {
@@ -281,180 +618,386 @@
   flex-direction: column;
   align-items: flex-end;
   gap: 4px;
+  flex-shrink: 0;
 }
 
-.confidence-value {
-  font-size: 28px;
-  font-weight: 700;
-  color: #10b981;
+/* "Recommended for" — what in the assessment drove this specific suggestion. */
+.recommendation-triggered {
+  margin: -4px 0 14px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--sw-ink-soft, #58736a);
 }
+.recommendation-triggered-label { font-weight: 700; color: var(--sw-ink, #0d2b23); }
 
-.confidence-label {
-  font-size: 12px;
-  color: #6b7280;
-  font-weight: 500;
+/* Priority as a labelled chip. The old badge was `text-transform: lowercase`
+   on an already-lowercase string and a 6px radius, so "high priority" and
+   "low priority" were the same solid block of colour, differing only in hue. */
+.priority-badge {
+  padding: 4px 11px;
+  border-radius: var(--sw-radius-pill, 999px);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--sw-ink, #0d2b23);
+  background: var(--rec-tint, #f8fafc);
+  box-shadow: inset 0 0 0 1px rgba(15, 42, 35, 0.08);
 }
+.priority-badge::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: middle;
+  background: var(--rec-accent, #94a3b8);
+}
+.priority-badge--high { color: #047857; }
+.priority-badge--medium { color: #b45309; }
+.priority-badge--low { color: #64748b; }
 
-/* Dosage */
+/* ── Dosage ──────────────────────────────────────────────────────────────
+   A definition list, not two paragraphs. Dose and timing are facts ABOUT the
+   supplement, and pairing them as label/value keeps them scannable when a
+   screen holds fifteen of them. */
 .recommendation-dosage {
-  margin-bottom: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 16px;
 }
 
-.dosage-text {
-  font-size: 16px;
-  font-weight: 600;
-  color: #374151;
-  margin: 0 0 4px 0;
+.dosage-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 150px;
+  min-width: 0;
+  padding: 10px 13px;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border: 1px solid var(--sw-line, #e2f1ea);
+  border-radius: var(--sw-radius-md, 14px);
 }
 
-.timing-text {
-  font-size: 14px;
-  color: #6b7280;
+.dosage-item dt {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--sw-ink-faint, #8aa39a);
+}
+
+.dosage-item dd {
   margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--sw-ink, #0d2b23);
 }
 
-/* Reason Section */
+/* Condition context — the 2-3 patient factors the AI tied together. */
+.recommendation-context {
+  margin: 0 0 16px;
+  padding: 11px 14px;
+  font-size: 13px;
+  font-style: italic;
+  line-height: 1.65;
+  color: #15803d;
+  background: #f0fdf4;
+  border-left: 3px solid #22c55e;
+  border-radius: 0 var(--sw-radius-sm, 10px) var(--sw-radius-sm, 10px) 0;
+}
+
+/* Interactions — always styled as a caution. This string is a claim about a
+   medication list the AI may not have had in full, so it must not read as
+   reassurance. A "None identified" from the model means "I found nothing",
+   not "you are safe". */
+.recommendation-interaction {
+  margin: 0 0 16px;
+  padding: 11px 14px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: #92400e;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: var(--sw-radius-md, 14px);
+}
+.recommendation-interaction-label {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #c2410c;
+}
+
+/* ── Expanded detail blocks ──────────────────────────────────────────────
+   Three kinds of supporting information, each in its own tint so a reader can
+   tell a citation from a shopping list at a glance. */
+.rec-expand {
+  margin-bottom: 16px;
+  padding: 7px 14px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--sw-ink-soft, #58736a);
+  background: transparent;
+  border: 1px solid var(--sw-line-strong, #cbe7da);
+  border-radius: var(--sw-radius-pill, 999px);
+  cursor: pointer;
+  transition: color var(--sw-dur, 0.24s) ease, border-color var(--sw-dur, 0.24s) ease;
+}
+.rec-expand:hover { color: #5b21b6; border-color: var(--sw-indigo, #6366f1); }
+.rec-expand:focus-visible { outline: 3px solid var(--sw-indigo, #6366f1); outline-offset: 2px; }
+
+.recommendation-details {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.detail-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: var(--sw-radius-md, 14px);
+}
+
+.detail-block__label {
+  display: flex;
+  align-items: center;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.detail-block p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+
+.detail-block--evidence { background: #eff6ff; border: 1px solid #bfdbfe; }
+.detail-block--evidence .detail-block__label { color: #1d4ed8; }
+.detail-block--evidence p { color: #1e40af; }
+
+.detail-block--foods { background: #f0fdf4; border: 1px solid #bbf7d0; }
+.detail-block--foods .detail-block__label { color: #15803d; }
+
+.detail-block--side-effects { background: #fff7ed; border: 1px solid #fed7aa; }
+.detail-block--side-effects .detail-block__label { color: #c2410c; }
+.detail-block--side-effects p { color: #92400e; }
+
+/* Food sources as pills, so four foods read as four things to buy. */
+.rec-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rec-pill {
+  padding: 4px 11px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #15803d;
+  background: #fff;
+  border: 1px solid #bbf7d0;
+  border-radius: var(--sw-radius-pill, 999px);
+}
+
+.evidence-info-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  padding: 0;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--sw-emerald-deep, #059669);
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.15s ease, color 0.15s ease;
+}
+.evidence-info-btn:hover { color: var(--sw-emerald, #10b981); transform: scale(1.15); }
+.evidence-info-btn:focus-visible { outline: 3px solid var(--sw-teal, #0d9488); outline-offset: 2px; }
+
+/* ── Reason ────────────────────────────────────────────────────────────
+   Tinted to match the card's own tone, so the explanation sits inside the
+   card's colour family instead of being a neutral grey island. */
 .recommendation-reason {
-  background: #f9fafb;
-  border-radius: 12px;
-  padding: 16px;
-  margin-bottom: 20px;
+  padding: 15px 16px;
+  margin-bottom: 16px;
+  border-radius: var(--sw-radius-md, 14px);
+  background: var(--rec-tint, #f8fafc);
+  border: 1px solid rgba(15, 42, 35, 0.05);
 }
 
 .reason-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
-  color: #9333ea;
+  margin-bottom: 7px;
+  color: #6d28d9;
 }
-
-.reason-header span {
-  font-size: 14px;
-  font-weight: 600;
-}
+.reason-header span { font-size: 13.5px; font-weight: 700; }
 
 .reason-text {
-  font-size: 14px;
-  color: #6b7280;
-  line-height: 1.6;
+  font-size: 13.5px;
+  color: var(--sw-ink-soft, #58736a);
+  line-height: 1.65;
   margin: 0;
 }
 
-/* Benefits */
-.recommendation-benefits {
-  margin-bottom: 20px;
-}
-
-.benefits-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: #1f2937;
-  margin: 0 0 12px 0;
-}
-
-.benefits-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.benefits-list li {
-  font-size: 14px;
-  color: #374151;
-  padding-left: 24px;
-  position: relative;
-  line-height: 1.5;
-}
-
-.benefits-list li::before {
-  content: '•';
-  position: absolute;
-  left: 8px;
-  color: #10b981;
-  font-weight: 700;
-  font-size: 18px;
-}
-
-/* Action Buttons */
+/* ── Actions ──────────────────────────────────────────────────────────────
+   The plan toggle is the point of this page, so it leads and the secondary
+   action sits beside it rather than competing. */
 .recommendation-actions {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  align-items: center;
+  padding-top: 14px;
+  border-top: 1px solid var(--sw-line, #e2f1ea);
 }
 
 .btn-add-plan,
-.btn-find-products {
-  display: flex;
+.btn-ghost,
+.btn-added {
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  padding: 10px 18px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 600;
+  padding: 10px 20px;
+  border-radius: var(--sw-radius-pill, 999px);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
   cursor: pointer;
-  transition: all 0.2s ease;
-  border: none;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
 }
 
 .btn-add-plan {
-  background: #10b981;
-  color: white;
+  border: 0;
+  background: var(--sw-grad-brand, linear-gradient(135deg, #10b981, #0891b2));
+  color: #fff;
+  box-shadow: 0 12px 24px -12px rgba(13, 148, 136, 1);
 }
-
 .btn-add-plan:hover:not(:disabled) {
-  background: #059669;
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+  filter: brightness(1.06);
+  box-shadow: 0 16px 30px -12px rgba(13, 148, 136, 1);
 }
+.btn-add-plan:disabled { opacity: 0.6; cursor: not-allowed; }
 
-.btn-add-plan:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
+/* "In your plan" is a confirmed state, not a disabled button. Styled as a
+   quiet confirmation so it does not look like a broken CTA — and it stays
+   clickable, because the reader needs a way back out. */
 .btn-added {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 18px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  border: 2px solid #86efac;
-  background: #f0fdf4;
-  color: #15803d;
+  border: 1.5px solid #6ee7b7;
+  background: #ecfdf5;
+  color: #047857;
 }
-
 .btn-added:hover:not(:disabled) {
-  background: #dcfce7;
-  border-color: #4ade80;
+  background: #d1fae5;
+  border-color: var(--sw-emerald, #10b981);
+}
+.btn-added:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.btn-ghost {
+  border: 1.5px solid var(--sw-line-strong, #cbe7da);
+  background: #fff;
+  color: var(--sw-ink-soft, #58736a);
+}
+.btn-ghost:hover {
+  border-color: var(--sw-emerald, #10b981);
+  background: var(--sw-surface-sunk, #f4fbf7);
+  color: var(--sw-emerald-deep, #059669);
 }
 
-.btn-added:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+/* Show more / less — the list is capped at six so a fifteen-item plan does
+   not open as a wall. */
+.btn-show-more {
+  display: block;
+  width: fit-content;
+  margin: 22px auto 0;
+  padding: 10px 24px;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--sw-ink-soft, #58736a);
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid var(--sw-line-strong, #cbe7da);
+  border-radius: var(--sw-radius-pill, 999px);
+  cursor: pointer;
+  transition: color var(--sw-dur, 0.24s) ease, border-color var(--sw-dur, 0.24s) ease;
+}
+.btn-show-more:hover { color: #5b21b6; border-color: var(--sw-indigo, #6366f1); }
+.btn-show-more:focus-visible { outline: 3px solid var(--sw-indigo, #6366f1); outline-offset: 2px; }
+
+.btn-add-plan:focus-visible,
+.btn-added:focus-visible,
+.btn-find-products:focus-visible {
+  outline: 3px solid var(--sw-teal, #0d9488);
+  outline-offset: 2px;
 }
 
-.btn-find-products {
-  background: white;
-  color: #374151;
-  border: 2px solid #d1d5db;
+/* ── Empty states ──────────────────────────────────────────────────────
+   Both of these were ~40 lines of INLINE styles each, duplicated verbatim.
+   They are now one class, and — see the JSX note — the same component with
+   different copy, so the two cannot drift apart. */
+.rec-empty {
+  max-width: 560px;
+  margin: 40px auto;
+  padding: 48px 36px;
+  text-align: center;
+  border: 1px solid var(--sw-line, #e2f1ea);
+  border-radius: var(--sw-radius-xl, 26px);
+  background: var(--sw-surface, #fff);
+  box-shadow: var(--sw-shadow-md, 0 10px 28px -14px rgba(9, 78, 58, 0.26));
+  animation: sw-rise 0.5s var(--sw-ease, cubic-bezier(0.16, 1, 0.3, 1)) both;
 }
 
-.btn-find-products:hover {
-  border-color: #10b981;
-  background: #f0fdf4;
-  color: #059669;
+.rec-empty__icon {
+  display: grid;
+  place-items: center;
+  width: 112px;
+  height: 112px;
+  margin: 0 auto 22px;
+  border-radius: 50%;
+  background: linear-gradient(140deg, #ede9fe, #dbeafe);
+  color: var(--sw-violet, #a855f7);
+  box-shadow: inset 0 0 0 1px #ddd6fe;
 }
 
-/* Toast Notification */
+.rec-empty__title {
+  margin: 0 0 8px;
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--sw-ink, #0d2b23);
+}
+
+.rec-empty__text {
+  margin: 0 auto 22px;
+  max-width: 42ch;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--sw-ink-soft, #58736a);
+}
+
+/* ── Toast ───────────────────────────────────────────────────────────── */
+
 .recommendations-toast {
   position: fixed;
   bottom: 32px;
@@ -463,7 +1006,7 @@
   background: #111827;
   color: #fff;
   padding: 14px 32px;
-  border-radius: 10px;
+  border-radius: var(--sw-radius-md, 14px);
   font-size: 15px;
   font-weight: 500;
   z-index: 1000;
@@ -473,69 +1016,83 @@
 }
 
 @keyframes slideUp {
-  from {
-    transform: translate(-50%, 20px);
-    opacity: 0;
-  }
-  to {
-    transform: translate(-50%, 0);
-    opacity: 1;
-  }
+  from { transform: translate(-50%, 20px); opacity: 0; }
+  to { transform: translate(-50%, 0); opacity: 1; }
 }
 
-/* Responsive Design */
+/* ── Entrance ──────────────────────────────────────────────────────────
+   Staggered per card, and `both` so a card waits out its delay invisibly
+   instead of flashing in at full opacity first. */
+.recommendations-list > .recommendation-card { animation: sw-rise 0.45s var(--sw-ease, ease) both; }
+.recommendations-list > .recommendation-card:nth-child(2) { animation-delay: 0.06s; }
+.recommendations-list > .recommendation-card:nth-child(3) { animation-delay: 0.12s; }
+.recommendations-list > .recommendation-card:nth-child(4) { animation-delay: 0.18s; }
+.recommendations-list > .recommendation-card:nth-child(5) { animation-delay: 0.24s; }
+
+/* ── Responsive ───────────────────────────────────────────────────────────
+   The card stacks rather than shrinking: a dose and a confidence bar sharing
+   one 280px row is how the label stops being readable. */
+
 @media (max-width: 768px) {
-  .recommendations-container {
-    padding: 24px 16px;
-  }
+  .recommendations-container { padding: 24px 16px 56px; }
+  .recommendations-header { margin-bottom: 22px; }
+  .recommendations-title { font-size: 26px; }
+  .recommendations-subtitle { font-size: 14.5px; }
 
-  .recommendations-header {
-    margin-bottom: 24px;
-  }
+  /* The toggle goes full width rather than sitting beside a wrapped title. */
+  .detail-mode-toggle { width: 100%; }
+  .detail-mode-btn { flex: 1; }
 
-  .recommendations-title {
-    font-size: 24px;
-  }
+  .rec-toolbar { flex-direction: column; align-items: stretch; }
+  .rec-search { max-width: none; }
 
-  .recommendations-subtitle {
-    font-size: 14px;
-  }
+  .recommendation-header { flex-direction: column; align-items: flex-start; }
+  .recommendation-confidence { align-items: flex-start; width: 100%; }
+  .rec-confidence { width: 100%; min-width: 0; }
+  .recommendation-name { font-size: 18px; }
 
-  .recommendation-header {
-    flex-direction: column;
-  }
+  .recommendation-dosage { flex-direction: column; }
+  .dosage-item { flex: 1 1 auto; }
 
-  .recommendation-confidence {
-    align-items: flex-start;
-  }
-
-  .filter-tabs {
-    overflow-x: auto;
-    flex-wrap: nowrap;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .filter-tab {
-    white-space: nowrap;
-  }
-
-  .recommendation-actions {
-    flex-direction: column;
-  }
-
+  .recommendation-actions { flex-direction: column; align-items: stretch; }
   .btn-add-plan,
-  .btn-find-products {
-    width: 100%;
-    justify-content: center;
-  }
+  .btn-ghost,
+  .btn-added { width: 100%; }
+
+  .rec-empty { padding: 36px 22px; }
+  .rec-consult { flex-direction: column; }
 }
 
 @media (max-width: 480px) {
-  .recommendation-name {
-    font-size: 18px;
-  }
+  .recommendations-title { font-size: 23px; }
+  .recommendations-subtitle { font-size: 13.5px; }
+  .filter-tab { padding: 8px 15px; font-size: 13px; }
+  .filter-tab__count { margin-left: 5px; padding: 1px 5px; font-size: 10px; }
+  .rec-empty__icon { width: 92px; height: 92px; }
+  .recommendation-summary__item { padding: 6px 11px; font-size: 12px; }
+}
 
-  .confidence-value {
-    font-size: 24px;
+@media (prefers-reduced-motion: reduce) {
+  .recommendations-header,
+  .recommendations-list > .recommendation-card,
+  .rec-empty {
+    animation: none;
+  }
+  .recommendation-card,
+  .btn-add-plan,
+  .btn-added,
+  .btn-ghost,
+  .filter-tab,
+  .detail-mode-btn,
+  .rec-expand,
+  .btn-show-more,
+  .rec-confidence__fill,
+  .btn-primary {
+    transition: none;
+  }
+  .recommendation-card:hover,
+  .btn-add-plan:hover:not(:disabled),
+  .btn-primary:hover {
+    transform: none;
   }
 }

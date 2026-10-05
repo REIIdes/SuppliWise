@@ -1,0 +1,594 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   ADMIN SUBSCRIPTION PANEL
+   Lives inside the light admin user row, so it is light-themed to match
+   AdminDashboard.css. The two-layer layout is the point: the effective state on
+   top, the PAID state and the ADMIN OVERRIDE side by side underneath, so an
+   admin can always see that the user's own purchase is intact underneath an
+   override and exactly what "Restore original" would return to.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.asp {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #dbe6dd;
+  border-radius: 12px;
+  background: #f8fbf9;
+  text-align: left;
+}
+
+.asp--loading {
+  color: #6b7c6b;
+  font-size: 13.5px;
+  padding: 18px;
+}
+
+.asp__error,
+.asp__notice {
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.asp__error {
+  color: #b91c1c;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+}
+
+.asp__notice {
+  color: #047857;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+}
+
+.asp-label {
+  margin: 0;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #7a8a7a;
+}
+
+/* ── Effective state ────────────────────────────────────────────────── */
+.asp-effective {
+  padding: 14px 16px;
+  border: 1px solid #dbe6dd;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.asp-effective__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.asp-effective__plan {
+  margin: 3px 0 0;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #14301f;
+}
+
+/* "Was PREMIUM · CANCELLED" — the record of what an account used to hold. */
+.asp-effective__was {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #7a8a7a;
+}
+
+/* The Team badge line: how many seats, and what one seat actually is. */
+.asp-effective__seats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 9px 0 0;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #35543f;
+}
+
+/* Seat editor in the paid-record section. */
+.asp-seats {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #e0e7fe;
+  border-radius: 10px;
+  background: #f5f7ff;
+}
+
+.asp-seats .asp-field { flex: 1 1 160px; }
+.asp-seats .asp-field input { max-width: 120px; }
+
+.asp-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.asp-effective__remaining {
+  margin: 12px 0 3px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #1f3d2c;
+}
+
+.asp-effective__meta {
+  margin: 0;
+  font-size: 12.5px;
+  color: #6b7c6b;
+  line-height: 1.5;
+}
+
+.asp-progress {
+  margin-top: 12px;
+  height: 6px;
+  border-radius: 999px;
+  background: #e8f0e9;
+  overflow: hidden;
+}
+
+.asp-progress__bar {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #34d399, #0d9488);
+  transition: width 0.3s ease;
+}
+
+/* ── Chips ──────────────────────────────────────────────────────────── */
+.asp-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  white-space: nowrap;
+}
+
+.asp-chip--paid { color: #047857; background: #ecfdf5; border-color: #a7f3d0; }
+.asp-chip--admin { color: #b45309; background: #fffbeb; border-color: #fde68a; }
+.asp-chip--team { color: #4338ca; background: #eef2ff; border-color: #c7d2fe; }
+.asp-chip--free { color: #6b7c6b; background: #f1f5f2; border-color: #dbe6dd; }
+.asp-chip--permanent { color: #4338ca; background: #eef2ff; border-color: #c7d2fe; }
+.asp-chip--active { color: #166534; background: #f0fdf4; border-color: #bbf7d0; }
+.asp-chip--muted { color: #7a8a7a; background: #f1f5f2; border-color: #dbe6dd; }
+
+/* ── The two layers ─────────────────────────────────────────────────── */
+.asp-layers {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.asp-layer {
+  padding: 13px 14px;
+  border: 1px solid #dbe6dd;
+  border-radius: 10px;
+  background: #ffffff;
+  border-left-width: 3px;
+}
+
+/* The layer currently deciding access is accented; the one underneath is
+   deliberately recessive so "which one is in force" is obvious at a glance. */
+.asp-layer--live { border-left-color: #10b981; }
+.asp-layer--muted { border-left-color: #cbd5c1; background: #fbfdfb; }
+
+.asp-layer--muted .asp-layer__plan,
+.asp-layer--muted .asp-layer__remaining { color: #6b7c6b; }
+
+.asp-layer__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.asp-layer__plan {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: #14301f;
+}
+
+.asp-layer__remaining {
+  margin: 3px 0 6px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #1f3d2c;
+}
+
+.asp-layer__meta {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: #6b7c6b;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.asp-layer__meta strong { color: #35543f; font-weight: 700; }
+
+.asp-layer__reason {
+  margin: 8px 0 0;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1.45;
+}
+
+.asp-layer__empty {
+  margin: 0;
+  font-size: 12.5px;
+  color: #7a8a7a;
+  line-height: 1.55;
+}
+
+/* ── Restore ────────────────────────────────────────────────────────── */
+.asp-restore {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 13px 15px;
+  border-radius: 10px;
+  border: 1px solid #bfdbfe;
+  background: linear-gradient(135deg, #eff6ff, #f5f3ff);
+}
+
+.asp-restore--off {
+  border-color: #dbe6dd;
+  background: #fbfdfb;
+}
+
+.asp-restore__text { min-width: 0; flex: 1 1 260px; }
+
+.asp-restore__body {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: #35543f;
+  line-height: 1.55;
+}
+
+.asp-restore--off .asp-restore__body { color: #7a8a7a; }
+
+/* ── Buttons ────────────────────────────────────────────────────────── */
+.asp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+/* The day count that the "+N days" / "−N days" buttons act on. */
+.asp-days {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px 0 12px;
+  border: 1px solid #cfdcd2;
+  border-radius: 8px;
+  background: #ffffff;
+  height: 34px;
+}
+
+.asp-days__label {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #4a6b57;
+  white-space: nowrap;
+}
+
+.asp-days input {
+  width: 62px;
+  padding: 4px 6px;
+  border: 1px solid #cfdcd2;
+  border-radius: 6px;
+  background: #fbfdfb;
+  color: #1f3d2c;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.asp-days input:disabled {
+  background: #f1f5f2;
+  color: #9aab9c;
+  cursor: not-allowed;
+}
+
+.asp-days input:focus-visible {
+  outline: 2px solid #10b981;
+  outline-offset: 1px;
+}
+
+.asp-paid-actions__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.asp-btn {
+  padding: 8px 13px;
+  border-radius: 8px;
+  border: 1px solid #cfdcd2;
+  background: #ffffff;
+  color: #2c4a37;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, transform 0.12s ease;
+  white-space: nowrap;
+}
+
+.asp-btn:hover:not(:disabled) {
+  background: #f0f7f2;
+  border-color: #a9c5b1;
+  transform: translateY(-1px);
+}
+
+.asp-btn:active:not(:disabled) { transform: translateY(0); }
+
+.asp-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.asp-btn:focus-visible {
+  outline: 2px solid #10b981;
+  outline-offset: 2px;
+}
+
+.asp-btn--primary {
+  background: linear-gradient(135deg, #10b981, #0d9488);
+  border-color: transparent;
+  color: #ffffff;
+}
+
+.asp-btn--primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #0d9488, #0f766e);
+  border-color: transparent;
+}
+
+.asp-btn--on {
+  background: linear-gradient(135deg, #0d9488, #0f766e);
+  color: #ffffff;
+}
+
+.asp-btn--restore {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #ffffff;
+}
+
+.asp-btn--restore:hover:not(:disabled) {
+  background: #1e40af;
+  border-color: #1e40af;
+}
+
+.asp-btn--danger {
+  color: #b91c1c;
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.asp-btn--danger:hover:not(:disabled) {
+  background: #fee2e2;
+  border-color: #fca5a5;
+}
+
+/* ── Form ───────────────────────────────────────────────────────────── */
+.asp-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #dbe6dd;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.asp-form__row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.asp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.asp-field > span {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #4a6b57;
+}
+
+.asp-field select,
+.asp-field input {
+  padding: 8px 10px;
+  border: 1px solid #cfdcd2;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1f3d2c;
+  font: inherit;
+  font-size: 13px;
+  width: 100%;
+}
+
+.asp-field input:disabled {
+  background: #f1f5f2;
+  color: #9aab9c;
+  cursor: not-allowed;
+}
+
+.asp-field select:focus-visible,
+.asp-field input:focus-visible {
+  outline: 2px solid #10b981;
+  outline-offset: 1px;
+}
+
+.asp-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #1f3d2c;
+  font-weight: 600;
+}
+
+.asp-check input {
+  margin-top: 2px;
+  width: 15px;
+  height: 15px;
+  accent-color: #10b981;
+  flex: 0 0 auto;
+}
+
+.asp-check small {
+  display: block;
+  margin-top: 2px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: #7a8a7a;
+}
+
+.asp-form__note {
+  margin: 0;
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  color: #075985;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.asp-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ── History ────────────────────────────────────────────────────────── */
+.asp-history {
+  border: 1px solid #dbe6dd;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 0 14px;
+}
+
+.asp-history > summary {
+  padding: 11px 0;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #4a6b57;
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  user-select: none;
+}
+
+.asp-history > summary::-webkit-details-marker { display: none; }
+
+.asp-history > summary::before {
+  content: "▸";
+  font-size: 11px;
+  transition: transform 0.18s ease;
+  display: inline-block;
+}
+
+.asp-history[open] > summary::before { transform: rotate(90deg); }
+
+.asp-history__empty {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  color: #7a8a7a;
+}
+
+.asp-history__list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.asp-history__item {
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: #f8fbf9;
+  border: 1px solid #e6efe8;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.asp-history__action {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: #1f3d2c;
+}
+
+.asp-history__note {
+  font-size: 12.5px;
+  color: #3f5f4b;
+  line-height: 1.45;
+}
+
+.asp-history__meta {
+  font-size: 11px;
+  color: #7a8a7a;
+  line-height: 1.4;
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────── */
+@media (max-width: 720px) {
+  .asp-layers { grid-template-columns: 1fr; }
+  .asp-form__row { grid-template-columns: 1fr; }
+  .asp-restore { flex-direction: column; align-items: stretch; }
+  .asp-restore .asp-btn { width: 100%; }
+  .asp-actions .asp-btn { flex: 1 1 auto; text-align: center; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .asp-btn,
+  .asp-progress__bar,
+  .asp-history > summary::before { transition: none; }
+  .asp-btn:hover:not(:disabled) { transform: none; }
+}

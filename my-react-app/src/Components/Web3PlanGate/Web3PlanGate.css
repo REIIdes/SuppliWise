@@ -1,0 +1,19 @@
+/* Layout around the shared PlanLockedCard for the blockchain routes.
+   PlanLockedCard brings its own card styling AND its own actions, so this file
+   only handles the one supporting line below it.
+
+   The locked screen used to render a second, identical pair of "Back to
+   Dashboard" / "View plans" buttons under this note. The card already renders
+   both actions, so the page showed FOUR buttons for TWO choices — a second,
+   competing call to action in a different style, which is exactly the split
+   attention PlanLockedCard exists to avoid. The `.w3gate-actions` rules are
+   gone with it. */
+
+.w3gate-note {
+  max-width: 640px;
+  margin: 4px auto 0;
+  text-align: center;
+  color: #5b6b7c;
+  font-size: 14px;
+  line-height: 1.65;
+}

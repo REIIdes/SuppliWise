@@ -1,0 +1,148 @@
+# CI — the cheapest way to keep SECURITY_AUDIT_REPORT.md honest.
+#
+# The audit recorded this as an open informational finding (I3): nothing ran the
+# test suite or `npm audit` on push, so the report's "0 vulnerabilities" claim
+# was a snapshot that silently expired. It had already expired — a nodemailer
+# advisory landed after the audit was written and sat unnoticed until this
+# workflow existed to catch it.
+#
+# What this gates, and why each step is here:
+#   • syntax (`npm run check`)      — a SyntaxError should never reach a review
+#   • server unit tests             — with a real MongoDB, so the 40 database
+#                                    suites actually EXECUTE instead of skipping.
+#                                    They skip silently without MONGO_TEST_URI,
+#                                    and a skipped test is not a passing test.
+#   • client lint / build / tests   — 0 errors; a green build proves the PWA
+#                                    service worker is still generated
+#   • `npm audit` (both scopes)     — this is the step that would have caught
+#                                    the nodemailer advisories on day one
+#   • secret sweep                  — the C1/C2 guard. The remote is public, so a
+#                                    committed credential is a permanent breach.
+#
+# Deliberately NOT run here: glitch-hunt.js and the test-*-flows.js probes. They
+# attack a LIVE API and write throwaway accounts to the application database, so
+# they need a running server and a disposable database. Run them by hand against
+# a local instance; see SECURITY_AUDIT_REPORT.md §9A / §9B.
+
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  server:
+    name: Server — syntax, tests, audit
+    runs-on: ubuntu-latest
+
+    # A real MongoDB so the database-backed suites run. testDbGuard refuses to
+    # connect to anything but MONGO_TEST_URI and skips without it, so without
+    # this service ~40 tests would report "skipped" and the job would still be
+    # green. Point it at the throwaway database, never the application's URI.
+    services:
+      mongo:
+        image: mongo:7
+        ports: ['27017:27017']
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: server
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - run: npm ci
+
+      - name: Syntax check
+        run: npm run check
+
+      - name: Unit tests
+        env:
+          MONGO_TEST_URI: mongodb://127.0.0.1:27017/suppliwise_test
+          MONGO_URI: mongodb://127.0.0.1:27017/suppliwise_app_unused
+          JWT_SECRET: ci-run-only-not-a-real-secret-000000000000000000000000
+        run: npm test
+
+      # Fails the job on any advisory. This is the step the audit lacked.
+      - name: Dependency audit (server)
+        run: npm audit --omit=dev
+
+  client:
+    name: Client — lint, build, tests, audit
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: my-react-app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: my-react-app/package-lock.json
+
+      - run: npm ci
+
+      # Warnings are allowed on purpose: the repo carries a few known, pre-existing
+      # react-hooks/exhaustive-deps warnings that are not regressions. Errors are not.
+      - name: Lint
+        run: npx eslint . --max-warnings=unlimited
+
+      - run: npm test
+
+      - name: Production build (PWA service worker must be generated)
+        run: npx vite build
+
+      - name: Dependency audit (client)
+        run: npm audit --omit=dev
+
+  secrets:
+    name: Secret sweep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history, so a secret committed and later "sanitized" is still caught.
+          fetch-depth: 0
+
+      # Search for STRUCTURE, never for a literal secret value — pasting a real
+      # credential into a pattern would put that credential in this file, which is
+      # tracked. Covers bcrypt/argon2 hashes and base32 TOTP seeds (32+ chars).
+      #
+      # The hash patterns deliberately require the real base64/base32 alphabet.
+      # A looser `\$argon2id\$` matches the documented placeholder in
+      # server/.env.example and README.md (`…$your_salt$your_hash`), which would
+      # fail every push over a template. Verified: these patterns match nothing in
+      # the tree today, and still catch a genuine credential.
+      - name: No hashes or TOTP seeds in tracked docs / example config
+        run: |
+          if git grep -nE '\$2[aby]\$[0-9]{2}\$[./A-Za-z0-9]{53}|\$argon2id\$v=[0-9]+\$m=[0-9]+,t=[0-9]+,p=[0-9]+\$[A-Za-z0-9+/]{8,}\$[A-Za-z0-9+/]{20,}|\b[A-Z2-7]{32}\b' \
+               -- '*.md' '*.example' ':!node_modules'; then
+            echo "::error::A credential-shaped value is committed. Sanitize it AND rotate it — sanitizing a file does not un-leak it (see SECURITY_AUDIT_REPORT.md §9)."
+            exit 1
+          fi
+          echo "No credential-shaped values in tracked documentation."
+
+      - name: .env must never be tracked
+        run: |
+          if git ls-files --error-unmatch server/.env 2>/dev/null; then
+            echo "::error::server/.env is tracked. It holds live credentials — untrack it and rotate everything in it."
+            exit 1
+          fi
+          echo "server/.env is not tracked."

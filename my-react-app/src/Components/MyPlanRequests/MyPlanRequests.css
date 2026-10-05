@@ -1,0 +1,126 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   MY PLAN REQUESTS
+   Sits inside the light "Plan & billing" card on the profile page, so it is
+   light-themed to match ProfilePage.css. Reads as an appendix to that card
+   rather than a section of its own — it exists to answer "what happened to my
+   request", not to compete with the current plan above it.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.mpr {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid #e6eee7;
+  text-align: left;
+}
+
+.mpr-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.mpr-label {
+  margin: 0;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #7a8a7a;
+}
+
+.mpr-refresh {
+  padding: 5px 11px;
+  border: 1px solid #dbe6dd;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #4a5c4a;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.mpr-refresh:hover:not(:disabled) {
+  background: #f4f9f5;
+  border-color: #b6cdb9;
+}
+
+.mpr-refresh:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.mpr-empty {
+  margin: 0;
+  padding: 14px;
+  border: 1px dashed #d5e2d7;
+  border-radius: 10px;
+  color: #7a8a7a;
+  font-size: 13px;
+  text-align: center;
+}
+
+.mpr-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mpr-row {
+  padding: 12px 14px;
+  border: 1px solid #e6eee7;
+  border-left: 4px solid #c8d8ca;
+  border-radius: 10px;
+  background: #f8fbf9;
+}
+
+.mpr-row--pending { border-left-color: #f0a04b; }
+.mpr-row--approved { border-left-color: #34a853; }
+.mpr-row--rejected { border-left-color: #c9cecb; }
+
+.mpr-row__main {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.mpr-badge {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.mpr-badge--pending { background: #fff1e6; color: #b45309; }
+.mpr-badge--approved { background: #e7f7ec; color: #15803d; }
+.mpr-badge--rejected { background: #f1f3f1; color: #6b7c6b; }
+
+.mpr-plan {
+  font-size: 14.5px;
+  font-weight: 800;
+  color: #14301f;
+}
+
+.mpr-meta {
+  margin: 5px 0 0;
+  font-size: 12.5px;
+  color: #6b7c6b;
+}
+
+.mpr-note {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #4a5c4a;
+}
+
+.mpr-note--ok { color: #15803d; }
+.mpr-note--bad { color: #b91c1c; }

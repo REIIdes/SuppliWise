@@ -53,6 +53,31 @@ const SPELLING_FIXES = {
   takot: 'anxiety', kinakabahan: 'nervousness',
 };
 
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Pre-compiled replacement rules (built once at module load so hot-path
+// sanitize calls don't rebuild ~100 RegExp objects on every request).
+function buildRules(map) {
+  return Object.entries(map)
+    .sort((a, b) => b[0].length - a[0].length)
+    .map(([from, to]) => ({ regex: new RegExp(`\\b${escapeRegExp(from)}\\b`, 'gi'), to }));
+}
+
+let SPELLING_RULES = null;
+let SLANG_RULES = null;
+function getRules() {
+  if (!SPELLING_RULES) SPELLING_RULES = buildRules(SPELLING_FIXES);
+  if (!SLANG_RULES) SLANG_RULES = buildRules(SLANG_TO_CLINICAL);
+  return { SPELLING_RULES, SLANG_RULES };
+}
+
+function applyRules(cleaned, rules) {
+  for (const { regex, to } of rules) {
+    cleaned = cleaned.replace(regex, to);
+  }
+  return cleaned;
+}
+
 const SLANG_TO_CLINICAL = {
   'super tired': 'significant fatigue',
   'really tired': 'significant fatigue',
@@ -227,9 +252,55 @@ function isGarbage(text) {
  * - Returns { value: '', garbage: true } if garbage detected
  * - Returns { value: cleanedText, garbage: false } otherwise
  */
+// Strip HTML/XML tags so stored text can never carry markup into admin
+// views, PDFs, or AI prompts (stored-XSS defense in depth — React already
+// escapes on render, but stored data should be clean too).
+function stripTags(text) {
+  return String(text).replace(/<[^>]*>/g, '');
+}
+
+// Removes prototype-pollution keys from parsed JSON bodies before they are
+// persisted (e.g. Mixed aiResults blobs). Also strips MongoDB operator keys
+// ($-leading) and dotted keys: both are illegal as field names (dotted keys
+// crash the write with a 500) and must never reach an update document.
+// Mutates nothing outside `value`.
+//
+// The depth guard is applied to VALUES, never used as an early return for the
+// node being examined. The old `if (depth > 10 || ...) return value` bailed out
+// on the whole subtree, so a `$`-prefixed or dotted key nested 11+ levels deep
+// was returned UNscrubbed and persisted — reintroducing exactly the
+// operator-injection hazard this function exists to remove. A 1 MB request body
+// reaches that depth easily. Now the walk continues to a depth that a 1 MB body
+// cannot meaningfully exceed, and cycles are tracked so a self-referential
+// object cannot spin forever.
+const SCRUB_MAX_DEPTH = 512;
+function scrubKeys(value, depth = 0, seen = new WeakSet()) {
+  if (value === null || typeof value !== 'object') return value;
+  if (depth > SCRUB_MAX_DEPTH) {
+    // Too deep to be legitimate data inside a 1 MB body. Drop rather than
+    // return unscrubbed.
+    return null;
+  }
+  if (seen.has(value)) return null; // cycle
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) value[i] = scrubKeys(value[i], depth + 1, seen);
+    return value;
+  }
+  for (const key of Object.keys(value)) {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype' ||
+        key.startsWith('$') || key.includes('.')) {
+      delete value[key];
+    } else {
+      value[key] = scrubKeys(value[key], depth + 1, seen);
+    }
+  }
+  return value;
+}
+
 function sanitizeTextField(text) {
   if (!text || typeof text !== 'string') return { value: '', garbage: false };
-  const trimmed = text.trim();
+  const trimmed = stripTags(text).trim();
   if (!trimmed) return { value: '', garbage: false };
   if (isGarbage(trimmed)) return { value: '', garbage: true };
 
@@ -240,18 +311,10 @@ function sanitizeTextField(text) {
   cleaned = cleaned.replace(/\s+/g, ' ').trim();
 
   // Apply spelling fixes (longer phrases first)
-  const spellingEntries = Object.entries(SPELLING_FIXES).sort((a, b) => b[0].length - a[0].length);
-  for (const [wrong, correct] of spellingEntries) {
-    const regex = new RegExp(`\\b${wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
-    cleaned = cleaned.replace(regex, correct);
-  }
+  cleaned = applyRules(cleaned, getRules().SPELLING_RULES);
 
   // Apply slang → clinical (longer phrases first)
-  const slangEntries = Object.entries(SLANG_TO_CLINICAL).sort((a, b) => b[0].length - a[0].length);
-  for (const [slang, clinical] of slangEntries) {
-    const regex = new RegExp(`\\b${slang.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
-    cleaned = cleaned.replace(regex, clinical);
-  }
+  cleaned = applyRules(cleaned, getRules().SLANG_RULES);
 
   // Remove repeated characters (sooooo → so)
   cleaned = cleaned.replace(/(.)\1{3,}/g, '$1$1');
@@ -267,22 +330,18 @@ function sanitizeTextField(text) {
  */
 function sanitizeShortField(text) {
   if (!text || typeof text !== 'string') return { value: text || '', garbage: false };
-  const trimmed = text.trim();
+  const trimmed = stripTags(text).trim();
   if (!trimmed) return { value: '', garbage: false };
   if (isGarbage(trimmed)) return { value: '', garbage: true };
 
   let cleaned = trimmed.replace(/\s+/g, ' ');
 
-  const spellingEntries = Object.entries(SPELLING_FIXES).sort((a, b) => b[0].length - a[0].length);
-  for (const [wrong, correct] of spellingEntries) {
-    const regex = new RegExp(`\\b${wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
-    cleaned = cleaned.replace(regex, correct);
-  }
+  cleaned = applyRules(cleaned, getRules().SPELLING_RULES);
 
   return { value: cleaned.trim(), garbage: false };
 }
 
-module.exports = { sanitizeTextField, sanitizeShortField, isGarbage, preprocessUserInput, sanitizeMedicalField };
+module.exports = { sanitizeTextField, sanitizeShortField, isGarbage, preprocessUserInput, sanitizeMedicalField, stripTags, scrubKeys };
 
 // ── preprocessUserInput ────────────────────────────────────────────────────
 // Normalises free-text before it is sent to the AI prompt.
@@ -290,7 +349,7 @@ module.exports = { sanitizeTextField, sanitizeShortField, isGarbage, preprocessU
 function preprocessUserInput(text) {
   if (!text || typeof text !== 'string') return '';
 
-  let cleaned = text.trim();
+  let cleaned = stripTags(text).trim();
   cleaned = cleaned.replace(/\s+/g, ' ');
 
   // Remove filler words
@@ -298,18 +357,10 @@ function preprocessUserInput(text) {
   cleaned = cleaned.replace(/\s+/g, ' ').trim();
 
   // Apply spelling fixes (longer phrases first to avoid partial matches)
-  const spellingEntries = Object.entries(SPELLING_FIXES).sort((a, b) => b[0].length - a[0].length);
-  for (const [wrong, correct] of spellingEntries) {
-    const regex = new RegExp(`\\b${wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
-    cleaned = cleaned.replace(regex, correct);
-  }
+  cleaned = applyRules(cleaned, getRules().SPELLING_RULES);
 
   // Apply slang → clinical (longer phrases first)
-  const slangEntries = Object.entries(SLANG_TO_CLINICAL).sort((a, b) => b[0].length - a[0].length);
-  for (const [slang, clinical] of slangEntries) {
-    const regex = new RegExp(`\\b${slang.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
-    cleaned = cleaned.replace(regex, clinical);
-  }
+  cleaned = applyRules(cleaned, getRules().SLANG_RULES);
 
   // Collapse repeated characters (sooooo → so)
   cleaned = cleaned.replace(/(.)\1{3,}/g, '$1$1');

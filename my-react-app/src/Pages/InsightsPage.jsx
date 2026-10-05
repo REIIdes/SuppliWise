@@ -1,16 +1,24 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
-import { getInsights } from '../api';
+import { getInsights, getToken } from '../api';
+import PlanLockedCard from '../Components/PlanLockedCard/PlanLockedCard';
+import { useSubscription, SUBSCRIPTION_EVENT } from '../hooks/useSubscription';
+/* The plan-day key is parsed by the shared helper, never by `new Date(key)`:
+   a bare YYYY-MM-DD is read as UTC midnight and then formatted in the HOST's
+   zone, which names the wrong weekday west of Greenwich. */
+import { parseDayKey } from '../utils/planDay.js';
 import './InsightsPage.css';
 
 function InsightsPage() {
   const navigate = useNavigate();
+  // Reactive plan object { active, plan, rank } — re-renders on any change.
+  const livePlan = useSubscription();
   const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [hasData, setHasData] = useState(false);
   const [hasAssessment, setHasAssessment] = useState(false);
+  const [upgradeInfo, setUpgradeInfo] = useState(null); // { requiresPlan, currentPlan }
   
   // Overview data
   const [overviewStats, setOverviewStats] = useState([]);
@@ -24,26 +32,19 @@ function InsightsPage() {
   // Today's progress data
   const [todaysSupplements, setTodaysSupplements] = useState([]);
   const [todaysStats, setTodaysStats] = useState({ taken: 0, total: 0, percentage: 0 });
-
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      navigate('/login');
-      return;
-    }
-
-    fetchInsightsData();
-  }, [navigate]);
+  // The plan day the server counted, for the heading. Empty until the first
+  // response, which is when the whole card is a spinner anyway.
+  const [planDayKey, setPlanDayKey] = useState('');
 
   const fetchInsightsData = async () => {
     try {
       setLoading(true);
       setError('');
+      setUpgradeInfo(null);
       const data = await getInsights();
 
       if (!data.hasData) {
         // Set empty state for new users
-        setHasData(true); // Show UI instead of error
         setHasAssessment(data.hasAssessment !== undefined ? data.hasAssessment : false);
         setOverviewStats([
           { icon: 'trophy', label: 'Longest Streak', value: 'None Yet', color: 'purple' },
@@ -61,7 +62,6 @@ function InsightsPage() {
         return;
       }
 
-      setHasData(true);
       setHasAssessment(true);
 
       // Set overview stats
@@ -104,6 +104,10 @@ function InsightsPage() {
 
       // Set today's progress data
       setTodaysSupplements(data.todaysSupplements || []);
+      // The day the server counted, so the heading below names it rather than
+      // re-deriving one — which for four hours out of every eight would be
+      // yesterday's, and the ring would be captioned with a day it never measured.
+      setPlanDayKey(data.planDay?.todayKey || '');
       const taken = (data.todaysSupplements || []).filter(s => s.taken).length;
       const total = (data.todaysSupplements || []).length;
       const percentage = total > 0 ? Math.round((taken / total) * 100) : 0;
@@ -111,9 +115,15 @@ function InsightsPage() {
 
       setLoading(false);
     } catch (err) {
+      // Plan-gated 403 is expected on FREE — don't spam console as error
+      if (err.requiresPlan) {
+        setUpgradeInfo({ requiresPlan: err.requiresPlan, currentPlan: err.currentPlan || livePlan.plan });
+        setLoading(false);
+        return;
+      }
       console.error('Error fetching insights:', err);
-      // Set empty state instead of error
-      setHasData(true); // Show UI instead of error
+      // Show error banner but still render empty-state UI below
+      setError(err.message || 'Could not load insights. Please try again.');
       setHasAssessment(false); // No assessment on error
       setOverviewStats([
         { icon: 'trophy', label: 'Longest Streak', value: 'None Yet', color: 'purple' },
@@ -130,6 +140,38 @@ function InsightsPage() {
       setLoading(false);
     }
   };
+
+  // Initial data load on mount + auth guard — server is source of truth for plan gating.
+  // Re-fetches instantly whenever the subscription changes anywhere in the app.
+  useEffect(() => {
+    const token = getToken();
+    if (!token) {
+      navigate('/login');
+      return;
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on mount is intentional
+    fetchInsightsData();
+    const onPlan = () => fetchInsightsData();
+    window.addEventListener(SUBSCRIPTION_EVENT, onPlan);
+    return () => window.removeEventListener(SUBSCRIPTION_EVENT, onPlan);
+  }, [navigate]);
+
+  /* Maps the `color` field the page already stores on each overview stat to a
+     tone modifier. The field existed and was rendered nowhere — the CSS
+     hard-coded every icon to #10b981, so four identical green squares were the
+     only thing distinguishing "longest streak" from "adherence rate". */
+  const STAT_TONES = {
+    green: 'emerald',
+    blue: 'cyan',
+    teal: 'teal',
+    purple: 'violet',
+    violet: 'violet',
+    indigo: 'indigo',
+    pink: 'rose',
+    amber: 'amber',
+  };
+
+  const statTone = (color) => STAT_TONES[String(color || '').toLowerCase()] || 'emerald';
 
   const getIconSvg = (iconType) => {
     switch (iconType) {
@@ -209,6 +251,23 @@ function InsightsPage() {
 
   const renderOverview = () => (
     <>
+      {/* Overview stat cards */}
+      {overviewStats.length > 0 && (
+        <div className="insights-section">
+          <h3 className="insights-section-title">At a Glance</h3>
+          <div className="overview-stats-grid">
+            {overviewStats.map((stat) => (
+              <div key={stat.label} className={`overview-stat-card stat-${stat.color} stat-tone--${statTone(stat.color)}`}>
+                <div className="overview-stat-icon">{getIconSvg(stat.icon)}</div>
+                <div className="overview-stat-body">
+                  <span className="overview-stat-value">{stat.value}</span>
+                  <span className="overview-stat-label">{stat.label}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {/* Current Phase Insights */}
       {currentPhase ? (
         <div className="insights-section">
@@ -270,11 +329,27 @@ function InsightsPage() {
     </>
   );
 
+  /* "Saturday, 3 October" for the plan-day key the server counted.
+     Shown only once there IS a key — an empty caption is worse than none, and the
+     card is a spinner until the first response arrives anyway. */
+  const planDayLabel = (() => {
+    const dayKey = planDayKey;
+    const parsed = parseDayKey(dayKey);
+    if (!parsed) return '';
+    const date = new Date(0);
+    date.setUTCFullYear(parsed.year, parsed.month - 1, parsed.day);
+    return date.toLocaleDateString('en-US', {
+      weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC',
+    });
+  })();
+
   const renderTodaysProgress = () => (
     <>
       {/* Progress Summary */}
       <div className="insights-section">
-        <h3 className="insights-section-title">Today's Supplement Progress</h3>
+        <h3 className="insights-section-title">
+          Today's Supplement Progress{planDayLabel ? ` — ${planDayLabel}` : ''}
+        </h3>
         
         {todaysSupplements.length === 0 ? (
           <div className="empty-state-progress">
@@ -577,10 +652,38 @@ function InsightsPage() {
 
         {/* Content */}
         <div className="insights-content">
-          {activeTab === 'overview' && renderOverview()}
-          {activeTab === 'progress' && renderTodaysProgress()}
-          {activeTab === 'adherence' && renderAdherence()}
-          {activeTab === 'ai' && renderAIInsight()}
+          {upgradeInfo ? (
+            <PlanLockedCard
+              featureLabel="Insights & Analytics"
+              requiresPlan={upgradeInfo.requiresPlan}
+              currentPlan={upgradeInfo.currentPlan}
+              benefits={[
+                'Adherence trends over time',
+                'AI-generated health insights',
+                'Progress tracking & streaks',
+                'Downloadable PDF reports',
+              ]}
+              onViewPlans={() => navigate('/pricing')}
+              onBack={() => navigate('/dashboard')}
+            />
+          ) : loading ? (
+            <div className="empty-state-message" style={{ textAlign: 'center', padding: '60px 20px' }}>
+              <p style={{ color: '#6b7280' }}>Loading your insights…</p>
+            </div>
+          ) : (
+            <>
+              {error && (
+                <div className="insights-error" role="alert">
+                  <p>{error}</p>
+                  <button type="button" onClick={fetchInsightsData}>Try again</button>
+                </div>
+              )}
+              {activeTab === 'overview' && renderOverview()}
+              {activeTab === 'progress' && renderTodaysProgress()}
+              {activeTab === 'adherence' && renderAdherence()}
+              {activeTab === 'ai' && renderAIInsight()}
+            </>
+          )}
         </div>
       </div>
     </div>

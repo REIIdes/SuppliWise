@@ -1,17 +1,38 @@
+import { useEffect, useId } from 'react';
 import './ConfirmModal.css';
 
-function ConfirmModal({ 
-  title, 
-  message, 
-  confirmText = 'Confirm', 
-  cancelText = 'Cancel', 
-  onConfirm, 
+function ConfirmModal({
+  title,
+  message,
+  confirmText = 'Confirm',
+  cancelText = 'Cancel',
+  onConfirm,
   onCancel,
   type = 'warning' // 'warning' or 'danger'
 }) {
+  const titleId = useId();
+  const messageId = useId();
+
+  // Escape always means "cancel": without it a native-looking dialog can trap
+  // the user (the overlay click is the only other way out).
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === 'Escape') onCancel?.();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
   return (
     <div className="confirm-modal-overlay" onClick={onCancel}>
-      <div className="confirm-modal" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="confirm-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={messageId}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className={`confirm-modal-icon confirm-modal-icon-${type}`}>
           {type === 'warning' ? (
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -27,13 +48,13 @@ function ConfirmModal({
             </svg>
           )}
         </div>
-        <h2 className="confirm-modal-title">{title}</h2>
-        <p className="confirm-modal-message">{message}</p>
+        <h2 className="confirm-modal-title" id={titleId}>{title}</h2>
+        <p className="confirm-modal-message" id={messageId}>{message}</p>
         <div className="confirm-modal-actions">
-          <button className="confirm-modal-btn confirm-modal-btn-cancel" onClick={onCancel}>
+          <button type="button" className="confirm-modal-btn confirm-modal-btn-cancel" onClick={onCancel}>
             {cancelText}
           </button>
-          <button className={`confirm-modal-btn confirm-modal-btn-confirm confirm-modal-btn-${type}`} onClick={onConfirm}>
+          <button type="button" className={`confirm-modal-btn confirm-modal-btn-confirm confirm-modal-btn-${type}`} onClick={onConfirm}>
             {confirmText}
           </button>
         </div>

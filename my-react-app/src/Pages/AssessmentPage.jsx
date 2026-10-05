@@ -1,7 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
-import { saveAssessment, getRecommendations, saveAssessmentResults } from '../api';
+import { saveAssessment, getRecommendations, saveAssessmentResults, getPriorityStatus, getCurrentSupplements, getToken, getStoredUser, migrateAssessmentHistory } from '../api';
+import { prefillSupplements } from '../utils/supplementPrefill.js';
+import { isDeadHour, countdownTo, DEAD_HOURS } from '../utils/slotSchedule.js';
+import useNow from '../hooks/useNow';
+import { useSubscription, SUBSCRIPTION_EVENT } from '../hooks/useSubscription';
 import './AssessmentPage.css';
 
 const TOTAL_STEPS = 4;
@@ -73,7 +77,11 @@ const DIET_INFO = {
 function DietTooltip({ diet, openDiet, onToggle }) {
   const visible = openDiet === diet;
   return (
-    <span className="diet-tooltip-wrap" onClick={(e) => e.stopPropagation()}>
+    // `--card` matters most here: in the 3-column diet grid a 260px panel
+    // anchored to the trigger of a third-column option ran ~150px past the card
+    // and gave the page a horizontal scrollbar. Opening leftwards, capped to the
+    // option's own width, cannot overflow at any column.
+    <span className="diet-tooltip-wrap diet-tooltip-wrap--card" onClick={(e) => e.stopPropagation()}>
       <button
         type="button"
         className="diet-info-btn"
@@ -102,7 +110,7 @@ function DietTooltip({ diet, openDiet, onToggle }) {
 function InfoTooltip({ id, text, openId, onToggle }) {
   const visible = openId === id;
   return (
-    <span className="diet-tooltip-wrap" onClick={(e) => e.stopPropagation()}>
+    <span className="diet-tooltip-wrap diet-tooltip-wrap--card" onClick={(e) => e.stopPropagation()}>
       <button
         type="button"
         className="diet-info-btn"
@@ -156,7 +164,7 @@ function ConditionTooltip({ condition, openCondition, onToggle }) {
   const visible = openCondition === condition;
   if (!CONDITION_INFO[condition]) return null;
   return (
-    <span className="diet-tooltip-wrap" onClick={(e) => e.stopPropagation()}>
+    <span className="diet-tooltip-wrap diet-tooltip-wrap--card" onClick={(e) => e.stopPropagation()}>
       <button
         type="button"
         className="diet-info-btn"
@@ -185,15 +193,14 @@ function Step1({ data, onChange, errors }) {
   const showActivityLevel = age === 0 || age >= 13;
   const [openActivity, setOpenActivity] = useState(null);
   const [openTooltip, setOpenTooltip] = useState(null);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isLoggedIn] = useState(() => !!getStoredUser());
 
   // Calculate age and load gender from user's data stored in localStorage (only for logged-in users)
   useEffect(() => {
-    const userStr = localStorage.getItem('user');
-    if (userStr) {
-      setIsLoggedIn(true);
-      try {
-        const user = JSON.parse(userStr);
+    const cachedUser = getStoredUser();
+    if (!cachedUser) return;
+    try {
+      const user = cachedUser;
         
         // Auto-calculate age from dateOfBirth
         if (user.dateOfBirth) {
@@ -217,9 +224,7 @@ function Step1({ data, onChange, errors }) {
       } catch (err) {
         console.error('Error loading user data:', err);
       }
-    } else {
-      setIsLoggedIn(false);
-    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Run once on mount
 
   useEffect(() => {
@@ -1128,11 +1133,20 @@ const WATER_OPTIONS = [
 ];
 
 function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current: {} } }) {
+  // BMI decides whether 'Obesity' belongs in this list: offering it to an
+  // underweight or normal-weight user contradicts their own Step 1 numbers.
+  const _bmiHeightCm = Number(data.height);
+  const _bmiWeightKg = (data.weightUnit || 'kg') === 'lbs' ? lbsToKg(data.weight) : Number(data.weight);
+  const bmi = _bmiHeightCm > 0 && _bmiWeightKg > 0
+    ? _bmiWeightKg / ((_bmiHeightCm / 100) ** 2)
+    : NaN;
+  const canHaveObesity = Number.isFinite(bmi) && bmi >= 25;
+
   // ── Medical conditions ──
   const conditionGroups = [
     {
       group: 'Cardiovascular & Metabolic',
-      items: ['Hypertension (High Blood Pressure)', 'High Cholesterol', 'Diabetes', 'Heart / Cardiovascular Disease', 'Obesity'],
+      items: ['Hypertension (High Blood Pressure)', 'High Cholesterol', 'Diabetes', 'Heart / Cardiovascular Disease', ...(canHaveObesity ? ['Obesity'] : [])],
     },
     {
       group: 'Bone & Joint',
@@ -1207,29 +1221,32 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.gender]);
 
-  const showPregnancy = data.gender === 'Female';
+  // If height/weight changed so the BMI no longer supports 'Obesity', drop it
+  // from the selected conditions (and its symptoms/severity) instead of
+  // letting a contradictory answer through.
+  useEffect(() => {
+    if (!canHaveObesity && (data.medicalConditions || []).includes('Obesity')) {
+      onChange('medicalConditions', data.medicalConditions.filter(c => c !== 'Obesity'));
+      onChange('symptoms', (data.symptoms || []).filter(s => !s.startsWith('Obesity::')));
+      onChange('symptomSeverity', Object.fromEntries(
+        Object.entries(data.symptomSeverity || {}).filter(([key]) => !key.startsWith('Obesity::'))
+      ));
+      onChange('noSymptomsForConditions', (data.noSymptomsForConditions || []).filter(x => x !== 'Obesity'));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canHaveObesity]);
 
   // ── Symptoms ──
   const selectedSymptoms = data.symptoms || [];
   const symptomSeverity = data.symptomSeverity || {};
   const gender = data.gender || '';
   const isPregnantOrBreastfeeding = data.isPregnant === 'Yes' || data.isBreastfeeding === 'Yes';
-  const visibleSymptoms = ALL_SYMPTOMS.filter(s => {
-    // Gender filter
-    if (s.genders.length > 0 && !s.genders.includes(gender) && gender !== '') return false;
-    if (s.name === 'Low Libido' && isPregnantOrBreastfeeding) return false;
-    // Condition-specific: only show if no conditions restriction OR if user selected a matching condition
-    if (s.conditions && s.conditions.length > 0) {
-      const selectedConditions = (data.medicalConditions || []).filter(c => c !== 'None');
-      return s.conditions.some(c => selectedConditions.includes(c));
-    }
-    return true; // general symptom — always show
-  });
   const [severityErrors, setSeverityErrors] = useState([]);
 
   // Sync parent-level errors (from clicking Next) into local severityErrors state
   useEffect(() => {
     if (errors.symptomSeverity && errors.symptomSeverity.length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional error-prop sync
       setSeverityErrors(errors.symptomSeverity);
     }
   }, [errors.symptomSeverity]);
@@ -1265,10 +1282,10 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
     onChange('symptoms', next);
     if (isChecked) {
       const newSev = { ...symptomSeverity };
-      delete newSev[s];
+      delete newSev[symptomKey];
       onChange('symptomSeverity', newSev);
       // Clear error for this symptom when it's unchecked
-      setSeverityErrors(prev => prev.filter(e => e !== s));
+      setSeverityErrors(prev => prev.filter(e => e !== symptomKey));
     }
   };
 
@@ -1518,10 +1535,7 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
 }
 
 // ── Step 4: Lifestyle & Medical Information ───────────────────────────────
-function Step4Lifestyle({ data, onChange, errors, isReadOnly = false }) {
-  const [showMedicationsInput, setShowMedicationsInput] = useState(false);
-  const [showAllergiesInput, setShowAllergiesInput] = useState(false);
-
+function Step4Lifestyle({ data, onChange, errors, isReadOnly = false, supplementsAutoFilled = false }) {
   const toggleLifestyle = (habit) => {
     const current = data.lifestyleHabits || [];
     if (habit === 'None') {
@@ -1538,38 +1552,6 @@ function Step4Lifestyle({ data, onChange, errors, isReadOnly = false }) {
       onChange('recreationalDrugTypes', '');
     }
   };
-
-  // Toggle "None" checkbox for medications
-  const handleMedicationsNoneChange = (checked) => {
-    if (checked) {
-      onChange('currentMedications', 'None');
-      setShowMedicationsInput(false);
-    } else {
-      onChange('currentMedications', '');
-      setShowMedicationsInput(true);
-    }
-  };
-
-  // Toggle "None" checkbox for allergies
-  const handleAllergiesNoneChange = (checked) => {
-    if (checked) {
-      onChange('allergies', 'None');
-      setShowAllergiesInput(false);
-    } else {
-      onChange('allergies', '');
-      setShowAllergiesInput(true);
-    }
-  };
-
-  // Initialize state based on existing data
-  useEffect(() => {
-    if (data.currentMedications && data.currentMedications.trim() && data.currentMedications !== 'None') {
-      setShowMedicationsInput(true);
-    }
-    if (data.allergies && data.allergies.trim() && data.allergies !== 'None') {
-      setShowAllergiesInput(true);
-    }
-  }, [data.currentMedications, data.allergies]);
 
   return (
     <div className="step-body">
@@ -1719,6 +1701,14 @@ function Step4Lifestyle({ data, onChange, errors, isReadOnly = false }) {
             </label>
           ))}
         </div>
+        {/* Explains an answer the user did not type, so a pre-selected "Yes"
+            never looks like a stuck form or a default nobody can clear. */}
+        {supplementsAutoFilled && data.takingSupplements === 'Yes' && (
+          <p className="field-hint-text">
+            Pre-filled from your current supplement plan. Edit the list below or
+            choose “No” if you have stopped taking them.
+          </p>
+        )}
         {/* Conditional input - If Yes */}
         {data.takingSupplements === 'Yes' && (
           <textarea
@@ -1779,10 +1769,10 @@ function Step4Lifestyle({ data, onChange, errors, isReadOnly = false }) {
               onChange={(e) => {
                 if (e.target.checked) {
                   onChange('currentMedications', 'None');
-                  setShowMedicationsInput(false);
+                  
                 } else {
                   onChange('currentMedications', '');
-                  setShowMedicationsInput(true);
+                  
                 }
               }}
             />
@@ -1813,10 +1803,10 @@ function Step4Lifestyle({ data, onChange, errors, isReadOnly = false }) {
               onChange={(e) => {
                 if (e.target.checked) {
                   onChange('allergies', 'None');
-                  setShowAllergiesInput(false);
+                  
                 } else {
                   onChange('allergies', '');
-                  setShowAllergiesInput(true);
+                  
                 }
               }}
             />
@@ -2149,6 +2139,147 @@ function AssessmentPage() {
   });
 
   const [isReadOnly] = useState(routeReadOnly);
+  const isUpdateMode = !!routeState.updateSourceId;
+  const [showUpdateConfirm, setShowUpdateConfirm] = useState(false);
+
+  /* ── The assessment is closed during the dead hours ──────────────────────
+     Between midnight and 4:00 AM the whole form is locked, not just its submit
+     button. Deliberately separate from `isReadOnly`, which means "history view"
+     and swaps the footer button for "Back to History" — the wrong control
+     entirely for someone part-way through their own assessment.
+
+     The draft is NOT touched: the existing sessionStorage draft stays exactly as
+     it was, so a user who starts an assessment at 11 PM and comes back at 4 AM
+     finds their answers intact. That matters more than it sounds — a four-hour
+     block is long enough to lose someone's place otherwise.
+
+     Client-side only, per the decision: this is a guard rail, not a security
+     boundary. The server still accepts the write, because the server has no
+     timezone and would lock out users whose local night is the server's day. */
+  const now = useNow();
+  const deadHours = isDeadHour(now);
+  const deadHoursCountdown = countdownTo(DEAD_HOURS.end, now);
+
+  useEffect(() => {
+    if (!deadHours) return undefined;
+
+    // Same approach as the read-only view: disable the real controls rather
+    // than layering an overlay, so a keyboard user cannot tab into a field that
+    // silently ignores what they type.
+    const container = document.querySelector('.assessment-container');
+    if (!container) return undefined;
+
+    const controls = container.querySelectorAll('input, select, textarea');
+    const previousDisabled = Array.from(controls).map((c) => c.disabled);
+    controls.forEach((c) => { c.disabled = true; c.setAttribute('aria-disabled', 'true'); });
+
+    const editable = container.querySelectorAll('[contenteditable]');
+    const previousContentEditable = Array.from(editable).map((c) => c.getAttribute('contenteditable'));
+    editable.forEach((c) => c.setAttribute('contenteditable', 'false'));
+
+    // Step navigation, so they cannot walk to another step either.
+    const navButtons = container.querySelectorAll('.step-body button');
+    const previousNavDisabled = Array.from(navButtons).map((b) => b.disabled);
+    navButtons.forEach((b) => { b.disabled = true; });
+
+    return () => {
+      controls.forEach((c, i) => {
+        c.disabled = previousDisabled[i];
+        c.removeAttribute('aria-disabled');
+      });
+      navButtons.forEach((b, i) => { b.disabled = previousNavDisabled[i]; });
+      editable.forEach((c, i) => {
+        const previous = previousContentEditable[i];
+        if (previous == null) c.removeAttribute('contenteditable');
+        else c.setAttribute('contenteditable', previous);
+      });
+    };
+  }, [deadHours]);
+
+  /* ── Pre-fill "Currently Taking Supplements?" ──────────────────────────
+     A returning user is already on a plan built from a previous assessment, and
+     asking them to retype it invites a contradiction: answer "No" here while
+     their tracker shows five morning supplements, and the new recommendations
+     are generated as though they were starting from nothing.
+
+     Three rules, all of which matter:
+       1. Only ever upgrades an UNANSWERED question to "Yes" — a draft that
+          already says "No" (they may have stopped) is never overwritten, or
+          the pre-fill would undo the user's own earlier correction.
+       2. Never on a read-only history view, and never when viewing a past
+          assessment: those render someone else's saved answers.
+       3. Best-effort. A failed fetch leaves the question exactly as it was;
+          an unanswered question is recoverable, a thrown render is not. */
+  const [supplementsAutoFilled, setSupplementsAutoFilled] = useState(false);
+  // Guards the one-shot pre-fill. A ref, not state: the effect below must run
+  // exactly once per mount, and a state write here would re-trigger it.
+  const autoFillCheckedRef = useRef(false);
+  useEffect(() => {
+    if (routeReadOnly || routeAssessment) return undefined;
+    if (autoFillCheckedRef.current) return undefined;
+    if (!getToken()) return undefined;
+
+    autoFillCheckedRef.current = true;
+    let cancelled = false;
+
+    getCurrentSupplements()
+      .then(data => {
+        if (cancelled) return;
+        setFormData(prev => {
+          const patch = prefillSupplements(prev.takingSupplements, data);
+          if (patch.takingSupplements) setSupplementsAutoFilled(true);
+          // Object.keys is empty when the pre-fill declined (already answered,
+          // or nothing detected) — returning `prev` keeps the object identity
+          // stable so this cannot loop.
+          return Object.keys(patch).length > 0 ? { ...prev, ...patch } : prev;
+        });
+      })
+      .catch(() => {
+        // Silent by design: the question stays blank and the user answers it.
+      });
+
+    return () => { cancelled = true; };
+  }, [routeReadOnly, routeAssessment]);
+
+  // Priority gate — a new assessment is blocked while a Priority review is open
+  // (read-only history views are never blocked). Re-checks instantly when the
+  // subscription changes: Premium upgrade lifts the "no flag" state for the
+  // next save; downgrade/expiry re-applies Standard-only immediately.
+  const [priorityGate, setPriorityGate] = useState({ checking: !routeReadOnly, blocked: false, items: [] });
+  const { refresh: refreshPlan, canAccess } = useSubscription();
+  // The pause is a Priority Assessment entitlement. The server already reports
+  // "not blocked" for lower tiers, and this render-time check makes a downgrade
+  // release the screen immediately instead of one fetch later.
+  const priorityEntitled = canAccess('priorityAssessment');
+  const checkPriorityGate = () => {
+    if (routeReadOnly) return Promise.resolve();
+    setPriorityGate((prev) => ({ ...prev, checking: true }));
+    return getPriorityStatus()
+      .then(data => {
+        if (!cancelledRef.current) setPriorityGate({ checking: false, blocked: !!data.blocked, items: data.assessments || [] });
+      })
+      .catch(() => {
+        // Fail open on network error — the server re-checks on submit (403)
+        if (!cancelledRef.current) setPriorityGate({ checking: false, blocked: false, items: [] });
+      });
+  };
+  const cancelledRef = useRef(false);
+  useEffect(() => {
+    if (routeReadOnly) return undefined;
+    cancelledRef.current = false;
+    // Initial gate probe: the synchronous "checking" flip is intentional
+    // (it raises the spinner until the promise settles); all later updates
+    // are event-driven through onPlan.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional initial checking state
+    checkPriorityGate();
+    const onPlan = () => { refreshPlan(); checkPriorityGate(); };
+    window.addEventListener(SUBSCRIPTION_EVENT, onPlan);
+    return () => {
+      cancelledRef.current = true;
+      window.removeEventListener(SUBSCRIPTION_EVENT, onPlan);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Clear sessionStorage only when explicitly starting fresh after viewing history
   useEffect(() => {
@@ -2157,10 +2288,11 @@ function AssessmentPage() {
       sessionStorage.removeItem(SESSION_KEY);
       
       // Start fresh but preserve user profile data (age, gender) if available
-      const userRaw = localStorage.getItem('user');
-      if (userRaw) {
+      const cachedProfile = getStoredUser();
+      if (cachedProfile) {
         try {
-          const user = JSON.parse(userRaw);
+          const user = cachedProfile;
+          // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time draft reset with profile preserve
           setFormData({
             ...EMPTY_FORM,
             age: user.age || '',
@@ -2178,6 +2310,7 @@ function AssessmentPage() {
     if (location.state?.clearDraft) {
       window.history.replaceState({}, document.title);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -2194,7 +2327,7 @@ function AssessmentPage() {
     if (!container) return;
     // Disable form controls
     const controls = container.querySelectorAll('input, select, textarea');
-    controls.forEach((c) => { try { c.disabled = true; c.setAttribute('aria-readonly', 'true'); } catch (e) {} });
+    controls.forEach((c) => { try { c.disabled = true; c.setAttribute('aria-readonly', 'true'); } catch { /* DOM guard — safe to ignore */ } });
     // Disable interactive buttons inside the step body (but not footer nav)
     const buttons = container.querySelectorAll('.step-body button');
     const prevButtonStates = [];
@@ -2208,7 +2341,7 @@ function AssessmentPage() {
         prevButtonStates[idx] = b.disabled;
         b.disabled = true;
         b.setAttribute('aria-hidden', 'true');
-      } catch (e) {}
+      } catch { /* DOM guard — safe to ignore */ }
     });
     // Remove contentEditable if present
     const editable = container.querySelectorAll('[contenteditable]');
@@ -2217,13 +2350,13 @@ function AssessmentPage() {
       try {
         prevEditable[idx] = el.getAttribute('contenteditable');
         el.setAttribute('contenteditable', 'false');
-      } catch (e) {}
+      } catch { /* DOM guard — safe to ignore */ }
     });
 
     return () => {
-      controls.forEach((c) => { try { c.disabled = false; c.removeAttribute('aria-readonly'); } catch (e) {} });
-      buttons.forEach((b, idx) => { try { b.disabled = prevButtonStates[idx] || false; b.removeAttribute('aria-hidden'); } catch (e) {} });
-      editable.forEach((el, idx) => { try { if (prevEditable[idx] !== null && prevEditable[idx] !== undefined) el.setAttribute('contenteditable', prevEditable[idx]); else el.removeAttribute('contenteditable'); } catch (e) {} });
+      controls.forEach((c) => { try { c.disabled = false; c.removeAttribute('aria-readonly'); } catch { /* DOM guard — safe to ignore */ } });
+      buttons.forEach((b, idx) => { try { b.disabled = prevButtonStates[idx] || false; b.removeAttribute('aria-hidden'); } catch { /* DOM guard — safe to ignore */ } });
+      editable.forEach((el, idx) => { try { if (prevEditable[idx] !== null && prevEditable[idx] !== undefined) el.setAttribute('contenteditable', prevEditable[idx]); else el.removeAttribute('contenteditable'); } catch { /* DOM guard — safe to ignore */ } });
     };
   }, [isReadOnly]);
 
@@ -2246,6 +2379,7 @@ function AssessmentPage() {
         // Remove Low Libido from symptoms if pregnant or breastfeeding
         if (pregnant === 'Yes' || breastfeeding === 'Yes') {
           updated.symptoms = (updated.symptoms || []).filter(s => s !== 'Low Libido');
+          // eslint-disable-next-line no-unused-vars
           const { 'Low Libido': _removed, ...restSeverity } = updated.symptomSeverity || {};
           updated.symptomSeverity = restSeverity;
         }
@@ -2310,6 +2444,17 @@ function AssessmentPage() {
 
   const handleSubmit = async () => {
     setSubmitError('');
+
+    // Belt and braces behind the disabled button: a disabled control can still
+    // be activated programmatically, and the clock is re-read here rather than
+    // trusting whatever the render saw. Cheap, and it closes the gap where the
+    // page sat open across midnight.
+    if (isDeadHour(new Date())) {
+      setSubmitError(`Assessments reopen at ${DEAD_HOURS.endsAt}. Your answers are saved — come back then.`);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
     const stepErrors = validateStep(step, formData);
     if (Object.keys(stepErrors).length > 0) {
       setErrors(stepErrors);
@@ -2329,7 +2474,7 @@ function AssessmentPage() {
       return;
     }
 
-    const token = localStorage.getItem('token');
+    const token = getToken();
     if (!token) {
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(formData));
       navigate('/login', { state: { fromAssessment: true } });
@@ -2359,34 +2504,71 @@ function AssessmentPage() {
       }
     });
 
-    const payload = { ...formData, weight: normalizedWeight, symptoms: uniqueSymptoms, symptomSeverity: strippedSeverity };
+    const payload = {
+      ...formData,
+      weight: normalizedWeight,
+      symptoms: uniqueSymptoms,
+      symptomSeverity: strippedSeverity,
+      // Tell the server where this update came from so History can show the link.
+      updatedFrom: isUpdateMode ? routeState.updateSourceId : null,
+    };
 
     setSubmitting(true);
     try {
+      // In an UPDATE, generate the new plan BEFORE saving anything: a failed AI
+      // call must leave the user's last assessment doc, recommendations, and
+      // intake history completely untouched.
+      let recommendations = null;
+      if (isUpdateMode) {
+        recommendations = await getRecommendations(payload);
+      }
+
       let assessmentId = null;
       let garbageFields = [];
+      let lastSeverityFlag = { flagged: false, reasons: [] };
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
           const saveResult = await saveAssessment(payload);
           assessmentId = saveResult?.assessment?._id;
           garbageFields = saveResult?.garbageFields || [];
+          if (saveResult?.severityFlag) lastSeverityFlag = saveResult.severityFlag;
           if (assessmentId) break;
         } catch (saveErr) {
           console.error(`Assessment save attempt ${attempt} failed:`, saveErr.message);
+          // Priority block must surface immediately — never retry past it
+          if (/prioritized|needs to finish|finish first/i.test(saveErr.message || '')) {
+            throw saveErr;
+          }
         }
       }
 
-      const recommendations = await getRecommendations(payload);
+      if (!isUpdateMode) {
+        recommendations = await getRecommendations(payload);
+      }
 
       if (assessmentId) {
         try {
           await saveAssessmentResults(assessmentId, recommendations);
+          // Carry the user's intake/metrics forward onto the new assessment so
+          // tracking continues instead of restarting at zero.
+          if (isUpdateMode && routeState.updateSourceId) {
+            try {
+              await migrateAssessmentHistory(assessmentId, routeState.updateSourceId);
+            } catch (migrateErr) {
+              console.error('Assessment history migration failed:', migrateErr.message);
+            }
+          }
         } catch (aiSaveErr) {
           console.error('AI results save error:', aiSaveErr.message);
         }
       }
 
       sessionStorage.removeItem(SESSION_KEY);
+      // Premium+ severe saves flag instantly; Free-tier severe saves stay
+      // Standard — the toast below reflects the live plan, no refresh needed.
+      if (lastSeverityFlag?.flagged) {
+        sessionStorage.setItem('suppliwise_last_priority_flag', JSON.stringify({ at: Date.now(), reasons: lastSeverityFlag.reasons || [] }));
+      }
       navigate('/results', { state: { recommendations, assessment: payload, garbageFields } });
     } catch (err) {
       const msg = err.message || '';
@@ -2405,13 +2587,40 @@ function AssessmentPage() {
   return (
     <div className="assessment-wrapper">
       <Navbar />
+      {priorityGate.blocked && priorityEntitled && !isReadOnly ? (
+        <div className="assessment-container">
+          <div className="priority-gate" role="alert">
+            <div className="priority-gate__icon" aria-hidden="true">⚑</div>
+            <h2 className="priority-gate__title">New Assessments Paused</h2>
+            <p className="priority-gate__text">
+              You have {priorityGate.items.length} prioritized assessment{priorityGate.items.length === 1 ? '' : 's'} that
+              must finish review first. Please follow your current plan — once an administrator
+              resolves the review, you can start a new assessment.
+            </p>
+            {priorityGate.items.slice(0, 2).map(item => (
+              <p key={item.id} className="priority-gate__item">
+                Flagged {item.flaggedAt ? new Date(item.flaggedAt).toLocaleDateString() : new Date(item.createdAt).toLocaleDateString()}
+                {(item.reasons || []).length > 0 ? ` — ${(item.reasons || []).slice(0, 2).join('; ')}` : ''}
+              </p>
+            ))}
+            <div className="priority-gate__actions">
+              <button type="button" className="priority-gate__btn priority-gate__btn--primary" onClick={() => navigate('/history')}>
+                View in History
+              </button>
+              <button type="button" className="priority-gate__btn priority-gate__btn--secondary" onClick={() => navigate('/dashboard')}>
+                Back to Dashboard
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
       <div className={`assessment-container ${isReadOnly ? 'readonly' : ''}`}>
         <div className="assessment-header">
           <div>
             <h2 className="assessment-title">
               {isReadOnly && routeAssessment && routeAssessment.createdAt
                 ? new Date(routeAssessment.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                : (isReadOnly ? 'Health Assessment History' : 'Health Assessment')}
+                : (isReadOnly ? 'Health Assessment History' : (isUpdateMode ? 'Update Health Assessment' : 'Health Assessment'))}
             </h2>
             <div className="progress-bar-track">
               <div className="progress-bar-fill" style={{ width: `${progress}%` }} />
@@ -2428,7 +2637,7 @@ function AssessmentPage() {
                 <div className="ai-spinner-ring" />
                 <span className="ai-spinner-icon">🧬</span>
               </div>
-              <h3 className="ai-loading-title">Analyzing Your Health Profile</h3>
+              <h3 className="ai-loading-title">{isUpdateMode ? 'Updating Previous Health Assessment' : 'Analyzing Your Health Profile'}</h3>
               <p className="ai-loading-sub">Our AI is building your personalized supplement plan...</p>
               <div className="ai-loading-steps">
                 <AILoadingStep icon="🔍" label="Reading your symptoms & goals" delay={0} />
@@ -2436,7 +2645,7 @@ function AssessmentPage() {
                 <AILoadingStep icon="⚗️" label="Checking interactions & dosages" delay={1200} />
                 <AILoadingStep icon="📋" label="Generating your wellness plan" delay={1800} />
               </div>
-              <p className="ai-loading-note">This usually takes 1–3 minutes</p>
+              <p className="ai-loading-note">This usually takes 2–3 minutes</p>
             </div>
           </div>
         )}
@@ -2447,7 +2656,15 @@ function AssessmentPage() {
           {step === 1 && <Step1 data={formData} onChange={handleChange} errors={errors} />}
           {step === 2 && <Step2 data={formData} onChange={handleChange} errors={errors} />}
           {step === 3 && <Step3Combined data={formData} onChange={handleChange} errors={errors} symptomRowRefs={symptomRowRefs} />}
-          {step === 4 && <Step4Lifestyle data={formData} onChange={handleChange} errors={errors} isReadOnly={isReadOnly} />}
+          {step === 4 && (
+            <Step4Lifestyle
+              data={formData}
+              onChange={handleChange}
+              errors={errors}
+              isReadOnly={isReadOnly}
+              supplementsAutoFilled={supplementsAutoFilled}
+            />
+          )}
 
           <div className="assessment-footer">
             <button className="btn-cancel" onClick={handleBack}>
@@ -2464,14 +2681,57 @@ function AssessmentPage() {
                   Back to History
                 </button>
               ) : (
-                <button className="btn-next" onClick={handleSubmit} disabled={submitting}>
-                  Get Recommendations →
-                </button>
+                deadHours ? (
+                  <div className="assessment-snoozed">
+                    <button className="btn-next" type="button" disabled>
+                      Reopens at {DEAD_HOURS.endsAt}
+                    </button>
+                    <p className="assessment-snoozed__note">
+                      Assessments are closed between midnight and {DEAD_HOURS.endsAt}.
+                      {!deadHoursCountdown.isDue && ` Back in ${deadHoursCountdown.text}.`}
+                      {' '}Your answers are saved.
+                    </p>
+                  </div>
+                ) : (
+                  <button className="btn-next" onClick={isUpdateMode ? () => setShowUpdateConfirm(true) : handleSubmit} disabled={submitting}>
+                    {isUpdateMode ? 'Submit Updated Assessment →' : 'Get Recommendations →'}
+                  </button>
+                )
               )
             )}
           </div>
         </div>
       </div>
+      )}
+      {showUpdateConfirm && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}>
+          <div style={{ background: '#fff', borderRadius: 16, maxWidth: 420, width: '100%', padding: 24, boxShadow: '0 20px 50px rgba(0,0,0,0.2)' }}>
+            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#111827' }}>Update Your Health Assessment?</h3>
+            <p style={{ marginTop: 10, color: '#4b5563', fontSize: 14, lineHeight: 1.5 }}>
+              Your updated health information will be used to generate new supplement recommendations.
+              Your existing supplement intake history and dashboard progress will be preserved.
+            </p>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
+              <button
+                type="button"
+                className="btn-cancel"
+                onClick={() => setShowUpdateConfirm(false)}
+                disabled={submitting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-next"
+                onClick={() => { setShowUpdateConfirm(false); handleSubmit(); }}
+                disabled={submitting}
+              >
+                Update Assessment
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

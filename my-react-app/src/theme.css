@@ -1,0 +1,489 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   SHARED VIBRANT THEME — tokens and primitives
+
+   WHY THIS FILE EXISTS
+   ────────────────────
+   Six pages each declared their own greens by hand, and they had drifted into
+   six different products: the dashboard's cards were 20px-radius gradient
+   tiles while Recommendations and Insights used flat 2px-neon-green outlines,
+   and the wellness score on one page was a bar and a ring on another. Every
+   page also re-spelled the same hero, tab bar and stat tile, so a change to
+   one never reached the others.
+
+   The tokens below are the single source for colour, radius, shadow and
+   spacing. The `.sw-*` primitives are the shared shapes those tokens dress.
+   Page stylesheets consume both instead of inventing values.
+
+   A NOTE ON THE OLD 2px GREEN BORDERS
+   ───────────────────────────────────
+   `border: 2px solid #86efac` appeared on cards in four page stylesheets. At
+   2px, #86efac is a fluorescent lime that reads as an error state or a debug
+   outline, and at that weight it dominates a page made of white cards. The
+   replacement is a 1px hairline (`--sw-line`) plus a 3px accent bar carrying
+   the section's own colour, so the grouping is still legible but the border
+   stops shouting.
+
+   EVERY VALUE IS A CUSTOM PROPERTY, never a literal
+   ──────────────────────────────────────────────────
+   Fallbacks are supplied at every use site (e.g. `var(--sw-radius-lg, 22px)`).
+   A page stylesheet is injected by Vite when its route chunk loads, which can
+   be AFTER this file — and on a direct deep-link it may be the only one that
+   ever loads. A var() that resolves to nothing falls back to the initial
+   value, not to nothing, so a page can never end up with `border-radius: ;
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Ink ────────────────────────────────────────────────────────────── */
+  --sw-ink: #0d2b23;
+  --sw-ink-soft: #58736a;
+  --sw-ink-faint: #8aa39a;
+  --sw-ink-invert: #ffffff;
+
+  /* ── Surfaces ───────────────────────────────────────────────────────── */
+  --sw-surface: #ffffff;
+  --sw-surface-sunk: #f4fbf7;
+  --sw-surface-raised: #ffffff;
+  --sw-line: #e2f1ea;
+  --sw-line-strong: #cbe7da;
+
+  /* ── Brand ramp ─────────────────────────────────────────────────────── */
+  --sw-emerald: #10b981;
+  --sw-emerald-deep: #059669;
+  --sw-teal: #0d9488;
+  --sw-cyan: #06b6d4;
+  --sw-indigo: #6366f1;
+  --sw-violet: #a855f7;
+  --sw-rose: #f43f5e;
+  --sw-amber: #f59e0b;
+
+  /* Semantic aliases, so a page asks for a MEANING not a hue. */
+  --sw-success: var(--sw-emerald, #10b981);
+  --sw-warning: var(--sw-amber, #f59e0b);
+  --sw-danger: var(--sw-rose, #f43f5e);
+  --sw-info: var(--sw-cyan, #06b6d4);
+
+  /* ── Gradients ──────────────────────────────────────────────────────── */
+  --sw-grad-brand: linear-gradient(135deg, #10b981 0%, #0d9488 55%, #0891b2 100%);
+  --sw-grad-spectrum: linear-gradient(92deg, #059669 0%, #06b6d4 45%, #6366f1 100%);
+  --sw-grad-warm: linear-gradient(135deg, #fbbf24 0%, #f97316 100%);
+  --sw-grad-cool: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+  --sw-grad-rose: linear-gradient(135deg, #fb7185 0%, #e11d48 100%);
+
+  /* ── Shape ──────────────────────────────────────────────────────────── */
+  --sw-radius-sm: 10px;
+  --sw-radius-md: 14px;
+  --sw-radius-lg: 20px;
+  --sw-radius-xl: 26px;
+  --sw-radius-pill: 999px;
+
+  /* ── Lift ───────────────────────────────────────────────────────────── */
+  --sw-shadow-sm: 0 1px 2px rgba(9, 78, 58, 0.06), 0 2px 6px rgba(9, 78, 58, 0.04);
+  --sw-shadow-md: 0 10px 28px -14px rgba(9, 78, 58, 0.26);
+  --sw-shadow-lg: 0 22px 46px -20px rgba(9, 78, 58, 0.34);
+
+  /* ── Page backdrop ──────────────────────────────────────────────────── */
+  --sw-mesh: radial-gradient(820px 440px at 3% -8%, rgba(52, 211, 153, 0.38), transparent 62%),
+            radial-gradient(760px 400px at 99% -4%, rgba(99, 102, 241, 0.26), transparent 62%),
+            radial-gradient(880px 520px at 76% 38%, rgba(34, 211, 238, 0.20), transparent 64%),
+            radial-gradient(820px 560px at 16% 90%, rgba(236, 72, 153, 0.17), transparent 66%),
+            linear-gradient(168deg, #eefcf5 0%, #ecf4ff 52%, #f5f0ff 100%);
+
+  /* ── Motion ─────────────────────────────────────────────────────────── */
+  --sw-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --sw-dur: 0.24s;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PRIMITIVES
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Page shell ──────────────────────────────────────────────────────────
+   The mesh backdrop is `fixed` and non-interactive so it reads as light across
+   the page rather than as scrollable content, and so a long list scrolls under
+   it without dragging it away and leaving a flat background behind. */
+.sw-shell {
+  position: relative;
+  min-height: 100vh;
+  background: var(--sw-mesh, linear-gradient(168deg, #eefcf5, #f5f0ff));
+  background-attachment: fixed;
+  color: var(--sw-ink, #0d2b23);
+  /* Declared twice on purpose: `hidden` would make this element a scroll
+     container, and a sticky element resolves against the NEAREST ancestor
+     scroll container — so anything sticky inside (the Navbar) would be pulled
+     off the viewport and scroll away with the page. `clip` contains the same
+     overflow without creating a scrollport. See PricingPage.css. */
+  overflow-x: hidden;
+  overflow-x: clip;
+}
+
+.sw-container {
+  position: relative;
+  z-index: 1;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 36px 24px 64px;
+}
+
+/* ── Page header ─────────────────────────────────────────────────────────
+   The gradient title uses the two-step trick documented in DashboardPage.css:
+   a solid colour first, `color: transparent` applied only inside @supports. */
+.sw-head {
+  margin-bottom: 26px;
+  animation: sw-rise 0.5s var(--sw-ease, cubic-bezier(0.16, 1, 0.3, 1)) both;
+}
+
+.sw-head__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 5px 13px 5px 10px;
+  border-radius: var(--sw-radius-pill, 999px);
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--sw-line-strong, #cbe7da);
+  box-shadow: var(--sw-shadow-sm, 0 1px 2px rgba(9, 78, 58, 0.06));
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--sw-teal, #0d9488);
+}
+
+.sw-head__eyebrow::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--sw-amber, #f59e0b), var(--sw-rose, #f43f5e));
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.18);
+}
+
+.sw-head__title {
+  margin: 0 0 8px;
+  color: var(--sw-emerald-deep, #059669);
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1.14;
+  letter-spacing: -0.03em;
+  background: var(--sw-grad-spectrum, linear-gradient(92deg, #059669, #06b6d4 45%, #6366f1));
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .sw-head__title { color: transparent; }
+}
+
+.sw-head__subtitle {
+  margin: 0;
+  max-width: 64ch;
+  font-size: 15.5px;
+  line-height: 1.55;
+  color: var(--sw-ink-soft, #58736a);
+}
+
+/* ── Segmented tab bar ───────────────────────────────────────────────────
+   A pill track with a gradient active chip. The old bars were a flat
+   lavender strip with dark text, so the selected tab was distinguished only
+   by a slightly different fill — too weak to scan. */
+.sw-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 5px;
+  margin-bottom: 24px;
+  border-radius: var(--sw-radius-pill, 999px);
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--sw-line, #e2f1ea);
+  box-shadow: var(--sw-shadow-sm, 0 1px 2px rgba(9, 78, 58, 0.06));
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.sw-tabs::-webkit-scrollbar { display: none; }
+
+.sw-tab {
+  position: relative;
+  flex: 0 0 auto;
+  padding: 9px 20px;
+  border: 0;
+  border-radius: var(--sw-radius-pill, 999px);
+  background: transparent;
+  color: var(--sw-ink-soft, #58736a);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--sw-dur, 0.24s) ease, background var(--sw-dur, 0.24s) ease,
+    box-shadow var(--sw-dur, 0.24s) ease;
+}
+
+.sw-tab:hover:not(.is-active) {
+  color: var(--sw-emerald-deep, #059669);
+  background: rgba(16, 185, 129, 0.10);
+}
+
+.sw-tab.is-active {
+  color: #fff;
+  background: var(--sw-grad-brand, linear-gradient(135deg, #10b981, #0891b2));
+  box-shadow: 0 8px 18px -10px rgba(13, 148, 136, 0.9);
+}
+
+.sw-tab:focus-visible {
+  outline: 3px solid var(--sw-teal, #0d9488);
+  outline-offset: 2px;
+}
+
+/* ── Panel ───────────────────────────────────────────────────────────────
+   The 1px hairline plus a 3px accent bar replaces the 2px neon outline. A
+   `::before` bar is used rather than a gradient border because
+   `border-image` drops the rounded corners. */
+.sw-card {
+  position: relative;
+  padding: 22px;
+  border: 1px solid var(--sw-line, #e2f1ea);
+  border-radius: var(--sw-radius-xl, 26px);
+  background: var(--sw-surface, #fff);
+  box-shadow: var(--sw-shadow-md, 0 10px 28px -14px rgba(9, 78, 58, 0.26));
+}
+
+.sw-card--accent::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 24px;
+  right: 24px;
+  height: 3px;
+  border-radius: 0 0 4px 4px;
+  background: var(--sw-accent, var(--sw-grad-brand, linear-gradient(135deg, #10b981, #0891b2)));
+  opacity: 0.9;
+}
+
+.sw-card__title {
+  margin: 0 0 16px;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--sw-ink, #0d2b23);
+}
+
+/* ── Stat tile ───────────────────────────────────────────────────────────
+   `--sw-tile-accent` is set per tile by a tone modifier, so the icon gradient,
+   the value and the hover lift all come from one declaration. */
+.sw-tile {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--sw-line, #e2f1ea);
+  border-radius: var(--sw-radius-lg, 20px);
+  background: var(--sw-surface-sunk, #f4fbf7);
+  overflow: hidden;
+  transition: transform var(--sw-dur, 0.24s) var(--sw-ease, ease),
+    box-shadow var(--sw-dur, 0.24s) ease, border-color var(--sw-dur, 0.24s) ease;
+}
+
+.sw-tile:hover {
+  transform: translateY(-3px);
+  border-color: var(--sw-line-strong, #cbe7da);
+  box-shadow: var(--sw-shadow-md, 0 10px 28px -14px rgba(9, 78, 58, 0.26));
+}
+
+.sw-tile__icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 14px;
+  color: #fff;
+  background: var(--sw-tile-accent, var(--sw-grad-brand, linear-gradient(135deg, #10b981, #0891b2)));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    0 8px 16px -10px rgba(9, 78, 58, 0.6);
+}
+
+.sw-tile__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sw-tile__value {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--sw-ink, #0d2b23);
+  line-height: 1.15;
+}
+
+.sw-tile__label {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--sw-ink-faint, #8aa39a);
+}
+
+/* Tone modifiers. One declaration each, so a tile cannot end up with a green
+   icon and a mismatched border. */
+.sw-tile--emerald { --sw-tile-accent: linear-gradient(140deg, #34d399, #059669); }
+.sw-tile--teal    { --sw-tile-accent: linear-gradient(140deg, #2dd4bf, #0d9488); }
+.sw-tile--cyan    { --sw-tile-accent: linear-gradient(140deg, #38bdf8, #0891b2); }
+.sw-tile--indigo  { --sw-tile-accent: linear-gradient(140deg, #818cf8, #4f46e5); }
+.sw-tile--violet  { --sw-tile-accent: linear-gradient(140deg, #c084fc, #7c3aed); }
+.sw-tile--amber   { --sw-tile-accent: linear-gradient(140deg, #fbbf24, #f97316); }
+.sw-tile--rose    { --sw-tile-accent: linear-gradient(140deg, #fb7185, #e11d48); }
+
+/* ── Buttons ───────────────────────────────────────────────────────────── */
+.sw-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 22px;
+  border: 0;
+  border-radius: var(--sw-radius-pill, 999px);
+  background: var(--sw-grad-brand, linear-gradient(135deg, #10b981, #0891b2));
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 12px 24px -12px rgba(13, 148, 136, 1);
+  transition: transform var(--sw-dur, 0.24s) ease, box-shadow var(--sw-dur, 0.24s) ease,
+    filter var(--sw-dur, 0.24s) ease;
+}
+
+.sw-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  filter: brightness(1.05);
+  box-shadow: 0 16px 30px -12px rgba(13, 148, 136, 1);
+}
+.sw-btn:active:not(:disabled) { transform: translateY(0); }
+.sw-btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+
+.sw-btn:focus-visible {
+  outline: 3px solid var(--sw-teal, #0d9488);
+  outline-offset: 2px;
+}
+
+.sw-btn--ghost {
+  background: var(--sw-surface, #fff);
+  color: var(--sw-ink-soft, #58736a);
+  border: 1.5px solid var(--sw-line-strong, #cbe7da);
+  box-shadow: none;
+}
+.sw-btn--ghost:hover:not(:disabled) {
+  border-color: var(--sw-emerald, #10b981);
+  color: var(--sw-emerald-deep, #059669);
+  background: var(--sw-surface-sunk, #f4fbf7);
+  filter: none;
+  box-shadow: var(--sw-shadow-sm, 0 1px 2px rgba(9, 78, 58, 0.06));
+}
+
+/* ── Notice banner ────────────────────────────────────────────────────────
+   Rendered by BOTH the dashboard and the results page. It used to live in
+   DashboardPage.css as a bare, global rule, so the results page only looked
+   right as a side effect of the dashboard's stylesheet being loaded — and when
+   the dashboard's rules were scoped under `.dashboard-wrapper`, the results
+   page lost the banner entirely.
+
+   This is what a genuinely shared component looks like: one owner, one place,
+   a class name no page stylesheet else claims. Each value still reads through
+   a `var(--x, fallback)` so a deep link that loads this file alone is fine. */
+.sw-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px 18px;
+  border: 1px solid var(--sw-rose, #fb7185);
+  border-radius: var(--sw-radius-lg, 24px);
+  background: linear-gradient(135deg, #fff1f2, #ffe4e6);
+  box-shadow: 0 12px 28px -16px rgba(185, 28, 28, 0.4);
+  color: var(--sw-rose-deep, #b91c1c);
+}
+
+.sw-banner__icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: linear-gradient(140deg, #f87171, #dc2626);
+  color: #fff;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.sw-banner__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  color: #7f1d1d;
+}
+.sw-banner__body strong { font-size: 15px; }
+.sw-banner__item { font-size: 13px; }
+
+.sw-banner__hint {
+  font-size: 12.5px;
+  color: var(--sw-rose-deep, #b91c1c);
+}
+
+.sw-banner__btn {
+  flex-shrink: 0;
+  padding: 10px 18px;
+  border: 0;
+  border-radius: var(--sw-radius-pill, 999px);
+  background: var(--sw-rose-deep, #b91c1c);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background var(--sw-dur, 0.24s) ease;
+}
+.sw-banner__btn:hover { background: #991b1b; }
+.sw-banner__btn:focus-visible {
+  outline: 3px solid var(--sw-rose-deep, #b91c1c);
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .sw-banner { flex-direction: column; }
+  .sw-banner__btn { width: 100%; }
+}
+
+/* ── Shared keyframes ──────────────────────────────────────────────────── */
+@keyframes sw-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes sw-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ── Reduced motion ──────────────────────────────────────────────────────
+   Kept in one place so a page adding a new animation inherits the policy
+   rather than having to remember it. */
+@media (prefers-reduced-motion: reduce) {
+  .sw-shell,
+  .sw-head,
+  .sw-tile,
+  .sw-btn,
+  .sw-tab {
+    animation: none;
+    transition: none;
+  }
+  .sw-tile:hover,
+  .sw-btn:hover:not(:disabled) {
+    transform: none;
+  }
+}

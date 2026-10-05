@@ -1,32 +1,110 @@
-/* Track Intake Wrapper */
+/* ── Shell ─────────────────────────────────────────────────────────────
+   The shared mesh backdrop, fixed and clipped so it reads as light across the
+   page rather than as content, and cannot open a horizontal scrollbar.
+
+   `overflow-x` is declared twice on purpose: `hidden` would make this element
+   a scroll container, and a sticky element resolves against the NEAREST
+   ancestor scroll container — so it would pull the sticky Navbar off the
+   viewport and the header would scroll away with the page. `clip` contains the
+   overflow without creating a scrollport. See PricingPage.css for the same
+   note. `hidden` first, for engines without `clip`. */
 .track-intake-wrapper {
   min-height: 100vh;
-  background: linear-gradient(135deg, #f0faf0 0%, #e8f5e9 100%);
+  position: relative;
+  overflow-x: hidden;
+  overflow-x: clip;
+  color: var(--sw-ink, #0d2b23);
+  background: var(--sw-mesh, linear-gradient(168deg, #eefcf5, #f5f0ff));
+  background-attachment: fixed;
 }
 
-/* Container */
 .track-intake-container {
+  position: relative;
+  z-index: 1;
   max-width: 1200px;
   margin: 0 auto;
-  padding: 32px 24px;
+  padding: 36px 24px 64px;
 }
 
-/* Header */
+/* ── Error state ──────────────────────────────────────────────────────────
+   This block was unstyled in every stylesheet, and its Retry button borrowed
+   `.btn-primary` — a name declared with four different looks by HomePage,
+   HistoryPage, ResultsPage and RecommendationsPage. Whichever of those was
+   injected last decided how the error screen looked, so the button changed
+   appearance depending on the route the member had visited first. It now has
+   its own class, styled here. */
+.track-intake-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  max-width: 520px;
+  margin: 48px auto;
+  padding: 36px 28px;
+  border: 1px solid #fecaca;
+  border-radius: var(--sw-radius-lg, 24px);
+  background: var(--sw-surface, #fff);
+  box-shadow: var(--sw-shadow-md, 0 10px 28px -14px rgba(9, 78, 58, 0.28));
+  text-align: center;
+}
+
+.track-intake-error p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.55;
+  color: #7f1d1d;
+}
+
+.track-intake-error__btn {
+  padding: 11px 24px;
+  border: 0;
+  border-radius: var(--sw-radius-pill, 999px);
+  background: var(--sw-grad-brand, linear-gradient(135deg, #10b981, #0d9488));
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform var(--sw-dur, 0.24s) ease, box-shadow var(--sw-dur, 0.24s) ease;
+}
+
+.track-intake-error__btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px -12px rgba(13, 148, 136, 1);
+}
+
+.track-intake-error__btn:focus-visible {
+  outline: 3px solid var(--sw-teal, #0d9488);
+  outline-offset: 2px;
+}
+
 .track-intake-header {
-  margin-bottom: 32px;
+  margin-bottom: 26px;
+  animation: sw-rise 0.5s var(--sw-ease, cubic-bezier(0.16, 1, 0.3, 1)) both;
 }
 
 .track-intake-title {
-  font-size: 32px;
-  font-weight: 700;
-  color: #1f2937;
-  margin: 0 0 8px 0;
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.14;
+  color: var(--sw-emerald-deep, #059669);
+  margin: 0 0 8px;
+  background: var(--sw-grad-spectrum, linear-gradient(92deg, #059669, #06b6d4 45%, #6366f1));
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .track-intake-title { color: transparent; }
 }
 
 .track-intake-subtitle {
-  font-size: 16px;
-  color: #6b7280;
+  font-size: 15.5px;
+  line-height: 1.55;
+  color: var(--sw-ink-soft, #58736a);
   margin: 0;
+  max-width: 64ch;
 }
 
 /* Content Layout */
@@ -46,19 +124,26 @@
   align-self: start;
 }
 
-/* Track Sections */
+/* ── Panel ─────────────────────────────────────────────────────────────
+   A 1px hairline plus a lift, in place of the 2px #86efac outline. At 2px
+   that lime reads as a debug outline; four of them stacked down this page
+   left no hierarchy at all. */
 .track-section {
-  background: white;
-  border: 2px solid #86efac;
-  border-radius: 16px;
+  position: relative;
+  background: var(--sw-surface, #fff);
+  border: 1px solid var(--sw-line, #e2f1ea);
+  border-radius: var(--sw-radius-xl, 26px);
   padding: 24px;
+  box-shadow: var(--sw-shadow-md, 0 10px 28px -14px rgba(9, 78, 58, 0.26));
+  animation: sw-rise 0.5s var(--sw-ease, cubic-bezier(0.16, 1, 0.3, 1)) both;
 }
 
 .section-title {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 700;
-  color: #1f2937;
-  margin: 0 0 20px 0;
+  letter-spacing: -0.015em;
+  color: var(--sw-ink, #0d2b23);
+  margin: 0 0 18px;
 }
 
 .section-header-with-legend {
@@ -128,22 +213,53 @@
   background: #6ee7b7;
 }
 
+/* Rows carry their priority on a coloured edge rather than in a border of the
+   same colour all the way round. The legend above this list explains what the
+   colours mean; before this, nothing on the list itself showed it. */
 .supplement-card {
+  position: relative;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px;
-  background: white;
-  border: 2px solid #86efac;
-  border-radius: 12px;
-  transition: all 0.3s ease;
   gap: 16px;
+  padding: 15px 16px 15px 19px;
+  border: 1px solid var(--sw-line, #e2f1ea);
+  border-radius: var(--sw-radius-md, 14px);
+  background: var(--sw-surface-sunk, #f4fbf7);
+  box-shadow: var(--sw-shadow-sm, 0 1px 2px rgba(9, 78, 58, 0.06));
+  transition: transform var(--sw-dur, 0.24s) var(--sw-ease, ease),
+    box-shadow var(--sw-dur, 0.24s) ease, border-color var(--sw-dur, 0.24s) ease;
 }
 
-.supplement-card.taken {
-  background: #d1fae5;
-  border-color: #6ee7b7;
+.supplement-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 11px;
+  bottom: 11px;
+  width: 4px;
+  border-radius: 0 4px 4px 0;
+  background: var(--row-accent, #cbd5e1);
 }
+
+.supplement-card--high   { --row-accent: linear-gradient(180deg, #34d399, #059669); }
+.supplement-card--medium { --row-accent: linear-gradient(180deg, #fbbf24, #f59e0b); }
+.supplement-card--low    { --row-accent: linear-gradient(180deg, #cbd5e1, #94a3b8); }
+
+.supplement-card:hover {
+  transform: translateX(3px);
+  border-color: var(--sw-line-strong, #cbe7da);
+  box-shadow: var(--sw-shadow-md, 0 10px 28px -14px rgba(9, 78, 58, 0.26));
+}
+
+/* A taken row recedes rather than disappearing: the record of what was taken
+   is the point, so it stays legible at a lower contrast. */
+.supplement-card.taken {
+  background: linear-gradient(180deg, #f2fdf8, #e7f8f0);
+  border-color: #b6ecd3;
+}
+
+.supplement-card.taken .supplement-name { color: #3f6357; }
 
 .supplement-info {
   flex: 1;
@@ -250,11 +366,451 @@
   border-color: #9ca3af;
 }
 
+.btn-mark-taken:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* ── The missed tray ─────────────────────────────────────────────────────
+   Doses whose window closed while they were still unticked. Parked at the very
+   bottom of the plan, below every live frame, so it never competes with what
+   the user can actually do right now. */
+.slot-tray {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+  padding-top: 16px;
+  border-top: 2px dashed #fecaca;
+}
+
+.slot-tray__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 9px 14px;
+  border: 1px solid #fecaca;
+  border-radius: var(--sw-radius-md, 14px);
+  background: linear-gradient(180deg, #fffbfb, #fef2f2);
+}
+
+/* Past the dead hours the day is over: cooler and flatter, so the tray stops
+   reading as something to act on. */
+.slot-tray--locked .slot-tray__header {
+  background: linear-gradient(180deg, #f8fafc, #eef2f7);
+  border-color: #dbe3ec;
+}
+
+.slot-tray__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #991b1b;
+}
+
+.slot-tray--locked .slot-tray__title { color: #475569; }
+
+.slot-tray__count {
+  font-size: 12px;
+  font-weight: 700;
+  color: #b91c1c;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #fee2e2;
+  white-space: nowrap;
+}
+
+.slot-tray--locked .slot-tray__count {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.slot-tray__note {
+  font-size: 12px;
+  color: #7f1d1d;
+}
+
+.slot-tray--locked .slot-tray__note { color: #64748b; }
+
+/* Shown when no frame is open — before 5 AM, or between windows. */
+.slots-idle {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px dashed #cbd5e1;
+  border-radius: var(--sw-radius-md, 14px);
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: #64748b;
+}
+
+/* A row the dead hours closed out: no button, and it says so. */
+.supplement-card--locked {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+  opacity: 0.85;
+}
+
+.supplement-card--locked .supplement-name { color: #64748b; }
+
+.supplement-locked-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #64748b;
+  font-size: 12.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* ── Dead-hour placeholders ────────────────────────────────────────────────
+   Every field listed, every one empty, each with a countdown. Showing the shape
+   of the day without offering a single button is what stops the pause from
+   reading as a broken screen. */
+.slots-deadhead {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid #dbe3ec;
+  border-radius: var(--sw-radius-md, 14px);
+  background: linear-gradient(180deg, #f8fafc, #eef2f7);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: #475569;
+}
+
+.slot-group--placeholder .slot-group__header {
+  background: linear-gradient(180deg, #fbfcfe, #f4f7fa);
+  border-color: #e6ebf1;
+  border-style: dashed;
+}
+
+.slot-group--placeholder .slot-group__icon { opacity: 0.5; }
+.slot-group--placeholder .slot-group__title { color: #64748b; }
+
+.slot-group__count--quiet {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.slot-group__countdown {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #0f766e;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #ccfbf1;
+  white-space: nowrap;
+}
+
+/* ── Dead hours (midnight → 4:00 AM) ────────────────────────────────────────
+   Deliberately the QUIETEST treatment in the file — cooler and flatter than
+   "Missed", which is warm-red. The distinction is the point: "Missed" is a
+   statement about the user's day, and telling someone at 2 AM that they missed
+   something would be both false and hostile. This just says: not now. */
+.slot-group--snoozed .slot-group__header {
+  background: linear-gradient(180deg, #f8fafc, #eef2f7);
+  border-color: #dbe3ec;
+}
+
+.slot-group--snoozed .slot-group__icon {
+  color: #64748b;
+  background: #e2e8f0;
+}
+
+.slot-group--snoozed .slot-group__title {
+  color: #475569;
+}
+
+.slot-group--snoozed .slot-group__window {
+  color: #64748b;
+}
+
+.slot-group__flag--night {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.supplement-card--snoozed {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+.supplement-card--snoozed .supplement-name {
+  color: #475569;
+}
+
+.supplement-card--snoozed:hover {
+  border-color: #cbd5e1;
+}
+
+/* ── Time-slot grouping ───────────────────────────────────────────────────
+   Today's plan is grouped Morning / Afternoon / Evening / Before Bed so it
+   reads the same way the results page's schedule does. The slot header is a
+   plain band: the list of cards below it is untouched, so a supplement still
+   looks exactly the same whether or not slots are ever rendered. */
+.supplements-list--slots {
+  /* The outer wrapper holds every section; each section scrolls its own list,
+     so one tall section cannot push the others out of view. */
+  max-height: none;
+  overflow: visible;
+  gap: 18px;
+}
+
+.slot-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.slot-group__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 14px;
+  border: 1px solid var(--sw-line, #e2f1ea);
+  border-radius: var(--sw-radius-md, 14px);
+  background: linear-gradient(180deg, #ffffff, #f4fbf7);
+  box-shadow: var(--sw-shadow-sm, 0 1px 2px rgba(9, 78, 58, 0.06));
+}
+
+.slot-group--complete .slot-group__header {
+  background: linear-gradient(180deg, #f2fdf8, #e7f8f0);
+  border-color: #b6ecd3;
+}
+
+/* A window whose time has passed with something still unticked. Deliberately
+   RECESSED rather than alarming: a missed dose is a fact to record, not an
+   error state to shout about, and a red block on every yesterday section is how
+   a tracker becomes something people stop opening. */
+.slot-group--missed .slot-group__header {
+  background: linear-gradient(180deg, #fffbfb, #fef2f2);
+  border-color: #fecaca;
+}
+
+.slot-group--missed .slot-group__icon {
+  color: #b91c1c;
+  background: #fee2e2;
+}
+
+.slot-group--missed .slot-group__title {
+  color: #7f1d1d;
+}
+
+/* Not yet open — ahead of the user, so it recedes rather than demanding action. */
+.slot-group--upcoming .slot-group__header {
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  border-color: #e5e7eb;
+}
+
+.slot-group--upcoming .slot-group__icon {
+  opacity: 0.55;
+}
+
+.slot-group__names {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+/* The hours, printed so the window is checkable rather than assumed. */
+.slot-group__window {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: #6b7280;
+  white-space: nowrap;
+}
+
+.slot-group--missed .slot-group__window {
+  color: #991b1b;
+}
+
+.slot-group__flag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.slot-group__flag--soon {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.missed-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  background: #fee2e2;
+  color: #b91c1c;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* A dose recorded outside its own window. Amber rather than red: it WAS taken,
+   just late — an error colour would overstate it. Amber specifically because the
+   sibling "Taken" pill is green, and green reads "on time". */
+.supplement-late-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #b45309;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* A missed row keeps its button usable — this is a late entry, not a lockout.
+   The styling says "out of time" while the control still works. */
+.supplement-card--missed {
+  background: #fef7f7;
+  border-color: #fecaca;
+  opacity: 0.92;
+}
+
+.supplement-card--missed .supplement-name {
+  color: #7f1d1d;
+}
+
+.supplement-card--missed:hover {
+  border-color: #fca5a5;
+}
+
+.slot-group__label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.slot-group__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  color: #0d9488;
+  background: #d9f2ec;
+}
+
+.slot-group__icon--morning   { color: #d97706; background: #fef3c7; }
+.slot-group__icon--afternoon { color: #0d9488; background: #d9f2ec; }
+.slot-group__icon--evening   { color: #4f46e5; background: #e0e7ff; }
+.slot-group__icon--night     { color: #4338ca; background: #e0e7ff; }
+.slot-group__icon--anytime   { color: #4b5563; background: #e5e7eb; }
+
+.slot-group__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #1f2937;
+}
+
+.slot-group__meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.slot-group__count {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #4b5563;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.08);
+  white-space: nowrap;
+}
+
+.slot-group__done {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: #10b981;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* "Take all morning" — the whole point of the grouping: one press instead of
+   five. Kept visually quieter than the per-item button so the individual
+   action is still the obvious default. */
+.btn-slot-taken {
+  padding: 7px 14px;
+  border: 1px solid #a7f3d0;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #047857;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color var(--sw-dur, 0.24s) ease,
+    border-color var(--sw-dur, 0.24s) ease, transform var(--sw-dur, 0.24s) ease;
+}
+
+.btn-slot-taken:hover:not(:disabled) {
+  background: #d1fae5;
+  border-color: #6ee7b7;
+  transform: translateY(-1px);
+}
+
+.btn-slot-taken:focus-visible {
+  outline: 3px solid var(--sw-teal, #0d9488);
+  outline-offset: 2px;
+}
+
+.btn-slot-taken:disabled {
+  opacity: 0.6;
+  cursor: progress;
+  transform: none;
+}
+
+@media (max-width: 768px) {
+  .slot-group__header {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .slot-group__meta {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
 /* This Week's Adherence */
 .adherence-box {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  padding: 16px;
+  border-radius: var(--sw-radius-lg, 20px);
+  border: 1px solid #e0e7ff;
+  background: linear-gradient(180deg, #f8fafc, #eef2ff);
 }
 
 .adherence-message {
@@ -360,20 +916,41 @@
   align-items: center;
   justify-content: center;
   font-size: 14px;
+  font-family: inherit;
   color: #374151;
+  background: none;
+  border: none;
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s ease;
   position: relative;
+  padding: 0;
 }
 
-.calendar-day:not(.empty):hover {
+.calendar-day:not(.empty):not(:disabled):hover {
   background: #f0fdf4;
   color: #10b981;
 }
 
 .calendar-day.empty {
   cursor: default;
+}
+
+.calendar-day.future {
+  color: #d1d5db;
+  cursor: default;
+}
+
+.calendar-day:disabled {
+  cursor: default;
+}
+
+.calendar-day.selected {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px #10b981;
+}
+
+.calendar-day.today.selected {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px #065f46;
 }
 
 .calendar-day.today {
@@ -508,10 +1085,37 @@
   white-space: nowrap;
 }
 
-/* Streak Section */
+/* ── Streak hero ───────────────────────────────────────────────────────
+   The one genuinely celebratory panel on the page, so it keeps a saturated
+   gradient — but a deep amber→orange rather than the previous #f59e0b→#ea580c
+   at full strength across the whole card, which read as a fire alarm next to
+   three white panels. The text shadow is gone too: it was there to keep white
+   text legible on a light orange, and at this depth it is not needed.
+
+   The continuous 2.2s scale-and-rotate "flicker" on the icon is reduced to a
+   slow, small breath. A permanent wobble on a number people read every day
+   is the kind of motion that becomes an irritant and is then ignored. */
+/* The two streak cards are the loudest blocks on this page and were pure
+   #f97316→#ea580c at full strength, pulling the eye away from the plan above
+   them. Deepened to a warmer amber-orange so they still read as a reward
+   without competing with the primary action. */
 .streak-section {
-  background: white;
-  border: 2px solid #86efac;
+  /* Pale amber with dark brown ink: ~5:1 or better at every point on the
+     ramp, so the subtitle is actually readable. The saturated orange this
+     replaced measured ~3.9:1 against its own mid-tone. */
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 44%, #fcd34d 100%);
+  border: 1px solid #fcd34d;
+  box-shadow: 0 12px 28px -20px rgba(217, 119, 6, 0.55);
+  color: #78350f;
+}
+
+.streak-section .streak-text {
+  color: #78350f;
+}
+
+.streak-section .section-title,
+.streak-section .streak-number {
+  color: #78350f;
 }
 
 .streak-content {
@@ -521,25 +1125,34 @@
 }
 
 .streak-icon {
-  width: 56px;
-  height: 56px;
-  background: #f0fdf4;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #10b981;
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
   flex-shrink: 0;
+  border-radius: 16px;
+  /* Solid amber rather than translucent white: on a pale amber card a
+     24%-white tile left the white glyph with almost nothing to sit on. */
+  background: linear-gradient(140deg, #fbbf24, #ea580c);
+  color: #fff;
+  box-shadow: 0 6px 14px -8px rgba(217, 119, 6, 0.9);
+  animation: streak-breathe 4.5s ease-in-out infinite;
+}
+
+@keyframes streak-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
 }
 
 .streak-text {
   flex: 1;
+  min-width: 0;
 }
 
 .streak-number {
   font-size: 24px;
-  font-weight: 700;
-  color: #1f2937;
+  font-weight: 800;
+  letter-spacing: -0.02em;
 }
 
 /* Responsive Design */
@@ -637,7 +1250,11 @@
 /* Completion Toast */
 .completion-toast {
   position: fixed;
-  top: 24px;
+  /* Below the sticky Navbar, not inside it. At `top: 24px` this covered the
+     bar's right-hand side (notifications bell, account pill) because its
+     z-index outranks the Navbar's. Matches the 90px the phone override in
+     mobile-responsive.css already used, and the shared .toast. */
+  top: 80px;
   right: 24px;
   background: linear-gradient(135deg, #6ee7b7 0%, #3dbf8a 100%);
   border-radius: 16px;
@@ -714,4 +1331,134 @@
 .completion-toast-close:hover {
   background: rgba(255, 255, 255, 0.3);
   transform: scale(1.1);
+}
+
+/* Interactive day-detail panel (calendar history) */
+.day-detail{border-color:#a7f3d0}
+.day-detail__header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px}
+.day-detail__header .section-title{margin:0}
+.day-detail__close{background:#f3f4f6;border:none;color:#6b7280;font-size:20px;line-height:1;width:32px;height:32px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.day-detail__close:hover{background:#e5e7eb;color:#111827}
+.day-detail__status{color:#6b7280;font-size:14px;padding:12px 0;margin:0}
+.day-detail__error{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:10px;padding:10px 14px;font-size:.9rem}
+.day-detail__retry{background:#b91c1c;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-weight:700;cursor:pointer;white-space:nowrap}
+.day-detail__summary{font-size:14px;font-weight:600;color:#065f46;margin:0 0 12px}
+.day-detail__list{display:flex;flex-direction:column;gap:10px}
+.day-detail__row{display:flex;align-items:flex-start;gap:10px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;padding:12px 14px}
+.day-detail__row--taken{background:#f0fdf4;border-color:#bbf7d0}
+.day-detail__row .priority-indicator{margin-top:4px}
+.day-detail__info{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
+.day-detail__name{font-weight:700;color:#111827;font-size:14px}
+.day-detail__meta{font-size:12.5px;color:#6b7280}
+.day-detail__pill{flex-shrink:0;font-size:11.5px;font-weight:700;padding:5px 10px;border-radius:999px;white-space:nowrap}
+.day-detail__pill--taken{background:#16a34a;color:#fff}
+.day-detail__pill--missed{background:#fee2e2;color:#b91c1c}
+.day-detail__pill--taken{background:#16a34a;color:#fff}
+.day-detail__pill--missed{background:#fee2e2;color:#b91c1c}
+@media (max-width:480px){.day-detail__row{flex-wrap:wrap}}
+
+/* ════════════════════════════════════════════════════════════════════
+   VIBRANT THEME REFRESH
+   ════════════════════════════════════════════════════════════════════ */
+.track-intake-wrapper {
+  background:
+    radial-gradient(900px 340px at 5% -80px, rgba(16, 185, 129, 0.16), transparent 60%),
+    radial-gradient(760px 300px at 96% -40px, rgba(168, 85, 247, 0.12), transparent 60%),
+    radial-gradient(820px 480px at 50% 115%, rgba(59, 130, 246, 0.10), transparent 60%),
+    linear-gradient(180deg, #eefbf1 0%, #f4faf6 100%);
+}
+
+.track-intake-title {
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  background: linear-gradient(92deg, #065f46 10%, #059669 45%, #7c3aed 90%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.track-section {
+  border-radius: 20px;
+  border: 1px solid #bbf7d0;
+  box-shadow: 0 8px 24px rgba(6, 95, 70, 0.08);
+  animation: track-section-in 0.45s ease both;
+}
+.track-intake-left .track-section:nth-child(2) { animation-delay: 0.08s; }
+.track-intake-left .track-section:nth-child(3) { animation-delay: 0.14s; }
+@keyframes track-section-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Removed. This restated .supplement-card and .supplement-card.taken to
+   override the originals above, which is where the row's 1.5px green outline
+   came from. The single set of rules above is now the only one. */
+
+.btn-mark-taken {
+  background: linear-gradient(135deg, #34d399, #059669) !important;
+  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.30);
+  transition: transform 0.15s ease, box-shadow 0.2s ease !important;
+}
+.btn-mark-taken:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 10px 22px rgba(16, 185, 129, 0.38) !important;
+}
+.btn-mark-taken:active { transform: scale(0.96) !important; }
+.btn-undo {
+  transition: transform 0.15s ease, background 0.2s ease !important;
+}
+.btn-undo:hover { transform: translateY(-1px); }
+
+/* Read-only "Taken" state — replaces the old Undo button. Same slot so the row
+   does not reflow, and deliberately not a button: no hover lift, no cursor, so
+   it never looks like something that should respond to a click. */
+.supplement-taken-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 16px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #047857;
+  background: #ecfdf5;
+  border: 1.5px solid #6ee7b7;
+  box-shadow: 0 4px 12px -8px rgba(16, 185, 129, 0.8);
+  white-space: nowrap;
+  user-select: none;
+  cursor: default;
+}
+.supplement-taken-pill svg { flex-shrink: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .track-section,
+  .streak-icon {
+    animation: none;
+  }
+  .supplement-card,
+  .btn-mark-taken,
+  .btn-undo,
+  .calendar-day {
+    transition: none;
+  }
+}
+
+/* ── Calendar day fills ───────────────────────────────────────────────────
+   Re-declared here rather than with `!important` in an appended block, so
+   there is a single declaration for each state. */
+.calendar-day.completed {
+  background: linear-gradient(180deg, #a7f3d0, #6ee7b7);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.28);
+}
+.calendar-day.today {
+  background: linear-gradient(135deg, #34d399, #059669);
+  color: #fff;
+  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.4), 0 0 0 3px rgba(16, 185, 129, 0.22);
+}
+.calendar-day:not(.empty):not(:disabled):hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 14px rgba(16, 185, 129, 0.25);
+  z-index: 1;
 }

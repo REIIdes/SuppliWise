@@ -1,9 +1,44 @@
 const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
+const { requireFeature } = require('../utils/entitlements');
 const Assessment = require('../models/Assessment');
 const IntakeRecord = require('../models/IntakeRecord');
 const DashboardMetrics = require('../models/DashboardMetrics');
+const { notExpiredFilter } = require('../utils/assessments');
+// The one definition of "today" and the one reader of the user's wall clock.
+// Both live in utils/planDay.js; this route used to compute a UTC calendar date of
+// its own, which is a different day from every other endpoint for four hours out
+// of every eight.
+const { planDayKey, minutesToNextReset, isInDeadHours, PLAN_DAY_RESET_LABEL } = require('../utils/planDay');
+const { cleanTimeZone } = require('../utils/intakeWindows');
+
+/**
+ * The `planDay` block, matching what routes/dashboard.js returns.
+ *
+ * Built here rather than imported because the payload is presentation: the rule
+ * below is imported, only the shape is repeated — and the shape is asserted by
+ * the client test (`planDayWiring.test.js`) on both sides.
+ */
+const planDayPayload = (now = new Date(), timeZone = 'UTC') => ({
+  todayKey: planDayKey(now, timeZone),
+  resetAt: PLAN_DAY_RESET_LABEL,
+  nextResetInMinutes: minutesToNextReset(now, timeZone),
+  inDeadHours: isInDeadHours(now, timeZone),
+  timeZone: cleanTimeZone(timeZone) || 'UTC',
+});
+
+/**
+ * The user's IANA timezone, from the header api.js sends on every request.
+ *
+ * Read-only here — insights never writes the user's document. Falls back to the
+ * stored zone, then UTC. See routes/dashboard.js → timezoneFor for the version
+ * that also persists it.
+ */
+const timezoneFor = async (req) =>
+  cleanTimeZone(req.get('x-client-timezone'))
+  || cleanTimeZone(req.user && req.user.timeZone)
+  || 'UTC';
 
 // Helper: Get date range for queries
 const getDateRange = (days) => {
@@ -20,42 +55,53 @@ const formatDate = (date) => {
 
 // @route   GET /api/insights
 // @desc    Get AI insights and tracking data for the active assessment
-// @access  Private
-router.get('/', protect, async (req, res) => {
+// @access  Private (DELUXE plan and above)
+// Insights & Analytics is a Deluxe+ entitlement — free-tier users are stopped
+// here with a 403 + requiresPlan payload so the client can show an upgrade prompt.
+router.get('/', protect, requireFeature('insights'), async (req, res) => {
   try {
-    // Get the latest assessment
-    const latestAssessment = await Assessment.findOne({ user: req.user._id })
+    // Latest assessment still in force (expired ones are retired from insights)
+    const latestAssessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
       .sort({ createdAt: -1 });
 
     if (!latestAssessment) {
-      return res.json({ 
+      return res.json({
         message: 'No assessment found. Please complete an assessment first.',
         hasData: false,
         hasAssessment: false,
+        planDay: planDayPayload(new Date(), await timezoneFor(req)),
       });
     }
 
-    // Get dashboard metrics
-    const metrics = await DashboardMetrics.findOne({
-      user: req.user._id,
-      assessment: latestAssessment._id,
-    });
+    // Independent reads run in parallel (Atlas RTT ~0.5s each — sequential was ~2.5s)
+    const { startDate } = getDateRange(30);
+
+    // The running PLAN DAY, not the UTC calendar date — the same key every other
+    // endpoint uses (utils/planDay.js). This route read its own UTC date, so
+    // between 00:00 and 04:00 UTC it served yesterday's doses while the dashboard
+    // showed today's, and the page captioned its ring with a day it never
+    // measured.
+    const timeZone = await timezoneFor(req);
+    const todayKey = planDayKey(new Date(), timeZone);
+    const [metrics, intakeRecords, todayIntakeRecords, totalAssessments] = await Promise.all([
+      DashboardMetrics.findOne({ user: req.user._id, assessment: latestAssessment._id }).lean(),
+      // Last 30 days only, lean + minimal fields
+      IntakeRecord.find({ user: req.user._id, assessment: latestAssessment._id, date: { $gte: startDate } })
+        .select('date taken')
+        .sort({ date: 1 })
+        .lean(),
+      IntakeRecord.find({ user: req.user._id, assessment: latestAssessment._id, dayKey: todayKey }).lean(),
+      Assessment.countDocuments({ user: req.user._id }),
+    ]);
 
     if (!metrics) {
       return res.json({
         hasData: false,
         hasAssessment: true,
         message: 'Not enough tracking data yet. Start tracking your supplements to see insights.',
+        planDay: planDayPayload(new Date(), timeZone),
       });
     }
-
-    // Get intake records for the last 30 days
-    const { startDate } = getDateRange(30);
-    const intakeRecords = await IntakeRecord.find({
-      user: req.user._id,
-      assessment: latestAssessment._id,
-      date: { $gte: startDate },
-    }).sort({ date: 1 });
 
     // Calculate daily adherence
     const dailyAdherence = {};
@@ -82,15 +128,8 @@ router.get('/', protect, async (req, res) => {
     const aiInsights = latestAssessment.aiResults?.actionPlan || [];
     const lifestyleAdvice = latestAssessment.aiResults?.lifestyleAdvice || [];
 
-    // Get today's supplements
-    const todayKey = formatDate(new Date());
+    // Get today's supplements (already fetched above)
     const recommendations = latestAssessment.aiResults?.recommendations || [];
-    
-    let todayIntakeRecords = await IntakeRecord.find({
-      user: req.user._id,
-      assessment: latestAssessment._id,
-      dayKey: todayKey,
-    });
 
     // Don't automatically create records - user must add supplements manually from recommendations
 
@@ -107,9 +146,6 @@ router.get('/', protect, async (req, res) => {
     const daysSinceStart = Math.floor(
       (new Date() - new Date(latestAssessment.createdAt)) / (1000 * 60 * 60 * 24)
     );
-
-    // Get total number of assessments completed by the user
-    const totalAssessments = await Assessment.countDocuments({ user: req.user._id });
 
     // Determine current phase based on days
     let currentPhase = null;
@@ -129,6 +165,9 @@ router.get('/', protect, async (req, res) => {
     res.json({
       hasData: true,
       hasAssessment: true,
+      // So the page can caption this ring with the day it actually measured
+      // rather than re-deriving one that is a day off for four hours.
+      planDay: planDayPayload(new Date(), timeZone),
       overview: {
         daysTracked: metrics.totalDaysTracked || daysSinceStart,
         currentStreak: metrics.currentStreak,

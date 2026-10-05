@@ -1,7 +1,13 @@
 /* Toast Notification */
 .toast {
   position: fixed;
-  top: 24px;
+  /* Clears the sticky Navbar (64px) plus a gap. At `top: 24px` this panel was
+     painted straight over the bar's right-hand side — the notifications bell
+     and the account pill — because the toast's z-index (1000) is an order of
+     magnitude above the Navbar's (100). The phone override in
+     mobile-responsive.css already used 90px for exactly this reason; this is
+     the desktop half of the same rule. Pinned by navbarSurface.test.js. */
+  top: 80px;
   right: 24px;
   background: white;
   border-radius: 12px;

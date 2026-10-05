@@ -40,9 +40,28 @@ const assessmentSchema = new mongoose.Schema(
     proteinIntake: { type: String },
     bloodTestResults: { type: String },
     recreationalDrugTypes: { type: String },
+    // 5 CALENDAR years after creation (shared helper — same math as the UI).
+    // The create route sets this explicitly; the default keeps any other insert
+    // on the standard retention window instead of "never expires".
+    // Priority assessments null this while flagged (never expire while under
+    // review) and restore it from createdAt when resolved.
     expiresAt: {
       type: Date,
-      default: () => new Date(Date.now() + 5 * 365.25 * 24 * 60 * 60 * 1000),
+      default: () => require('../utils/assessments').expiryDateFromNow(),
+    },
+    // Admin-set priority flag
+    priority: { type: String, enum: ['Priority', 'Standard'], default: 'Standard' },
+    // Flagging lifecycle (user-visible history of auto-detection + resolution)
+    flagReasons: [{ type: String }],
+    flaggedAt: { type: Date, default: null },
+    resolvedAt: { type: Date, default: null },
+    resolvedReason: { type: String, default: '' },
+    // When this record came out of the "Update Health Assessment" flow, the
+    // assessment it was created from — so History can explain the linkage.
+    updatedFrom: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Assessment',
+      default: null,
     },
     // User info snapshot (for easy identification in DB)
     userEmail: { type: String },
@@ -50,5 +69,8 @@ const assessmentSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// Hot paths query newest-first per user — index them (dashboard, insights, assessment routes)
+assessmentSchema.index({ user: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Assessment', assessmentSchema);

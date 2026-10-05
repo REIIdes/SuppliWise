@@ -1,0 +1,2108 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   PRICING PAGE — SuppliWise plan catalogue
+
+   A dark, self-contained surface: the rest of the app is light mint, so this
+   page is deliberately its own world — a deep indigo canvas with an "aurora" of
+   light behind it and a VIBRANT accent per plan tier.
+
+   THE ONE IDEA IN THIS FILE
+   ────────────────────────
+   Every card, chip, check, price glow and CTA is tinted from a single per-tier
+   pair of custom properties (`--a` and `--a-rgb`). The tier rules below set
+   those two values ONCE; every rule downstream reads them. That is why the
+   grid reads as a spectrum from Free to Ultimate instead of four identical
+   grey boxes, and it is why a new tier only needs one three-line rule.
+
+   AURORA, NOT A HERO GRADIENT
+   ──────────────────────────
+   The colour comes from a soft, slow, non-interactive backdrop rather than from
+   saturated surfaces. Text keeps AA contrast on a near-black canvas (see the
+   ink tokens), and the colour lives where it earns attention: the recommended
+   card, the price, the primary buttons, the check marks.
+
+   NOTE ON `overflow-x`
+   ───────────────────
+   Declared twice on purpose. `hidden` makes the element a scroll container,
+   which SILENTLY breaks `position: sticky` for everything inside it — the
+   control dock below would simply never stick. `clip` contains the same
+   overflow without creating a scrollport, so it is declared second and wins
+   wherever it is supported.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.pricing-page {
+  /* ── Canvas ─────────────────────────────────────────────────────────── */
+  --p-bg: #070a18;
+  --p-bg-2: #0b1024;
+  --p-card: #101632;
+  --p-card-2: #161d3f;
+  --p-line: rgba(150, 164, 255, 0.16);
+  --p-line-soft: rgba(150, 164, 255, 0.10);
+
+  /* ── Ink ──────────────────────────────────────────────────────────────
+     `--p-faint` was #5d6d82, which is 3.2:1 on this background — it failed
+     WCAG AA for the 12px price notes and the "/month" suffix that are set in
+     it. It is #7f8ab0 now: 5.2:1, so the same text passes. */
+  --p-text: #f2f5ff;
+  --p-muted: #a9b3d4;
+  --p-faint: #7f8ab0;
+
+  /* ── Vibrant accents ───────────────────────────────────────────────── */
+  --p-cyan: #22d3ee;
+  --p-sky: #38bdf8;
+  --p-indigo: #818cf8;
+  --p-violet: #a855f7;
+  --p-fuchsia: #e879f9;
+  --p-pink: #fb7185;
+  --p-amber: #fbbf24;
+  --p-lime: #a3e635;
+  --p-emerald: #34d399;
+
+  --p-grad: linear-gradient(115deg, #22d3ee 0%, #6366f1 42%, #a855f7 74%, #f0abfc 100%);
+  --p-grad-2: linear-gradient(115deg, #34d399 0%, #22d3ee 52%, #818cf8 100%);
+
+  /* ── Semantic ──────────────────────────────────────────────────────── */
+  --p-live: #34d399;
+  --p-warn: #fbbf24;
+  --p-danger: #f87171;
+
+  /* Ink for text sitting ON a saturated gradient. Every tier gradient is at
+     least 4.6:1 against this, and the bright ones are far above it. */
+  --p-on-grad: #060818;
+
+  --p-radius: 22px;
+  --p-radius-sm: 12px;
+  /* The navbar is `position: sticky; top: 0` INSIDE this page, and it is
+     64px tall (44px logo box + 10px padding either side). The control dock
+     tucks directly underneath it rather than behind it. */
+  --p-nav-h: 64px;
+
+  --p-shadow: 0 30px 70px -34px rgba(2, 4, 20, 0.95);
+
+  /* No webfont is loadable here (the CSP allows only `self`/`data:` and no
+     external styles), so this is a system stack, not a downloaded face. It
+     still beats the app-wide `sans-serif`, which Chromium resolves to Arial:
+     Segoe UI Variable / SF / Roboto are all genuinely better at these sizes. */
+  --p-font: "Segoe UI Variable Display", "Segoe UI", -apple-system,
+    BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  position: relative;
+  min-height: 100vh;
+  background: var(--p-bg);
+  color: var(--p-text);
+  font-family: var(--p-font);
+  /* `hidden` first for engines without `clip`; see the note at the top. */
+  overflow-x: hidden;
+  overflow-x: clip;
+  /* A stacking context, so the backdrop pseudo-elements below can sit behind
+     this page's content with `z-index: -1` without escaping behind the body
+     background. */
+  isolation: isolate;
+}
+
+/* ── Aurora backdrop ────────────────────────────────────────────────────
+   Four soft pools of colour and a faint grid. Deliberately NOT `fixed`: a
+   fixed layer is repainted on every scroll frame and the drift animation
+   below would run for a page that is not moving. An absolutely-positioned
+   band at the top of the page is cheaper and does the same job. */
+.pricing-page::before,
+.pricing-page::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.pricing-page::before {
+  height: 1150px;
+  background:
+    radial-gradient(46rem 26rem at 8% -6%, rgba(34, 211, 238, 0.30), transparent 62%),
+    radial-gradient(40rem 24rem at 94% 2%, rgba(168, 85, 247, 0.30), transparent 64%),
+    radial-gradient(36rem 22rem at 52% 26%, rgba(232, 121, 249, 0.16), transparent 66%),
+    radial-gradient(44rem 20rem at 74% 58%, rgba(52, 211, 153, 0.12), transparent 62%);
+  animation: pricing-aurora 34s ease-in-out infinite alternate;
+}
+
+.pricing-page::after {
+  height: 1000px;
+  background-image:
+    linear-gradient(rgba(157, 170, 255, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(157, 170, 255, 0.055) 1px, transparent 1px);
+  background-size: 62px 62px;
+  /* Fades the grid out downwards so it reads as depth, not as a table. */
+  -webkit-mask-image: radial-gradient(120% 78% at 50% 0%, #000 0%, transparent 74%);
+  mask-image: radial-gradient(120% 78% at 50% 0%, #000 0%, transparent 74%);
+}
+
+@keyframes pricing-aurora {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(0, 26px, 0) scale(1.04); }
+}
+
+/* ── The navbar on this page ────────────────────────────────────────────
+   The <Navbar /> is rendered INSIDE .pricing-page, so it sits on this dark
+   canvas. The shared navbar is a light component, which left a solid white bar
+   pinned across the top of a near-black page — and it made the pinned-while-
+   scrolled state impossible to ship here: a transparent bar would have put the
+   navbar's own dark link text on a #070a18 background.
+
+   So this page asks the navbar to wear dark clothes. The text then stays light
+   in BOTH states, which is the point of the scrolled behaviour: only the surface
+   changes, and there is no contrast inversion to cross-fade through.
+
+   The `!important` is load-bearing, for the same reason it is on `.pricing-sheet`
+   further down: mobile-responsive.css sets `background: white !important` on
+   the navbar at ≤768px, and an important declaration beats an ordinary one
+   regardless of source order. Without it the bar would be white at the top of a
+   dark page on exactly the screens where that override applies.
+
+   OPAQUE, AND THE COLOURS ARE THE POINT. The rule below used to be a
+   translucent `rgba(17,23,52,0.94) -> rgba(11,16,36,0.88)`, and the scrolled
+   state was `transparent`. Both are wrong here, and neither looks wrong in
+   isolation. The bar is sticky, so the hero copy, the aurora band and the plan
+   cards all scroll UNDER it, and this page's body ink is LIGHT (#a9b3d4 muted,
+   #f2f5ff body) on a near-black bar. Twelve percent of light grey showing
+   through a dark surface is still plainly readable, and a fully transparent
+   scrolled state let the feature lists sit visibly inside the header. Fully
+   opaque is the only value that cannot collide, so the veil is gone and the
+   scroll affordance is carried by the divider instead.
+
+   navbarSurface.test.js fails the build if this regresses. */
+.pricing-page .navbar {
+  background: linear-gradient(180deg, #111734 0%, #0b1024 100%) !important;
+  box-shadow: 0 1px 0 rgba(150, 164, 255, 0.16) !important;
+}
+
+.pricing-page .navbar.navbar--scrolled {
+  /* Same opaque surface; the scroll affordance is the divider getting crisper.
+     Nothing here may go see-through — see the note above. */
+  background: linear-gradient(180deg, #111734 0%, #0b1024 100%) !important;
+  box-shadow: 0 1px 0 rgba(150, 164, 255, 0.32) !important;
+}
+
+/* Only the elements that are dark-on-light in the shared navbar need restating.
+   The brand wordmark is gradient-clipped text (already legible on dark), the
+   Sign In pill and the avatar/notifications triggers are self-contained light
+   chips, and the rainbow ribbon is its own element. */
+.pricing-page .navbar .navbar-nav-link,
+.pricing-page .navbar .navbar-nav-link--plans,
+.pricing-page .navbar .navbar-history-link {
+  color: #c3cbe4;
+}
+
+.pricing-page .navbar .navbar-nav-link:hover,
+.pricing-page .navbar .navbar-nav-link--plans:hover,
+.pricing-page .navbar .navbar-history-link:hover,
+.pricing-page .navbar .navbar-nav-link.active,
+.pricing-page .navbar .navbar-nav-link--plans.active,
+.pricing-page .navbar .navbar-history-link.active {
+  color: #6ee7b7;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.18), rgba(34, 211, 238, 0.14));
+}
+
+.pricing-shell {
+  position: relative;
+  width: 100%;
+  max-width: 1220px;
+  margin: 0 auto;
+  padding: 0 24px 76px;
+}
+
+/* ── Hero ──────────────────────────────────────────────────────────────── */
+.pricing-hero {
+  position: relative;
+  text-align: center;
+  padding: 62px 0 26px;
+}
+
+.pricing-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 16px 7px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--p-line);
+  background: rgba(255, 255, 255, 0.045);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  color: var(--p-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-bottom: 22px;
+}
+
+/* The dot breathes, so the line above the fold is not static. A 3s, 3-property
+   animation is cheap enough to leave running; reduced-motion pins it. */
+.pricing-eyebrow__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--p-emerald);
+  box-shadow: 0 0 0 4px rgba(52, 211, 153, 0.16);
+  animation: pricing-pulse 3s ease-in-out infinite;
+}
+
+@keyframes pricing-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.10); }
+  50% { box-shadow: 0 0 0 7px rgba(52, 211, 153, 0.22); }
+}
+
+.pricing-title {
+  margin: 0 0 14px;
+  font-size: clamp(32px, 5.4vw, 52px);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1.06;
+}
+
+.pricing-title__accent {
+  background: var(--p-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  /* A soft bloom behind the gradient words. `text-shadow` does not render on
+     background-clipped text, so the glow is a blurred pseudo-element instead. */
+  position: relative;
+  white-space: nowrap;
+}
+
+.pricing-title__accent::after {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: inherit;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: blur(18px);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.pricing-subtitle {
+  margin: 0 auto;
+  max-width: 640px;
+  color: var(--p-muted);
+  font-size: 15.5px;
+  line-height: 1.66;
+}
+
+/* What every plan carries. These three were already promised in the subtitle
+   above, so restating them as chips is emphasis rather than a new claim. */
+.pricing-includes {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 10px;
+  list-style: none;
+  margin: 22px auto 0;
+  padding: 0;
+  max-width: 720px;
+}
+
+.pricing-includes li {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 13px 6px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--p-line-soft);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--p-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.pricing-includes svg { color: var(--p-emerald); flex: 0 0 auto; }
+
+/* ── Current-plan card ───────────────────────────────────────────────────
+   It used to be one long pill with four facts in a row, which at 1180px wide
+   was mostly empty space and at 360px wrapped into three ragged lines. It is
+   now a three-column card: the facts, a period meter, and the one action. The
+   meter is the addition worth having — "30 days remaining" is a number, and a
+   number you can see running out is a number you can plan around. */
+.pricing-current {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(190px, 260px) auto;
+  align-items: center;
+  gap: 18px 26px;
+  margin: 30px auto 0;
+  padding: 18px 20px 18px 22px;
+  max-width: 940px;
+  border-radius: var(--p-radius);
+  border: 1px solid var(--p-line);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.015));
+  box-shadow: var(--p-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  text-align: left;
+  overflow: hidden;
+}
+
+/* A tier-coloured wash down the left edge, so the card says which plan it is
+   about before a word is read. */
+.pricing-current::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--card-grad, var(--p-grad));
+}
+
+.pricing-current--free { --card-grad: linear-gradient(180deg, #94a3b8, #cbd5e1); }
+.pricing-current--monthly { --card-grad: linear-gradient(180deg, #22d3ee, #38bdf8); }
+.pricing-current--annual { --card-grad: linear-gradient(180deg, #a855f7, #e879f9); }
+.pricing-current--custom { --card-grad: linear-gradient(180deg, #fbbf24, #fb7185); }
+
+.pricing-current__main { min-width: 0; }
+
+.pricing-current__label {
+  display: block;
+  color: var(--p-faint);
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  margin-bottom: 5px;
+}
+
+.pricing-current__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pricing-current__plan {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+}
+
+.pricing-current__meta {
+  margin: 5px 0 0;
+  color: var(--p-muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.pricing-current__meta strong { color: var(--p-text); font-weight: 700; }
+
+.pricing-current__note {
+  margin: 7px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--p-muted);
+}
+
+/* ── Period meter ───────────────────────────────────────────────────────
+   `--fill` is set inline from the real remaining days, so the bar and the
+   sentence above it can never disagree — they read the same number. */
+.pricing-current__period { min-width: 0; }
+
+.pricing-meter {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--p-line-soft);
+  overflow: hidden;
+}
+
+.pricing-meter__fill {
+  display: block;
+  height: 100%;
+  width: calc(var(--fill, 0) * 1%);
+  min-width: 6px;
+  border-radius: inherit;
+  background: var(--card-grad, var(--p-grad));
+  transition: width 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pricing-current__period-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--p-faint);
+}
+
+.pricing-current__period-note strong { color: var(--p-text); font-weight: 800; }
+
+/* Now a real button, not an underlined link: it is the single action this card
+   offers, and it is what a member presses when they want to change something. */
+.pricing-current__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  white-space: nowrap;
+  border: 1px solid var(--p-line);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--p-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 10px 16px;
+  border-radius: 999px;
+  text-decoration: none;
+  transition: background 0.18s ease, border-color 0.18s ease, transform 0.16s ease;
+}
+
+.pricing-current__action:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(150, 164, 255, 0.34);
+  transform: translateY(-1px);
+  color: var(--p-text);
+}
+
+.pricing-current__action:focus-visible {
+  outline: 2px solid var(--p-cyan);
+  outline-offset: 3px;
+}
+
+/* ── Source chip: PAID vs ADMIN vs FREE ─────────────────────────────────── */
+.pricing-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.pricing-chip--paid {
+  color: #6ee7b7;
+  background: rgba(52, 211, 153, 0.14);
+  border-color: rgba(52, 211, 153, 0.34);
+}
+
+.pricing-chip--admin {
+  color: #fcd34d;
+  background: rgba(251, 191, 36, 0.14);
+  border-color: rgba(251, 191, 36, 0.36);
+}
+
+.pricing-chip--free {
+  color: #c3cbe4;
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--p-line);
+}
+
+.pricing-chip--permanent {
+  color: #c4b5fd;
+  background: rgba(167, 139, 250, 0.16);
+  border-color: rgba(167, 139, 250, 0.4);
+}
+
+/* ── Section header ────────────────────────────────────────────────────── */
+.pricing-bar__title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+}
+
+.pricing-bar__note {
+  margin: 0;
+  color: var(--p-faint);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* ── Control dock ───────────────────────────────────────────────────────
+   The currency picker and the period toggle are the two controls on the page,
+   and they used to sit in a heading row that scrolled away — so switching
+   Monthly/Yearly meant scrolling back up to compare prices against it. They
+   now live in a glass dock that sticks directly under the navbar, and the
+   heading and the caption sit outside it, above and below. */
+.pricing-bar {
+  position: sticky;
+  top: var(--p-nav-h);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 34px 0 10px;
+  padding: 10px 12px 10px 20px;
+  border-radius: 999px;
+  border: 1px solid var(--p-line);
+  background: rgba(11, 16, 36, 0.82);
+  box-shadow: 0 18px 44px -30px rgba(0, 0, 0, 0.95), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(16px) saturate(140%);
+  text-align: left;
+}
+
+.pricing-bar__controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* ── Currency picker ────────────────────────────────────────────────────── */
+.pricing-currency {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  height: 40px;
+  padding: 0 6px 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--p-line-soft);
+  background: rgba(255, 255, 255, 0.04);
+  white-space: nowrap;
+  transition: border-color 0.18s ease, background 0.18s ease;
+}
+
+.pricing-currency:hover { border-color: rgba(150, 164, 255, 0.3); }
+
+.pricing-currency__label {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--p-faint);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.pricing-currency__select {
+  /* The native control carries the arrow; the box is ours so it matches the
+     segmented toggle beside it. */
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--p-text);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
+  padding: 6px 34px 6px 10px;
+  cursor: pointer;
+  max-width: 210px;
+  text-overflow: ellipsis;
+  /* The dropdown list itself must be legible on a dark surface. */
+  color-scheme: dark;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--p-cyan) 50%),
+    linear-gradient(135deg, var(--p-cyan) 50%, transparent 50%);
+  background-position:
+    calc(100% - 16px) calc(50% + 1px),
+    calc(100% - 11px) calc(50% + 1px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  transition: color 0.18s ease;
+}
+
+.pricing-currency__select:hover { color: var(--p-cyan); }
+
+.pricing-currency__select:focus-visible {
+  outline: 2px solid var(--p-cyan);
+  outline-offset: 3px;
+  border-radius: 8px;
+}
+
+.pricing-currency__select:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.pricing-currency__select option {
+  background: #101632;
+  color: #f2f5ff;
+}
+
+/* ── Period toggle ───────────────────────────────────────────────────────
+   Two options, one pill that slides. The pill carries the full brand ramp so
+   the control is the most colourful thing in the dock — it is the control a
+   member is about to use. */
+.pricing-toggle {
+  position: relative;
+  display: inline-flex;
+  padding: 4px;
+  border-radius: 999px;
+  border: 1px solid var(--p-line-soft);
+  background: rgba(255, 255, 255, 0.03);
+  isolation: isolate;
+}
+
+.pricing-toggle__btn {
+  position: relative;
+  z-index: 1;
+  border: none;
+  background: transparent;
+  color: var(--p-muted);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
+  padding: 8px 18px;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: color 0.2s ease;
+  white-space: nowrap;
+}
+
+.pricing-toggle__btn:hover { color: var(--p-text); }
+.pricing-toggle__btn[aria-pressed="true"] { color: var(--p-on-grad); }
+
+.pricing-toggle__btn:focus-visible {
+  outline: 2px solid var(--p-cyan);
+  outline-offset: 2px;
+}
+
+.pricing-toggle__btn[aria-pressed="true"]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 999px;
+  background: var(--p-grad);
+  box-shadow: 0 8px 22px -12px rgba(168, 85, 247, 0.9);
+  animation: pricing-pill 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes pricing-pill {
+  from { opacity: 0; transform: scaleX(0.86); }
+  to { opacity: 1; transform: scaleX(1); }
+}
+
+.pricing-toggle__save {
+  font-size: 11px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(163, 230, 53, 0.16);
+  color: var(--p-lime);
+  border: 1px solid rgba(163, 230, 53, 0.34);
+}
+
+.pricing-toggle__btn[aria-pressed="true"] .pricing-toggle__save {
+  background: rgba(6, 8, 24, 0.18);
+  color: var(--p-on-grad);
+  border-color: rgba(6, 8, 24, 0.22);
+}
+
+/* ── Plan grid ───────────────────────────────────────────────────────────
+   Separate cards with real gaps, not one box with dividers: at four across,
+   a shared border made the plans read as columns of a table rather than as
+   four things you can choose between. */
+.pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  align-items: stretch;
+}
+
+/* ── Plan card ───────────────────────────────────────────────────────────
+   `--a` (hex) and `--a-rgb` (triplet) are the tier's colour. Everything below
+   reads them, so tinting a new tier is a single rule, not a dozen edits. */
+.pricing-card {
+  --a: #94a3b8;
+  --a-rgb: 148, 163, 184;
+  --a-grad: linear-gradient(115deg, #cbd5e1, #94a3b8);
+
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 22px 18px 20px;
+  border-radius: var(--p-radius);
+  border: 1px solid var(--p-line-soft);
+  background:
+    linear-gradient(180deg, rgba(var(--a-rgb), 0.10), rgba(var(--a-rgb), 0.02) 42%, rgba(255, 255, 255, 0.012));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.22s ease, border-color 0.22s ease;
+}
+
+/* The per-tier palette. Order matters only in that the recommended-card rules
+   below must come after these, so a highlighted tier keeps its own hue. */
+.pricing-card--free    { --a: #94a3b8; --a-rgb: 148, 163, 184; --a-grad: linear-gradient(115deg, #e2e8f0, #94a3b8); }
+.pricing-card--monthly { --a: #22d3ee; --a-rgb: 34, 211, 238;  --a-grad: linear-gradient(115deg, #22d3ee, #38bdf8); }
+.pricing-card--annual  { --a: #a855f7; --a-rgb: 168, 85, 247;  --a-grad: linear-gradient(115deg, #a855f7, #e879f9); }
+.pricing-card--custom  { --a: #fbbf24; --a-rgb: 251, 191, 36;  --a-grad: linear-gradient(115deg, #fbbf24, #fb7185); }
+
+.pricing-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(var(--a-rgb), 0.45);
+  box-shadow: 0 26px 54px -30px rgba(var(--a-rgb), 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.pricing-card > * { position: relative; z-index: 1; }
+
+/* The recommended plan. A gradient hairline around the whole card plus a
+   coloured bloom: the outline is the one cue that survives a screenshot, a
+   grayscale print and a colour-blind viewer, so the card still reads as the
+   hero when the colour does not. */
+.pricing-card--highlight {
+  border-color: transparent;
+  background:
+    linear-gradient(180deg, rgba(var(--a-rgb), 0.20), rgba(var(--a-rgb), 0.05) 46%, rgba(255, 255, 255, 0.02));
+  box-shadow: 0 30px 64px -34px rgba(168, 85, 247, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+/* The gradient border, drawn as a masked ring so it follows the radius
+   exactly. `mask-composite: exclude` keeps only the ring between the two
+   gradient layers; without it the whole card would be painted. */
+.pricing-card--highlight::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: var(--p-grad);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+.pricing-card__badge {
+  position: absolute;
+  top: -11px;
+  left: 18px;
+  z-index: 2;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--p-grad);
+  color: var(--p-on-grad);
+  box-shadow: 0 10px 24px -10px rgba(168, 85, 247, 0.95);
+}
+
+/* ── Card head: glyph + name + tagline ─────────────────────────────────── */
+.pricing-card__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  margin-bottom: 4px;
+}
+
+.pricing-card__glyph {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(var(--a-rgb), 0.16);
+  border: 1px solid rgba(var(--a-rgb), 0.34);
+  color: var(--a);
+}
+
+.pricing-card__headings { min-width: 0; }
+
+.pricing-card__name {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+
+.pricing-card__tagline {
+  margin: 3px 0 0;
+  color: var(--p-muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+  min-height: 2.9em;
+}
+
+.pricing-card__price {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 16px 0 3px;
+}
+
+.pricing-card__amount {
+  font-size: 36px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  background: var(--a-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.pricing-card__period {
+  color: var(--p-faint);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pricing-card__price-note {
+  min-height: 2.7em;
+  margin: 0;
+  color: var(--p-faint);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.pricing-card__price-note--save {
+  color: var(--p-emerald);
+  font-weight: 700;
+}
+
+/* ── CTA ────────────────────────────────────────────────────────────────── */
+.pricing-cta {
+  margin: 16px 0 18px;
+  width: 100%;
+  border: 1px solid var(--p-line);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--p-text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 11px 16px;
+  border-radius: var(--p-radius-sm);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: transform 0.16s ease, background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.pricing-cta:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.09);
+  border-color: var(--p-line);
+}
+
+.pricing-cta:active:not(:disabled) { transform: translateY(0); }
+.pricing-cta:disabled { cursor: not-allowed; opacity: 0.72; }
+
+.pricing-cta:focus-visible {
+  outline: 2px solid var(--p-cyan);
+  outline-offset: 2px;
+}
+
+/* The tier's own gradient, so the button on each card is unmistakably that
+   card's. The recommended card gets the full brand ramp. */
+.pricing-cta--primary {
+  background: var(--a-grad, var(--p-grad));
+  border-color: transparent;
+  color: var(--p-on-grad);
+  box-shadow: 0 14px 32px -18px rgba(var(--a-rgb, 168, 85, 247), 0.95);
+}
+
+.pricing-cta--primary:hover:not(:disabled) {
+  background: var(--a-grad, var(--p-grad));
+  filter: brightness(1.07);
+}
+
+.pricing-cta--current {
+  background: rgba(163, 230, 53, 0.12);
+  border-color: rgba(163, 230, 53, 0.4);
+  color: #d9f99d;
+}
+
+.pricing-cta--danger {
+  background: rgba(248, 113, 113, 0.12);
+  border-color: rgba(248, 113, 113, 0.42);
+  color: #fecaca;
+}
+
+.pricing-cta--danger:hover:not(:disabled) {
+  background: rgba(248, 113, 113, 0.2);
+  border-color: rgba(248, 113, 113, 0.62);
+}
+
+.pricing-cta--ghost {
+  background: transparent;
+  border-color: var(--p-line);
+  color: var(--p-muted);
+}
+
+.pricing-cta__spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  animation: pricing-spin 0.7s linear infinite;
+}
+
+@keyframes pricing-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Feature list ─────────────────────────────────────────────────────────
+   The check is a filled disc in the tier colour rather than a bare tick: at
+   13px on a dark card a tick alone disappears, and a column of them is what a
+   member actually scans. */
+.pricing-features {
+  list-style: none;
+  margin: 0;
+  padding: 16px 0 0;
+  border-top: 1px solid var(--p-line-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+}
+
+.pricing-feature {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: #dbe2f7;
+}
+
+.pricing-feature svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--p-on-grad);
+  background: var(--a);
+  border-radius: 50%;
+  padding: 2px;
+  width: 16px;
+  height: 16px;
+  stroke-width: 3.4;
+}
+
+.pricing-feature--inherited { color: var(--p-muted); }
+
+/* The "Everything in X, plus:" preamble is a restatement, not a new unlock, so
+   its mark is a quiet dot rather than a full check. */
+.pricing-feature--inherited svg {
+  background: transparent;
+  color: var(--p-faint);
+  padding: 0;
+  width: 16px;
+  height: 16px;
+}
+
+/* The feature's own description, under its name. It comes from the same record
+   the entitlement gate uses, so it is the feature's real description rather
+   than a second piece of marketing copy to keep in sync. */
+.pricing-feature span { min-width: 0; }
+
+.pricing-feature__desc {
+  display: block;
+  margin-top: 3px;
+  font-size: 11.5px;
+  line-height: 1.42;
+  color: var(--p-faint);
+}
+
+/* A real, enforced limit — visually quieter than a feature unlock, because it
+   is a number rather than a capability. */
+.pricing-feature--limit { color: var(--p-muted); }
+.pricing-feature--limit svg {
+  background: transparent;
+  color: var(--p-faint);
+  padding: 0;
+  width: 16px;
+  height: 16px;
+}
+
+/* Before the catalogue lands, say so rather than rendering an empty gap that
+   looks like a plan with nothing in it. */
+.pricing-feature--pending { color: var(--p-faint); font-style: italic; }
+.pricing-feature__pending-text { opacity: 0.75; }
+/* ── Info columns ───────────────────────────────────────────────────────── */
+.pricing-info {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.pricing-info__col {
+  --a: #22d3ee;
+  --a-rgb: 34, 211, 238;
+
+  position: relative;
+  padding: 20px;
+  border-radius: var(--p-radius);
+  border: 1px solid var(--p-line-soft);
+  background: rgba(255, 255, 255, 0.022);
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease, background 0.2s ease;
+}
+
+.pricing-info__col:hover {
+  transform: translateY(-3px);
+  border-color: rgba(var(--a-rgb), 0.34);
+  background: rgba(var(--a-rgb), 0.055);
+}
+
+.pricing-info__col--period  { --a: #a855f7; --a-rgb: 168, 85, 247; }
+.pricing-info__col--renewal { --a: #a3e635; --a-rgb: 163, 230, 53; }
+
+.pricing-info__icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(var(--a-rgb), 0.16);
+  border: 1px solid rgba(var(--a-rgb), 0.32);
+  color: var(--a);
+  margin-bottom: 13px;
+}
+
+.pricing-info__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  line-height: 1.35;
+}
+
+.pricing-info__body {
+  margin: 8px 0 0;
+  color: var(--p-muted);
+  font-size: 13px;
+  line-height: 1.62;
+  flex: 1;
+}
+
+.pricing-info__link {
+  align-self: flex-start;
+  margin-top: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--a-rgb), 0.3);
+  background: rgba(var(--a-rgb), 0.1);
+  color: var(--a);
+  font-size: 12.5px;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.2s ease, transform 0.16s ease, color 0.2s ease;
+}
+
+.pricing-info__link:hover {
+  background: rgba(var(--a-rgb), 0.2);
+  transform: translateY(-1px);
+  color: var(--a);
+}
+
+.pricing-info__link:focus-visible {
+  outline: 2px solid var(--p-cyan);
+  outline-offset: 2px;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   WHERE TO PAY
+   ══════════════════════════════════════════════════════════════════════════
+
+   The proof step used to say "send us your payment receipt" and never said
+   where. This is the answer: the actual account, plainly, with the steps under
+   it. Rendered only when the server says a destination exists, so there is
+   never a half-filled box implying a payment is possible. */
+
+.pricing-payto {
+  margin: 14px 0 0;
+  padding: 13px 15px;
+  border: 1px solid rgba(34, 211, 238, 0.28);
+  border-radius: var(--p-radius-sm);
+  background: rgba(34, 211, 238, 0.06);
+}
+
+.pricing-payto__head {
+  margin: 0 0 9px;
+  color: var(--p-text);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.pricing-payto__list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+}
+
+.pricing-payto__row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.pricing-payto__row dt {
+  flex: 0 0 auto;
+  min-width: 108px;
+  color: var(--p-faint);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.pricing-payto__row dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--p-text);
+  font-size: 13.5px;
+  font-weight: 700;
+  /* An account number must never be re-wrapped into something that can be
+     mistyped: the dashes and spacing are part of the number. */
+  word-break: keep-all;
+  overflow-wrap: normal;
+}
+
+.pricing-payto__how,
+.pricing-payto__ref {
+  margin: 9px 0 0;
+  color: var(--p-muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.pricing-payto__ref strong { color: var(--p-text); }
+
+/* No destination on this deployment. Says so instead of implying otherwise. */
+.pricing-payto--none {
+  border-color: rgba(250, 204, 21, 0.3);
+  background: rgba(250, 204, 21, 0.07);
+  color: #fde68a;
+  font-size: 13px;
+  line-height: 1.55;
+}
+/* ── Scroll lock while a sheet is open ───────────────────────────────────
+   Set by PricingPage. `position: fixed` on the body is what iOS Safari actually
+   honours — `overflow: hidden` alone is silently ignored there, which is how the
+   page behind ends up scrolling under a modal on a phone. The width:100% stops
+   the layout jumping sideways as the scrollbar disappears. */
+body.pricing-scroll-locked {
+  position: fixed;
+  overflow: hidden;
+  width: 100%;
+}
+
+/* ── Checkout / cancel sheet ─────────────────────────────────────────────
+   SIZING CONTRACT, and it is the whole reason this works on a phone:
+
+     the SHEET is capped to the viewport and is a flex column;
+     the BODY is the only thing that scrolls;
+     the HEAD and the ACTIONS are fixed, always reachable.
+
+   Without this the sheet just grew, `align-items: center` overflowed it
+   equally top and bottom, and the "Send for approval" button — the one control
+   the whole flow exists for — ended up off-screen with no way to scroll to it.
+   That is a different failure on every viewport, so it is fixed once here
+   rather than patched per breakpoint.
+
+   Z-INDEX, and the number matters more than it looks.
+
+   The page chrome is not low: the Navbar is `position: sticky` at 1000, the
+   floating chat toggle is 1000, and ResultsPage reaches 2000. At the z-index
+   this rule used to have (220) the sheet painted UNDER the navbar — and on a
+   phone, where the sheet is a full-bleed bottom sheet, the navbar lay across
+   the top of the dialog and cut straight through the plan name and the step
+   marker.
+
+   3000 clears every page-level layer in the app and sits below only the PWA
+   install prompt (9999), which is deliberately the most topmost thing. */
+.pricing-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  background: rgba(3, 6, 20, 0.8);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: pricing-fade 0.2s ease both;
+}
+
+@keyframes pricing-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.pricing-sheet {
+  width: 100%;
+  /* The `!important` is the one deliberate exception in this file, and it is
+     load bearing. `mobile-responsive.css` sets
+         * { max-width: 100vw !important }
+     inside a portrait-phone media query, to stop any element forcing horizontal
+     overflow. That `!important` overrides EVERY max-width in the app — including
+     this dialog's width, so on a 768px portrait tablet the sheet stretched to
+     728px and the action row became far wider than it was designed for. Opting
+     this one element back in restores the intended width; the breakpoints below
+     re-override it (also `!important`, because one important declaration always
+     beats a non-important one) to go full-bleed where a bottom sheet is what we
+     want. */
+  max-width: 470px !important;
+  /* dvh, not vh: on mobile browsers the URL bar collapses on scroll, and a vh
+     cap is briefly taller than the screen, which re-clips the buttons. dvh tracks
+     the visible area. The vh is the fallback for browsers without it. */
+  max-height: 92vh;
+  max-height: 92dvh;
+  display: flex;
+  flex-direction: column;
+  border-radius: 22px;
+  border: 1px solid var(--p-line);
+  background: linear-gradient(180deg, #131a3a, #0a0f22);
+  box-shadow: var(--p-shadow);
+  overflow: hidden;
+  /* OPACITY ONLY, deliberately — no transform on this element.
+     The sheet carries the layout position: it is what is anchored to the bottom
+     of the screen on a phone, and its height is what the scroll contract depends
+     on. An entrance that MOVES it therefore moves the primary button with it.
+
+     A `translateY` entrance has a failure mode that is easy to hit and very hard
+     to spot: if the animation is throttled, deferred or interrupted (a
+     backgrounded tab, a slow frame, reduced-motion toggled mid-flight) it can sit
+     at its first keyframe, and the sheet then rests lower than it should. On a
+     bottom-anchored sheet that pushes the submit button off the bottom of the
+     screen. Measured, not theorised: a 24px residual put it 24px past a 667px
+     viewport.
+
+     A fade cannot displace anything, so the resting layout is identical whether
+     the animation runs, is skipped, or never starts. The motion cue is kept by
+     the overlay's own fade, which sits on an element whose position is not load
+     bearing. */
+  animation: pricing-sheet-fade 0.24s ease both;
+}
+
+@keyframes pricing-sheet-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.pricing-sheet__head {
+  position: relative;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid var(--p-line-soft);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  /* Shrink first, and never scroll away: the plan name is what the member is
+     checking the receipt against. */
+  flex: 0 0 auto;
+}
+
+/* A gradient hairline across the top of the dialog, so the sheet carries the
+   page's colour into the modal instead of looking like a different product. */
+.pricing-sheet__head::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: var(--p-grad);
+}
+
+.pricing-sheet__eyebrow {
+  margin: 0 0 5px;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--p-cyan);
+}
+
+.pricing-sheet__title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+}
+
+.pricing-sheet__close {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  border: 1px solid var(--p-line);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--p-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s ease, background 0.2s ease;
+}
+
+.pricing-sheet__close:hover { color: var(--p-text); background: rgba(255, 255, 255, 0.1); }
+.pricing-sheet__close:focus-visible { outline: 2px solid var(--p-cyan); outline-offset: 2px; }
+
+/* The one scrollable region. min-height:0 is required on a flex child for
+   `overflow-y: auto` to actually bound it — without it the child grows to its
+   content and the parent scrolls instead, taking the buttons with it. */
+.pricing-sheet__body {
+  padding: 20px 24px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Momentum scrolling on iOS, a visible scrollbar on desktop. */
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--p-violet) transparent;
+}
+
+.pricing-sheet__body::-webkit-scrollbar { width: 8px; }
+.pricing-sheet__body::-webkit-scrollbar-track { background: transparent; }
+.pricing-sheet__body::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--p-violet), var(--p-cyan));
+  border-radius: 999px;
+}
+
+.pricing-summary {
+  border: 1px solid var(--p-line);
+  border-radius: var(--p-radius-sm);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 15px 16px;
+  margin-bottom: 16px;
+}
+
+.pricing-summary__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13.5px;
+  color: var(--p-muted);
+}
+
+.pricing-summary__row + .pricing-summary__row { margin-top: 9px; }
+.pricing-summary__row strong { color: var(--p-text); font-weight: 700; }
+
+.pricing-summary__total {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--p-line-soft);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.pricing-summary__amount {
+  font-size: 25px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  background: var(--p-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Which currency the total is in, and how that was decided. A price without
+   saying what it is denominated in is not a price anyone can trust. */
+.pricing-summary__currency {
+  margin: 11px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--p-line-soft);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--p-faint);
+}
+
+.pricing-sheet__note {
+  display: flex;
+  gap: 9px;
+  margin: 0 0 16px;
+  padding: 11px 13px;
+  border-radius: var(--p-radius-sm);
+  border: 1px solid var(--p-line);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--p-muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.pricing-sheet__note svg { flex: 0 0 auto; margin-top: 1px; color: var(--p-cyan); }
+.pricing-sheet__note--warn { border-color: rgba(251, 191, 36, 0.34); background: rgba(251, 191, 36, 0.08); }
+.pricing-sheet__note--warn svg { color: var(--p-warn); }
+.pricing-sheet__note--error { border-color: rgba(248, 113, 113, 0.42); background: rgba(248, 113, 113, 0.09); }
+.pricing-sheet__note--error svg { color: var(--p-danger); }
+
+/* Pinned to the bottom of the sheet on every viewport. The primary action is
+   the reason the sheet exists, so it must never be something the member has to
+   scroll to find.
+
+   `flex-wrap` is deliberate. Three actions split into three equal thirds
+   squeezed "I paid by transfer" and "Confirm Premium" until they broke
+   mid-word ("I paid by trans/fer"). A two-line button label is a worse outcome
+   than a second row, and wrapping is what buys us that second row. */
+.pricing-sheet__actions {
+  display: flex;
+  gap: 10px;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  padding: 14px 24px 20px;
+  border-top: 1px solid var(--p-line-soft);
+  /* A gradient, not a hard colour, so content scrolling underneath fades out
+     instead of being sliced by an opaque edge. */
+  background: linear-gradient(180deg, rgba(10, 15, 34, 0) 0%, #0a0f22 22%);
+}
+
+/* `nowrap` because a label must never break across lines. `min-width: 0` so a
+   flex item can still shrink rather than force the row wider than the sheet.
+
+   `width: auto` here is load bearing, not tidiness. The shared `.pricing-cta`
+   rule sets `width: 100%` for the full-width card buttons, and with
+   `flex-basis: auto` a flex item takes its base size FROM `width` — so every
+   button in this row claimed the full width and each one wrapped onto its own
+   line. `auto` makes the base size the label's own width, which is what lets
+   the two secondary actions share a row. */
+.pricing-sheet__actions .pricing-cta {
+  margin: 0;
+  width: auto;
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+/* Three actions — Cancel · I paid by transfer · Confirm — give the primary a
+   row of its own, so it is the widest, biggest target on the sheet and the two
+   secondaries share the row above it.
+
+   Scoped to the row direction on purpose: in a column, `flex-basis: 100%`
+   would mean a 100%-TALL button. The mobile block resets it. */
+@media (min-width: 641px) {
+  .pricing-sheet__actions--stacked .pricing-cta--primary { flex-basis: 100%; }
+}
+
+/* ── Two-step progress marker ─────────────────────────────────────────────
+   Only shown when the deployment routes through review (selfServe off), so the
+   member can tell "step 2 of 2" from "the button did nothing". */
+.pricing-sheet__steps {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 7px 0 0;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.pricing-sheet__steps span { color: var(--p-faint); }
+.pricing-sheet__steps .is-current { color: var(--p-cyan); }
+.pricing-sheet__steps .is-done { color: var(--p-muted); }
+.pricing-sheet__step-arrow { opacity: 0.5; }
+
+/* ── Proof-of-payment form ──────────────────────────────────────────────── */
+.pricing-proof {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+/* The order stays pinned at the top of step 2: a receipt is checked against a
+   price, so "which plan and how much?" must never require remembering step 1. */
+.pricing-proof__summary {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border: 1px solid var(--p-line);
+  border-radius: var(--p-radius-sm);
+  background: rgba(255, 255, 255, 0.035);
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--p-text);
+}
+
+.pricing-proof__summary strong {
+  margin-left: auto;
+  font-size: 16px;
+  font-weight: 800;
+  background: var(--p-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.pricing-proof__term {
+  flex: 1 0 100%;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--p-faint);
+}
+
+.pricing-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pricing-field__label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--p-muted);
+}
+
+/* "optional" / "required" spelled out. A field the member must fill in that
+   only differs from the others by a colour is a support ticket waiting. */
+.pricing-field__opt,
+.pricing-field__req {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.pricing-field__opt {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--p-faint);
+}
+
+.pricing-field__req {
+  background: rgba(34, 211, 238, 0.16);
+  color: var(--p-cyan);
+  border: 1px solid rgba(34, 211, 238, 0.3);
+}
+
+.pricing-field__input {
+  width: 100%;
+  padding: 10px 13px;
+  border: 1px solid var(--p-line);
+  border-radius: var(--p-radius-sm);
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--p-text);
+  font-family: inherit;
+  font-size: 13.5px;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.pricing-field__input::placeholder { color: var(--p-faint); }
+
+.pricing-field__input:focus {
+  outline: none;
+  border-color: var(--p-cyan);
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.16);
+}
+
+.pricing-field__input:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.pricing-field__input--area { resize: vertical; min-height: 58px; line-height: 1.5; }
+
+.pricing-field__error {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #fca5a5;
+}
+
+/* ── Upload control ─────────────────────────────────────────────────────── */
+.pricing-upload {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 24px 16px;
+  border: 1.5px dashed var(--p-line);
+  border-radius: var(--p-radius-sm);
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--p-muted);
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.pricing-upload:hover:not(:disabled) {
+  border-color: var(--p-cyan);
+  background: rgba(34, 211, 238, 0.07);
+}
+
+.pricing-upload:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.pricing-upload--error { border-color: rgba(248, 113, 113, 0.55); }
+
+/* A receipt is dragged over the box. Solid, not just a tint: a drag gives no
+   other feedback before release, so this is the only signal that the drop will
+   be accepted. */
+.pricing-upload--over {
+  border-color: var(--p-cyan);
+  background: rgba(34, 211, 238, 0.12);
+  box-shadow: inset 0 0 0 1px var(--p-cyan);
+}
+
+.pricing-upload--over .pricing-upload__cta { color: var(--p-cyan); }
+
+.pricing-upload__cta { font-size: 13.5px; font-weight: 700; color: var(--p-text); }
+.pricing-upload__hint { font-size: 11.5px; color: var(--p-faint); }
+
+/* The chosen receipt, previewed inline and contained: receipts are tall and
+   narrow, and one full-height screenshot would push the submit button off a
+   phone screen. */
+.pricing-upload--done {
+  display: block;
+  padding: 0;
+  border-style: solid;
+  border-color: var(--p-line);
+  overflow: hidden;
+  text-align: left;
+}
+
+.pricing-upload__preview {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+  object-position: top center;
+  background: #0a1428;
+}
+
+.pricing-upload__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  border-top: 1px solid var(--p-line-soft);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--p-muted);
+}
+
+/* The file's size and type, beside the Remove button. Muted and left-aligned:
+   it is a confirmation of WHAT was attached, not a control. */
+.pricing-upload__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pricing-upload__replace {
+  padding: 5px 11px;
+  border: 1px solid var(--p-line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--p-muted);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.pricing-upload__replace:hover:not(:disabled) {
+  border-color: var(--p-danger);
+  color: var(--p-danger);
+}
+
+.pricing-upload__replace:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* The native <input type=file> is driven by a styled button instead of being
+   hidden with opacity:0 — a visible-at-all-times, keyboard-reachable control
+   behaves identically in the Android webview, where a zero-opacity file input
+   often refuses to open the picker at all. */
+.pricing-file-native {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── Toast ──────────────────────────────────────────────────────────────── */
+.pricing-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%);
+  /* Above the sheet (3000) and above the page chrome (1000). The old 240 put
+     this confirmation BEHIND the navbar, so on a phone the one message that
+     tells a member their request was received was the one thing they could not
+     see. */
+  z-index: 3100;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 13px 20px;
+  border-radius: 999px;
+  border: 1px solid rgba(52, 211, 153, 0.34);
+  background: rgba(13, 22, 40, 0.97);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 24px 60px -28px rgba(0, 0, 0, 0.95);
+  color: var(--p-text);
+  font-size: 13.5px;
+  font-weight: 600;
+  /* Fade, not a rise: this toast is bottom-anchored, so the same throttled
+     transform that pushed the sheet's buttons off screen would push the
+     confirmation of a submitted request off screen — which is the one moment
+     the member most needs to read it. */
+  animation: pricing-sheet-fade 0.24s ease both;
+}
+
+.pricing-toast svg { flex: 0 0 auto; color: var(--p-emerald); }
+.pricing-toast--error { border-color: rgba(248, 113, 113, 0.48); }
+.pricing-toast--error svg { color: var(--p-danger); }
+
+/* ── Loading skeleton ───────────────────────────────────────────────────── */
+.pricing-skeleton {
+  border-radius: var(--p-radius);
+  height: 420px;
+  border: 1px solid var(--p-line-soft);
+  background: linear-gradient(100deg, #101632 30%, #1a2246 50%, #101632 70%);
+  background-size: 220% 100%;
+  animation: pricing-shimmer 1.4s linear infinite;
+}
+
+@keyframes pricing-shimmer {
+  from { background-position: 140% 0; }
+  to { background-position: -40% 0; }
+}
+
+.pricing-load-error {
+  border: 1px solid rgba(248, 113, 113, 0.38);
+  background: rgba(248, 113, 113, 0.08);
+  border-radius: var(--p-radius);
+  padding: 18px 20px;
+  color: #fecaca;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.pricing-load-error .pricing-current__action { margin-left: auto; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   CANCEL SHEET
+   ══════════════════════════════════════════════════════════════════════════
+
+   The Free card's button opens this. Its whole job is to make an irreversible
+   choice (end the plan now) and a reversible one (ask an administrator) look
+   different, and to put each one's consequence in writing underneath it. */
+
+.pricing-cancel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.pricing-cancel__lede {
+  margin: 0;
+  color: var(--p-muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+.pricing-cancel__lede strong { color: var(--p-text); font-weight: 700; }
+
+.pricing-cancel__options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.pricing-cancel__options[disabled] { opacity: 0.6; }
+
+.pricing-cancel__legend {
+  padding: 0 0 2px;
+  color: var(--p-faint);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* A label, not a styled div: the whole card is the tap target, so the radio
+   itself is kept for assistive tech and taken out of the visual flow. */
+.pricing-cancel__option {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 13px 14px;
+  border: 1px solid var(--p-line);
+  border-radius: var(--p-radius-sm);
+  background: rgba(255, 255, 255, 0.025);
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease;
+}
+.pricing-cancel__option:hover { border-color: rgba(150, 164, 255, 0.3); }
+
+.pricing-cancel__option.is-selected {
+  border-color: rgba(34, 211, 238, 0.55);
+  background: rgba(34, 211, 238, 0.09);
+  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.2);
+}
+
+/* The immediate door carries the warning tint even when it is the one selected,
+   so "this one takes effect now" is visible before it is chosen. */
+.pricing-cancel__option--now.is-selected {
+  border-color: rgba(248, 113, 113, 0.6);
+  background: rgba(248, 113, 113, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.22);
+}
+
+.pricing-cancel__option input {
+  flex: 0 0 auto;
+  margin: 2px 0 0;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--p-danger);
+}
+.pricing-cancel__option:not(.pricing-cancel__option--now) input { accent-color: var(--p-cyan); }
+
+.pricing-cancel__option-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.pricing-cancel__option-label {
+  color: var(--p-text);
+  font-size: 14px;
+  font-weight: 700;
+}
+.pricing-cancel__option-note {
+  color: var(--p-faint);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.pricing-cancel__note {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(250, 204, 21, 0.3);
+  border-radius: var(--p-radius-sm);
+  background: rgba(250, 204, 21, 0.08);
+  color: #fde68a;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.pricing-cancel__reason-label {
+  color: var(--p-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.pricing-cancel__reason-label span { color: var(--p-faint); font-weight: 400; }
+
+.pricing-cancel__reason {
+  width: 100%;
+  padding: 11px 13px;
+  border: 1px solid var(--p-line);
+  border-radius: var(--p-radius-sm);
+  background: rgba(0, 0, 0, 0.26);
+  color: var(--p-text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: vertical;
+}
+.pricing-cancel__reason::placeholder { color: var(--p-faint); }
+.pricing-cancel__reason:focus {
+  outline: none;
+  border-color: var(--p-cyan);
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.16);
+}
+.pricing-cancel__reason:disabled { opacity: 0.6; }
+
+/* The selected option's consequence, announced when the choice changes so a
+   screen-reader user hears the difference between the two doors rather than
+   only their labels. Visually hidden, but genuinely in the tree. */
+.pricing-cancel__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────────── */
+@media (max-width: 1080px) {
+  /* 4 columns of pricing copy is unreadable on a tablet: go 2×2, keeping the
+     card order so Free → Ultra still reads left-to-right, top-to-bottom. */
+  .pricing-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 16px; }
+  .pricing-info { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 900px) {
+  .pricing-current {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+    border-radius: var(--p-radius);
+  }
+  .pricing-current__action { width: 100%; }
+  .pricing-current__plan { font-size: 20px; }
+}
+
+@media (max-width: 860px) {
+  /* The dock goes STATIC here, and this is a considered trade rather than an
+     oversight. A phone stacks the title, the currency picker and the period
+     toggle into three rows, and pinning that would cost a quarter of the
+     viewport to save a scroll — on a phone only one card is visible at a time
+     anyway, so the member is scrolling regardless. The dock earns its keep on a
+     desktop, where four cards sit side by side and comparing them is the whole
+     point. */
+  .pricing-bar {
+    position: static;
+    border-radius: 20px;
+    padding: 12px;
+    gap: 12px;
+  }
+  .pricing-bar__title { font-size: 19px; }
+  .pricing-bar__controls { gap: 8px; }
+  .pricing-currency__select { max-width: 170px; }
+}
+
+@media (max-width: 640px) {
+  .pricing-shell { padding: 0 16px 56px; }
+  .pricing-hero { padding: 38px 0 18px; }
+
+  .pricing-grid { grid-template-columns: 1fr; }
+  .pricing-card__tagline,
+  .pricing-card__price-note { min-height: 0; }
+
+  .pricing-bar { margin-top: 24px; }
+  .pricing-bar__note { font-size: 12.5px; }
+
+  /* Phone only: the controls each take a full row so neither is squeezed. */
+  .pricing-bar__controls { width: 100%; }
+  .pricing-currency { flex: 1 1 auto; justify-content: space-between; }
+  .pricing-currency__select { max-width: none; }
+  .pricing-toggle { flex: 1 1 100%; }
+  .pricing-toggle__btn { flex: 1; justify-content: center; padding: 9px 10px; }
+
+  /* The account details stack, so a long number is never squeezed into a
+     column beside its label. */
+  .pricing-payto__row { flex-direction: column; gap: 1px; }
+  .pricing-payto__row dt { min-width: 0; }
+
+  /* ── Sheet becomes a bottom sheet ─────────────────────────────────────
+     Full-bleed, anchored to the bottom, only the top corners rounded. This is
+     the shape a phone user expects from a modal, and it buys ~40px of vertical
+     room over a centred dialog — which matters because the proof step is the
+     tallest thing in the flow. */
+  .pricing-overlay { padding: 0; align-items: flex-end; }
+
+  .pricing-sheet {
+    /* `!important` to beat the base rule's, since an important declaration
+       always wins over a non-important one regardless of source order. */
+    max-width: none !important;
+    max-height: 94vh;
+    max-height: 94dvh;
+    border-radius: 22px 22px 0 0;
+    border-bottom: none;
+    /* No animation override here on purpose: the base rule is already a
+       displacement-free fade, and re-introducing a slide here would put the
+       submit button back at the mercy of a throttled animation. */
+  }
+
+  .pricing-sheet__head { padding: 18px 18px 14px; }
+  .pricing-sheet__title { font-size: 20px; }
+  .pricing-sheet__body { padding: 16px 18px; }
+  .pricing-sheet__actions {
+    padding: 12px 18px 16px;
+    /* Safe area: on a notched phone the home indicator sits exactly where the
+       primary button is, and without this the tap target is half off-screen. */
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+
+  /* Full-width stack, in DOM order, so the primary lands LAST — at the bottom of
+     a column, which is both the conventional place for a checkout's confirm and
+     the easiest place for a thumb. `column-reverse` plus `order: -1` was doing
+     this in two contradictory hops, and it would also have turned the desktop
+     `flex-basis: 100%` into a full-HEIGHT button, since flex-basis follows the
+     main axis. One direction, no order overrides. */
+  .pricing-sheet__actions {
+    flex-direction: column;
+    flex-wrap: nowrap;
+  }
+  .pricing-sheet__actions .pricing-cta {
+    flex: 0 0 auto;
+    width: 100%;
+  }
+
+  /* Proof form: a 24px dropzone plus a 220px preview does not fit a short
+     phone next to the other fields. */
+  .pricing-upload { padding: 18px 14px; }
+  .pricing-upload__preview { max-height: 160px; }
+  .pricing-field__input { padding: 11px 12px; font-size: 16px; }
+  /* 16px, not 13.5px: anything smaller makes iOS Safari zoom the page on focus,
+     which then leaves the sheet scrolled away from the field being typed in. */
+  .pricing-field__input--area { font-size: 16px; }
+  .pricing-proof__summary strong { margin-left: 0; font-size: 15px; }
+
+  .pricing-cancel__option { padding: 12px; }
+}
+
+/* Landscape phone. A centred dialog in a 380px-tall viewport is a letterbox:
+   the sheet takes the full height and the body scrolls, which is exactly the
+   layout the sizing contract already produces, so only the padding changes. */
+@media (max-width: 900px) and (max-height: 520px) {
+  .pricing-overlay { align-items: stretch; padding: 0; }
+  .pricing-sheet {
+    max-width: none !important; /* see the note on the base rule */
+    max-height: 100vh;
+    max-height: 100dvh;
+    border-radius: 0;
+    border: none;
+  }
+  .pricing-sheet__head { padding: 12px 16px 10px; }
+  .pricing-sheet__title { font-size: 17px; }
+  .pricing-sheet__body { padding: 12px 16px; }
+  .pricing-sheet__actions { padding: 10px 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pricing-page *,
+  .pricing-page *::before,
+  .pricing-page *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  /* A fixed transform beats both the aurora drift and the card hover lift. */
+  .pricing-page::before { transform: none; }
+  .pricing-eyebrow__dot { animation: none; box-shadow: 0 0 0 4px rgba(52, 211, 153, 0.16); }
+  .pricing-card:hover,
+  .pricing-info__col:hover,
+  .pricing-cta:hover:not(:disabled),
+  .pricing-current__action:hover,
+  .pricing-info__link:hover { transform: none; }
+}

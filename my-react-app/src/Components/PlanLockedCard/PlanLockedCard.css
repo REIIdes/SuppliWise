@@ -1,0 +1,408 @@
+/* PlanLockedCard — full-page plan gate.
+   Palette is drawn from the tokens the rest of the app already uses
+   (emerald / teal / indigo / violet — see ResultsPage.css and
+   AdminDashboard.css) so this card reads as part of the product rather
+   than a bolted-on widget. */
+
+.plc-card {
+  position: relative;
+  isolation: isolate;
+  max-width: 640px;
+  margin: 40px auto 56px;
+  /* The aurora is absolutely positioned and must be clipped to the rounded
+     corners, which means overflow:hidden — and that in turn clips anything
+     pulled above the card edge. Padding-top reserves the room the badge
+     borrows so the lock is fully visible instead of sliced in half. */
+  padding-top: 38px;
+  background: #fff;
+  border: 1px solid rgba(13, 148, 136, 0.16);
+  border-radius: 26px;
+  overflow: hidden;
+  box-shadow:
+    0 28px 64px -24px rgba(13, 148, 136, 0.38),
+    0 10px 24px -12px rgba(79, 70, 229, 0.22);
+}
+
+/* Vibrant aurora band behind the top of the card. Kept short, and faded to
+   solid white well before the headline, so the gradient-text accent and the
+   eyebrow always sit on a near-white field and keep their contrast. */
+.plc-card__aurora {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 172px;
+  z-index: -1;
+  background:
+    radial-gradient(58% 105% at 18% 4%, rgba(139, 92, 246, 0.55), transparent 68%),
+    radial-gradient(52% 100% at 82% 8%, rgba(20, 184, 166, 0.52), transparent 70%),
+    radial-gradient(76% 120% at 50% 0%, rgba(16, 185, 129, 0.42), transparent 74%),
+    linear-gradient(118deg, #6366f1 0%, #8b5cf6 32%, #14b8a6 68%, #10b981 100%);
+}
+
+/* Soft white wash so everything below the badge reads on a clean field. */
+.plc-card__aurora::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0) 26%, rgba(255, 255, 255, 0.82) 62%, #fff 82%);
+}
+
+.plc-card__body {
+  padding: 0 36px 32px;
+  text-align: center;
+}
+
+/* ── Icon badge ──────────────────────────────────────────────────────── */
+
+.plc-badge {
+  width: 86px;
+  height: 86px;
+  /* Pulls the badge up into the aurora band; the card's padding-top makes
+     sure it stops at the card edge rather than outside it. */
+  margin: -38px auto 16px;
+  display: grid;
+  place-items: center;
+  border-radius: 26px;
+  background: linear-gradient(150deg, #ffffff 0%, #f0fdfa 55%, #eef2ff 100%);
+  box-shadow:
+    0 16px 34px -10px rgba(16, 185, 129, 0.55),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.95);
+}
+
+/* ── Headline block ──────────────────────────────────────────────────── */
+
+.plc-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 6px 15px 6px 11px;
+  border-radius: 999px;
+  /* Near-opaque, not a 9% tint: this pill straddles the gradient band, where a
+     translucent fill left the label unreadable against emerald/teal. */
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(13, 148, 136, 0.28);
+  color: #0b5f58;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.plc-eyebrow__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: linear-gradient(140deg, #10b981, #4f46e5);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18);
+}
+
+.plc-title {
+  margin: 0 0 12px;
+  font-size: clamp(26px, 5vw, 34px);
+  line-height: 1.18;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #0f172a;
+}
+
+.plc-title__accent {
+  background: linear-gradient(104deg, #0d9488 0%, #4f46e5 52%, #8b5cf6 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  /* Guarantees a readable colour if background-clip:text is unsupported. */
+  -webkit-text-fill-color: transparent;
+}
+
+@supports not ((-webkit-background-clip: text) or (background-clip: text)) {
+  .plc-title__accent {
+    color: #4f46e5;
+    -webkit-text-fill-color: currentColor;
+  }
+}
+
+.plc-lede {
+  margin: 0 auto 26px;
+  max-width: 46ch;
+  color: #475569;
+  font-size: 15.5px;
+  line-height: 1.65;
+}
+
+/* ── Plan journey (current → required) ───────────────────────────────── */
+
+.plc-journey {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 18px 16px;
+  margin-bottom: 22px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 1px solid #e2e8f0;
+}
+
+.plc-journey__end {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  min-width: 116px;
+}
+
+.plc-journey__caption {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.plc-journey__arrow {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  color: #4f46e5;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 4px 12px -4px rgba(79, 70, 229, 0.45);
+}
+
+.plc-pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 18px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.plc-pill--current {
+  color: #475569;
+  background: #e2e8f0;
+  border: 1px solid #cbd5e1;
+}
+
+.plc-pill--target {
+  color: #fff;
+  background: linear-gradient(112deg, #0d9488 0%, #4f46e5 55%, #8b5cf6 100%);
+  box-shadow: 0 10px 22px -8px rgba(79, 70, 229, 0.7);
+}
+
+.plc-pill__sparkle {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #fde68a;
+  box-shadow: 0 0 0 3px rgba(253, 230, 138, 0.28);
+}
+
+/* ── Benefits panel ──────────────────────────────────────────────────── */
+
+.plc-panel {
+  text-align: left;
+  padding: 20px 22px;
+  margin-bottom: 26px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 8px 20px -14px rgba(15, 23, 42, 0.35);
+}
+
+.plc-panel__title {
+  margin: 0 0 14px;
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #0f766e;
+}
+
+.plc-benefits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 11px 18px;
+}
+
+.plc-benefit {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 14.5px;
+  line-height: 1.45;
+  color: #334155;
+}
+
+.plc-check {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: #10b981;
+}
+
+/* ── Actions ─────────────────────────────────────────────────────────── */
+
+.plc-actions {
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.plc-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 13px 26px;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease,
+    border-color 0.16s ease, color 0.16s ease;
+}
+
+.plc-btn--primary {
+  color: #fff;
+  background: linear-gradient(112deg, #10b981 0%, #14b8a6 38%, #4f46e5 100%);
+  box-shadow: 0 14px 28px -10px rgba(20, 184, 166, 0.75);
+}
+
+.plc-btn--primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 20px 36px -12px rgba(79, 70, 229, 0.8);
+}
+
+.plc-btn--primary:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.plc-btn--ghost {
+  color: #334155;
+  background: #fff;
+  border-color: #cbd5e1;
+}
+
+.plc-btn--ghost:hover:not(:disabled) {
+  color: #0f172a;
+  background: #f8fafc;
+  border-color: #94a3b8;
+  transform: translateY(-2px);
+  box-shadow: 0 10px 20px -12px rgba(15, 23, 42, 0.4);
+}
+
+.plc-btn:focus-visible {
+  outline: 3px solid rgba(79, 70, 229, 0.55);
+  outline-offset: 3px;
+}
+
+.plc-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* ── Footnote ────────────────────────────────────────────────────────── */
+
+.plc-footnote {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin: 0;
+  color: #64748b;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.plc-footnote svg {
+  flex: 0 0 auto;
+}
+
+/* ── Responsive ──────────────────────────────────────────────────────── */
+
+@media (max-width: 560px) {
+  .plc-card {
+    margin: 24px auto 36px;
+    border-radius: 20px;
+    padding-top: 32px;
+  }
+
+  .plc-card__body {
+    padding: 0 20px 26px;
+  }
+
+  .plc-badge {
+    width: 72px;
+    height: 72px;
+    margin-top: -32px;
+    border-radius: 22px;
+  }
+
+  .plc-journey {
+    gap: 10px;
+    padding: 16px 12px;
+  }
+
+  .plc-journey__end {
+    min-width: 96px;
+  }
+
+  .plc-pill {
+    padding: 8px 14px;
+    font-size: 13px;
+  }
+
+  .plc-benefits {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .plc-actions {
+    flex-direction: column;
+  }
+
+  .plc-btn {
+    width: 100%;
+  }
+}
+
+/* ── Motion / contrast preferences ───────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .plc-btn {
+    transition: none;
+  }
+
+  .plc-btn:hover:not(:disabled) {
+    transform: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .plc-card {
+    border-color: #0f766e;
+    box-shadow: none;
+  }
+
+  .plc-lede,
+  .plc-benefit,
+  .plc-footnote {
+    color: #1e293b;
+  }
+}

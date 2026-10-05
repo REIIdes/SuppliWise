@@ -1,4 +1,17 @@
-# Forgot Password Feature with OTP Verification
+> **SUPERSEDED — see `FORGOT_PASSWORD_REDESIGN.md`.**
+>
+> This document describes the old flow: a 6-digit code entered into a three-step
+> modal on the sign-in page. That has been replaced by an emailed link and two
+> dedicated pages. What changed and why is in `FORGOT_PASSWORD_REDESIGN.md`.
+> The endpoints named below still exist as aliases and still work.
+>
+> Two errors in this document are worth knowing about if you read it as
+> current: the resend cooldown was 60s in the docs and 30s in the code, and the
+> "Password requirements enforced (8+ chars, uppercase, number)" line no longer
+> describes the server — the policy is 10+ characters with all four character
+> classes, defined once in `server/utils/passwordRules.js`.
+
+# Forgot Password Feature with OTP Verification (historical)
 
 ## 📋 Overview
 

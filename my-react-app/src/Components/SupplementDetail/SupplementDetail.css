@@ -1,0 +1,418 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   SUPPLEMENT DETAIL + EVIDENCE OVERLAYS
+
+   Imported by SupplementDetail.jsx rather than by any page, so the styling
+   arrives with the component. That matters for a deep link: a page that
+   rendered a modal it had no stylesheet for showed an unstyled white box.
+
+   Prefixed `swdetail` / `swevidence` because these are shared, and a bare
+   `.sdm-panel` or `.evidence-info-overlay` is exactly the kind of unowned name
+   that ends up restyled by whichever page loaded last.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Supplement detail ─────────────────────────────────────────────────── */
+
+.swdetail__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(15, 42, 35, 0.5);
+  animation: swdetail-fade 0.18s ease;
+}
+
+@keyframes swdetail-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.swdetail__panel {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 680px;
+  max-height: 88vh;
+  overflow: hidden;
+  background: var(--sw-surface, #fff);
+  border-radius: var(--sw-radius-xl, 26px) var(--sw-radius-xl, 26px) 0 0;
+  box-shadow: 0 -4px 32px rgba(2, 44, 34, 0.2);
+  animation: swdetail-rise 0.22s var(--sw-ease, cubic-bezier(0.16, 1, 0.3, 1));
+}
+
+@keyframes swdetail-rise {
+  from { transform: translateY(60px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+/* Centred dialog rather than a bottom sheet once there is room for it. */
+@media (min-width: 700px) {
+  .swdetail__overlay { align-items: center; padding: 24px; }
+  .swdetail__panel {
+    border-radius: var(--sw-radius-lg, 20px);
+    max-height: 85vh;
+  }
+}
+
+.swdetail__header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 24px 16px;
+  background: var(--sw-surface, #fff);
+  border-bottom: 1px solid var(--sw-line, #e2f1ea);
+}
+
+.swdetail__header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.swdetail__icon { flex-shrink: 0; font-size: 28px; }
+
+.swdetail__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--sw-ink, #0d2b23);
+}
+
+.swdetail__close {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  font: inherit;
+  font-size: 14px;
+  color: var(--sw-ink-soft, #58736a);
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background var(--sw-dur, 0.24s) ease;
+}
+.swdetail__close:hover { background: var(--sw-line, #e2f1ea); }
+.swdetail__close:focus-visible { outline: 3px solid var(--sw-teal, #0d9488); outline-offset: 2px; }
+
+.swdetail__body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px 24px 32px;
+  overflow-y: auto;
+}
+
+.swdetail__loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 40px 0;
+  font-size: 14px;
+  color: var(--sw-ink-soft, #58736a);
+}
+.swdetail__loading p { margin: 0; }
+
+.swdetail__spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--sw-line, #e2f1ea);
+  border-top-color: var(--sw-emerald, #10b981);
+  border-radius: 50%;
+  animation: swdetail-spin 0.7s linear infinite;
+}
+@keyframes swdetail-spin {
+  to { transform: rotate(360deg); }
+}
+
+.swdetail__error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 16px;
+  font-size: 13px;
+  color: #9f1239;
+  background: #fff1f2;
+  border: 1px solid #fda4af;
+  border-radius: var(--sw-radius-md, 14px);
+}
+.swdetail__error p { margin: 0; line-height: 1.6; }
+
+/* The retry control. The error message asks the reader to try again, so the
+   panel owes them a way to — and the failure is transient, so retrying is the
+   correct action rather than a hopeful one. */
+.swdetail__error-body { min-width: 0; }
+.swdetail__retry {
+  margin-top: 10px;
+  padding: 7px 14px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: #9f1239;
+  background: #fff;
+  border: 1px solid #fda4af;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.swdetail__retry:hover { background: #ffe4e6; }
+.swdetail__retry:focus-visible {
+  outline: 2px solid #9f1239;
+  outline-offset: 2px;
+}
+
+.swdetail__overview {
+  margin: 0;
+  padding: 14px 16px;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--sw-ink-soft, #58736a);
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border-left: 3px solid var(--sw-emerald, #10b981);
+  border-radius: 0 var(--sw-radius-sm, 10px) var(--sw-radius-sm, 10px) 0;
+}
+
+.swdetail__section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.swdetail__section-title {
+  margin: 0;
+  padding-bottom: 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sw-ink, #0d2b23);
+  border-bottom: 1px solid var(--sw-line, #e2f1ea);
+}
+
+.swdetail__benefits,
+.swdetail__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.swdetail__benefit {
+  padding: 12px 14px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: var(--sw-radius-md, 14px);
+}
+
+.swdetail__benefit-title {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #15803d;
+}
+
+.swdetail__benefit-desc,
+.swdetail__step-desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--sw-ink-soft, #58736a);
+}
+
+.swdetail__step {
+  padding: 12px 14px;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border: 1px solid var(--sw-line, #e2f1ea);
+  border-radius: var(--sw-radius-md, 14px);
+}
+
+.swdetail__step-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--sw-ink, #0d2b23);
+}
+
+.swdetail__considerations {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.swdetail__considerations li {
+  position: relative;
+  padding-left: 22px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--sw-ink-soft, #58736a);
+}
+
+/* A tick, not a bullet — a bare `•` rendered as a stray dot with no box. */
+.swdetail__considerations li::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  left: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sw-amber, #f59e0b);
+}
+
+.swdetail__availability {
+  margin: 0;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--sw-ink-soft, #58736a);
+  background: #f8fafc;
+  border: 1px solid var(--sw-line, #e2f1ea);
+  border-radius: var(--sw-radius-md, 14px);
+}
+
+.swdetail__disclaimer {
+  margin: 0;
+  padding-top: 10px;
+  font-size: 11px;
+  font-style: italic;
+  line-height: 1.6;
+  text-align: center;
+  color: var(--sw-ink-faint, #8aa39a);
+  border-top: 1px solid var(--sw-line, #e2f1ea);
+}
+
+/* ── Evidence explainer ────────────────────────────────────────────────── */
+
+.swevidence__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(15, 42, 35, 0.5);
+  animation: swdetail-fade 0.18s ease;
+}
+
+.swevidence__panel {
+  width: 100%;
+  max-width: 540px;
+  overflow: hidden;
+  background: var(--sw-surface, #fff);
+  border-radius: var(--sw-radius-lg, 20px);
+  box-shadow: 0 24px 60px rgba(2, 44, 34, 0.24);
+  animation: swevidence-rise 0.24s var(--sw-ease, cubic-bezier(0.16, 1, 0.3, 1));
+}
+
+@keyframes swevidence-rise {
+  from { transform: translateY(20px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.swevidence__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border-bottom: 1px solid var(--sw-line, #e2f1ea);
+}
+
+.swevidence__title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--sw-ink, #0d2b23);
+}
+
+.swevidence__close {
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--sw-ink-faint, #8aa39a);
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color var(--sw-dur, 0.24s) ease, background var(--sw-dur, 0.24s) ease;
+}
+.swevidence__close:hover { color: var(--sw-ink, #0d2b23); background: var(--sw-line, #e2f1ea); }
+.swevidence__close:focus-visible { outline: 3px solid var(--sw-teal, #0d9488); outline-offset: 2px; }
+
+.swevidence__body { padding: 24px; }
+
+.swevidence__intro {
+  margin: 0 0 16px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--sw-ink, #0d2b23);
+}
+
+.swevidence__list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0 0 20px;
+  padding: 0;
+  list-style: none;
+}
+
+.swevidence__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--sw-ink-soft, #58736a);
+}
+
+.swevidence__check { flex-shrink: 0; margin-top: 1px; }
+
+.swevidence__disclaimer {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 20px;
+  padding: 12px 14px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: var(--sw-radius-md, 14px);
+}
+.swevidence__disclaimer p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #78350f;
+}
+.swevidence__disclaimer strong { font-weight: 700; color: #92400e; }
+
+@media (max-width: 600px) {
+  .swdetail__header { padding: 16px 20px; }
+  .swdetail__body { padding: 18px 20px 28px; }
+  .swevidence__body { padding: 20px; }
+  .swevidence__header { padding: 16px 20px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .swdetail__overlay,
+  .swdetail__panel,
+  .swevidence__overlay,
+  .swevidence__panel { animation: none; }
+}
