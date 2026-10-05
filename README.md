@@ -149,6 +149,9 @@ A full-stack MERN web app with **PWA + Android APK support** that delivers **AI-
 - **Tap for Details** works from history — cached per assessment (no repeat API calls)
 - View, download PDF, or delete — all from the history card
 - Page depth scales with plan (Free 5 / Deluxe 10 / Premium+ 20 per page)
+- **Update Health Assessment** — re-take the assessment from the history page: the expanded **Active** card pre-fills the form with your previous answers, and the new assessment is linked to the one it updated ("Updated from your previous assessment" on its card)
+- Intake records, streaks, and adherence metrics carry over to the new assessment — tracking continues instead of restarting at zero
+- In update mode the new AI plan is generated **before** anything is saved, so a failed AI call leaves your last assessment, recommendations, and intake history untouched
 
 ---
 
