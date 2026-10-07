@@ -85,6 +85,26 @@
   border-radius: 12px;
 }
 
+.install-modal-open {
+  width: 100%;
+  padding: 12px 24px;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  border: none;
+  background: linear-gradient(135deg, #10b981 0%, #059669 55%, #0d9488 100%);
+  color: #fff;
+  box-shadow: 0 10px 24px rgba(5, 150, 105, 0.28);
+  transition: transform 0.16s ease, box-shadow 0.2s ease;
+  margin-bottom: 12px;
+}
+
+.install-modal-open:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 30px rgba(5, 150, 105, 0.34);
+}
+
 .install-modal-close {
   width: 100%;
   padding: 12px 24px;
