@@ -1,10 +1,13 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
+import InstallAppModal from '../Components/InstallAppModal/InstallAppModal';
 import { PLAN_CARD_ORDER, PLAN_META } from '../subscription/catalogue';
 import './HomePage.css';
 
 function HomePage() {
   const navigate = useNavigate();
+  const [showInstallModal, setShowInstallModal] = useState(false);
 
   return (
     <div className="home-wrapper">
@@ -53,6 +56,15 @@ function HomePage() {
             onClick={() => document.getElementById('how-it-works')?.scrollIntoView({ behavior: 'smooth' })}
           >
             Learn More
+          </button>
+          {/* Opens the install modal; the QR inside is a placeholder until the
+              mobile QR is ready. */}
+          <button
+            className="btn-secondary"
+            type="button"
+            onClick={() => setShowInstallModal(true)}
+          >
+            Install for Mobile
           </button>
         </div>
 
@@ -219,12 +231,17 @@ function HomePage() {
           <button type="button" className="home-footer__link" onClick={() => document.getElementById('how-it-works')?.scrollIntoView({ behavior: 'smooth' })}>
             How it works
           </button>
+          <button type="button" className="home-footer__link" onClick={() => setShowInstallModal(true)}>
+            Install the app
+          </button>
         </nav>
         <p className="home-footer__legal">
           For educational and wellness purposes only. Not a substitute for
           professional medical advice.
         </p>
       </footer>
+
+      {showInstallModal && <InstallAppModal onClose={() => setShowInstallModal(false)} />}
     </div>
   );
 }

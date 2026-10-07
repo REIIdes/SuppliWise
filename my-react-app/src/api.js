@@ -1045,6 +1045,18 @@ export const getHistory = async (page = 1, limit = 10, fields = '') => {
   };
 };
 
+// Get the current (active) assessment — the newest one still in
+// force, form fields only (aiResults projected out server-side).
+// Powers the Update Health Assessment choice on the dashboard.
+export const getActiveAssessment = async () => {
+  const res = await apiFetch('/assessment/active', {
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throwFriendly(res.status, data);
+  return data;
+};
+
 // Save AI results to an assessment record
 export const saveAssessmentResults = async (assessmentId, results) => {
   const res = await apiFetch(`/assessment/${assessmentId}/results`, {

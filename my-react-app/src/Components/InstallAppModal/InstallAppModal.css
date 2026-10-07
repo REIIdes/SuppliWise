@@ -1,0 +1,103 @@
+/* Install App modal — QR placeholder */
+.install-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  animation: installFadeIn 0.2s ease-in-out;
+}
+
+@keyframes installFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.install-modal {
+  background: #fff;
+  border-radius: 16px;
+  padding: 28px 32px;
+  max-width: 420px;
+  width: 90%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  text-align: center;
+  animation: installScaleIn 0.25s ease-out;
+}
+
+@keyframes installScaleIn {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.install-modal-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: #1f2937;
+  margin: 0 0 8px;
+}
+
+.install-modal-subtitle {
+  font-size: 14.5px;
+  color: #6b7280;
+  line-height: 1.5;
+  margin: 0 0 20px;
+}
+
+.install-modal-qr-placeholder {
+  border: 2px dashed #d1d5db;
+  border-radius: 12px;
+  background: #f9fafb;
+  padding: 28px 20px;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.install-modal-qr-placeholder svg {
+  width: 56px;
+  height: 56px;
+  color: #9ca3af;
+}
+
+.install-modal-qr-coming {
+  font-weight: 700;
+  color: #6b7280;
+  margin: 0;
+  font-size: 14px;
+}
+
+.install-modal-qr-note {
+  font-size: 12.5px;
+  color: #9ca3af;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.install-modal-qr-image {
+  display: block;
+  width: 200px;
+  height: 200px;
+  margin: 0 auto 20px;
+  border-radius: 12px;
+}
+
+.install-modal-close {
+  width: 100%;
+  padding: 12px 24px;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 2px solid #d1d5db;
+  background: #e5e7eb;
+  color: #374151;
+  transition: all 0.2s ease;
+}
+
+.install-modal-close:hover {
+  background: #d1d5db;
+}

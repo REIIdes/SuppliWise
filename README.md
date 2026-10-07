@@ -81,6 +81,7 @@ A full-stack MERN web app with **PWA + Android APK support** that delivers **AI-
 ### 📊 Dashboard & Tracking
 
 - **Personalized Dashboard** — today's supplements, wellness score, and quick stats
+- **New Assessment choice** — the dashboard's New Assessment card asks whether to *Update current assessment* (previous answers pre-filled; streak, adherence and intake history carry over) or *Start a new assessment* (fresh plan, tracking restarts)
 - **Add Supplements to Plan** — dynamically add recommended supplements to your daily plan
 - **Track Daily Intake** — mark supplements as taken/undo with real-time progress tracking
 - **Smart Streak System** — earn streaks by completing 100% of supplements each day

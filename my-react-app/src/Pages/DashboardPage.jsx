@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import Toast from '../Components/Toast/Toast';
 import ConfirmModal from '../Components/ConfirmModal/ConfirmModal';
-import { getDashboard, updateIntake, updateIntakeBulk, getToken, getStoredUser, getMyProfile, setStoredUser } from '../api';
+import AssessmentChoiceModal from '../Components/AssessmentChoiceModal/AssessmentChoiceModal';
+import { getDashboard, updateIntake, updateIntakeBulk, getToken, getStoredUser, getMyProfile, setStoredUser, getActiveAssessment } from '../api';
 import { subscribeDashboardRefresh } from '../utils/dashboardRefresh';
 import useSubscription from '../hooks/useSubscription';
 import useNow from '../hooks/useNow';
@@ -184,6 +185,12 @@ function DashboardPage() {
   // progress and refuse a second press instead of double-submitting.
   const [slotPending, setSlotPending] = useState(null);
   const [showNewAssessmentConfirm, setShowNewAssessmentConfirm] = useState(false);
+  const [showAssessmentChoice, setShowAssessmentChoice] = useState(false);
+  // The full active-assessment document (form fields, no
+  // aiResults), fetched once per dashboard load so the New
+  // Assessment card can offer "Update current assessment"
+  // without a round-trip on click.
+  const [activeAssessmentDoc, setActiveAssessmentDoc] = useState(null);
   const [showPriorityBlock, setShowPriorityBlock] = useState(false);
   const [priorityBlock, setPriorityBlock] = useState({ blocked: false, count: 0 });
   const [priorityAssessments, setPriorityAssessments] = useState([]);
@@ -259,6 +266,7 @@ function DashboardPage() {
         setQuickStats(EMPTY_STATS);
         setPriorityBlock(data.priorityBlock || { blocked: false, count: 0 });
         setPriorityAssessments(data.priorityAssessments || []);
+        setActiveAssessmentDoc(null);
         return;
       }
 
@@ -278,6 +286,13 @@ function DashboardPage() {
       });
       setPriorityBlock(data.priorityBlock || { blocked: false, count: 0 });
       setPriorityAssessments(data.priorityAssessments || []);
+      // Fire-and-forget: the document only matters if the user
+      // opens the New Assessment choice, and a failure here must
+      // never fail the dashboard — the card simply falls back to
+      // the direct "start new" navigation below.
+      getActiveAssessment()
+        .then((doc) => { setActiveAssessmentDoc(doc || null); })
+        .catch(() => { setActiveAssessmentDoc(null); });
     } catch (err) {
       // A rejected session (401 + SESSION_* code) is already handled
       // globally by api.js: this tab's copy is cleared and it redirects to
@@ -516,6 +531,14 @@ function DashboardPage() {
           setShowPriorityBlock(true);
           break;
         }
+        // With an assessment in force, the card offers the choice
+        // between continuing it and starting over. Without the
+        // document (first-ever user, or the fetch above failed) the
+        // card keeps its original one-click behaviour.
+        if (activeAssessmentDoc) {
+          setShowAssessmentChoice(true);
+          break;
+        }
         // Check if user has supplements that haven't been taken today
         const hasUnfinishedSupplements = todaysSupplements.some(s => !s.taken);
         if (hasUnfinishedSupplements && todaysSupplements.length > 0) {
@@ -544,6 +567,34 @@ function DashboardPage() {
     setShowNewAssessmentConfirm(false);
     // When explicitly confirming to abandon current supplements, then clear draft
     navigate('/assessment', { state: { clearDraft: true } });
+  };
+
+  const confirmUpdateAssessment = () => {
+    setShowAssessmentChoice(false);
+    if (!activeAssessmentDoc) return;
+    // The same route state the History page's Update button
+    // sends, so the form pre-fills and the replacement record
+    // is linked to this assessment through `updatedFrom`.
+    navigate('/assessment', {
+      state: {
+        assessment: activeAssessmentDoc,
+        readOnly: false,
+        updateSourceId: activeAssessmentDoc._id,
+      },
+    });
+  };
+
+  const confirmStartNewAssessment = () => {
+    setShowAssessmentChoice(false);
+    // Replacing the plan is the destructive step the direct
+    // path also guards: abandoning today's unfinished
+    // supplements clears the draft so the form starts clean.
+    const hasUnfinishedSupplements = todaysSupplements.some(s => !s.taken);
+    if (hasUnfinishedSupplements && todaysSupplements.length > 0) {
+      navigate('/assessment', { state: { clearDraft: true } });
+    } else {
+      navigate('/assessment');
+    }
   };
 
   // ── Derived view state ───────────────────────────────────────────────────
@@ -798,6 +849,19 @@ function DashboardPage() {
           type="warning"
           onConfirm={confirmNewAssessment}
           onCancel={() => setShowNewAssessmentConfirm(false)}
+        />
+      )}
+
+      {/* Assessment choice — Update the current assessment or start fresh.
+          Only offered while an assessment is in force and its document
+          is loaded; otherwise the card navigates directly. */}
+      {showAssessmentChoice && activeAssessmentDoc && (
+        <AssessmentChoiceModal
+          assessmentDate={activeAssessmentDoc.createdAt}
+          hasUnfinishedSupplements={todaysSupplements.length > 0 && todaysSupplements.some(s => !s.taken)}
+          onUpdate={confirmUpdateAssessment}
+          onStartNew={confirmStartNewAssessment}
+          onCancel={() => setShowAssessmentChoice(false)}
         />
       )}
 

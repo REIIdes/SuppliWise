@@ -12,7 +12,7 @@ const { historyLimitFor, tierOf, can, PLAN_LABELS, resolveSubscription } = requi
 // Severity is reached through the flagging layer, which runs the rule engine
 // (utils/severity.js) as its authoritative floor and can only escalate on top.
 const { analyzePriorityFlagging } = require('../utils/priorityFlagging');
-const { expiryDateFromNow, expiryFromCreatedAt } = require('../utils/assessments');
+const { expiryDateFromNow, expiryFromCreatedAt, notExpiredFilter } = require('../utils/assessments');
 const { guardRaisePriority, selfHealOpenPriority } = require('../utils/priorityGate');
 
 // Flag an assessment as Priority + notify the user and admins (best-effort,
@@ -412,6 +412,30 @@ router.get('/history', protect, async (req, res) => {
   } catch (error) {
     console.error('[assessment GET /history]', error.message);
     res.status(500).json({ message: 'Could not load your history. Please try again.' });
+  }
+});
+
+// @route   GET /api/assessment/active
+// @desc    The user's current assessment — the newest one still in
+//          force, the same query the dashboard runs. The ~500 KB
+//          aiResults blob is projected out on purpose: the Update
+//          Health Assessment flow pre-fills the form from the
+//          assessment's own fields, and the replacement assessment
+//          generates fresh results, so shipping the old ones would
+//          only cost bandwidth.
+// @access  Private
+router.get('/active', protect, async (req, res) => {
+  try {
+    const assessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
+      .sort({ createdAt: -1 })
+      .select('-aiResults');
+    if (!assessment) {
+      return res.status(404).json({ message: 'No active assessment.' });
+    }
+    res.json(assessment);
+  } catch (error) {
+    console.error('[assessment GET /active]', error.message);
+    res.status(500).json({ message: 'Could not load the active assessment.' });
   }
 });
 

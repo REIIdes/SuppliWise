@@ -1,0 +1,60 @@
+/* Assessment choice modal — shares the ConfirmModal chrome (overlay,
+   card, title, message) so the two dialogs read as one family. */
+.choice-modal-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 0 16px;
+  text-align: left;
+}
+
+.choice-modal-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 2px solid #d1d5db;
+  background: #ffffff;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.choice-modal-option-update {
+  border-color: #a7f3d0;
+  background: #f0fdf9;
+}
+
+.choice-modal-option:hover {
+  border-color: #10b981;
+  background: #ecfdf5;
+}
+
+.choice-modal-option-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.choice-modal-option-desc {
+  font-size: 13px;
+  color: #6b7280;
+  line-height: 1.45;
+}
+
+.choice-modal-cancel {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #6b7280;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.choice-modal-cancel:hover {
+  background: #f3f4f6;
+  color: #374151;
+}
