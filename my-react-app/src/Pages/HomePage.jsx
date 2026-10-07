@@ -8,6 +8,20 @@ import './HomePage.css';
 function HomePage() {
   const navigate = useNavigate();
   const [showInstallModal, setShowInstallModal] = useState(false);
+  /* "Install for Mobile" only belongs on a phone/tablet browser: desktop
+     visitors get nothing to install, and an already-installed PWA IS the
+     app — no point offering it a second time. Same standalone-mode check
+     PWAInstallPrompt uses for "already installed". */
+  const [showInstallForMobile] = useState(() => {
+    const ua = window.navigator.userAgent || '';
+    const isMobileWeb =
+      /Mobi|Android|iPhone|iPad|iPod|IEMobile|Opera Mini/i.test(ua) ||
+      (/Macintosh/i.test(ua) && (window.navigator.maxTouchPoints || 0) > 1);
+    const isInstalled =
+      window.matchMedia('(display-mode: standalone)').matches ||
+      window.navigator.standalone === true;
+    return isMobileWeb && !isInstalled;
+  });
 
   return (
     <div className="home-wrapper">
@@ -58,14 +72,16 @@ function HomePage() {
             Learn More
           </button>
           {/* Opens the install modal; the QR inside is a placeholder until the
-              mobile QR is ready. */}
-          <button
-            className="btn-secondary"
-            type="button"
-            onClick={() => setShowInstallModal(true)}
-          >
-            Install for Mobile
-          </button>
+              mobile QR is ready. Only offered where installing makes sense. */}
+          {showInstallForMobile && (
+            <button
+              className="btn-secondary"
+              type="button"
+              onClick={() => setShowInstallModal(true)}
+            >
+              Install for Mobile
+            </button>
+          )}
         </div>
 
         {/* Stats row */}
@@ -231,9 +247,11 @@ function HomePage() {
           <button type="button" className="home-footer__link" onClick={() => document.getElementById('how-it-works')?.scrollIntoView({ behavior: 'smooth' })}>
             How it works
           </button>
-          <button type="button" className="home-footer__link" onClick={() => setShowInstallModal(true)}>
-            Install the app
-          </button>
+          {showInstallForMobile && (
+            <button type="button" className="home-footer__link" onClick={() => setShowInstallModal(true)}>
+              Install the app
+            </button>
+          )}
         </nav>
         <p className="home-footer__legal">
           For educational and wellness purposes only. Not a substitute for
