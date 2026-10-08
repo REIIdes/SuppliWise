@@ -258,6 +258,33 @@ export default function ChatAssistant() {
     return () => container.removeEventListener('scroll', handleScroll);
   }, [open]);
 
+  // The messages box can change size without any scroll event firing —
+  // collapsing the quick-prompt chips grows it, and a grown box can turn
+  // a scrollable transcript into one that fits, leaving scrollTop
+  // already sitting at the bottom. No scroll event fires in that case,
+  // so the "jump to newest" button used to stay visible pointing at a
+  // bottom the reader was already looking at, and clicking it scrolled
+  // nowhere. Re-running the same at-bottom check on every box resize
+  // keeps the button honest. ResizeObserver fires on box size, not
+  // content size, so incoming messages — which only grow the content —
+  // never reach this; the follow effect above owns those.
+  useEffect(() => {
+    if (!open) return;
+    const container = messagesContainerRef.current;
+    if (!container || typeof ResizeObserver === 'undefined') return;
+
+    const check = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
+      followBottomRef.current = isAtBottom;
+      setShowScrollButton(!isAtBottom && scrollHeight > clientHeight);
+    };
+
+    const observer = new ResizeObserver(check);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [open]);
+
   // Close chat when clicking outside
   useEffect(() => {
     if (!open) return;
@@ -276,12 +303,19 @@ export default function ChatAssistant() {
   }, [open]);
 
   const scrollToBottom = () => {
-    if (messagesContainerRef.current) {
-      messagesContainerRef.current.scrollTo({
-        top: messagesContainerRef.current.scrollHeight,
-        behavior: 'smooth'
-      });
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    // Already looking at the newest message? Clear the button
+    // instead of scrolling to the position we are already at.
+    const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
+    if (isAtBottom) {
+      setShowScrollButton(false);
+      return;
     }
+    el.scrollTo({
+      top: el.scrollHeight,
+      behavior: 'smooth'
+    });
   };
 
   // Focus the composer when the panel opens and whenever a reply lands, so
