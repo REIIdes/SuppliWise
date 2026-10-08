@@ -24,7 +24,7 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Inches, Pt, RGBColor
+from docx.shared import Emu, Inches, Pt, RGBColor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -69,6 +69,72 @@ MONO_FONT = "Consolas"
 # ===========================================================================
 
 
+# ===========================================================================
+# OOXML element ordering
+#
+# Word validates the child order of w:tblPr, w:tcPr and w:pPr against the
+# ECMA-376 schema. Appending blindly produces a file Word either repairs
+# silently (losing the formatting) or refuses to open. Every property element
+# written below goes through _ordered_insert so the sequence is always valid.
+# ===========================================================================
+
+TBLPR_ORDER = [
+    "w:tblStyle", "w:tblpPr", "w:tblOverlap", "w:bidiVisual",
+    "w:tblStyleRowBandSize", "w:tblStyleColBandSize", "w:tblW", "w:jc",
+    "w:tblCellSpacing", "w:tblInd", "w:tblBorders", "w:shd", "w:tblLayout",
+    "w:tblCellMar", "w:tblLook", "w:tblCaption", "w:tblDescription",
+]
+
+TCPR_ORDER = [
+    "w:cnfStyle", "w:tcW", "w:gridSpan", "w:hMerge", "w:vMerge", "w:tcBorders",
+    "w:shd", "w:noWrap", "w:tcMar", "w:textDirection", "w:tcFitText",
+    "w:vAlign", "w:hideMark",
+]
+
+PPR_ORDER = [
+    "w:pStyle", "w:keepNext", "w:keepLines", "w:pageBreakBefore", "w:framePr",
+    "w:widowControl", "w:numPr", "w:suppressLineNumbers", "w:pBdr", "w:shd",
+    "w:tabs", "w:suppressAutoHyphens", "w:kinsoku", "w:wordWrap",
+    "w:overflowPunct", "w:topLinePunct", "w:autoSpaceDE", "w:autoSpaceDN",
+    "w:bidi", "w:adjustRightInd", "w:snapToGrid", "w:spacing", "w:ind",
+    "w:contextualSpacing", "w:mirrorIndents", "w:suppressOverlap", "w:jc",
+    "w:textDirection", "w:textAlignment", "w:textboxTightWrap", "w:outlineLvl",
+    "w:divId", "w:cnfStyle", "w:rPr", "w:sectPr", "w:pPrChange",
+]
+
+EMU_PER_TWIP = 635
+
+
+def _ordered_insert(parent, child, order):
+    """Insert ``child`` into ``parent`` at its schema-mandated position."""
+    tag = child.tag
+    name = None
+    for candidate in order:
+        if qn(candidate) == tag:
+            name = candidate
+            break
+    if name is None:                      # unknown tag -> append
+        parent.append(child)
+        return child
+
+    # Replace an existing element of the same type.
+    for existing in parent.findall(tag):
+        parent.remove(existing)
+
+    rank = order.index(name)
+    for sibling in parent:
+        sibling_name = None
+        for candidate in order:
+            if qn(candidate) == sibling.tag:
+                sibling_name = candidate
+                break
+        if sibling_name is not None and order.index(sibling_name) > rank:
+            sibling.addprevious(child)
+            return child
+    parent.append(child)
+    return child
+
+
 def shade(el, hex_fill):
     """Apply a solid fill to a docx table cell."""
     pr = el._tc.get_or_add_tcPr()
@@ -76,23 +142,21 @@ def shade(el, hex_fill):
     shd.set(qn("w:val"), "clear")
     shd.set(qn("w:color"), "auto")
     shd.set(qn("w:fill"), hex_fill)
-    pr.append(shd)
+    _ordered_insert(pr, shd, TCPR_ORDER)
 
 
 def cell_margins(table, top=28, bottom=28, left=60, right=60):
     """Tight cell padding in twentieths of a point."""
-    tblPr = table._tbl.tblPr
     mar = OxmlElement("w:tblCellMar")
     for tag, val in (("top", top), ("left", left), ("bottom", bottom), ("right", right)):
         node = OxmlElement("w:" + tag)
         node.set(qn("w:w"), str(val))
         node.set(qn("w:type"), "dxa")
         mar.append(node)
-    tblPr.append(mar)
+    _ordered_insert(table._tbl.tblPr, mar, TBLPR_ORDER)
 
 
 def table_borders(table, color=LINE, size=4, inside=True):
-    tblPr = table._tbl.tblPr
     borders = OxmlElement("w:tblBorders")
     edges = ["top", "left", "bottom", "right"]
     if inside:
@@ -104,24 +168,22 @@ def table_borders(table, color=LINE, size=4, inside=True):
         e.set(qn("w:space"), "0")
         e.set(qn("w:color"), color)
         borders.append(e)
-    tblPr.append(borders)
+    _ordered_insert(table._tbl.tblPr, borders, TBLPR_ORDER)
 
 
 def no_borders(table):
-    tblPr = table._tbl.tblPr
     borders = OxmlElement("w:tblBorders")
     for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
         e = OxmlElement("w:" + edge)
         e.set(qn("w:val"), "none")
         e.set(qn("w:sz"), "0")
         borders.append(e)
-    tblPr.append(borders)
+    _ordered_insert(table._tbl.tblPr, borders, TBLPR_ORDER)
 
 
 def left_accent(table, color=GREEN, size=18):
     """Give a single-cell table a thick coloured left edge (note/code look)."""
-    tblPr = table._tbl.tblPr
-    borders = tblPr.find(qn("w:tblBorders"))
+    borders = table._tbl.tblPr.find(qn("w:tblBorders"))
     if borders is None:
         return
     for e in borders.findall(qn("w:left")):
@@ -132,6 +194,60 @@ def left_accent(table, color=GREEN, size=18):
     le.set(qn("w:space"), "0")
     le.set(qn("w:color"), color)
     borders.append(le)
+
+
+def pin_widths(table, total_twips, fracs):
+    """Pin column widths so Word cannot re-fit them.
+
+    Three things are required for a fixed column layout in Word:
+
+    1. ``w:tblLayout w:type="fixed"`` -- without it Word recomputes the layout
+       and largely ignores the widths below.
+    2. A ``w:tblGrid`` whose ``w:gridCol`` values match the intended widths.
+       This is the grid Word actually reads; per-cell ``w:tcW`` alone is not
+       enough, and python-docx builds an equal-width grid by default.
+    3. ``w:tblW`` set to the full table width, so the table does not shrink to
+       fit its content.
+    """
+    tbl = table._tbl
+    tblPr = tbl.tblPr
+
+    layout = OxmlElement("w:tblLayout")
+    layout.set(qn("w:type"), "fixed")
+    _ordered_insert(tblPr, layout, TBLPR_ORDER)
+
+    tblW = OxmlElement("w:tblW")
+    tblW.set(qn("w:w"), str(total_twips))
+    tblW.set(qn("w:type"), "dxa")
+    _ordered_insert(tblPr, tblW, TBLPR_ORDER)
+
+    ncols = len(table.columns)
+    if not fracs or len(fracs) != ncols:
+        fracs = [1.0 / ncols] * ncols
+    scale = float(sum(fracs)) or 1.0
+    fracs = [f / scale for f in fracs]
+    widths = [int(total_twips * f) for f in fracs]
+    # absorb rounding drift into the widest column
+    drift = total_twips - sum(widths)
+    if drift and widths:
+        widths[widths.index(max(widths))] += drift
+
+    old = tbl.find(qn("w:tblGrid"))
+    if old is not None:
+        tbl.remove(old)
+    grid = OxmlElement("w:tblGrid")
+    for w in widths:
+        gc = OxmlElement("w:gridCol")
+        gc.set(qn("w:w"), str(w))
+        grid.append(gc)
+    tblPr.addnext(grid)
+
+    for row in table.rows:
+        for i, cell in enumerate(row.cells):
+            if i < len(widths):
+                cell.width = Emu(widths[i] * EMU_PER_TWIP)
+    table.autofit = False
+    return widths
 
 
 def repeat_header(row):
@@ -274,6 +390,13 @@ class DocxBuilder:
         s = self.doc.sections[0]
         return s.page_width - s.left_margin - s.right_margin
 
+    def _content_twips(self):
+        return int(self._content_width() / EMU_PER_TWIP)
+
+    def _pin(self, table, fracs=None):
+        """Pin a table's columns to the full content width."""
+        return pin_widths(table, self._content_twips(), fracs)
+
     # -- primitives ---------------------------------------------------------
 
     def _runs(self, p, text, size=9, bold=False, italic=False, color=None, mono=False):
@@ -316,7 +439,7 @@ class DocxBuilder:
             bot.set(qn("w:space"), "3")
             bot.set(qn("w:color"), GREEN)
             pdr.append(bot)
-            p._p.get_or_add_pPr().append(pdr)
+            _ordered_insert(p._p.get_or_add_pPr(), pdr, PPR_ORDER)
         self._runs(p, text, sizes[level], bold=True, color=colors[level])
         return p
 
@@ -378,6 +501,7 @@ class DocxBuilder:
         cell_margins(t, top=40, bottom=40, left=90, right=80)
         table_borders(t, color=bg, size=2)
         left_accent(t, color=accent, size=18)
+        self._pin(t, [1.0])
 
         p = cell.paragraphs[0]
         p.paragraph_format.space_after = Pt(0)
@@ -397,6 +521,7 @@ class DocxBuilder:
         cell_margins(t, top=40, bottom=40, left=90, right=70)
         table_borders(t, color=LINE, size=2)
         left_accent(t, color=GREEN, size=14)
+        self._pin(t, [1.0])
 
         cell.text = ""
         for i, ln in enumerate(lines):
@@ -442,11 +567,9 @@ class DocxBuilder:
                 self._runs(p, val, font, bold=bool(first_bold and ci == 0))
 
         if widths:
-            total = self._content_width()
-            for row in t.rows:
-                for ci, frac in enumerate(widths):
-                    if ci < cols:
-                        row.cells[ci].width = int(total * frac)
+            self._pin(t, widths)
+        else:
+            self._pin(t)
         self.spacer(2)
         return t
 
@@ -760,6 +883,66 @@ def build_pdf(html_path, pdf_path):
     return pdf_path if os.path.isfile(pdf_path) else None
 
 
+def verify_docx(path):
+    """Re-open the saved DOCX and assert the layout invariants hold.
+
+    Word silently repairs or ignores malformed table properties, so the only
+    reliable check is to inspect the file that was actually written. This runs
+    on every build so an alignment regression cannot ship unnoticed.
+    """
+    doc = Document(path)
+
+    problems = []
+    containers = [0]
+
+    def check(el):
+        name = el.tag.split("}")[-1]
+        order = {"tblPr": TBLPR_ORDER, "tcPr": TCPR_ORDER, "pPr": PPR_ORDER}.get(name)
+        if order:
+            containers[0] += 1
+            ranks, names = [], []
+            for child in el:
+                cn = child.tag.split("}")[-1]
+                if "w:" + cn in order:
+                    ranks.append(order.index("w:" + cn))
+                    names.append(cn)
+            if ranks != sorted(ranks):
+                problems.append("%s children out of schema order: %s" % (name, names))
+        for child in el:
+            check(child)
+
+    check(doc.element.body)
+
+    no_fixed = 0
+    grid_mismatch = 0
+    for t in doc.tables:
+        lay = t._tbl.tblPr.find(qn("w:tblLayout"))
+        if lay is None or lay.get(qn("w:type")) != "fixed":
+            no_fixed += 1
+        grid = t._tbl.find(qn("w:tblGrid"))
+        cols = grid.findall(qn("w:gridCol")) if grid is not None else []
+        if len(cols) != len(t.columns):
+            grid_mismatch += 1
+            continue
+        want = [int(gc.get(qn("w:w"))) * EMU_PER_TWIP for gc in cols]
+        for row in t.rows:
+            got = [c.width or 0 for c in row.cells]
+            if any(abs(a - wb) > 1200 for a, wb in zip(got, want)):
+                grid_mismatch += 1
+                break
+
+    problems = problems[:5]
+    ok = not problems and not no_fixed and not grid_mismatch
+
+    print("  verify: %d tables, %d property containers, fixed-layout %d, "
+          "grid-mismatch %d, order-violations %d"
+          % (len(doc.tables), containers[0], no_fixed, grid_mismatch, len(problems)))
+    for p in problems:
+        print("    ! " + p)
+    print("  verify:", "PASS" if ok else "FAIL")
+    return ok
+
+
 def build_docx():
     print("Building DOCX ...")
     b = DocxBuilder()
@@ -776,6 +959,7 @@ def build_docx():
     cell_margins(rule, top=8, bottom=8, left=0, right=0)
     rc.paragraphs[0].paragraph_format.space_after = Pt(0)
     set_font(rc.paragraphs[0].add_run(""), size=2)
+    b._pin(rule, [1.0])
     b.spacer(8)
 
     b.para(COVER["title"], size=26, bold=True, color=GREEN_DARK, space_after=2)
@@ -802,6 +986,7 @@ def build_docx():
     for row in ct.rows:
         row.cells[0].width = int(total_w * 0.28)
         row.cells[1].width = int(total_w * 0.72)
+    b._pin(ct, [0.28, 0.72])
 
     b.spacer(10)
     b.para(COVER["footer"], size=7.5, color=SLATE_SOFT, italic=True)
@@ -833,6 +1018,7 @@ def build_docx():
     path = os.path.join(OUT_DIR, BASENAME + ".docx")
     b.doc.save(path)
     print("  -> " + path)
+    verify_docx(path)
     return path
 
 
