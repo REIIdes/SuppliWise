@@ -321,6 +321,39 @@ router.post('/', protect, requireFeature('chat'), chatLimiter, async (req, res) 
         thread.messageCount = thread.messages.length;
         await thread.save();
         persistedThreadId = thread._id;
+
+        // ── Auto-archive oldest threads beyond the 7-conversation limit ──
+        // Only runs after a new thread is created (not on existing thread updates).
+        // Pinned conversations are never auto-archived.
+        try {
+          const ACTIVE_LIMIT = 7;
+          const activeCount = await AiChatThread.countDocuments({
+            user: req.user._id,
+            archived: { $ne: true },
+          });
+          if (activeCount > ACTIVE_LIMIT) {
+            const excess = activeCount - ACTIVE_LIMIT;
+            // Oldest non-pinned active threads first
+            const toArchive = await AiChatThread.find({
+              user: req.user._id,
+              archived: { $ne: true },
+              pinned: { $ne: true },
+              _id: { $ne: persistedThreadId }, // never archive the one just created
+            })
+              .sort({ updatedAt: 1 }) // oldest first
+              .limit(excess)
+              .select('_id');
+            if (toArchive.length > 0) {
+              await AiChatThread.updateMany(
+                { _id: { $in: toArchive.map((t) => t._id) } },
+                { $set: { archived: true, pinned: false } }
+              );
+            }
+          }
+        } catch (autoArchiveErr) {
+          // Non-critical — log but never fail the chat response
+          console.error('[chat] auto-archive failed:', autoArchiveErr.message);
+        }
       }
     } catch (saveError) {
       console.error('[chat] conversation persistence failed:', saveError.message);
@@ -343,11 +376,12 @@ router.post('/', protect, requireFeature('chat'), chatLimiter, async (req, res) 
 
 // ── GET /api/chat/threads ──────────────────────────────────────
 // Active (non-archived) conversations for the history menu.
+// Hard-capped at 7 — older ones are auto-archived on new thread creation.
 router.get('/threads', protect, requireFeature('chat'), async (req, res) => {
   try {
     const threads = await AiChatThread.find({ user: req.user._id, archived: { $ne: true } })
       .sort({ pinned: -1, updatedAt: -1 })
-      .limit(100)
+      .limit(7)
       .select('title updatedAt lastText messageCount pinned archived')
       .lean();
     return res.json({ threads });

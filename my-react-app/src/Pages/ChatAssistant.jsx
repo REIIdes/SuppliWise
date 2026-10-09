@@ -505,7 +505,7 @@ export default function ChatAssistant() {
     try {
       const data = await listChatThreads();
       if (version !== conversationVersionRef.current) return;
-      setThreads(Array.isArray(data?.threads) ? data.threads : []);
+      setThreads(Array.isArray(data?.threads) ? data.threads.slice(0, 7) : []);
     } catch (err) {
       // History is a convenience: a failed load must never
       // break the chat itself, so the menu just stays empty.
@@ -619,13 +619,13 @@ export default function ChatAssistant() {
         // If we archived the open conversation, start fresh
         if (String(activeThreadId) === String(thread._id)) startNewConversation();
       } else {
-        // Unarchive: move back to active list, re-sort
+        // Unarchive: move back to active list, re-sort, cap at 7
         setArchivedThreads((prev) => prev.filter((t) => String(t._id) !== String(thread._id)));
         setThreads((prev) =>
           [...prev, { ...thread, archived: false }].sort((a, b) => {
             if (a.pinned === b.pinned) return new Date(b.updatedAt) - new Date(a.updatedAt);
             return b.pinned ? 1 : -1;
-          })
+          }).slice(0, 7)
         );
       }
     } catch (err) {
