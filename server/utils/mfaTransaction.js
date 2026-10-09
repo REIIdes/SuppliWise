@@ -24,8 +24,6 @@ const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v));
 // worthless by the time anyone looks at it. The emailed-code path needs a
 // little longer because the user may have to open their mail.
 const DEFAULT_TTL_MS = 5 * 60 * 1000;
-// 30-second grace buffer for clock skew between the server and Atlas.
-const CLOCK_SKEW_GRACE_MS = 30 * 1000;
 const MAX_ATTEMPTS = 10;
 
 // Generous ceiling on tokens resolved per process per minute, so a run of
@@ -112,7 +110,7 @@ async function peek(rawToken, { method = null } = {}) {
   const row = await MfaTransaction.findOne({
     tokenHash: hashToken(token),
     consumedAt: null,
-    expiresAt: { $gt: new Date(Date.now() - CLOCK_SKEW_GRACE_MS) },
+    expiresAt: { $gt: new Date() },
   }).lean();
   if (!row) return null;
   if (row.attempts >= row.maxAttempts) return null;
@@ -142,7 +140,7 @@ async function spend(rawToken, { method = null } = {}) {
     {
       tokenHash: hashToken(token),
       consumedAt: null,
-      expiresAt: { $gt: new Date(Date.now() - CLOCK_SKEW_GRACE_MS) },
+      expiresAt: { $gt: now },
       $expr: { $lt: ['$attempts', '$maxAttempts'] },
       ...(method ? { methods: method } : {}),
     },
@@ -173,7 +171,7 @@ async function spendById(id, { method = null } = {}) {
     {
       _id: objectId,
       consumedAt: null,
-      expiresAt: { $gt: new Date(Date.now() - CLOCK_SKEW_GRACE_MS) },
+      expiresAt: { $gt: now },
       $expr: { $lt: ['$attempts', '$maxAttempts'] },
       ...(method ? { methods: method } : {}),
     },
