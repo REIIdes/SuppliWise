@@ -56,13 +56,6 @@ const assessmentSchema = new mongoose.Schema(
     flaggedAt: { type: Date, default: null },
     resolvedAt: { type: Date, default: null },
     resolvedReason: { type: String, default: '' },
-    // When this record came out of the "Update Health Assessment" flow, the
-    // assessment it was created from — so History can explain the linkage.
-    updatedFrom: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Assessment',
-      default: null,
-    },
     // User info snapshot (for easy identification in DB)
     userEmail: { type: String },
     userName: { type: String },

@@ -390,15 +390,10 @@ function HistoryPage() {
     setError('');
     return getHistory(targetPage, limit || undefined)
       .then(data => {
-        // A failed AI run still leaves a bare Assessment row behind (no
-        // aiResults). Those are not history — they are unfinished attempts —
-        // so keep them out of the list instead of rendering an empty card.
-        const normalized = data.assessments
-          .filter(item => item && item.aiResults)
-          .map(item => ({
-            ...item,
-            aiResults: enrichAiResults(item.aiResults),
-          }));
+        const normalized = data.assessments.map(item => ({
+          ...item,
+          aiResults: enrichAiResults(item.aiResults),
+        }));
         setHistory(prev => {
           if (!append) return normalized;
           // De-dupe: overlapping pages (plan change, an item deleted elsewhere)
@@ -826,14 +821,6 @@ function HistoryPage() {
                     <span className="history-ago">{agoOf(item.createdAt)}</span>
                   </div>
                   <div className="history-card-title">{cardTitle(item)}</div>
-                  {item.updatedFrom && (
-                    <p style={{ margin: '2px 0 0', fontSize: 12.5, color: '#6b7280' }}>
-                      Updated from your previous assessment{(() => {
-                        const source = history.find((h) => String(h._id) === String(item.updatedFrom));
-                        return source ? ` (${fmt(source.createdAt)})` : '';
-                      })()}
-                    </p>
-                  )}
                   <div className="history-tags">
                     {item.priority === 'Priority' && (
                       <span className="tag tag-priority" title={(item.flagReasons || []).join('; ') || 'Flagged for priority review'}>
@@ -1305,20 +1292,6 @@ function HistoryPage() {
                       )}
                     </div>
                   )}
-                </div>
-              )}
-              {/* Update flow entry point: only on the ACTIVE assessment means the
-                  user is continuing their tracked journey, not editing history. */}
-              {expanded === item._id && isActive && (
-                <div className="history-update-row" style={{ display: 'flex', justifyContent: 'flex-end', padding: '12px 16px 16px' }}>
-                  <button
-                    type="button"
-                    className="btn-primary history-update-assessment-btn"
-                    style={{ borderRadius: 12, padding: '10px 18px', fontWeight: 700, background: '#10b981', color: '#fff', border: 'none', cursor: 'pointer' }}
-                    onClick={() => navigate('/assessment', { state: { assessment: item, readOnly: false, updateSourceId: item._id } })}
-                  >
-                    Update Health Assessment
-                  </button>
                 </div>
               )}
             </div>

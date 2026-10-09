@@ -18,6 +18,8 @@
 const Passkey = require('../models/Passkey');
 const BackupCode = require('../models/BackupCode');
 const MfaTransaction = require('../models/MfaTransaction');
+const SecurityEvent = require('../models/SecurityEvent');
+const AdminEvent = require('../models/AdminEvent');
 
 /**
  * A Mongoose-shaped query that resolves to null.
@@ -46,9 +48,13 @@ function nullQuery() {
  * @param {number} [options.backupCodes]  what `BackupCode.countDocuments` reports
  * @param {object|null} [options.transaction] a live transaction to resolve, or
  *   null (the default) to say "this account is not mid-sign-in"
+ * @param {Function} [options.onSecurityEvent] called with every event `/login`
+ *   records, so a suite can still assert on what was written
  * @returns {() => void} restore function
  */
-function stubMfaModels({ passkeys = 0, backupCodes = 0, transaction = null } = {}) {
+function stubMfaModels({
+  passkeys = 0, backupCodes = 0, transaction = null, onSecurityEvent = null,
+} = {}) {
   const originals = {
     passkeyCount: Passkey.countDocuments,
     backupCount: BackupCode.countDocuments,
@@ -56,6 +62,8 @@ function stubMfaModels({ passkeys = 0, backupCodes = 0, transaction = null } = {
     transactionCreate: MfaTransaction.create,
     transactionFindOne: MfaTransaction.findOne,
     transactionFindOneAndUpdate: MfaTransaction.findOneAndUpdate,
+    securityEventCreate: SecurityEvent.create,
+    adminEventCreate: AdminEvent.create,
   };
 
   Passkey.countDocuments = async () => passkeys;
@@ -78,6 +86,28 @@ function stubMfaModels({ passkeys = 0, backupCodes = 0, transaction = null } = {
     return query;
   };
 
+  // ── The audit trail ────────────────────────────────────────────────────
+  //
+  // `/login` ends with two best-effort writes: SecurityEvent.write() for the
+  // sign-in record, and AdminEvent.create() for a first-time device. Both are
+  // `await`ed (or left pending) against a connection that does not exist in a
+  // unit suite, so each one buffers for Mongoose's full 10-second
+  // bufferTimeoutMS before its own `.catch` swallows it.
+  //
+  // That is where the "the happy path still signs a user in" timeouts came
+  // from. SecurityEvent.write() is `await`ed directly by the route, so the
+  // request did not answer until the buffer gave up — 20s for a login plus a
+  // verify, and 30s+ for any test that called the route more than once. The
+  // route itself was correct the whole time.
+  //
+  // `onSecurityEvent` is how a suite keeps the ability to assert on what was
+  // recorded; suites that do not care get a resolved write for free.
+  SecurityEvent.create = async (doc) => {
+    if (onSecurityEvent) await onSecurityEvent(doc);
+    return doc;
+  };
+  AdminEvent.create = async (doc) => doc;
+
   return function restore() {
     Passkey.countDocuments = originals.passkeyCount;
     BackupCode.countDocuments = originals.backupCount;
@@ -85,6 +115,8 @@ function stubMfaModels({ passkeys = 0, backupCodes = 0, transaction = null } = {
     MfaTransaction.create = originals.transactionCreate;
     MfaTransaction.findOne = originals.transactionFindOne;
     MfaTransaction.findOneAndUpdate = originals.transactionFindOneAndUpdate;
+    SecurityEvent.create = originals.securityEventCreate;
+    AdminEvent.create = originals.adminEventCreate;
   };
 }
 

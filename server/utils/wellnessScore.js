@@ -65,10 +65,6 @@ const clampPct = (value) => {
  * out-of-range value cannot hand out free points.
  */
 function getWellnessBaseline(assessment) {
-  // No AI results at all means the recommendation generation failed before
-  // anything was saved — that is NOT a completed assessment. Returning the
-  // neutral 15 here used to manufacture a wellness number out of thin air.
-  if (assessment && (assessment.aiResults == null || typeof assessment.aiResults !== 'object')) return 0;
   const raw = assessment && assessment.aiResults && assessment.aiResults.wellnessBaseline;
   if (typeof raw === 'number' && Number.isFinite(raw)) {
     return clamp(raw, 0, BASELINE_MAX);

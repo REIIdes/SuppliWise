@@ -45,7 +45,25 @@ const USER_ID = '507f1f77bcf86cd799439011';
 const OTHER_USER_ID = '507f1f77bcf86cd799439099';
 const ASSESSMENT_ID = '507f1f77bcf86cd7994390aa';
 
-const dayKey = () => new Date().toISOString().split('T')[0];
+/**
+ * The plan day these rows are seeded under.
+ *
+ * This was `new Date().toISOString().split('T')[0]` — the UTC calendar date —
+ * which is NOT the key the dashboard routes read IntakeRecord by any more. A
+ * plan day runs 04:00 -> 04:00, so between 00:00 and 04:00 UTC the running plan
+ * day is the PREVIOUS date, and this suite then seeded a day's records under a
+ * key no route would ask for: the plan rendered empty, and POST /intake/bulk
+ * refused every press with "Only today's supplements can be updated". The whole
+ * file failed for those four hours and passed for the other twenty — which is the
+ * worst kind of suite failure, because it looks like a flaky environment rather
+ * than a clock-dependent assertion.
+ *
+ * Derived from `planDayKey` rather than restated, so this suite cannot drift from
+ * the rule it is testing. Same fix as Test File/admin-override.test.js.
+ */
+const { planDayKey } = require('../utils/planDay');
+
+const dayKey = () => planDayKey(new Date(), 'UTC');
 
 /** The plan as the results page renders it, so the test mirrors a real plan. */
 const DAILY_SCHEDULE = [

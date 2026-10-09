@@ -327,21 +327,6 @@ function App() {
     };
   }, []);
 
-  /* ── Remember that this device runs the installed app ────────────────
-     When the app boots in standalone display mode it *is* the PWA. Chrome
-     hides beforeinstallprompt once installed, so its absence can't be used
-     to detect "already have it" from a normal browser tab later — this
-     flag is our own copy of that fact. App entry points read it to skip
-     the install CTA and go straight to opening instead. */
-  useEffect(() => {
-    const standalone =
-      window.matchMedia('(display-mode: standalone)').matches ||
-      window.navigator.standalone === true;
-    if (standalone) {
-      try { localStorage.setItem('suppliwise:pwa-installed', '1'); } catch { /* private mode */ }
-    }
-  }, []);
-
   if (!sessionReady) return <RouteFallback />;
 
   return (

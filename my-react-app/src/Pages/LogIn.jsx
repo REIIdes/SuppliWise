@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { NavLink, Link, useNavigate, useLocation } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import { BASE_URL, saveAssessment, getRecommendations, saveAssessmentResults, parseJSON, startSession, takeAuthNotice, getToken, redeemBackupCode, accountIdOf, getActiveAccountId, getStoredUser } from '../api';
@@ -48,7 +48,6 @@ function LogIn() {
   const [fieldErrors, setFieldErrors] = useState({});
   const [error, setError] = useState(LOGIN_NOTICE);
   const [loading, setLoading] = useState(false);
-  const errorRef = useRef(null);
   // OPT-IN saved login: checked by default so switching accounts later never
   // asks for this password again (server stores only a session-bound
   // remember credential — never this password or an access token).
@@ -65,7 +64,7 @@ function LogIn() {
   const [resendCooldown, setResendCooldown] = useState(0);
   const [resendTimer, setResendTimer] = useState(null);
   const [success, setSuccess] = useState('');
-  const [otpTimeLeft, setOtpTimeLeft] = useState(600); // 10 minutes in seconds
+  const [otpTimeLeft, setOtpTimeLeft] = useState(300); // 5 minutes in seconds
   const [otpExpiryTimer, setOtpExpiryTimer] = useState(null);
   const [requiresTwoFactor, setRequiresTwoFactor] = useState(false);
   // Whether the second-factor box is collecting a live authenticator code or a
@@ -108,13 +107,6 @@ function LogIn() {
     const timers = [50, 300, 1000].map((ms) => setTimeout(syncAutofill, ms));
     return () => timers.forEach(clearTimeout);
   }, []);
-
-  // Scroll to error message when it appears
-  useEffect(() => {
-    if (error && errorRef.current) {
-      errorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-  }, [error]);
 
   // The alternate route to the admin login, now that the visible link is gone.
   // Ctrl+Shift+A. Ignored while the user is typing so it can't fire mid-email,
@@ -176,7 +168,7 @@ function LogIn() {
   };
 
   const startOtpExpiryTimer = () => {
-    setOtpTimeLeft(600); // Reset to 10 minutes
+    setOtpTimeLeft(300); // Reset to 5 minutes
     
     // Clear existing timer if any
     if (otpExpiryTimer) {
@@ -517,7 +509,7 @@ function LogIn() {
     setError('');
     setSuccess('');
     setResendCooldown(0);
-    setOtpTimeLeft(600);
+    setOtpTimeLeft(300);
     if (resendTimer) clearInterval(resendTimer);
     if (otpExpiryTimer) clearInterval(otpExpiryTimer);
     setLoading(false);
@@ -562,7 +554,7 @@ function LogIn() {
             </div>
           )}
 
-          {error && !showOtpModal && <p ref={errorRef} className="auth-error">{error}</p>}
+          {error && !showOtpModal && <p className="auth-error">{error}</p>}
 
           <div className={`auth-field ${fieldErrors.email ? 'field-has-error' : ''}`}>
             <label>Email</label>

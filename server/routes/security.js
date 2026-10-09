@@ -29,6 +29,9 @@ const { revokeOtherUserSessions } = require('../utils/sessions');
 const { sendOtpEmail, sendStatusEmail } = require('../utils/email');
 const { isValidEmail } = require('../utils/emailValidation');
 const rateLimits = require('../utils/rateLimits');
+// Generation, digest storage and atomic single-use consumption of emailed codes.
+// One module, so this flow cannot end up with a weaker policy than the others.
+const otpChallenge = require('../utils/otpChallenge');
 const { strongestFactor } = require('../utils/strongestFactor');
 const {
   accountKey, recordOffense, lockRemainingMs, recordAccountFailure, clearOffenses, lockMeta,
@@ -450,8 +453,25 @@ router.delete('/backup-codes', sensitiveLimiter, requireStepUp, async (req, res)
 // email-change proof: single-use, short-lived, and a restart simply asks the
 // user to request a new code. The address is NOT written to the user until it
 // is verified, so an unproven value can never be read back.
-const recoveryEmailProofs = new Map(); // userId -> { email, otp, expiresAt }
+//
+// The entry holds an HMAC DIGEST, never the code. It used to hold the plaintext
+// `otp`, which meant any read of this process's memory yielded a live code.
+// See utils/otpChallenge.js.
+//
+// Format: { email, digest, expiresAt, attempts, maxAttempts }
+const recoveryEmailProofs = new Map();
 const RECOVERY_PROOF_TTL_MS = 15 * 60 * 1000;
+
+// Wrong codes allowed before the proof is destroyed.
+//
+// THIS WAS MISSING ENTIRELY, which is the most serious defect found in this
+// audit. The check was a bare `if (code !== proof.otp)` with no counter and no
+// invalidation, so a 6-digit code stayed guessable for the full 15 minutes of
+// its life. The only brake was `sensitiveLimiter` — 60 requests per 10 minutes
+// per IP — which is 360 guesses per hour from one address and is trivially
+// multiplied by rotating source addresses. Five attempts, enforced on the
+// challenge, is the limit the whole design depends on everywhere else.
+const RECOVERY_PROOF_MAX_ATTEMPTS = otpChallenge.MAX_ATTEMPTS;
 
 function maskLocal(email) {
   const [user, domain] = String(email || '').split('@');
@@ -497,7 +517,7 @@ router.post('/recovery-email/request', sensitiveLimiter, requireStepUp, async (r
     // comment claimed a failure would drop the proof; in practice a failed send
     // left the proof sitting there and told the user to go and read a code that
     // was never delivered.
-    const otp = crypto.randomInt(100000, 999999).toString();
+    const otp = otpChallenge.generateOtp();
     const delivered = await sendOtpEmail(email, otp, 'recovery');
     if (!delivered) {
       // Nothing is stored, so the address can never be "verified" by someone who
@@ -506,7 +526,16 @@ router.post('/recovery-email/request', sensitiveLimiter, requireStepUp, async (r
       console.error(`[security/recovery-email] delivery failed for ${str(user._id).slice(0, 8)}…`);
       return res.status(503).json({ message: 'Could not send the confirmation code. Please try again in a moment.' });
     }
-    recoveryEmailProofs.set(String(user._id), { email, otp, expiresAt: Date.now() + RECOVERY_PROOF_TTL_MS });
+    // Only the digest is retained. The key encodes the account, so a proof can
+    // never be presented by anyone other than the account it was issued to, and
+    // the purpose is fixed by the route it was requested from.
+    recoveryEmailProofs.set(String(user._id), otpChallenge.buildEntry({
+      otp,
+      context: `recovery_email_${user._id}`,
+      ttlMs: RECOVERY_PROOF_TTL_MS,
+      maxAttempts: RECOVERY_PROOF_MAX_ATTEMPTS,
+    }));
+    recoveryEmailProofs.get(String(user._id)).email = email;
 
     res.json({ message: `We sent a confirmation code to ${email}.` });
   } catch (error) {
@@ -525,21 +554,36 @@ router.post('/recovery-email/verify', sensitiveLimiter, async (req, res) => {
   try {
     const code = str(req.body?.code).trim();
     const key = String(req.user._id);
-    const proof = recoveryEmailProofs.get(key);
-    if (!proof) return res.status(400).json({ message: 'Request a new confirmation code.' });
-    if (Date.now() > proof.expiresAt) {
-      recoveryEmailProofs.delete(key);
-      return res.status(400).json({ message: 'That code has expired. Request a new one.' });
+    if (!recoveryEmailProofs.has(key)) {
+      return res.status(400).json({ message: 'Request a new confirmation code.' });
     }
-    if (code !== proof.otp) {
+
+    // Verify AND consume, atomically.
+    //
+    // The old sequence read the proof, compared the plaintext with `!==`, and
+    // deleted it several lines later — after an `await`. Two concurrent requests
+    // carrying the same valid code could both pass the comparison before either
+    // deleted the entry, so single-use was not actually enforced. It also had no
+    // attempt counter at all, and `!==` short-circuits on the first differing
+    // character.
+    //
+    // `consume()` has no await between its check and its delete, enforces the
+    // five-attempt budget on the challenge itself, and compares an HMAC digest in
+    // constant time.
+    const verdict = otpChallenge.consume(recoveryEmailProofs, key, code);
+    if (!verdict.ok) {
+      if (verdict.outcome === 'locked') {
+        return res.status(429).json({ message: 'Too many incorrect codes. Request a new confirmation code.' });
+      }
+      // expired / missing / malformed / mismatch share one answer.
       return res.status(400).json({ message: 'That confirmation code is not correct.' });
     }
+    const { email: proofEmail } = verdict.entry;
 
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ message: 'Account not found.' });
 
-    recoveryEmailProofs.delete(key); // single-use
-    user.recoveryEmail = proof.email;
+    user.recoveryEmail = proofEmail;
     user.recoveryEmailVerifiedAt = new Date();
     await user.save();
 
@@ -552,10 +596,10 @@ router.post('/recovery-email/verify', sensitiveLimiter, async (req, res) => {
       const UserNotification = require('../models/UserNotification');
       await UserNotification.create({
         user: user._id, type: 'info', title: 'Recovery email changed',
-        detail: `Your recovery email was set to ${maskLocal(proof.email)}. If this was not you, change your password and contact support immediately.`,
+        detail: `Your recovery email was set to ${maskLocal(proofEmail)}. If this was not you, change your password and contact support immediately.`,
       }).catch(() => {});
       if (process.env.EMAIL_USER && process.env.EMAIL_PASSWORD) {
-        await sendStatusEmail(user.email, 'recovery-email', { address: maskLocal(proof.email) }).catch(() => {});
+        await sendStatusEmail(user.email, 'recovery-email', { address: maskLocal(proofEmail) }).catch(() => {});
       }
     } catch { /* best-effort */ }
 

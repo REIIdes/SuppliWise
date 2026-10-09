@@ -1,4 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  `android:usesCleartextTraffic="false"` and the networkSecurityConfig together
+  are the "this app does not speak plain HTTP" setting, and both are set because
+  each covers the other.
+
+  usesCleartextTraffic is the platform-wide default. networkSecurityConfig is the
+  per-host policy, and when both are present the CONFIG wins for hosts it
+  describes. Setting only the config would leave a reader (and a reviewer)
+  looking at a manifest that says `true`, which is the kind of contradiction
+  people trust the wrong half of.
+
+  The development case is solved with a trusted certificate instead of cleartext:
+  the debug build's network_security_config.xml adds the local development CA as
+  a trust anchor, and cleartext is not permitted for any host in any build type.
+-->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <application
@@ -8,7 +23,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/AppTheme"
-        android:usesCleartextTraffic="true"
+        android:usesCleartextTraffic="false"
         android:networkSecurityConfig="@xml/network_security_config">
 
         <activity

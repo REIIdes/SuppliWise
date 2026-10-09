@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DEBUG BUILDS ONLY.
+
+  This file overrides src/main/res/xml/network_security_config.xml for the
+  `debug` build type, so a release APK never contains it.
+
+  WHAT IS DIFFERENT, AND WHY IT IS SAFE TO BE
+  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  One extra trust anchor: the local development certificate authority, bundled
+  from certs/rootCA.pem into res/raw by `node scripts/dev-certs.mjs`.
+
+  This is what makes the app work against a development backend over HTTPS
+  WITHOUT cleartext. The API's certificate is issued by that CA, and an Android
+  app that does not trust the CA refuses the connection outright
+  (ERR_CERT_AUTHORITY_INVALID), which is a genuinely baffling symptom, because
+  the identical URL works in the browser on the same phone. The browser trusts
+  the OS certificate store, which `mkcert -install` populated; the app does not
+  read that store. Trusting the CA inside the app is what makes the two agree.
+
+  The alternatives were both worse:
+
+    * cleartextTrafficPermitted="true" works immediately, but ships bearer
+      tokens and OTP codes in the clear on any shared network, and it was the
+      previous configuration.
+
+    * asking the user to install a CA certificate through Android Settings.
+      Android deliberately makes that awkward, and apps that do not opt into
+      user-installed anchors silently fail to trust it.
+
+  WHY IT IS NOT A RELEASE CONCERN
+  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  This file is in src/debug/, so Android compiles it only into a debug build, and
+  the CA is a development certificate authority that exists on one machine and is
+  trusted by nothing else.
+
+  It is also NOT committed: `*.pem` is in .gitignore, so a clone has no
+  res/raw/mkcert_rootca.pem and therefore cannot build the debug APK until
+  `node scripts/dev-certs.mjs` has been run. That is the correct order of
+  operations, and the reason `npm run certs` is a prerequisite rather than an
+  optional extra.
+
+  If a release build ever genuinely needs to trust a private CA (an internal
+  deployment with its own authority, say), that belongs in the main config as a
+  deliberate, reviewed change. It is not a debug file, and it is certainly not
+  re-enabling cleartext.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+            <!-- Development CA. Present only in debug builds. -->
+            <certificates src="@raw/mkcert_rootca" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

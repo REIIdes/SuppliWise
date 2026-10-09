@@ -3,7 +3,6 @@ const mongoose = require('mongoose');
 const router = express.Router();
 const Assessment = require('../models/Assessment');
 const DashboardMetrics = require('../models/DashboardMetrics');
-const IntakeRecord = require('../models/IntakeRecord');
 const UserNotification = require('../models/UserNotification');
 const AdminEvent = require('../models/AdminEvent');
 const { protect } = require('../middleware/auth');
@@ -12,7 +11,7 @@ const { historyLimitFor, tierOf, can, PLAN_LABELS, resolveSubscription } = requi
 // Severity is reached through the flagging layer, which runs the rule engine
 // (utils/severity.js) as its authoritative floor and can only escalate on top.
 const { analyzePriorityFlagging } = require('../utils/priorityFlagging');
-const { expiryDateFromNow, expiryFromCreatedAt, notExpiredFilter } = require('../utils/assessments');
+const { expiryDateFromNow, expiryFromCreatedAt } = require('../utils/assessments');
 const { guardRaisePriority, selfHealOpenPriority } = require('../utils/priorityGate');
 
 // Flag an assessment as Priority + notify the user and admins (best-effort,
@@ -184,8 +183,6 @@ router.post('/', protect, async (req, res) => {
       currentSupplements: suppsResult.value,
       recentBloodTest,
       bloodTestResults: bloodResult.value,
-      // The "Update Health Assessment" flow sends the source assessment id.
-      updatedFrom: req.body.updatedFrom || null,
       sunExposure: req.body.sunExposure,
       fitnessFocus: req.body.fitnessFocus,
       proteinIntake: req.body.proteinIntake,
@@ -415,30 +412,6 @@ router.get('/history', protect, async (req, res) => {
   }
 });
 
-// @route   GET /api/assessment/active
-// @desc    The user's current assessment — the newest one still in
-//          force, the same query the dashboard runs. The ~500 KB
-//          aiResults blob is projected out on purpose: the Update
-//          Health Assessment flow pre-fills the form from the
-//          assessment's own fields, and the replacement assessment
-//          generates fresh results, so shipping the old ones would
-//          only cost bandwidth.
-// @access  Private
-router.get('/active', protect, async (req, res) => {
-  try {
-    const assessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
-      .sort({ createdAt: -1 })
-      .select('-aiResults');
-    if (!assessment) {
-      return res.status(404).json({ message: 'No active assessment.' });
-    }
-    res.json(assessment);
-  } catch (error) {
-    console.error('[assessment GET /active]', error.message);
-    res.status(500).json({ message: 'Could not load the active assessment.' });
-  }
-});
-
 // @route   GET /api/assessment/me
 // @desc    Get the current user's latest assessment
 // @access  Private
@@ -494,79 +467,6 @@ router.get('/results/:assessmentId', protect, async (req, res) => {
 
 // @route   PATCH /api/assessment/:id/results
 // @desc    Store AI results on an existing assessment
-// Move the user's intake rows and dashboard metrics from a previous assessment
-// onto this (newer) one. Used by the "Update Health Assessment" flow: the new
-// assessment becomes the current one, but tracking MUST carry forward — the
-// user is continuing their journey, not starting over.
-//
-// We reassign the OLD rows rather than copying them: a supplement that is still
-// recommended keeps its full intake trail, and one that was dropped keeps its
-// history readable but is simply absent from the new recommendation list.
-//
-// Validates both assessments belong to the caller before touching anything.
-router.post('/:id/migrate-history', protect, async (req, res) => {
-  try {
-    if (!mongoose.isValidObjectId(req.params.id)) {
-      return res.status(400).json({ message: 'Invalid assessment.' });
-    }
-    const { fromAssessment } = req.body || {};
-    if (!fromAssessment || !mongoose.isValidObjectId(fromAssessment)) {
-      return res.status(400).json({ message: 'A valid source assessment is required.' });
-    }
-    if (String(fromAssessment) === String(req.params.id)) {
-      return res.json({ migrated: 0, metricsCarriedOver: false });
-    }
-
-    const [target, source] = await Promise.all([
-      Assessment.findOne({ _id: req.params.id, user: req.user._id }).select('_id').lean(),
-      Assessment.findOne({ _id: fromAssessment, user: req.user._id }).select('_id').lean(),
-    ]);
-    if (!target || !source) {
-      return res.status(404).json({ message: 'Assessment not found.' });
-    }
-
-    // Re-point all prior intake rows at the new current assessment.
-    const intakeResult = await IntakeRecord.updateMany(
-      { user: req.user._id, assessment: source._id },
-      { $set: { assessment: target._id } },
-    );
-
-    // Carry the previous metrics forward onto the new assessment's metrics doc
-    // (POST /assessment already created a fresh zeroed one for continuity of the
-    // per-assessment streak clock).
-    const previous = await DashboardMetrics.findOne({ user: req.user._id, assessment: source._id })
-      .sort({ createdAt: -1 })
-      .lean();
-    let metricsCarriedOver = false;
-    if (previous) {
-      await DashboardMetrics.updateOne(
-        { user: req.user._id, assessment: target._id },
-        {
-          $set: {
-            currentStreak: previous.currentStreak || 0,
-            longestStreak: previous.longestStreak || 0,
-            totalDaysTracked: previous.totalDaysTracked || 0,
-            overallAdherence: previous.overallAdherence || 0,
-            energyLevel: previous.energyLevel || 'Medium',
-            lastTrackedDate: previous.lastTrackedDate,
-            lastCompletedDay: previous.lastCompletedDay,
-            streakAwardedToday: previous.streakAwardedToday || false,
-          },
-        },
-      );
-      metricsCarriedOver = true;
-    }
-
-    return res.json({
-      migrated: intakeResult.modifiedCount || 0,
-      metricsCarriedOver,
-    });
-  } catch (error) {
-    console.error('[assessment POST /:id/migrate-history]', error.message);
-    return res.status(500).json({ message: 'Could not carry your history forward. Please try again.' });
-  }
-});
-
 // @access  Private
 const MAX_AI_RESULTS_BYTES = 500 * 1024; // 500 KB — prevents DB bloat from oversized payloads
 router.patch('/:id/results', protect, async (req, res) => {

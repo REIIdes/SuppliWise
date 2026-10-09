@@ -109,28 +109,6 @@ function normalizeChatRequest(body) {
   return { message: normalizedMessage, history };
 }
 
-// A chat turn may reference a stored conversation: `threadId`
-// continues an existing thread, `newThread` seeds a new one from
-// the (already validated) client history. Both are optional and
-// mutually exclusive — once a turn is persisted the server owns
-// the transcript, so a request must never claim both intents.
-function normalizeThreadRequest(body) {
-  const { threadId, newThread } = body;
-  const hasThread = threadId !== undefined && threadId !== null && threadId !== '';
-  if (hasThread && newThread === true) {
-    throw new ChatInputError('Choose a conversation to continue or start a new one.');
-  }
-  if (hasThread) {
-    if (typeof threadId !== 'string' || !/^[a-f0-9]{24}$/i.test(threadId)) {
-      throw new ChatInputError('Conversation reference is invalid.');
-    }
-  }
-  if (newThread !== undefined && newThread !== true && newThread !== false) {
-    throw new ChatInputError('Invalid new conversation flag.');
-  }
-  return { threadId: hasThread ? threadId : null, newThread: newThread === true };
-}
-
 function recommendationDataFromAssessment(assessment) {
   const recommendations = assessment?.aiResults?.recommendations;
   if (!Array.isArray(recommendations)) return [];
@@ -193,8 +171,6 @@ module.exports = {
   MAX_HISTORY_CONTENT_LENGTH,
   MAX_REPLY_LENGTH,
   normalizeChatRequest,
-  normalizeHistory,
-  normalizeThreadRequest,
   recommendationDataFromAssessment,
   buildRecommendationContext,
   extractAssistantReply,

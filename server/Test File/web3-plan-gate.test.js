@@ -26,6 +26,24 @@ require.cache[authPath].exports = {
   protect: (req, res, next) => next(),
 };
 
+const mongoose = require('mongoose');
+
+// ── Why the buffer timeout is lowered ───────────────────────────────────────
+//
+// The DELUXE cases below are asserted by REACHING the handler: there is no
+// database, so every query buffers for Mongoose's default 10s before the
+// handler answers 500. That is the correct outcome — anything other than a 500
+// or 403 would mean the gate let something through by accident — but the 12
+// gated paths then cost 10s each, so the test needs ~2 minutes to finish and
+// times out long before it can prove anything.
+//
+// Mongoose has no connection to abandon here, so the wait is pure dead time.
+// Lowering bufferTimeoutMS collapses it: each handler still fails, still
+// answers 500, and the suite finishes in seconds. Nothing about what is being
+// asserted changes — only how long the assertion waits for a connection that
+// is never going to arrive.
+mongoose.set('bufferTimeoutMS', 250);
+
 const web3Router = require('../routes/web3');
 
 /** Mount the router and issue one request as a user on `plan`. */

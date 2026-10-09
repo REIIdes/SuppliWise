@@ -54,7 +54,13 @@ function webauthnOrigins() {
  * shell uses, and the backend's own port. Never used in production.
  */
 function developmentOrigins() {
+  const port = str(process.env.PORT || '5000');
   return [
+    // The Vite dev servers, both schemes. The https forms are not optional
+    // decoration: the dev server runs over TLS when a certificate is present
+    // (see scripts/dev-certs.mjs), and an https page talking to an http API is
+    // blocked by the browser as mixed content — so trusting only the http form
+    // would leave the whole app unable to reach its own API.
     'http://localhost:5173',
     'http://localhost:5174',
     'http://localhost:5175',
@@ -65,10 +71,18 @@ function developmentOrigins() {
     'http://127.0.0.1:5174',
     'http://127.0.0.1:5175',
     'https://127.0.0.1:5173',
+    'https://127.0.0.1:5174',
+    'https://127.0.0.1:5175',
     'capacitor://localhost',
     'http://localhost',
     'http://127.0.0.1',
-    `http://localhost:${str(process.env.PORT || '5000')}`,
+    // The API's own origin. Same-origin requests (a page served by this
+    // process, curl, the native app) must be trusted in both schemes for the
+    // same reason as above.
+    `http://localhost:${port}`,
+    `https://localhost:${port}`,
+    `http://127.0.0.1:${port}`,
+    `https://127.0.0.1:${port}`,
   ];
 }
 

@@ -151,7 +151,23 @@ function describeIpLocation(headerValue, rawIp) {
 }
 
 // In-memory OTP storage (in production, use Redis or database)
-const otpStore = new Map(); // Format: { email: { otp, expiresAt, requestedAt, attempts } }
+//
+// Format: { <purposeAndSubject>: { digest, expiresAt, createdAt, requestedAt, attempts, maxAttempts } }
+//
+// WHAT IS *NOT* IN HERE
+// --------------------
+// The entry holds an HMAC digest, never the code. It used to hold `otp: "123456"`
+// in plaintext for the whole life of the challenge, which meant anything that
+// could read this process's memory — a heap dump, a crash reporter, a stray
+// `console.log(store)`, a debugger attached to a dev box — held live sign-in
+// codes that were still redeemable. utils/otpChallenge.js owns the digest and
+// the constant-time comparison; this file only decides WHEN an entry exists.
+const otpStore = new Map();
+
+// Generation, storage representation and atomic single-use consumption of
+// emailed codes. One module, so the login, email-change and recovery-email
+// flows cannot each invent their own weaker version.
+const otpChallenge = require('../utils/otpChallenge');
 
 // Plaintext OTPs must not accumulate for the process lifetime. Entries were
 // only removed when a code was verified, exhausted, or re-requested on the same
@@ -225,14 +241,26 @@ function authFailure(res, error, context) {
   return res.status(500).json({ message: 'Something went wrong. Please try again later.' });
 }
 
-// Max wrong-code attempts per OTP before it is invalidated (brute-force guard)
-const MAX_OTP_ATTEMPTS = 5;
+// Max wrong-code attempts per OTP before it is invalidated (brute-force guard).
+// Owned by utils/otpChallenge.js so the login, email-change and recovery-email
+// flows cannot drift apart — they used to be independent implementations, and
+// the recovery-email one had no limit at all.
+const MAX_OTP_ATTEMPTS = otpChallenge.MAX_ATTEMPTS;
 
 // How long a one-time code stays valid. Defined once and used by issueOtp() so
 // every issuing route grants the same window — it used to be a literal
 // `10 * 60 * 1000` repeated at each of the five call sites, where one site
 // could be edited without the others and codes would silently disagree.
-const OTP_TTL_MS = 10 * 60 * 1000;
+//
+// Five minutes, down from ten. The window is a pure security parameter: it is
+// the amount of time an attacker who has intercepted or triggered a code has to
+// guess it, and the emailed code is only 6 digits (~20 bits of entropy). Five
+// minutes is ample for someone to open a mail client, read a code and type it;
+// ten minutes doubles the guessing window for no usability gain that matters.
+// The MFA transaction that gates the session is minted independently and lasts
+// 10 minutes for the email path, so this does not shorten the sign-in window —
+// it only stops an unredeemed code from staying useful for as long.
+const OTP_TTL_MS = 5 * 60 * 1000;
 
 // How long a single delivery may take before it is treated as failed. The
 // transporter is pooled, so a healthy relay answers in a few hundred ms; this
@@ -267,10 +295,25 @@ const OTP_DELIVERY_TIMEOUT_MS = 10000;
 // OFF unless LOG_OTP_IN_CONSOLE is explicitly truthy. It is never on by
 // default, it never logs in production (see the NODE_ENV guard), and the email
 // is masked so the line is not a map of who has an account.
+//
+// THE GUARD IS NOW AN ALLOWLIST, NOT A DENYLIST
+// ---------------------------------------------
+// It used to ask only "is NODE_ENV *not* production?". That is a denylist, and a
+// denylist fails open on any value it does not recognise — a staging box with
+// NODE_ENV=stage, a container image with NODE_ENV unset, a typo'd
+// NODE_ENV=prodution. Every one of those would have printed live sign-in codes
+// into a log aggregator.
+//
+// It now requires NODE_ENV to be one of the three values that mean "a developer's
+// own machine", so anything unrecognised is treated as production. This is the
+// one place in the application where a code is written to a log at all, and it
+// is scoped as narrowly as the requirement allows while keeping local sign-in
+// possible.
+const DEV_ENVIRONMENTS = new Set(['development', 'dev', 'test']);
 function logOtpToConsole(toEmail, otp, type) {
-  const logCodes = /^(1|true|yes|on)$/i.test(String(process.env.LOG_OTP_IN_CONSOLE || ''))
-    && process.env.NODE_ENV !== 'production';
-  if (logCodes) {
+  const optedIn = /^(1|true|yes|on)$/i.test(String(process.env.LOG_OTP_IN_CONSOLE || ''));
+  const localDev = DEV_ENVIRONMENTS.has(String(process.env.NODE_ENV || '').trim().toLowerCase());
+  if (optedIn && localDev) {
     console.log(`[otp] ${type} code for ${maskEmail(toEmail)}: ${otp}`);
   }
 }
@@ -310,15 +353,28 @@ async function deliverOtp(toEmail, otp, type) {
 // is released on failure so an honest user whose mail bounced can retry
 // immediately instead of being told to wait for a code that never existed.
 //
+// Issuing REPLACES any previous entry under the same key, which is what
+// invalidates the old code on a resend: one live code per purpose per subject,
+// never two. There is no documented security reason to keep an older code valid
+// alongside its replacement, and keeping both would mean a code an attacker
+// captured from an earlier mail still worked.
+//
 // @returns {Promise<{ok: true, otp: string} | {ok: false}>}
 async function issueOtp(toEmail, otpKey, rateKey, type) {
-  const otp = crypto.randomInt(100000, 999999).toString();
+  const otp = otpChallenge.generateOtp();
   const delivered = await deliverOtp(toEmail, otp, type);
   if (!delivered) {
     if (rateKey) otpRateLimitMap.delete(rateKey);
     return { ok: false };
   }
-  otpStore.set(otpKey, { otp, expiresAt: Date.now() + OTP_TTL_MS, requestedAt: Date.now() });
+  // Only the HMAC digest is stored. See otpChallenge.js for why a bare hash of a
+  // 6-digit value would not be a protection.
+  otpStore.set(otpKey, otpChallenge.buildEntry({
+    otp,
+    context: otpKey,
+    ttlMs: OTP_TTL_MS,
+    maxAttempts: MAX_OTP_ATTEMPTS,
+  }));
   if (rateKey) otpRateLimitMap.set(rateKey, Date.now());
   return { ok: true, otp };
 }
@@ -333,21 +389,31 @@ function otpDeliveryFailed(res) {
   });
 }
 
-// Records a failed OTP attempt. Returns true when the caller should reject the
-// attempt, and invalidates the stored OTP once the limit is reached.
-function registerOtpAttempt(key, storedData) {
-  storedData.attempts = (storedData.attempts || 0) + 1;
-  if (storedData.attempts >= MAX_OTP_ATTEMPTS) {
-    otpStore.delete(key);
-    return 'locked';
-  }
-  otpStore.set(key, storedData);
-  return 'mismatch';
-}
+// The one message every wrong-code rejection shares.
+//
+// Two things are deliberately collapsed into it. First, "expired", "never
+// issued", "already used" and "wrong code" are indistinguishable, so this route
+// cannot be used to probe which challenges exist. Second, the wording does not
+// tell the caller whether the challenge still has attempts left, which would let
+// an attacker calibrate how far through the budget they are without ever
+// triggering the lock.
+//
+// Kept as a function rather than a literal because it is now quoted by three
+// call sites and by the tests that pin the contract.
+const OTP_REJECTION_MESSAGE = 'That verification code is not valid.';
 
 // Rate limiting map for OTP requests
 const otpRateLimitMap = new Map(); // Format: { userId: lastRequestTime }
 const OTP_COOLDOWN_MS = 30000; // 30 seconds cooldown
+
+// The answer given whenever /resend-login-otp cannot act: unknown account,
+// inside the cooldown, or a malformed id.
+//
+// One string for all three so the route cannot be used to tell them apart. See
+// the comment at the call site for why "User not found" was itself the bug.
+const RESEND_GENERIC_MESSAGE =
+  'If that sign-in attempt is still valid, a new verification code is on its way. '
+  + 'Check your inbox — and your spam folder if it does not arrive within a few minutes.';
 
 // Generate JWT (admin sessions only — users are minted by issueUserSession).
 // User tokens are issued WITHOUT an `exp` and WITH a `sid` (session id):
@@ -780,17 +846,10 @@ router.post('/login', async (req, res) => {
         BackupCode.countDocuments({ user: user._id, usedAt: null }),
       ]);
     }
-    let mfaMethods = mfaTransaction.methodsFor(
+    const mfaMethods = mfaTransaction.methodsFor(
       { twoFactorEnabled: user.twoFactorEnabled, twoFactorMethod },
       { passkeys: passkeyCount, backupCodeCount: backupCount },
     );
-    if (!usesAuthenticator && !mfaMethods.includes('email-otp')) {
-      // This branch delivers the second factor BY EMAIL, so the transaction must
-      // accept 'email-otp'. For accounts with 2FA off (or a half-broken 2FA
-      // setup) methodsFor falls back to ['totp'], which makes every
-      // verify-login-otp read "That sign-in attempt has expired".
-      mfaMethods = [...mfaMethods.filter((m) => m !== 'totp'), 'email-otp'];
-    }
     const mfaToken = await mfaTransaction.start({
       user: user._id,
       methods: mfaMethods,
@@ -1103,22 +1162,25 @@ router.post('/verify-login-otp', async (req, res) => {
     // with the canonical `_id`, and `findById` accepts upper-case hex, so a
     // non-canonical id resolved a user but missed its own pending OTP.
     const otpKey = `login_${user._id}`;
-    const storedData = otpStore.get(otpKey);
 
-    if (!storedData) {
-      return res.status(400).json({ message: 'No OTP request found. Please try logging in again.' });
-    }
+    // Verify AND consume, atomically.
+    //
+    // This replaces a read-then-compare-then-delete sequence with three awaits
+    // interleaved between the checks. Two concurrent submissions of one valid
+    // code could both pass every check and both reach the session-issuing code
+    // below; only the atomic MfaTransaction spend stopped the second one from
+    // getting a token, and only by accident of ordering rather than by design.
+    // `consume()` contains no await between its check and its delete, so on the
+    // event loop exactly one caller can observe the entry.
+    //
+    // It also enforces expiry, the single-use guarantee and the attempt budget
+    // in one place, and compares against an HMAC digest in constant time rather
+    // than with `!==` on the plaintext.
+    const submitted = str(otp).trim();
+    const verdict = otpChallenge.consume(otpStore, otpKey, submitted);
 
-    // Check if OTP has expired
-    if (Date.now() > storedData.expiresAt) {
-      otpStore.delete(otpKey);
-      return res.status(400).json({ message: 'Verification code has expired. Please try logging in again.' });
-    }
-
-    // Verify OTP (wrong attempts are counted; the code is invalidated after MAX_OTP_ATTEMPTS)
-    if (storedData.otp !== str(otp).trim()) {
-      const outcome = registerOtpAttempt(otpKey, storedData);
-      if (outcome === 'locked') {
+    if (!verdict.ok) {
+      if (verdict.outcome === 'locked') {
         // Capped ladder + keyed on the RESOLVED id. This is an unauthenticated
         // public route: keying on the raw client-supplied userId let anyone who
         // knew a victim's email lock their 2FA / password reset / recovery codes,
@@ -1126,11 +1188,13 @@ router.post('/verify-login-otp', async (req, res) => {
         recordOtpOffense(accountKey('otp-user', user._id));
         return res.status(429).json({ message: 'Too many incorrect attempts. Please request a new code.' });
       }
-      return res.status(400).json({ message: 'Invalid verification code. Please try again.' });
+      // 'missing', 'expired', 'malformed' and 'mismatch' all answer identically.
+      // The old code answered "No OTP request found." for one and "Invalid
+      // verification code." for another, which told an attacker holding a user id
+      // whether that account had a code outstanding at all.
+      return res.status(400).json({ message: OTP_REJECTION_MESSAGE });
     }
 
-    // OTP is valid, remove from store
-    otpStore.delete(otpKey);
     clearOffenses(accountKey('otp-user', transaction.user));
 
     // Spend the transaction, atomically, BEFORE the session exists. Two
@@ -1472,10 +1536,29 @@ router.post('/resend-login-otp', async (req, res) => {
     if (!userId) {
       return res.status(400).json({ message: 'User ID is required' });
     }
+    if (!mongoose.isValidObjectId(str(userId))) {
+      // A malformed id is bad input, not a missing account: `findById` throws a
+      // CastError on this, which the generic handler would turn into a 500. It
+      // is a 400 because a malformed value can never name an account, so the
+      // answer reveals nothing about whether one exists.
+      return res.status(400).json({ message: 'Invalid request.' });
+    }
 
     const user = await User.findById(userId);
     if (!user) {
-      return res.status(401).json({ message: 'User not found' });
+      // ENUMERATION, CLOSED.
+      //
+      // This used to answer `401 { message: 'User not found' }` for an id that
+      // does not exist and `200` for one that does. Anyone holding a candidate
+      // id could therefore confirm whether that account exists, from an
+      // unauthenticated route, with a single request — and the app is careful to
+      // make /login itself non-enumerating, so this route was undoing that.
+      //
+      // The answer is now the same one a real account gets when it is inside the
+      // resend cooldown. That is not a convenient coincidence: it is the honest
+      // version of the same concealment, because "you just asked, wait" is
+      // something a caller learns whether or not the account exists.
+      return res.status(200).json({ message: RESEND_GENERIC_MESSAGE });
     }
 
     // Check rate limiting (60 second cooldown)
@@ -1484,8 +1567,8 @@ router.post('/resend-login-otp', async (req, res) => {
       const timeSinceLastRequest = Date.now() - lastRequest;
       if (timeSinceLastRequest < OTP_COOLDOWN_MS) {
         const remainingSeconds = Math.ceil((OTP_COOLDOWN_MS - timeSinceLastRequest) / 1000);
-        return res.status(429).json({ 
-          message: `Please wait ${remainingSeconds} seconds before requesting another code.`,
+        return res.status(200).json({
+          message: RESEND_GENERIC_MESSAGE,
           remainingSeconds,
         });
       }
@@ -1902,47 +1985,12 @@ router.post('/two-factor-method', protect, async (req, res) => {
   }
 });
 
-// @route   POST /api/auth/resend-password-reset-otp
-// @desc    Resend OTP for password reset
-// @access  Public
-router.post('/resend-password-reset-otp', async (req, res) => {
-  const { userId } = req.body;
-
-  try {
-    if (!userId) {
-      return res.status(400).json({ message: 'User ID is required' });
-    }
-
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(401).json({ message: 'Invalid request' });
-    }
-
-    // Check rate limiting (60 second cooldown)
-    const lastRequest = otpRateLimitMap.get(user._id.toString());
-    if (lastRequest) {
-      const timeSinceLastRequest = Date.now() - lastRequest;
-      if (timeSinceLastRequest < OTP_COOLDOWN_MS) {
-        const remainingSeconds = Math.ceil((OTP_COOLDOWN_MS - timeSinceLastRequest) / 1000);
-        return res.status(429).json({ 
-          message: `Please wait ${remainingSeconds} seconds before requesting another code.`,
-          remainingSeconds,
-        });
-      }
-    }
-
-    // As with /login: keep the existing code if the replacement never went out.
-    const issued = await issueOtp(user.email, `password_reset_${user._id}`, user._id.toString(), 'password-reset');
-    if (!issued.ok) return otpDeliveryFailed(res);
-
-    res.json({
-      message: 'Verification code sent to your email successfully',
-    });
-  } catch (error) {
-    console.error('[resend-password-reset-otp]', error.message);
-    res.status(500).json({ message: 'Something went wrong. Please try again later.' });
-  }
-});
+// NOTE: a second `POST /api/auth/resend-password-reset-otp` used to be
+// registered further down this file. Express resolves a path against handlers in
+// registration order, so that copy was unreachable — it had been superseded by
+// the legacy alias above, which delegates to utils/passwordReset.js — and it is
+// gone rather than left as dead code carrying a weaker security posture than
+// the live route it shadowed. The live route is the alias registered above.
 
 // @route   POST /api/auth/request-email-otp
 // @desc    Request OTP for email change
@@ -2056,30 +2104,20 @@ router.post('/verify-email-otp', async (req, res) => {
         lockedBy: 'account',
       });
     }
-    const storedData = otpStore.get(otpKey);
+    const verdict = otpChallenge.consume(otpStore, otpKey, str(otp).trim());
 
-    if (!storedData) {
-      return res.status(400).json({ message: 'No OTP request found. Please request a new code.' });
-    }
-
-    // Check if OTP has expired
-    if (Date.now() > storedData.expiresAt) {
-      otpStore.delete(otpKey);
-      return res.status(400).json({ message: 'Verification code has expired. Please request a new one.' });
-    }
-
-    // Verify OTP (wrong attempts are counted; the code is invalidated after MAX_OTP_ATTEMPTS)
-    if (storedData.otp !== str(otp).trim()) {
-      const outcome = registerOtpAttempt(otpKey, storedData);
-      if (outcome === 'locked') {
+    if (!verdict.ok) {
+      if (verdict.outcome === 'locked') {
         recordOtpOffense(accountKey('otp-user', user._id));
         return res.status(429).json({ message: 'Too many incorrect attempts. Please request a new code.' });
       }
-      return res.status(400).json({ message: 'Invalid verification code. Please try again.' });
+      // One answer for missing, expired, malformed and wrong — see the note on
+      // OTP_REJECTION_MESSAGE. This route is behind a valid session, so there is
+      // no enumeration concern here, but there is no reason to tell a caller
+      // which challenges exist either.
+      return res.status(400).json({ message: OTP_REJECTION_MESSAGE });
     }
 
-    // OTP is valid, remove from store
-    otpStore.delete(otpKey);
     clearOffenses(accountKey('otp-user', user._id));
 
     // Record the proof server-side: PUT /profile will only ever accept a

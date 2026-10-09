@@ -3,8 +3,7 @@
   "appName": "SuppliWise",
   "webDir": "dist",
   "server": {
-    "cleartext": true,
-    "androidScheme": "http"
+    "androidScheme": "https"
   },
   "android": {
     "buildOptions": {

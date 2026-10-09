@@ -20,4 +20,21 @@ export default defineConfig([
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
   },
+  {
+    // Files that run in NODE, not in a browser, so they get Node's globals.
+    //
+    // `**/*.test.js` live inside src/ but execute under `node --test` — they
+    // import node:fs / node:http and read process.env to spawn real servers.
+    // `vite.config.js` and `eslint.config.js` are build tooling and are only
+    // ever evaluated by Node.
+    //
+    // Without this they are linted against browser globals alone, so
+    // `process.env.X` is reported as undefined in a file that genuinely has
+    // it. That is worse than a cosmetic error: the tempting "fix" is a blanket
+    // eslint-disable, which then hides real mistakes for the whole file.
+    files: ['**/*.test.js', 'vite.config.js', 'eslint.config.js', 'scripts/**/*.mjs'],
+    languageOptions: {
+      globals: { ...globals.browser, ...globals.node },
+    },
+  },
 ])

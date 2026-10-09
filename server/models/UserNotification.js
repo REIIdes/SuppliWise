@@ -10,7 +10,7 @@ const userNotificationSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ['severe-flag', 'info', 'resolved'],
+      enum: ['severe-flag', 'info'],
       default: 'info',
       index: true,
     },

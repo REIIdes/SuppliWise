@@ -228,7 +228,11 @@ const probes = {
   // These exercise the live stack (limiters, headers, auth) like an outsider.
 };
 
-const SELF_BASE = () => `http://localhost:${process.env.PORT || 5000}`;
+// TLS_ENABLED-aware: these probes call the live API, so they must speak the scheme
+// the API is actually serving. A pinned `http://` here makes every self-probe
+// fail against an HTTPS API with an error that names neither TLS nor the
+// certificate.
+const SELF_BASE = () => require('./tls').loopbackOrigin();
 
 async function selfFetch(path, options = {}, timeoutMs = 5000) {
   const controller = new AbortController();

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import { registerUser, saveAssessment, getRecommendations, saveAssessmentResults, getCaptcha, startSession } from '../api';
@@ -55,7 +55,6 @@ function SignIn() {
   const [captchaLoading, setCaptchaLoading] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const errorRef = useRef(null);
 
   const fromAssessment = location.state?.fromAssessment;
 
@@ -76,13 +75,6 @@ function SignIn() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time challenge fetch on mount
     loadCaptcha();
   }, []);
-
-  // Scroll to error message when it appears
-  useEffect(() => {
-    if (error && errorRef.current) {
-      errorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-  }, [error]);
 
   // Months array
   const months = [
@@ -295,7 +287,7 @@ function SignIn() {
             </div>
           )}
 
-          {error && <p ref={errorRef} className="auth-error">{error}</p>}
+          {error && <p className="auth-error">{error}</p>}
 
           <div className="name-row">
             <div className={`auth-field ${fieldErrors.firstName ? 'field-has-error' : ''}`}>

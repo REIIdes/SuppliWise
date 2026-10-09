@@ -1,34 +1,10 @@
-import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
-import InstallAppModal from '../Components/InstallAppModal/InstallAppModal';
 import { PLAN_CARD_ORDER, PLAN_META } from '../subscription/catalogue';
 import './HomePage.css';
 
 function HomePage() {
   const navigate = useNavigate();
-  const [showInstallModal, setShowInstallModal] = useState(false);
-  {/* Install CTA policy, computed once on load:
-        Mobile web + never installed  → "Install for Mobile" (QR modal)
-        Mobile web + installed before → "Open the App" (never a second install)
-        Desktop web, or standalone    → no CTA at all (the app is already open) */}
-  const [installCTA] = useState(() => {
-    const ua = window.navigator.userAgent || '';
-    const isMobileWeb =
-      /Mobi|Android|iPhone|iPad|iPod|IEMobile|Opera Mini/i.test(ua) ||
-      (/Macintosh/i.test(ua) && (window.navigator.maxTouchPoints || 0) > 1);
-    const standalone =
-      window.matchMedia('(display-mode: standalone)').matches ||
-      window.navigator.standalone === true;
-    // App.jsx records this flag every time the app boots as a PWA, so a
-    // device that installed once remembers it even when visited later in a
-    // normal browser tab (where standalone detection is false).
-    let flagged = false;
-    try { flagged = localStorage.getItem('suppliwise:pwa-installed') === '1'; } catch { /* private mode */ }
-    return { isMobileWeb, standalone, installedBefore: flagged };
-  });
-  const showInstallCTA = installCTA.isMobileWeb && !installCTA.standalone && !installCTA.installedBefore;
-  const showOpenCTA = installCTA.isMobileWeb && !installCTA.standalone && installCTA.installedBefore;
 
   return (
     <div className="home-wrapper">
@@ -78,30 +54,6 @@ function HomePage() {
           >
             Learn More
           </button>
-          {/* Opens the install modal; the QR inside is a placeholder until the
-              mobile QR is ready. Only offered where installing makes sense. */}
-          {showInstallCTA && (
-            <button
-              className="btn-secondary"
-              type="button"
-              onClick={() => setShowInstallModal(true)}
-            >
-              Install for Mobile
-            </button>
-          )}
-          {showOpenCTA && (
-            /* Device installed the app before — never offer a second install.
-               Same URL routes to the installed app on Android/Chrome where the
-               PWA has a verified link. */
-            <button
-              className="btn-secondary"
-              type="button"
-              title="Open the SuppliWise app you already have on this device"
-              onClick={() => window.location.assign('/')}
-            >
-              Open the App
-            </button>
-          )}
         </div>
 
         {/* Stats row */}
@@ -267,19 +219,12 @@ function HomePage() {
           <button type="button" className="home-footer__link" onClick={() => document.getElementById('how-it-works')?.scrollIntoView({ behavior: 'smooth' })}>
             How it works
           </button>
-          {showInstallCTA && (
-            <button type="button" className="home-footer__link" onClick={() => setShowInstallModal(true)}>
-              Install the app
-            </button>
-          )}
         </nav>
         <p className="home-footer__legal">
           For educational and wellness purposes only. Not a substitute for
           professional medical advice.
         </p>
       </footer>
-
-      {showInstallModal && <InstallAppModal onClose={() => setShowInstallModal(false)} />}
     </div>
   );
 }

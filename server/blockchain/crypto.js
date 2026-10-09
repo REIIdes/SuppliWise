@@ -29,6 +29,37 @@ function sha256Hex(input) {
     .digest('hex');
 }
 
+// ── Keyed sealing (integrity seal) ─────────────────────────────────────────
+//
+// sha256 is an unkeyed digest: anyone who can compute a hash can compute ANY
+// hash. That is enough to notice a careless edit, but it means a block header
+// carries no proof of *authorship* — a database attacker simply re-mines the
+// chain and every hash in it verifies.
+//
+// An HMAC closes that gap: the digest is keyed with a secret held OUTSIDE the
+// database, so a valid seal cannot be produced by anyone who only has the data.
+// This is what the ledger uses to authenticate its checkpoint and its head
+// record — the two things the fast verification path trusts without re-hashing.
+function hmacHex(key, message) {
+  const secret = Buffer.isBuffer(key) ? key : Buffer.from(String(key), 'utf8');
+  return crypto.createHmac('sha256', secret).update(String(message), 'utf8').digest('hex');
+}
+
+// Constant-time string comparison. A plain `===` leaks the matching prefix
+// length through timing, which turns "forge this seal" from a 2^256 search into
+// a byte-at-a-time one — the reason this exists rather than `===`.
+function timingSafeEqualHex(a, b) {
+  const bufA = Buffer.from(String(a), 'utf8');
+  const bufB = Buffer.from(String(b), 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+// Derive a 32-byte sealing key from an arbitrary passphrase.
+function deriveSealKey(passphrase) {
+  return crypto.createHash('sha256').update(`sw:chain-seal:${String(passphrase || '')}`, 'utf8').digest();
+}
+
 // Canonical payload hash — used for every tx `dataHash`.
 function hashPayload(payload) {
   return sha256Hex(stableStringify(payload === undefined ? null : payload));
@@ -144,6 +175,9 @@ module.exports = {
   stableStringify,
   sha256Hex,
   hashPayload,
+  hmacHex,
+  timingSafeEqualHex,
+  deriveSealKey,
   generateIdentity,
   addressFromPublicKey,
   sign,

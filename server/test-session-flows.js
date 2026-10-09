@@ -26,7 +26,10 @@ const User = require('./models/User');
 const Session = require('./models/Session');
 const { issueUserSession } = require('./utils/sessions');
 
-const BASE = `http://127.0.0.1:${process.env.PORT || 5000}/api`;
+// TLS_ENABLED-aware, so this suite follows the API's scheme. Run it through
+// `node scripts/withDevCa.mjs test-session-flows.js` when TLS is on, so this
+// process trusts the local development certificate authority.
+const BASE = `${require('./utils/tls').loopbackOrigin()}/api`;
 
 // Declared once and reused by register + every later sign-in for these
 // accounts. As a bare literal it fell behind utils/passwordRules.js, and the

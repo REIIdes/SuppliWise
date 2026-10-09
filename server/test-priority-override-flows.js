@@ -31,7 +31,9 @@ const AdminEvent = require('./models/AdminEvent');
 const { issueUserSession } = require('./utils/sessions');
 const { expiryFrom } = require('./utils/assessments');
 
-const BASE = `http://localhost:${process.env.PORT || 5000}`;
+// TLS_ENABLED-aware, so this suite follows the API's scheme. Run it through
+// `node scripts/withDevCa.mjs test-priority-override-flows.js` when TLS is on.
+const BASE = require('./utils/tls').loopbackOrigin();
 const TEST_EMAIL = 'priority-override-flow@example.com';
 
 const results = [];
@@ -40,7 +42,14 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  -> ' + detail : ''}`);
 };
 
-const todayKey = () => new Date().toISOString().split('T')[0];
+// Same key the Priority gate and every dashboard route read IntakeRecord by.
+// This was the naive UTC calendar date, so between 00:00 and 04:00 UTC this
+// script seeded the day's rows under a key nothing asked for and the gate
+// evaluated the wrong day — the flow reported a false pass/fail rather than
+// failing loudly. Derived from planDayKey so it cannot drift again.
+const { planDayKey } = require('./utils/planDay');
+
+const todayKey = () => planDayKey(new Date());
 
 async function api(path, { method = 'GET', token, body } = {}) {
   const res = await fetch(BASE + path, {

@@ -10,6 +10,20 @@ const nodemailer = require('nodemailer');
 const DEFAULT_CREDENTIAL_UPDATE_DESCRIPTION =
   "I'll Updated Your Credentials With Upgraded Version of Encryption";
 
+/**
+ * How long an emailed code stays valid, as told to the user in the mail itself.
+ *
+ * MUST equal OTP_TTL_MS in routes/auth.js. That one governs enforcement; this
+ * one governs what the recipient is told. They were both `10` before, and the
+ * enforcement value has just been reduced to 5 minutes — so if this had been left
+ * at 10, the mail would make a claim the server does not honour, and a user who
+ * read it would wait out a timer that had already expired the code.
+ *
+ * Exported so the test suite can assert the two agree rather than trusting a
+ * comment to keep them aligned.
+ */
+const OTP_TTL_MINUTES = 5;
+
 // Logs land in shared stdout/log files, so recipients are never written out
 // in full: keeps the local part's first character plus the domain so an
 // incident stays diagnosable without persisting PII.
@@ -79,6 +93,38 @@ async function closeTransporter() {
   }
 }
 
+/**
+ * Reject a recipient that is not a single, well-formed address.
+ *
+ * Applied to every sender below, not only the ones that already did it.
+ *
+ * WHY
+ * ---
+ * `sendOtpEmail` was the one sender in this file that took its recipient
+ * verbatim from the caller. The other five validate with a regex and cap the
+ * length; this one did neither. Nodemailer builds the header from the value, so
+ * a CRLF inside it is a header-injection primitive — an extra recipient, an
+ * extra header, or a body the recipient never saw. Even with a library that
+ * happens to sanitise, relying on that is how header injection gets reintroduced
+ * after a dependency bump.
+ *
+ * CR/LF/NUL are rejected outright rather than stripped: no legitimate address
+ * contains them, so there is no valid input to preserve.
+ *
+ * @returns {string|null} the trimmed address, or null if unusable.
+ */
+function safeRecipient(value) {
+  const address = String(value == null ? '' : value).trim();
+  if (!address || address.length > 254) return null;
+  if (/[\r\n\0]/.test(address)) return null;
+  // Exactly one address. A comma or angle bracket means the caller tried to
+  // append a second recipient or smuggle a header, and none of these flows ever
+  // need to send to more than one person.
+  if (/[,<>]/.test(address)) return null;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) return null;
+  return address;
+}
+
 const getTransporter = () => {
   if (!transporter) {
     // Check if email is configured
@@ -94,6 +140,13 @@ const getTransporter = () => {
         pool: true,
         maxConnections: 3,
         maxMessages: 100,
+        // Certificate validation is nodemailer's default, but it is stated
+        // explicitly rather than inherited. `rejectUnauthorized: false` is the
+        // single most common SMTP misconfiguration — it turns up in a hundred
+        // "fix self-signed cert" threads — and making the secure value the
+        // explicit one means a later edit has to type the insecure one to turn
+        // it off.
+        tls: { rejectUnauthorized: true },
         auth: {
           user: process.env.EMAIL_USER,
           pass: String(process.env.EMAIL_PASSWORD).replace(/\s+/g, ''),
@@ -105,12 +158,28 @@ const getTransporter = () => {
       // over the EMAIL_SERVICE preset — a `service` preset would otherwise
       // overwrite host/port with the provider's well-known values.
       const host = String(process.env.EMAIL_HOST || '').trim();
+      const secure = String(process.env.EMAIL_SECURE || '').trim().toLowerCase() === 'true';
       const options = host
         ? {
             ...common,
             host,
             port: Number.parseInt(process.env.EMAIL_PORT, 10) || 587,
-            secure: String(process.env.EMAIL_SECURE || '').trim().toLowerCase() === 'true',
+            secure,
+            // DOWNGRADE PROTECTION.
+            //
+            // With `secure: false` (the default for port 587) nodemailer uses
+            // STARTTLS *if the server advertises it*, and silently proceeds in
+            // cleartext when it does not. An active network attacker who strips
+            // the STARTTLS capability advertisement from the server's greeting
+            // downgrades the connection without either endpoint noticing — and
+            // the SMTP AUTH credentials plus every OTP in flight then cross the
+            // network in the clear.
+            //
+            // `requireTLS` makes that downgrade a hard connection failure. In
+            // production a relay that cannot do STARTTLS is a misconfiguration
+            // to fix, not something to work around silently. It stays off in
+            // development so Mailpit/Mailhog on plain localhost still works.
+            requireTLS: !secure && process.env.NODE_ENV === 'production',
           }
         : { ...common, service: process.env.EMAIL_SERVICE || 'gmail' };
 
@@ -135,10 +204,23 @@ const getTransporter = () => {
 const sendOtpEmail = async (toEmail, otp, type = 'email-change') => {
   try {
     const transport = getTransporter();
-    
+
     if (!transport) {
       return false;
     }
+
+    // Validated here, at the boundary, rather than trusted from the caller. This
+    // was the one sender that did not validate its recipient, and it is the most
+    // exposed of them: the address arrives from a request body on the email-change
+    // and recovery-email routes. See safeRecipient.
+    const recipient = safeRecipient(toEmail);
+    if (!recipient) return false;
+
+    // Interpolated into the HTML body. The code is generated from
+    // crypto.randomInt and is therefore always six digits, but it is escaped
+    // like any other interpolated value so a future change to the generator
+    // cannot silently turn this into an injection point.
+    const safeOtp = escapeHtml(String(otp == null ? '' : otp));
 
     const fromName = process.env.EMAIL_FROM_NAME || 'SuppliWise';
     const fromAddress = process.env.EMAIL_FROM_ADDRESS || process.env.EMAIL_USER;
@@ -181,7 +263,7 @@ const sendOtpEmail = async (toEmail, otp, type = 'email-change') => {
 
     const mailOptions = {
       from: `"${fromName}" <${fromAddress}>`,
-      to: toEmail,
+      to: recipient,
       subject: subject,
       html: `
         <!DOCTYPE html>
@@ -229,9 +311,9 @@ const sendOtpEmail = async (toEmail, otp, type = 'email-change') => {
                       <div style="background: #f0fdf4; border: 2px solid #bbf7d0; border-radius: 12px; padding: 24px; text-align: center; margin: 0 0 24px;">
                         <p style="color: #166534; font-size: 14px; font-weight: 600; margin: 0 0 12px; text-transform: uppercase; letter-spacing: 1px;">Your Verification Code</p>
                         <div style="background: white; border: 2px solid #22c55e; border-radius: 8px; padding: 16px; display: inline-block;">
-                          <span style="color: #111827; font-size: 36px; font-weight: 700; letter-spacing: 8px; font-family: 'Courier New', monospace;">${otp}</span>
+                          <span style="color: #111827; font-size: 36px; font-weight: 700; letter-spacing: 8px; font-family: 'Courier New', monospace;">${safeOtp}</span>
                         </div>
-                        <p style="color: #166534; font-size: 13px; margin: 12px 0 0;">This code will expire in <strong>10 minutes</strong></p>
+                        <p style="color: #166534; font-size: 13px; margin: 12px 0 0;">This code will expire in <strong>${OTP_TTL_MINUTES} minutes</strong></p>
                       </div>
                       
                       <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 0 0 24px;">
@@ -280,7 +362,7 @@ ${bodyText}
 
 VERIFICATION CODE: ${otp}
 
-This code will expire in 10 minutes.
+This code will expire in ${OTP_TTL_MINUTES} minutes.
 
 ${securityText}
 
@@ -296,7 +378,7 @@ This is an automated message from SuppliWise.
     };
 
     await transport.sendMail(mailOptions);
-    console.log(`[Email] Verification email sent successfully to ${maskEmail(toEmail)}`);
+    console.log(`[Email] Verification email sent successfully to ${maskEmail(recipient)}`);
     return true;
   } catch (error) {
     // Close, don't just forget — see closeTransporter(). Dropping the reference
@@ -320,9 +402,9 @@ This is an automated message from SuppliWise.
  */
 async function sendPasswordResetEmail(toEmail, { resetUrl, code, expiresInMinutes = 30 } = {}) {
   try {
-    const clean = String(toEmail || '').trim().slice(0, 254);
+    const clean = safeRecipient(toEmail);
     const link = String(resetUrl || '').trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) return false;
+    if (!clean) return false;
     // Refuse to send a "reset your password" mail with no working link: that
     // would be a credential-shaped email that helps nobody.
     if (!/^https?:\/\//i.test(link)) return false;
@@ -451,8 +533,8 @@ async function sendPasswordChangedEmail(toEmail) {
  */
 async function sendCredentialUpdateEmail(toEmail, { description } = {}) {
   try {
-    const clean = String(toEmail || '').trim().slice(0, 254);
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) return false;
+    const clean = safeRecipient(toEmail);
+    if (!clean) return false;
 
     const transport = getTransporter();
     if (!transport) return false;
@@ -535,6 +617,10 @@ The SuppliWise Team
 
 module.exports = {
   sendOtpEmail,
+  // The TTL the mail TELLS the user about. Exported so a test can assert it
+  // equals the TTL routes/auth.js actually enforces, instead of trusting two
+  // independent constants to stay in agreement.
+  OTP_TTL_MINUTES,
   sendStatusEmail,
   sendAdminCredentialsEmail,
   sendAdminCredentialUpdateEmail,
@@ -568,8 +654,8 @@ module.exports = {
 // Returns true on sent, false otherwise (never throws).
 async function sendAdminCredentialsEmail(toEmail, { alias, password, totpSecret, description } = {}) {
   try {
-    const clean = String(toEmail || '').trim().slice(0, 254);
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) return false;
+    const clean = safeRecipient(toEmail);
+    if (!clean) return false;
     if (!alias || !password || !totpSecret) return false;
     const transport = getTransporter();
     if (!transport) return false;
@@ -672,8 +758,8 @@ async function sendAdminCredentialsEmail(toEmail, { alias, password, totpSecret,
  */
 async function sendAdminCredentialUpdateEmail(toEmail, context = {}) {
   try {
-    const clean = String(toEmail || '').trim().slice(0, 254);
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) return false;
+    const clean = safeRecipient(toEmail);
+    if (!clean) return false;
     const transport = getTransporter();
     if (!transport) return false;
 
@@ -771,8 +857,8 @@ async function sendAdminCredentialUpdateEmail(toEmail, context = {}) {
 // Returns true on sent, false otherwise (never throws).
 async function sendStatusEmail(toEmail, kind, context = {}) {
   try {
-    const clean = String(toEmail || '').trim().slice(0, 254);
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) return false;
+    const clean = safeRecipient(toEmail);
+    if (!clean) return false;
     const transport = getTransporter();
     if (!transport) return false;
 

@@ -46,6 +46,9 @@ const { isAllowed: isTrustedOrigin, verifyOrigin, assertProductionConfigured, li
 // the production boot check below possible.
 const webauthn = require('./utils/webauthn');
 const secretBox = require('./utils/secretBox');
+// TLS material and the https/http decision. Opt-in via TLS_ENABLED; see
+// utils/tls.js for why that is not automatic.
+const tls = require('./utils/tls');
 
 const app = express();
 
@@ -121,6 +124,16 @@ if (process.env.NODE_ENV === 'production' && !passkeyConfig.configured) {
   throw new Error(`WebAuthn is not configured for production: ${passkeyConfig.error}`);
 }
 
+// 4. TLS. A production process that serves plain HTTP with no proxy in front of
+//    it is a credentialed API in cleartext on the public internet. Refuse to
+//    boot rather than start insecure and leave the decision implicit. TLS
+//    terminated by a load balancer is fine — TRUST_PROXY=true says so.
+//    Loading the material here as well turns a bad certificate path into a
+//    readable failure at boot, rather than a handshake error on every request.
+tls.assertProductionConfigured();
+const tlsConfig = tls.describe();
+if (tlsConfig.error) throw new Error(tlsConfig.error);
+
 // ── Security headers ──────────────────────────────────────────────────────
 // Helmet sets X-Frame-Options, X-Content-Type-Options, HSTS, etc.
 // Strict CSP: this origin serves JSON only (no HTML/JS ever rendered), so
@@ -128,7 +141,16 @@ if (process.env.NODE_ENV === 'production' && !passkeyConfig.configured) {
 // content from executing if an upstream layer ever reflects markup.
 // Safe for the SPA: the Vite frontend is a separate origin (localhost:5173)
 // and only consumes JSON — it never renders this origin's responses as pages.
+//
+// `hsts` is conditional rather than left on. Helmet's default sends
+// Strict-Transport-Security on EVERY response, including ones served over plain
+// HTTP — and a browser that receives HSTS over HTTP remembers the host as
+// HTTPS-only and then refuses to connect to it over HTTP at all. That turns an
+// intentionally-plain-HTTP run (a test server, a LAN phone) into a dead
+// connection that looks like a network fault. Only claim HTTPS when this
+// process is actually serving it. See utils/tls.js.
 app.use(helmet({
+  hsts: tls.shouldSendHsts() ? { maxAge: tls.hstsMaxAge(), includeSubDomains: true } : false,
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'none'"],
@@ -598,7 +620,10 @@ mongoose
         console.log(`[admin-sync] ${accounts.length} admin account(s) ensured (${inserted} newly inserted): ${accounts.map(a => a.alias).join(', ')}`);
       })
       .then(() => new Promise((resolve, reject) => {
-        const server = app.listen(PORT, () => {
+        // https when TLS_ENABLED=true, plain http otherwise. The caller gets
+        // the same Server object either way, so the timeout tuning and the
+        // fatal-bind handling below are unaffected by which it is.
+        const server = tls.createServer(app).listen(PORT, () => {
           // Slowloris / idle-connection hygiene. Node's defaults allow 60 s
           // for headers and 300 s for a whole body, so a flood of half-open
           // sockets can pin an fd for minutes each; these bound it. Node
@@ -620,7 +645,11 @@ mongoose
           server.headersTimeout = 15 * 1000;
           server.requestTimeout = 150 * 1000;
           server.keepAliveTimeout = 5 * 1000;
-          console.log(`Server running on port ${PORT}`);
+          // The scheme is logged because "it works in the browser but the app
+          // says network error" is almost always a scheme mismatch between
+          // what the client assumed and what the server is doing, and this
+          // line is where the answer is.
+          console.log(`Server running on ${tls.scheme()}://localhost:${PORT}`);
           resolve(server);
         });
         // A bind failure is FATAL, not transient. Without this listener the
@@ -691,6 +720,15 @@ mongoose
           + `passkeys=${passkeys.configured ? `on (rpId=${passkeys.rpID}, origins=${passkeys.origins.length})` : `OFF (${passkeys.error})`} `
           + `| totp-encryption=${key.source} keyIds=${key.keyIds.join(',')} `
           + `| trusted-origins=${trustedOriginList().length}`,
+        );
+        // Transport, for the same reason: "the browser is on https and the API
+        // is on http" is a silent mismatch that surfaces only as a failed
+        // request, and the boot log is where someone looks first. Certificate
+        // paths only — never the key.
+        console.log(
+          `[tls] serving ${tls.scheme()}`
+          + (tlsConfig.enabled ? ` (certificate ${tlsConfig.certFile})` : '')
+          + `| hsts=${tls.shouldSendHsts() ? `max-age=${tls.hstsMaxAge()}s` : 'off'}`,
         );
         if (!passkeys.configured) {
           // Not fatal outside production, but it is not fine either: the

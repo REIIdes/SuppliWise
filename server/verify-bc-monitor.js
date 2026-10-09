@@ -24,7 +24,10 @@ const AdminAccount = require('./models/AdminAccount');
     { algorithm: 'HS256', expiresIn: '10m' }
   );
 
-  const res = await fetch('http://localhost:5000/api/admin/security/monitor?fresh=1', {
+  // TLS_ENABLED-aware. Run via `npm run verify:bc-monitor` so this process trusts
+  // the local development certificate authority when the API serves HTTPS.
+  const origin = require('./utils/tls').loopbackOrigin();
+  const res = await fetch(`${origin}/api/admin/security/monitor?fresh=1`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   const data = await res.json();
@@ -33,7 +36,10 @@ const AdminAccount = require('./models/AdminAccount');
     process.exit(1);
   }
 
-  const EXPECTED_BC = 21; // ledger + features 1–20
+  // ledger + features 1-20 + bc_seal (checkpoint sealing / head anchor).
+  // Kept as an explicit count so ADDING a probe without updating this fails
+  // loudly, rather than leaving the number quietly stale.
+  const EXPECTED_BC = 22;
   const bc = data.monitors.filter(m => m.key.startsWith('bc_'));
   const bad = data.monitors.filter(m => m.status === 'error' || m.status === 'critical' || m.status === 'warning');
   const dupKeys = data.monitors.map(m => m.key).filter((k, i, a) => a.indexOf(k) !== i);

@@ -48,6 +48,9 @@ export const exportWalletKey = () => w3Fetch('/web3/wallet/private-key');
 export const getChain = (limit = 25, before = null) =>
   w3Fetch(`/web3/chain?limit=${limit}${before != null ? `&before=${before}` : ''}`);
 export const verifyChain = () => w3Fetch('/web3/chain/verify');
+// Compact integrity state for the chain banner. Separate from verifyChain
+// because this one is cheap enough to poll, while a full re-verification is not.
+export const getChainStatus = () => w3Fetch('/web3/chain/status');
 export const getTx = (hash) => w3Fetch(`/web3/tx/${encodeURIComponent(hash)}`);
 export const getWeb3Config = () => w3Fetch('/web3/config');
 

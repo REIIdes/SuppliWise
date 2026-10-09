@@ -22,7 +22,9 @@ const ChatMessage = require('../models/ChatMessage');
 const AdminEvent = require('../models/AdminEvent');
 const UserNotification = require('../models/UserNotification');
 
-const BASE = `http://localhost:${process.env.PORT || 5000}/api`;
+// TLS_ENABLED-aware, so this suite follows the API's scheme when it runs against a
+// live server rather than the throwaway one it starts itself.
+const BASE = `${require('../utils/tls').loopbackOrigin()}/api`;
 
 let passed = 0;
 const check = (label, cond) => {

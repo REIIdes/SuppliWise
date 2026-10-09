@@ -119,8 +119,13 @@ function developmentOrigins() {
       out.push(`http://${host}:${webPort}`);
       out.push(`https://${host}:${webPort}`);
     }
+    // The API's own origin, both schemes — same reasoning as in
+    // utils/origins.js: the dev server and the API are HTTPS together when a
+    // certificate is present, and a ceremony from an https page against an http
+    // origin is refused by the browser before it ever reaches this code.
+    out.push(`http://${host}:${port}`);
+    out.push(`https://${host}:${port}`);
   }
-  out.push(`http://localhost:${port}`, `http://127.0.0.1:${port}`);
   return out;
 }
 
@@ -166,7 +171,7 @@ function config() {
     // Derive the dev RP ID from whatever origin the dev server is on, so a
     // developer on a LAN address gets working passkeys instead of a ceremony
     // that is rejected because the origin does not match.
-    const seed = (origins[0] || process.env.PUBLIC_WEB_URL || 'http://localhost:5173');
+    const seed = (origins[0] || process.env.PUBLIC_WEB_URL || 'https://localhost:5173');
     try {
       rpID = new URL(normaliseOrigin(seed) || seed).hostname;
     } catch {
@@ -201,6 +206,12 @@ function config() {
     // The classic production mistake: an https app whose origin list still
     // names localhost. Passkeys registered against localhost work nowhere else,
     // so this is refused rather than warned about.
+    //
+    // Note the dev fallback above deliberately includes http:// origins, and
+    // that is safe HERE precisely because this check only runs in production: a
+    // loopback dev server is a trustworthy context under the WebAuthn spec, and
+    // the alternative — refusing http on loopback — would mean a fresh clone
+    // cannot test passkeys at all before it has a domain.
     if (isProduction()) {
       const insecure = origins.filter((o) => !o.startsWith('https://') && !o.startsWith('capacitor://'));
       if (insecure.length) {

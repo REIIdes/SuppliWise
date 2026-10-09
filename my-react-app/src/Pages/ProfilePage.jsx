@@ -93,7 +93,7 @@ function ProfilePage() {
   const [bannerPicturePreview, setBannerPicturePreview] = useState(() => storedUser.bannerPicture || '');
   const [resendCooldown, setResendCooldown] = useState(0);
   const [resendTimer, setResendTimer] = useState(null);
-  const [otpTimeLeft, setOtpTimeLeft] = useState(600); // 10 minutes in seconds
+  const [otpTimeLeft, setOtpTimeLeft] = useState(300); // 5 minutes in seconds
   const [otpExpiryTimer, setOtpExpiryTimer] = useState(null);
   // (password show/hide toggles live with the Change Password card now)
 
@@ -328,16 +328,11 @@ function ProfilePage() {
       // successfully!" left over from the last save describes that save, not
       // the draft now on screen, so it is cleared on the way in.
       setSuccess('');
-    } else {
-      // The param leaving (e.g. the user picks "Personal Info" from the account
-      // menu) must exit edit mode too — otherwise the form stays mid-edit with
-      // Save/Cancel visible on a plain Personal Info view.
-      setIsEditing(false);
     }
   }
 
   const startOtpExpiryTimer = () => {
-    setOtpTimeLeft(600); // Reset to 10 minutes
+    setOtpTimeLeft(300); // Reset to 5 minutes
     
     // Clear existing timer if any
     if (otpExpiryTimer) {
@@ -902,7 +897,7 @@ function ProfilePage() {
     setShowOtpModal(false);
     setOtp('');
     setPendingEmailChange('');
-    setOtpTimeLeft(600);
+    setOtpTimeLeft(300);
     if (resendTimer) clearInterval(resendTimer);
     if (otpExpiryTimer) clearInterval(otpExpiryTimer);
   };

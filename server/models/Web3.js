@@ -21,6 +21,7 @@ const txSchema = new mongoose.Schema(
     // Always present: sha256 of the canonical payload. Personal payloads are
     // stored ONLY here (as a digest) so the chain never leaks private data.
     dataHash: { type: String, required: true },
+    digestCovers: { type: String, enum: ['data', 'private'], default: 'data' },
     timestamp: { type: Number, required: true },
   },
   { _id: false }
@@ -32,6 +33,8 @@ const blockSchema = new mongoose.Schema({
   prevHash: { type: String, required: true },
   nonce: { type: Number, required: true },
   hash: { type: String, required: true },
+  v: { type: Number, default: 2 },
+  difficulty: { type: Number, default: 0 },
   txs: { type: [txSchema], default: [] },
 });
 blockSchema.index({ 'txs.txHash': 1 });
@@ -57,9 +60,81 @@ const chainAuditSchema = new mongoose.Schema({
   // When the deep whole-chain audit that established this checkpoint ran.
   verifiedAt: { type: Date, default: null },
   checked: { type: Number, default: 0 },
+  // HMAC over upTo + prevHash + sealed, keyed by CHAIN_SEAL_KEY.
+  //
+  // The checkpoint is a PERFORMANCE claim — "everything up to N was re-hashed
+  // and the result was H". Nothing in the chain proves it, so it was previously
+  // just a row in the same database it describes: anyone able to write to the
+  // blocks could write "verified up to <tip>" and make the fast path re-hash
+  // zero blocks forever, reporting a fully rewritten chain as perfectly valid.
+  // Sealing it with a key held outside the database makes forging that claim
+  // require the secret. A checkpoint whose seal does not verify is discarded and
+  // the next check falls back to a full re-hash from genesis.
+  seal: { type: String, default: '' },
+  // The currently-open integrity incident, if any.
+  //
+  // Persisted because an incident that lives only in memory is lost on restart:
+  // a server that restarted between "chain broke" and "chain repaired" would
+  // forget it had ever raised an alarm, so the audience that was warned would
+  // never receive the all-clear — leaving a permanent false alarm in their inbox
+  // and no record that the problem was ever resolved.
+  incident: {
+    fingerprint: { type: String, default: '' },
+    reason: { type: String, default: '' },
+    brokenAt: { type: Number, default: -1 },
+    raisedAt: { type: Number, default: 0 },
+  },
+  // Deepest height ever proven, and the hash proven there. Monotonic: it only
+  // ever moves forward. This is what makes TRUNCATION detectable — deleting the
+  // tail leaves a shorter chain that is internally flawless, and without a
+  // high-water mark there is nothing to compare the new tip against.
+  sealed: {
+    index: { type: Number, default: -1 },
+    hash: { type: String, default: '' },
+  },
 });
 
 const ChainAudit = mongoose.model('SwChainAudit', chainAuditSchema);
+
+// ── Chain repair record (append-only) ─────────────────────────────────────
+// A permanent, human-readable account of every integrity incident and every
+// repair. This exists because the ledger's own history is exactly what cannot be
+// trusted after a break: a repair truncates the corrupted blocks, so without an
+// independent record the only trace that blocks 3-9 ever existed — and that they
+// were discarded — would vanish with them.
+//
+// Never truncated and never anchored into the chain it describes: writing the
+// record into the chain would make it self-referential and would put the
+// evidence inside the thing that just proved unreliable. `dedupeKey` makes the
+// common double-submit idempotent without a unique index, so no index migration
+// is needed on a live collection.
+const chainRepairSchema = new mongoose.Schema({
+  key: { type: String, default: 'chain' },
+  at: { type: Number, default: () => Date.now() },
+  kind: {
+    type: String,
+    enum: ['incident', 'repair', 'repair-failed', 'quarantine-lifted'],
+    required: true,
+  },
+  actor: { type: String, default: 'system' },
+  // The block the problem was found at, and the machine-readable cause.
+  brokenAt: { type: Number, default: -1 },
+  reason: { type: String, default: '' },
+  failureKind: { type: String, default: '' }, // linkage | truncation | tip-rewrite
+  // For a repair: how much history was discarded, and what is in it.
+  keptThrough: { type: Number, default: -1 },
+  discardedCount: { type: Number, default: 0 },
+  discardedIndexes: { type: [Number], default: [] },
+  // Post-repair verdict, so the record shows the outcome rather than the intent.
+  healthyAfter: { type: Boolean, default: null },
+  durationMs: { type: Number, default: 0 },
+  // Idempotency for the common "operator clicked twice" case.
+  dedupeKey: { type: String, default: '' },
+});
+chainRepairSchema.index({ at: -1 });
+chainRepairSchema.index({ key: 1, at: -1 });
+
+const ChainRepair = mongoose.model('SwChainRepair', chainRepairSchema);
 
 // ── Wallet / Decentralized Identity ────────────────────────────────────────
 // Keyed by `address`. Users get one wallet (`user` set — unique + sparse, so
@@ -527,6 +602,7 @@ const Booking = mongoose.model('SwBooking', bookingSchema);
 module.exports = {
   Block,
   ChainAudit,
+  ChainRepair,
   Wallet,
   Web3Config,
   DEFAULT_PARAMS,

@@ -117,7 +117,9 @@ test('recovery codes — full lifecycle over real HTTP', { skip: preflight.skip 
       await User.deleteOne({ _id: user._id });
     });
     const token = await issueUserSession(user._id, { userAgent: 'recovery-test', ip: '127.0.0.1' });
-    return { user, email, token, client: clientFor(base, token), spent: new Map() };
+    // A SET of absolute TOTP steps already spent by this account. See nextCode:
+    // keyed on the absolute step, because that is what determines the code.
+    return { user, email, token, client: clientFor(base, token), spent: new Set() };
   };
 
   /**
@@ -125,20 +127,49 @@ test('recovery codes — full lifecycle over real HTTP', { skip: preflight.skip 
    *
    * `verifyTotpOnce` is single-use per account, so a suite that authenticates
    * several times cannot keep sending the same code — it would be measuring the
-   * replay cache rather than the thing it means to test. The server accepts a
-   * ±1 step window, so all three offsets below are valid at any moment; this
-   * hands out the least-used of them.
+   * replay cache rather than the thing it means to test.
+   *
+   * WHAT IS TRACKED, AND WHY IT IS THE ABSOLUTE STEP
+   * -------------------------------------------------
+   * An earlier version counted uses per OFFSET and handed out the least-used of
+   * [0, +1, -1]. That is wrong the moment the clock ticks during the suite.
+   * Offsets are relative to *now*, so a code minted at offset -1 while the step
+   * counter was N is code-for-counter N — and an hour later, at step N+1, offset
+   * -1 is code-for-counter N again. The same code, reissued. The replay cache
+   * then refuses it (correctly — it is a genuine replay) and the step-up fails
+   * with "That verification code is not valid."
+   *
+   * That is the flake this replaced: it appeared only in long runs, which is
+   * exactly when the suite crosses a 30-second boundary, and it presented as a
+   * step-up failing for no stated reason.
+   *
+   * So the ledger is keyed on the ABSOLUTE counter, which is what actually
+   * determines the code. Two calls can therefore never mint the same code for one
+   * account, regardless of how long the suite takes.
+   *
+   * The server accepts a ±1 step window, so the three offsets below are all valid
+   * codes at any moment; the window is only what makes a freshly minted code
+   * acceptable to the verifier, not what makes it unique.
    */
   const nextCode = (ctx, secret) => {
-    const WINDOW = [0, 1, -1];
-    let best = WINDOW[0];
-    for (const offset of WINDOW) {
-      if ((ctx.spent.get(offset) || 0) < (ctx.spent.get(best) || 0)) best = offset;
+    const currentStep = Math.floor(Date.now() / 30000);
+    // Ordered so the CURRENT step is preferred: it is the one most likely to
+    // still be inside the verifier's ±1 window when the request lands.
+    for (const offset of [0, 1, -1]) {
+      const step = currentStep + offset;
+      if (ctx.spent.has(step)) continue;
+      ctx.spent.add(step);
+      return totpFor(secret, offset);
     }
-    const uses = ctx.spent.get(best) || 0;
-    assert.ok(uses < 2, 'this account has spent every usable TOTP step — seed a new one');
-    ctx.spent.set(best, uses + 1);
-    return totpFor(secret, best);
+    // Every step in and around the current one is spent. Waiting is the honest
+    // answer — a new step mints fresh codes — but a suite that hit this would
+    // otherwise stall, so it waits for the next step rather than failing.
+    const waitMs = (currentStep + 2) * 30000 - Date.now() + 250;
+    throw new Error(
+      'every usable TOTP step is spent for this account; '
+      + `wait ${Math.ceil(waitMs / 1000)}s and re-run (the suite issued `
+      + `${ctx.spent.size} codes without the clock advancing)`,
+    );
   };
 
   const turnOnAuthenticator = async (ctx) => {

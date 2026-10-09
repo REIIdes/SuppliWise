@@ -12,7 +12,10 @@
     "notify-admins": "node scripts/notify-admins.js",
     "send-admin-credentials": "node scripts/send-admin-credentials.js",
     "test": "node --test \"Test File/*.test.js\"",
-    "test:flows": "node test-subscription-flows.js",
+    "test:flows": "node scripts/withDevCa.mjs test-subscription-flows.js",
+    "glitch-hunt": "node scripts/withDevCa.mjs glitch-hunt.js",
+    "glitch-hunt:web3": "node scripts/withDevCa.mjs glitch-hunt-web3.js",
+    "verify:bc-monitor": "node scripts/withDevCa.mjs verify-bc-monitor.js",
     "check": "node scripts/check-syntax.js"
   },
   "dependencies": {
