@@ -455,7 +455,7 @@
 .chat-archive-nav-btn:hover { background: #f0eeff; color: #5b4fcf; }
 .chat-archive-nav-btn svg { flex-shrink: 0; }
 
-/* ── Archive empty state ─────────────────────────────────────── */
+/* ── Archive empty state (inside history panel) ──────────────── */
 .chat-archive-empty {
   display: flex;
   flex-direction: column;
@@ -467,6 +467,52 @@
 }
 .chat-archive-empty svg { opacity: 0.55; }
 .chat-archive-empty p { margin: 0; font-size: 13px; }
+
+/* ── Full-window Archive View ────────────────────────────────── */
+.chat-archive-fullview {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.chat-archive-fullview-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e8ecf7;
+  background: #f8f8fd;
+  flex-shrink: 0;
+}
+.chat-archive-fullview-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #1f2937;
+}
+.chat-archive-fullview-title svg { color: #9ca3af; }
+.chat-archive-fullview-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex: 1;
+  padding: 48px 24px;
+  color: #9ca3af;
+  text-align: center;
+}
+.chat-archive-fullview-empty svg { opacity: 0.45; }
+.chat-archive-fullview-empty p  { margin: 0; font-size: 14px; font-weight: 600; color: #6b7280; }
+.chat-archive-fullview-empty span { font-size: 12.5px; }
+.chat-archive-fullview-list {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 
 /* ── Archived item title/meta dimmed ─────────────────────────── */
 .chat-thread-item.is-archived .chat-thread-item-title { color: #6b7280; }

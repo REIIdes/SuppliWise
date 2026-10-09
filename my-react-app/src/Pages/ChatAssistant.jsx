@@ -288,6 +288,8 @@ export default function ChatAssistant() {
   const [archiveLoading, setArchiveLoading] = useState(false);
   // 'conversations' = main history panel, 'archive' = separate archive screen
   const [historyView, setHistoryView] = useState('conversations');
+  // Top-level chat view: 'chat' | 'archive'
+  const [chatView, setChatView] = useState('chat');
   // Three-dots dropdown — which thread's menu is open
   const [menuOpenFor, setMenuOpenFor] = useState(null);
   // Reactive plan object { active, plan, rank } — subscribing re-renders this
@@ -344,6 +346,7 @@ export default function ChatAssistant() {
     setHistoryView('conversations');
     setArchiveLoading(false);
     setMenuOpenFor(null);
+    setChatView('chat');
   }, [userId]);
 
   // Follow new content only while the reader is already at the bottom. If a
@@ -910,12 +913,13 @@ export default function ChatAssistant() {
                   </div>
                 )}
 
-                {/* Footer button — opens the separate Archive view */}
+                {/* Footer button — opens the full-window Archive view */}
                 <button
                   type="button"
                   className="chat-archive-nav-btn"
                   onClick={() => {
-                    setHistoryView('archive');
+                    setChatView('archive');
+                    setThreadsOpen(false);
                     if (archivedThreads.length === 0) loadArchived();
                   }}
                 >
@@ -1066,8 +1070,65 @@ export default function ChatAssistant() {
               </div>
             </div>
           ) : (
-            // Normal Chat Interface
+            // Normal Chat Interface — or Archive full-window view
             <>
+              {chatView === 'archive' ? (
+                /* ── Full-window Archive View ── */
+                <div className="chat-archive-fullview">
+                  <div className="chat-archive-fullview-header">
+                    <button
+                      type="button"
+                      className="chat-archive-back-btn"
+                      onClick={() => setChatView('chat')}
+                      aria-label="Back to chat"
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <polyline points="15 6 9 12 15 18" />
+                      </svg>
+                    </button>
+                    <span className="chat-archive-fullview-title">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <polyline points="21 8 21 21 3 21 3 8" />
+                        <rect x="1" y="3" width="22" height="5" />
+                        <line x1="10" y1="12" x2="14" y2="12" />
+                      </svg>
+                      Archived Chats
+                    </span>
+                  </div>
+
+                  {archiveLoading ? (
+                    <div className="chat-thread-empty" style={{ paddingTop: 40 }}>Loading…</div>
+                  ) : archivedThreads.length === 0 ? (
+                    <div className="chat-archive-fullview-empty">
+                      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <polyline points="21 8 21 21 3 21 3 8" />
+                        <rect x="1" y="3" width="22" height="5" />
+                        <line x1="10" y1="12" x2="14" y2="12" />
+                      </svg>
+                      <p>No archived chats yet</p>
+                      <span>Archived conversations will appear here</span>
+                    </div>
+                  ) : (
+                    <div className="chat-archive-fullview-list">
+                      {archivedThreads.map((t) => (
+                        <ThreadItem
+                          key={t._id}
+                          t={t}
+                          activeThreadId={activeThreadId}
+                          menuOpenFor={menuOpenFor}
+                          setMenuOpenFor={setMenuOpenFor}
+                          onOpen={(thread) => { setChatView('chat'); openThread(thread); }}
+                          onPin={() => {}}
+                          onArchive={archiveThread}
+                          onDelete={setDeleteTarget}
+                          isArchived
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+              <>
               <div className="chat-disclaimer-banner">
                 ⚕️ Educational only — not medical advice. Consult a healthcare provider.
               </div>
@@ -1171,6 +1232,8 @@ export default function ChatAssistant() {
                   )}
                 </button>
               </div>
+            </>
+            )}
             </>
           )}
         </div>
