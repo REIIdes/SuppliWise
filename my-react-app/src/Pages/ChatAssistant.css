@@ -267,8 +267,9 @@
   z-index: 20;
   display: flex;
   flex-direction: column;
-  max-height: min(58%, 320px);
-  overflow-y: auto;
+  /* Tall enough to show ~8 conversations before scrolling,
+     capped so it never overflows the chat window. */
+  max-height: min(72%, 480px);
   background: #fff;
   border: 1px solid #e4e7f5;
   border-radius: 12px;
@@ -282,11 +283,19 @@
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: #9ca3af;
+  /* Stays visible while the list scrolls */
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 1;
+  border-radius: 12px 12px 0 0;
 }
 .chat-thread-list {
   display: flex;
   flex-direction: column;
   padding-bottom: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .chat-thread-item {
   display: flex;
