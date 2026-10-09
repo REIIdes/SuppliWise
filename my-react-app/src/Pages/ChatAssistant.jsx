@@ -512,11 +512,11 @@ export default function ChatAssistant() {
     }
   };
 
-  const startNewConversation = () => {
+  const startNewConversation = (targetView = 'chat') => {
     setActiveThreadId(null);
     setMessages([WELCOME_MESSAGE]);
     setThreadsOpen(false);
-    setChatView('chat');
+    setChatView(targetView);
     followBottomRef.current = true;
   };
 
@@ -1135,7 +1135,7 @@ export default function ChatAssistant() {
                   <button
                     type="button"
                     className="chat-archive-reading-back"
-                    onClick={() => setChatView('archive')}
+                    onClick={() => { startNewConversation('archive'); }}
                     aria-label="Back to archived chats"
                   >
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
