@@ -317,6 +317,30 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.chat-thread-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 1px;
+}
+.chat-thread-pin {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #b6bcc9;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.chat-thread-pin:hover { background: #f3f4f6; color: #7c7ce8; }
+.chat-thread-pin:focus-visible { outline: 2px solid #7c7ce8; outline-offset: 1px; }
 .chat-thread-delete {
   flex-shrink: 0;
   display: flex;
@@ -324,7 +348,6 @@
   justify-content: center;
   width: 24px;
   height: 24px;
-  margin-top: 1px;
   padding: 0;
   border: 0;
   border-radius: 6px;

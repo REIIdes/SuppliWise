@@ -347,9 +347,9 @@ router.post('/', protect, requireFeature('chat'), chatLimiter, async (req, res) 
 router.get('/threads', protect, requireFeature('chat'), async (req, res) => {
   try {
     const threads = await AiChatThread.find({ user: req.user._id })
-      .sort({ updatedAt: -1 })
+      .sort({ pinned: -1, updatedAt: -1 })
       .limit(50)
-      .select('title updatedAt lastText messageCount')
+      .select('title updatedAt lastText messageCount pinned')
       .lean();
     return res.json({ threads });
   } catch (error) {
@@ -402,6 +402,27 @@ router.delete('/threads/:id', protect, requireFeature('chat'), async (req, res) 
   } catch (error) {
     console.error('[chat] thread delete failed:', error.message);
     return res.status(500).json({ message: 'Could not delete the conversation.' });
+  }
+});
+
+// ── PATCH /api/chat/threads/:id/pin ────────────────────────────
+// Toggle pin status for a conversation. Scoped to the owner.
+router.patch('/threads/:id/pin', protect, requireFeature('chat'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!/^[a-f0-9]{24}$/i.test(id)) {
+      return res.status(400).json({ message: 'Conversation reference is invalid.' });
+    }
+    const thread = await AiChatThread.findOne({ _id: id, user: req.user._id });
+    if (!thread) {
+      return res.status(404).json({ message: 'Conversation not found.' });
+    }
+    thread.pinned = !thread.pinned;
+    await thread.save();
+    return res.json({ pinned: thread.pinned });
+  } catch (error) {
+    console.error('[chat] thread pin failed:', error.message);
+    return res.status(500).json({ message: 'Could not update the conversation.' });
   }
 });
 
