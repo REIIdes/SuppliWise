@@ -11,6 +11,7 @@ import { PLAN_LABELS } from '../utils/plan';
 import { subscribeOverlays } from '../utils/overlayRegistry';
 import { useSubscription } from '../hooks/useSubscription';
 import UpgradeModal from '../Components/UpgradeModal/UpgradeModal';
+import ConfirmModal from '../Components/ConfirmModal/ConfirmModal';
 import './ChatAssistant.css';
 
 // ── Markdown renderer (no external deps) ──────────────────────────────────
@@ -199,6 +200,10 @@ export default function ChatAssistant() {
   const [threads, setThreads] = useState([]);
   const [threadsOpen, setThreadsOpen] = useState(false);
   const [threadsLoading, setThreadsLoading] = useState(false);
+  // The conversation a delete press is waiting on: the
+  // menu's trash button only arms this; the modal's
+  // confirm button performs the removal.
+  const [deleteTarget, setDeleteTarget] = useState(null);
   // Reactive plan object { active, plan, rank } — subscribing re-renders this
   // component the instant the subscription changes, so the gates below always
   // read fresh state. (Destructuring `plan` here would give the tier string,
@@ -248,6 +253,7 @@ export default function ChatAssistant() {
     setThreads([]);
     setThreadsOpen(false);
     setThreadsLoading(false);
+    setDeleteTarget(null);
   }, [userId]);
 
   // Follow new content only while the reader is already at the bottom. If a
@@ -439,6 +445,14 @@ export default function ChatAssistant() {
       if (version !== conversationVersionRef.current) return;
       console.error('[chat] thread delete failed:', err.message);
     }
+  };
+
+  // The modal's confirm button performs the
+  // removal the trash icon only armed.
+  const confirmDeleteThread = async () => {
+    const target = deleteTarget;
+    setDeleteTarget(null);
+    if (target) await deleteThread(target._id);
   };
 
   // Focus the composer when the panel opens and whenever a reply lands, so
@@ -719,7 +733,7 @@ export default function ChatAssistant() {
                         className="chat-thread-delete"
                         aria-label="Delete conversation"
                         title="Delete conversation"
-                        onClick={(e) => { e.stopPropagation(); deleteThread(t._id); }}
+                        onClick={(e) => { e.stopPropagation(); setDeleteTarget(t); }}
                       >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                           <polyline points="3 6 5 6 21 6" />
@@ -929,6 +943,17 @@ export default function ChatAssistant() {
           currentPlan={upgradeInfo.currentPlan}
           onClose={() => setUpgradeInfo(null)}
           onViewPlans={() => { setUpgradeInfo(null); navigate('/pricing'); }}
+        />
+      )}
+      {deleteTarget && (
+        <ConfirmModal
+          type="danger"
+          title="Delete this conversation?"
+          message={`"${deleteTarget.title || 'New conversation'}" and its entire transcript will be permanently removed. This cannot be undone.`}
+          confirmText="Yes, delete"
+          cancelText="Keep conversation"
+          onConfirm={confirmDeleteThread}
+          onCancel={() => setDeleteTarget(null)}
         />
       )}
     </>
