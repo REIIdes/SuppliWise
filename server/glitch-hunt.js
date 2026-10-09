@@ -30,7 +30,13 @@ const { issueUserSession } = require('./utils/sessions');
 // the session rule.
 const SESSION_CACHE_TTL_MS_FOR_PROBE = 30 * 1000;
 
-const BASE = `http://127.0.0.1:${process.env.PORT || 5000}/api`;
+// Derived from TLS_ENABLED rather than hardcoded, so this probe keeps working when
+// the API serves HTTPS. A pinned `http://` here fails every request with a
+// certificate error that reads as a broken certificate rather than as "this
+// script is still speaking http". Run it through
+// `node scripts/withDevCa.mjs glitch-hunt.js` (or `npm run glitch-hunt`) so the
+// local development authority is trusted by this process.
+const BASE = `${require('./utils/tls').loopbackOrigin()}/api`;
 
 // One shared password, declared once. It used to be repeated as a bare literal at
 // four separate call sites ('GlitchHunt123' twice, 'Escalate1234', 'Nope12345'),

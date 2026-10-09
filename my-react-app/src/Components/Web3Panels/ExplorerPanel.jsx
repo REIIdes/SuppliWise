@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getChain, verifyChain, getTx } from '../../api/web3';
+import { getChain, verifyChain, getTx, getChainStatus } from '../../api/web3';
 import { Spinner, Alert, Stat, CopyChip, Empty, fmtTime, trunc, usePanelState } from './w3ui';
 
 // Chain explorer: browse blocks, recompute the whole chain's integrity, and
@@ -8,6 +8,7 @@ export default function ExplorerPanel() {
   const { loading, setLoading, alert, ok, fail, clear, info } = usePanelState();
   const [chain, setChain] = useState(null);
   const [verify, setVerify] = useState(null);
+  const [status, setStatus] = useState(null);
   const [txInput, setTxInput] = useState('');
   const [tx, setTx] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -30,6 +31,20 @@ export default function ExplorerPanel() {
 
   useEffect(() => { load(); /* eslint-disable-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect -- intentional initial load on mount */ }, []);
 
+  // Poll the compact integrity status so a break is visible WITHOUT the user
+  // pressing "Verify". Previously the Integrity tile read "unverified" until
+  // someone clicked the button — which is exactly backwards for a control whose
+  // whole job is to report a problem nobody was looking for.
+  useEffect(() => {
+    let alive = true;
+    const read = () => {
+      getChainStatus().then((s) => { if (alive) setStatus(s); }).catch(() => {});
+    };
+    read();
+    const timer = setInterval(read, 30000);
+    return () => { alive = false; clearInterval(timer); };
+  }, []);
+
   const runVerify = async () => {
     try {
       setBusy(true);
@@ -42,6 +57,10 @@ export default function ExplorerPanel() {
       fail(err, 'Could not verify the chain.');
     } finally {
       setBusy(false);
+      // Re-read the compact status either way: a completed verification is what
+      // closes an open incident, so the banner must refresh after it, not only
+      // after a user-initiated full check.
+      getChainStatus().then(setStatus).catch(() => {});
     }
   };
 
@@ -65,6 +84,21 @@ export default function ExplorerPanel() {
 
   const oldest = chain.blocks.length ? Math.min(...chain.blocks.map((b) => b.index)) : 0;
 
+  // Prefer the polled status; fall back to the last manual verification while
+  // the first poll is still in flight, so the tile never flashes "unverified"
+  // on a chain that is fine.
+  const verdict = status ?? verify;
+  const integrityLabel = !verdict
+    ? 'checking…'
+    : verdict.valid === false
+      ? 'BROKEN ✗'
+      : verdict.state === 'verifying'
+        ? 'checking…'
+        : 'Valid ✓';
+  const integrityTone = !verdict || verdict.valid === false
+    ? (verdict && verdict.valid === false ? 'amber' : '')
+    : 'green';
+
   return (
     <div>
       <Alert alert={alert} onClear={clear} />
@@ -86,8 +120,44 @@ export default function ExplorerPanel() {
           <Stat value={`#${chain.height}`} label="Chain height" tone="green" />
           <Stat value={chain.difficulty} label="PoW difficulty" />
           <Stat value={chain.blocks.length} label="Blocks loaded" />
-          <Stat value={verify ? (verify.valid ? 'Valid ✓' : 'BROKEN ✗') : 'unverified'} label="Integrity" tone={verify ? (verify.valid ? 'green' : 'amber') : ''} />
+          <Stat
+            value={integrityLabel}
+            label="Integrity"
+            tone={integrityTone}
+          />
         </div>
+        {status && status.state === 'compromised' && (
+          <div className="w3-alert err" style={{ marginTop: 14 }} role="alert">
+            <strong>⚠️ Blockchain record integrity issue.</strong>{' '}
+            {status.notice || 'Records anchored around the affected block are not being treated as verified.'}
+            {status.brokenAt != null && (
+              <> Affected block: <span className="w3-mono">#{status.brokenAt}</span>. </>
+            )}
+            {status.reason && <> <span className="w3-mono">{status.reason}</span></>}
+            {/*
+              Say the two things a user would otherwise have to guess: that the
+              ledger is frozen rather than broken-forever, and what that means for
+              a receipt they are waiting on. Without this the warning reads as
+              "everything is lost", which is the opposite of the truth.
+            */}
+            {status.quarantined && (
+              <div style={{ marginTop: 8 }}>
+                The ledger has paused rather than continuing on the damaged blocks, and your
+                account, balance and orders are unaffected. New on-chain receipts are temporarily
+                withheld — anything you complete is still recorded on your account and will be
+                anchored once the chain is repaired.
+                {status.quarantine?.needsBackupRestore && (
+                  <> This one requires a backup restore rather than a repair.</>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+        {status && status.lastVerifiedAt && status.state !== 'compromised' && (
+          <p className="w3-card-sub" style={{ marginTop: 12 }}>
+            Last full integrity re-check: {fmtTime(new Date(status.lastVerifiedAt).getTime())}. Every block added since is re-checked as it lands.
+          </p>
+        )}
         <div style={{ marginTop: 14 }}>
           <div className="w3-label">Tip hash</div>
           <CopyChip value={chain.tip} label={chain.tip} />

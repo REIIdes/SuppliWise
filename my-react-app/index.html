@@ -35,7 +35,12 @@
            Production deployments should additionally send this as an HTTP
            header with a nonce/hash so 'unsafe-inline' can be dropped.
          • connect-src must allow http:/https:/ws: because the API origin is
-           derived from the page host (LAN devices call http://<ip>:5000).
+           derived from the page host (LAN devices call https://<ip>:5000).
+           BOTH schemes stay listed on purpose. The dev servers run on HTTPS when
+           a certificate is present and on HTTP when it is not, and the client
+           follows whichever the page is using (src/api.js) — so a policy
+           hard-wired to https: would break the plain-HTTP path that a clone
+           with no certs/ directory still uses.
          • img-src needs the same http:/https: allowance, for exactly the same
            reason, and this is NOT theoretical: profile pictures stopped being
            inline data: URLs and are now served as FILES from

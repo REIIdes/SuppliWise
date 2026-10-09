@@ -20,7 +20,11 @@
 require('dotenv').config();
 const mongoose = require('mongoose');
 
-const BASE = process.env.SMOKE_BASE_URL || 'http://localhost:5000/api';
+// TLS_ENABLED-aware, so the default origin is right whether the API serves HTTP or
+// HTTPS. SMOKE_BASE_URL still wins — pointing this at a remote host is the point
+// of that override. Run via `npm run glitch-hunt:web3` so this process trusts the
+// local development certificate authority.
+const BASE = process.env.SMOKE_BASE_URL || `${require('./utils/tls').loopbackOrigin()}/api`;
 const STAMP = Date.now();
 
 const SUPPLY_ORDER = [

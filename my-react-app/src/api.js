@@ -57,6 +57,19 @@ const loadWebAuthn = async () => {
 // Resolve the backend URL: explicit env override wins; otherwise derive it
 // from the page host so phones/tablets on the LAN (e.g. 192.168.x.x) reach
 // the backend instead of a dead localhost:5000 ("Failed to fetch").
+//
+// THE SCHEME FOLLOWS THE PAGE. This is not a preference, it is a requirement:
+// a browser blocks an https page from requesting an http API as MIXED CONTENT,
+// and it does so before the request is sent — so every call fails at once, with
+// no error naming the cause. So the API URL inherits whatever the page is
+// using, on every host including localhost.
+//
+// Concretely that means the localhost branch is no longer a hardcoded
+// `http://localhost:5000`. It was the one host where the scheme was pinned, and
+// pinning it is what made `vite dev` over https unable to reach its own API:
+// the page asked for http from an https document and was refused. Deriving it
+// from `window.location.protocol` means a dev server with a certificate and one
+// without both work, with no configuration and nothing to remember.
 const getBaseUrl = () => {
   // `import.meta.env` only exists under Vite. Under `node --test` it is
   // undefined, and an unguarded read here made utils/pictureUrl.test.js throw
@@ -66,12 +79,26 @@ const getBaseUrl = () => {
   if (override) return override;
   if (typeof window !== 'undefined') {
     const { hostname, protocol } = window.location;
-    if (hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
+    // The native shell (Capacitor) serves the app from its own local origin —
+    // `capacitor://localhost` or `https://localhost` — and `localhost` there is
+    // the PHONE, not the machine running the API. Deriving `…:5000` from it
+    // produced a URL that cannot resolve on any real device, which is why the
+    // APK has always needed VITE_API_URL (or a configured `server.host`).
+    // Detecting it explicitly means the requirement is stated rather than
+    // accidental: build the app with VITE_API_URL set to the backend's real
+    // address.
+    const isNativeShell = typeof window.Capacitor !== 'undefined'
+      && window.Capacitor?.isNativePlatform?.() === true;
+    if (hostname && !isNativeShell) {
+      // `https:` maps to https and everything else to http, which is what keeps
+      // an http dev server and an https one both working with no configuration.
       const scheme = protocol === 'https:' ? 'https:' : 'http:';
       return `${scheme}//${hostname}:5000/api`;
     }
   }
-  return 'http://localhost:5000/api';
+  // No window at all (`node --test`, a server-side render). There is no page to
+  // inherit a scheme from; https matches the default the dev servers now use.
+  return 'https://localhost:5000/api';
 };
 const BASE_URL = getBaseUrl();
 

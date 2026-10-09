@@ -96,10 +96,27 @@ async function setParam(param, value, actor) {
 
 // ── Chain anchoring helper ─────────────────────────────────────────────────
 // Never throws: anchoring is an audit enhancement, not the source of truth.
+//
+// The `dataHash` is always computed by the LEDGER, never taken from the caller.
+// `normalizeTx` used to accept a caller-supplied digest (`tx.dataHash ||
+// hashPayload(data)`), which meant a route could assert a digest that did not
+// describe the payload it was anchoring — and since the old header only ever
+// committed to the txHash, that false digest became permanently unfalsifiable.
+//
+// The privacy feature is unaffected: `secret` lets a caller anchor the digest
+// of a payload that is deliberately NOT written on-chain. The ledger marks those
+// transactions `digestCovers: 'private'` and commits the digest itself, so it
+// still cannot be swapped — verification simply cannot re-derive it from `data`,
+// which is the honest answer rather than a fake equality check.
 async function anchor(type, actor, { public: pub = null, secret = null }) {
   try {
-    const dataHash = hashPayload(secret !== null ? secret : pub);
-    return await ledger.append([{ type, actor, data: pub, dataHash }]);
+    return await ledger.append([
+      // `secret`, not a precomputed `dataHash`: the ledger owns digest derivation
+      // so a caller cannot attach a digest that does not describe its payload.
+      secret !== null && secret !== undefined
+        ? { type, actor, data: pub, secret }
+        : { type, actor, data: pub },
+    ]);
   } catch (err) {
     console.error('[web3 anchor]', type, err.message);
     return { index: -1, hash: '', txs: [''] };

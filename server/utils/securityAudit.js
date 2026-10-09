@@ -131,8 +131,9 @@ const SECURITY_AUDIT = {
       title: 'No Content-Security-Policy on the client',
       detail: 'Nothing restricted where the browser would load or run script from, maximising XSS blast radius.',
       status:
-        'mitigated — CSP meta added (external script hosts and eval refused). frame-ancestors must still be set as ' +
-        'an HTTP header; the policy must be re-verified in a live browser.',
+        'fixed — CSP meta covers the client, and frame-ancestors is now sent as a real HTTP header by every origin ' +
+        'this repository controls (vite dev, vite preview, and the production dist/ host added in F11). Verified ' +
+        'enforcing in a live browser.',
     },
   ],
 
@@ -146,7 +147,8 @@ const SECURITY_AUDIT = {
     'H5  routes/auth.js — account lockout gate + failure recording on /verify-admin-2fa.',
     'H6  routes/auth.js — /setup-2fa returns 409 when twoFactorEnabled is already true.',
     'H7  routes/polish.js — protect middleware added after confirming no unauthenticated frontend caller.',
-    'H8  my-react-app/index.html — Content-Security-Policy meta (allowlist script/style/img/font/worker sources).',
+    'H8  my-react-app/index.html — Content-Security-Policy meta (allowlist script/style/img/font/worker sources); my-react-app/scripts/serveDist.mjs — frame-ancestors + X-Frame-Options as real headers on the production dist/.',
+    'F11 utils/priorityRules.js + utils/priorityGate.js — the Priority gate reads the 04:00 plan day (planDayKey) instead of the UTC calendar date; the duplicated copy of the rule in priorityGate.js removed.',
     'M1  middleware/auth.js — query-string token fallback removed; the SSE stream keeps its own route-scoped header copy.',
     'M2  utils/entitlements.js + routes/subscription.js — own-property feature lookup, prototype keys fail closed.',
     'M3  routes/dashboard.js — reset now verifies the assessment belongs to the caller.',
@@ -406,6 +408,54 @@ const SECURITY_AUDIT = {
           + 're-derived later.',
         status: 'corrected — the proposed fix was wrong and was backed out',
       },
+      {
+        id: 'F11',
+        severity: 'medium',
+        title: 'The Priority gate was still reading a different "today" than the tracker writes',
+        detail:
+          'utils/planDay.js moved the plan day to 04:00 -> 04:00 in the user\'s own zone, and routes/dashboard.js, ' +
+          'routes/insights.js and the rest of the app moved with it. utils/priorityRules.js and utils/priorityGate.js ' +
+          'did not: both still computed `new Date().toISOString().split(\'T\')[0]\', the UTC calendar date. They agreed ' +
+          'with each other — which is why nothing failed — and disagreed with every writer of IntakeRecord.dayKey. The ' +
+          'two copies of the rule are the actual defect: priorityGate.js held a copy-pasted duplicate of the whole ' +
+          'priorityRules.js rule, and the copy is the one that drifted.',
+        impact:
+          'For a four-hour window every day, `byDay.has(today)` missed and the gate fell through to "the most recent day ' +
+          'with records" — reading the day that had just ENDED. A legitimate Priority flag was then refused with "already ' +
+          'complete" because the user finished YESTERDAY, and selfHealOpenPriority could auto-release a real, open ' +
+          'clinical review on the strength of a day the user had already satisfied, while today\'s doses sat unticked. ' +
+          'Worst for users east of UTC, where the window falls in the evening.',
+        fix:
+          'priorityRules.getTodayKey() is now derived from planDayKey, and priorityGate.js imports the whole rule from ' +
+          'priorityRules instead of restating it — one copy, so the drift cannot recur. The live flow script ' +
+          '(test-priority-override-flows.js) had the same naive key and was seeding rows the gate never asked for, so ' +
+          'it reported false results rather than failing loudly; it derives from planDayKey too.',
+        alsoFixed:
+          'Test File/intake-time-slots.test.js seeded rows under the naive UTC date while the routes read the plan day, so ' +
+          'all 18 of its tests failed between 00:00 and 04:00 UTC and passed for the other 20 hours — a clock-dependent ' +
+          'suite that looks flaky rather than wrong. Same one-line cause as the admin-override suite had already been ' +
+          'fixed for. It now derives the key from planDayKey.',
+        status: 'fixed — the gate and the tracker now agree on the day, always',
+      },
+      {
+        id: 'F12',
+        severity: 'high',
+        title: 'The production dist/ had no host, so frame-ancestors had nowhere to go',
+        detail:
+          'H8 was recorded as "mitigated", and honestly so: a <meta> policy covers everything a meta tag may express, ' +
+          'but `frame-ancestors` is IGNORED in a <meta http-equiv> and honoured only as a real response header. ' +
+          'vite.config.js sent it on `dev` and `preview`. `vite build` emits a static dist/ that some other server hands ' +
+          'out, and the audit carried this as a manual action: "there is no host config in this repository to do it for us". ' +
+          'The closest thing to production therefore had no framing protection at all — clickjacking.',
+        fix:
+          'Added my-react-app/scripts/serveDist.mjs (`npm run serve:prod`): a zero-dependency static host for dist/ that ' +
+          'serves the SPA with the same header set, imported from vite.config.js rather than restated, so the two cannot ' +
+          'drift. It also carries an SPA fallback (the app can be deep-linked), immutable caching for hashed assets, ' +
+          'no-cache for index.html, and a resolved-path traversal guard. src/utils/securityHeaders.test.js asserts the ' +
+          'headers over real HTTP, including on a deep-linked route — the case where headers attached only to the ' +
+          '"file found" branch would leave a refresh on /dashboard framable while / looked protected.',
+        status: 'fixed — production dist/ is covered, and asserted over real HTTP',
+      },
     ],
     reVerification: {
       serverUnitTests: 'PASS — 990/990, 0 skipped, exits cleanly (originally 796 with 40 silently skipped)',
@@ -450,7 +500,7 @@ const SECURITY_AUDIT = {
     'Purge secrets from git history (history rewrite) — or assume they are known, since the remote is public.',
     'Decide whether this repository should be public at all.',
     'OPERATIONAL: if this API runs behind a reverse proxy or load balancer, set TRUST_PROXY=true — otherwise every client resolves to the proxy address and IP lockouts bucket all users together.',
-    'OPERATIONAL: the hardened response headers now cover `vite dev` and `vite preview` only. Whoever serves the production dist/ must send X-Frame-Options and Content-Security-Policy: frame-ancestors \'none\' as real headers — there is no host config in this repository to do it.',
+    'OPERATIONAL: `npm run serve:prod` (my-react-app) serves the built dist/ with X-Frame-Options and Content-Security-Policy: frame-ancestors \'none\' as real headers. If you deploy dist/ to some OTHER host — Netlify, Vercel, nginx, Cloudflare — that host must send the same headers; copy them from `securityHeaders` in my-react-app/vite.config.js so the policy stays one policy.',
     'Keep the new CI green. `npm audit` is now a gate, which is the only reason the nodemailer advisories were caught at all; do not let it be skipped or made non-blocking.',
   ],
 

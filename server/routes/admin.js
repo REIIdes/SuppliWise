@@ -51,6 +51,11 @@ const {
   Expert, Booking, Web3Config, DEFAULT_PARAMS,
 } = require('../models/Web3');
 const ledger = require('../blockchain/ledger');
+// Read off the ledger module rather than through the instance: `sealAvailable`
+// is a module-level function (it answers whether a key exists at all, so it must
+// not depend on any ledger state), and calling it as `ledger.sealAvailable()`
+// works only by accident of how the exports are attached.
+const { sealAvailable } = require('../blockchain/ledger');
 const { readBigDocument } = require('../utils/bigDocuments');
 
 const router = express.Router();
@@ -1898,11 +1903,24 @@ router.post('/subscription-cancel-requests/:id/reject', async (req, res) => {
 let monitorCache = { at: 0, payload: null };
 const MONITOR_CACHE_TTL_MS = 60 * 1000;
 
-router.get('/security/monitor', async (req, res) => {
-  const forceFresh = req.query.fresh === '1';
-  if (!forceFresh && monitorCache.payload && Date.now() - monitorCache.at < MONITOR_CACHE_TTL_MS) {
-    return res.json({ ...monitorCache.payload, cached: true });
-  }
+// The run currently in progress, shared by every caller that arrives while it
+// is still going.
+//
+// The cache alone did not stop a pile-up, because it is only populated once a
+// run COMPLETES. The 30 s poll, a "Sync now" click and a report download landing
+// together each found an empty cache and each started its own 48-probe run —
+// which contend for the same connection pool and the same self-HTTP probes, so
+// N concurrent callers made every run ~6x slower (measured: 1.5 s alone, 8.8 s
+// with five at once) and pushed probes into their 10 s timeout. The browser then
+// aborted at its 20 s budget and showed "The security check did not respond in
+// time" for a server that was answering in under two.
+//
+// One run at a time, with every concurrent caller awaiting the SAME promise,
+// removes the pile-up at the source: the extra requests cost nothing and the
+// probes run against an uncontended pool.
+let monitorInFlight = null;
+
+const runMonitorProbes = async (app) => {
   const at = new Date().toISOString();
 
   // Helper: wrap an async probe so it always resolves to a result object.
@@ -2134,7 +2152,11 @@ router.get('/security/monitor', async (req, res) => {
           auth_bruteforce:     ['Auth Brute Force + Replay', 'bruteforce'],
           csrf_stateless:      ['CSRF (Stateless Auth)', 'csrf'],
         }[key] || [key, key];
-        return probe(key, meta[0], meta[1], () => check(req.app));
+        // `app` rather than `req`: this run is shared by every concurrent
+        // caller (see monitorInFlight), so it must not close over one request's
+        // object — a shared run outlives the request that happened to start it,
+        // and reading `req` after that response was sent throws.
+        return probe(key, meta[0], meta[1], () => check(app));
       }
     ),
 
@@ -2161,7 +2183,33 @@ router.get('/security/monitor', async (req, res) => {
       });
       const v = await ledger.verify();
       if (!v.valid) {
-        return { status: 'critical', detail: `Chain integrity FAILED at block ${v.brokenAt} (${v.reason}) — anchored digests cannot be trusted until the chain is re-synced.` };
+        // `kind` distinguishes the failure modes, which need different responses:
+        // a truncation means blocks are MISSING (data loss / restore from backup),
+        // whereas a linkage break means the history was ALTERED (investigation).
+        // Reporting both as one "FAILED" string is what made this unusable during
+        // an incident.
+        const what = v.kind === 'truncation'
+          ? 'blocks are missing from the chain (truncation) — restore from backup before trusting any anchored digest'
+          : v.kind === 'tip-rewrite'
+            ? 'the tip block was replaced — history was altered after the fact'
+            : 'block linkage or a committed payload was altered';
+        const q = ledger.quarantined;
+        return {
+          status: 'critical',
+          detail: `Chain integrity FAILED at block ${v.brokenAt} (${v.reason}) — ${what}. `
+            + `All affected accounts have been notified automatically (${v.notified ? 'notification sent' : 'notification pending'}). `
+            + (q
+              ? `QUARANTINED: new blocks are refused, so the corruption cannot be buried further. `
+                + `${q.affectedBlocks} block(s) are affected. `
+                + (q.unrecoverable
+                  // Truncation cannot be repaired by discarding: the missing
+                  // blocks ARE the evidence, so a backup restore is the only
+                  // honest recovery. Saying so stops an operator attempting a
+                  // repair that would quietly legitimise the deletion.
+                  ? 'Recovery requires RESTORING A BACKUP — discarding blocks cannot restore missing ones. '
+                  : `Repair with POST /api/admin/security/chain/repair (confirm: "DISCARD-BROKEN-BLOCKS") to discard blocks from #${q.brokenAt} onward; the last provably-good block is #${q.brokenAt - 1}. `)
+              : ''),
+        };
       }
       // $sum of the per-block tx array sizes rather than $unwind + $count: same
       // answer, a fraction of the server-side work on a large collection.
@@ -2178,6 +2226,39 @@ router.get('/security/monitor', async (req, res) => {
         ? ` Whole-chain re-hash passed across all ${v.verifiedChecked} block(s) at ${new Date(v.verifiedAt).toLocaleTimeString()}; every block since then is re-checked as it is appended.`
         : ' A whole-chain re-hash is running in the background.';
       return { status: 'healthy', detail: `Append-only chain verified: height ${v.height}, difficulty ${v.difficulty}, ${v.checked} block(s) linked, ${txAgg ? txAgg.txs : 0} anchored tx(s). Hash-linkage + nonce re-audit passed.${auditNote} Personal data never touches the chain — only sha256 digests.` };
+    }),
+
+    // A checkpoint whose seal does not verify was either forged or written under a
+    // different CHAIN_SEAL_KEY. It is discarded on load, so the chain is still
+    // checked — but silently, and only on the next request. Surfaced here because
+    // "the integrity anchor was tampered with" is the single most alarming thing
+    // this monitor can report, and it would otherwise have no surface at all.
+    probe('bc_seal', 'Integrity Seal & Head Anchor', 'blockchain', async () => {
+      const compromised = ledger.sealCompromised;
+      if (compromised) {
+        return {
+          status: 'critical',
+          detail: 'The chain checkpoint FAILED its HMAC seal and was discarded. Someone edited the stored '
+            + '"already verified" record, or CHAIN_SEAL_KEY changed. The chain was re-hashed from genesis instead '
+            + 'of trusting the claim. Treat as a tamper attempt until proven otherwise.',
+        };
+      }
+      if (!sealAvailable()) {
+        return {
+          status: 'warning',
+          detail: 'No integrity seal key is configured (CHAIN_SEAL_KEY unset and JWT_SECRET too short). '
+            + 'The checkpoint cannot be authenticated, so a rewritten chain could not be distinguished from a '
+            + 'verified one. Set CHAIN_SEAL_KEY to a 32+ character random value.',
+        };
+      }
+      const anchored = await ledger.readDiskAnchor();
+      return {
+        status: 'healthy',
+        detail: 'Checkpoint records are HMAC-sealed with CHAIN_SEAL_KEY (or JWT_SECRET when unset) and the seal '
+          + 'is verified on load, so a forged "already verified" claim is rejected rather than trusted. '
+          + `${anchored ? `Host head anchor: deepest sealed position is block ${anchored.index}.` : 'Host head anchor: not yet written (no verified height yet).'} `
+          + 'A leaked database credential alone cannot hide a rewritten chain.',
+      };
     }),
 
     // Feature 1 — Immutable supply chain tracking (public QR verification)
@@ -2468,7 +2549,39 @@ router.get('/security/monitor', async (req, res) => {
   } else {
     monitorCache = { at: 0, payload: null };
   }
-  res.json(payload);
+  return payload;
+};
+
+// The single entry point: serve the cache when it is warm, otherwise join (or
+// start) the one run in progress.
+//
+// `fresh=1` deliberately bypasses the cache — that is what "Sync now" means —
+// but it still JOINS a run already in flight rather than starting a second one.
+// Bypassing the cache and duplicating the work are different requests: the
+// first is the user's explicit request for new data, the second is the pile-up
+// this exists to prevent. It can only ever make the response fresher, never
+// staler, so nothing is lost by sharing.
+router.get('/security/monitor', (req, res) => {
+  const forceFresh = req.query.fresh === '1';
+  if (!forceFresh && monitorCache.payload && Date.now() - monitorCache.at < MONITOR_CACHE_TTL_MS) {
+    return res.json({ ...monitorCache.payload, cached: true });
+  }
+  if (!monitorInFlight) {
+    // Cleared on every path, including a throw: a rejected run must not wedge
+    // every later caller onto a promise that will never settle again.
+    // `req.app` (not `req`) is handed in: the run outlives this request.
+    monitorInFlight = runMonitorProbes(req.app).finally(() => { monitorInFlight = null; });
+  }
+  return monitorInFlight.then(
+    (payload) => res.json(payload),
+    (err) => {
+      console.error('[security/monitor] probe run failed:', err.message);
+      // 503 rather than a 500: the request itself was fine, the check could not
+      // be performed, and this is the one status that tells a retrying client
+      // the answer may be different next time.
+      res.status(503).json({ message: 'The security monitor could not complete its checks. Please try again.' });
+    },
+  );
 });
 
 router.get('/security', (req, res) => {
@@ -2504,6 +2617,64 @@ router.get('/security', (req, res) => {
       detail: rec.description,
     })),
   });
+});
+
+// @route   POST /api/admin/security/chain/repair
+// @desc    Repair a quarantined blockchain ledger by discarding everything from
+//          the first broken block onward, then re-verifying. DESTRUCTIVE and
+//          deliberately explicit: it permanently removes blocks, so it is an
+//          operator decision, never automatic and never triggered by a monitor
+//          probe.
+// @access  Private (admin only)
+//
+// WHY IT IS NOT A ONE-CLICK BUTTON
+// --------------------------------
+// An integrity system that repairs itself would help an attacker erase their own
+// evidence: corrupt a block, and the system helpfully discards it and re-verifies
+// clean. So repair requires an explicit `confirm: 'DISCARD-BROKEN-BLOCKS'` token
+// (typed, not clicked) and is recorded permanently.
+//
+// Placed after the monitor route deliberately: `runMonitorProbes` outlives the
+// request that started it, so everything between that function and the monitor
+// route is treated as "must not touch req". A handler here is a different thing.
+router.post('/security/chain/repair', async (req, res) => {
+  try {
+    const CONFIRM_TOKEN = 'DISCARD-BROKEN-BLOCKS';
+    if (req.body?.confirm !== CONFIRM_TOKEN) {
+      return res.status(400).json({
+        message: 'Repair permanently discards blocks from the first broken block onward.',
+        requiresConfirm: CONFIRM_TOKEN,
+        quarantined: !!ledger.quarantined,
+        quarantinedAt: ledger.quarantined?.brokenAt ?? null,
+      });
+    }
+
+    // Refuse early rather than mid-walk: repairing a healthy chain is almost
+    // always a mis-click, and the repair log should not fill with no-ops.
+    if (!ledger.quarantined) {
+      const v = await ledger.verify();
+      if (v.valid !== false) {
+        return res.status(400).json({ message: 'The chain is not quarantined — nothing to repair.' });
+      }
+    }
+
+    const actor = String(req.admin?.alias || req.user?.alias || 'unknown-admin');
+    const keepTo = req.body?.keepTo;
+    const report = await ledger.repair({
+      actor,
+      keepTo: keepTo == null ? null : Number(keepTo),
+    });
+
+    // A refusal (e.g. keepTo past the last good block) is a client mistake, not
+    // a server fault — 400 keeps it distinguishable from a genuine repair.
+    if (report.repaired === false) {
+      return res.status(400).json(report);
+    }
+    return res.json(report);
+  } catch (error) {
+    console.error('[admin security/chain/repair]', error.message);
+    res.status(500).json({ message: 'Could not repair the chain.' });
+  }
 });
 
 // ── AI providers ────────────────────────────────────────────────────────

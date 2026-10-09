@@ -71,6 +71,7 @@ const MONITOR_FRAMEWORK = {
   bc_trials:          'Blockchain',
   bc_oracle:          'Blockchain',
   bc_experts:         'Blockchain',
+  bc_seal:            'Blockchain',
 };
 
 // Full label for the Description column title
@@ -122,6 +123,7 @@ const MONITOR_LABEL = {
   bc_trials:          'Clinical Trial Consent',
   bc_oracle:          'Decentralized Oracles',
   bc_experts:         'Professional Bookings',
+  bc_seal:            'Integrity Seal & Head Anchor',
 };
 
 // Implementation path shown below the label
@@ -173,6 +175,7 @@ const MONITOR_IMPL = {
   bc_trials:          'routes/web3/ecosystem.js (feature 18)',
   bc_oracle:          'routes/web3/ecosystem.js (feature 19)',
   bc_experts:         'routes/web3/ecosystem.js (feature 20)',
+bc_seal:            'blockchain/ledger.js · HMAC-SHA256 checkpoint seal',
 };
 
 // Display order — core platform first, then the whole blockchain layer
@@ -225,6 +228,9 @@ const MONITOR_ORDER = [
   'bc_trials',
   'bc_oracle',
   'bc_experts',
+  // Integrity seal: whether the stored "already verified" checkpoint can be
+  // authenticated, so a forged one cannot make a rewritten chain look verified.
+  'bc_seal',
 ];
 
 // ── Table section grouping ────────────────────────────────────────────────

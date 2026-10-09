@@ -18,7 +18,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { decideRaisePriority, getTodayKey } = require('../utils/priorityGate');
+const { decideRaisePriority, getTodayKey, summarizeIntakeDays } = require('../utils/priorityGate');
+const { planDayKey } = require('../utils/planDay');
 
 const intake = (total, taken) => ({ total, taken, complete: total > 0 && taken === total });
 
@@ -116,7 +117,29 @@ test('every refusal carries a message the admin UI can show', () => {
 test('dayKey is the YYYY-MM-DD form IntakeRecord stores', () => {
   const k = getTodayKey();
   assert.match(k, /^\d{4}-\d{2}-\d{2}$/);
-  assert.equal(k, new Date().toISOString().split('T')[0]);
+  // It must be the SAME key the rest of the product reads and writes IntakeRecord
+  // by — the 04:00 plan day from utils/planDay.js, not the UTC calendar date.
+  // This assertion used to pin the naive UTC date, which is what let the gate
+  // keep evaluating the wrong day for four hours a day after every route had
+  // moved to the plan day.
+  assert.equal(k, planDayKey(new Date()));
+});
+
+test('the gate reads the day the tracker writes, not the UTC calendar date', () => {
+  // The regression this pins: between 00:00 and 04:00 UTC the naive UTC date is
+  // TOMORROW's date, while the plan day still running is yesterday's. A gate
+  // asking for the naive date therefore grouped the wrong day's rows — which
+  // refused legitimate Priority flags ("already complete") and could auto-release
+  // a real review on the strength of a day the user had already satisfied.
+  //
+  // Deterministic: the assertion is about the key, checked at both sides of the
+  // 04:00 boundary rather than depending on when the suite happens to run.
+  assert.equal(planDayKey(new Date('2026-10-09T03:59:00Z')), '2026-10-08');
+  assert.equal(planDayKey(new Date('2026-10-09T04:00:00Z')), '2026-10-09');
+  // ...and the group the gate picks is driven by that key, not by a hard-coded
+  // date: a plan finished under TODAY's key must read as complete.
+  const today = getTodayKey();
+  assert.equal(summarizeIntakeDays([{ dayKey: today, taken: true }], today).complete, true);
 });
 
 // ── What counts as "already done" ──────────────────────────────────────────

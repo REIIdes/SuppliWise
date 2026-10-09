@@ -33,11 +33,12 @@ const IntakeRecord = require('../models/IntakeRecord');
 const Assessment = require('../models/Assessment');
 const AdminEvent = require('../models/AdminEvent');
 const { expiryFromCreatedAt } = require('./assessments');
-
-/** Today in YYYY-MM-DD, matching the dayKey used by IntakeRecord. */
-function getTodayKey() {
-  return new Date().toISOString().split('T')[0];
-}
+// The rule itself lives in priorityRules.js, which is pure data in / pure data
+// out. It used to be COPY-PASTED into this file, and the two copies drifted:
+// this one kept the naive UTC calendar date for "today" long after the rest of
+// the product moved to the 04:00 plan day, so the gate evaluated the wrong day
+// for four hours a day. One copy, imported, cannot drift again.
+const { getTodayKey, summarizeIntakeDays, decideRaisePriority } = require('./priorityRules');
 
 /**
  * Completion state of an assessment's plan for today.
@@ -45,77 +46,21 @@ function getTodayKey() {
  * be `taken`, and there must be at least one record (an empty plan is not
  * "complete", it is "not started" — treating it as complete would let a
  * Priority through for a user who has no supplements at all).
+ *
+ * This is the only database-facing half: read the rows, hand them to the shared
+ * rule. Both the "prefer today, else the newest day with records" fallback and
+ * its rationale are documented on summarizeIntakeDays.
  */
 async function intakeStateFor(userId, assessmentId) {
   if (!userId || !assessmentId) return { total: 0, taken: 0, complete: false, dayKey: null };
 
-  // TODAY first, then fall back to the most recent day that has records.
-  //
-  // The fallback is what makes "the assessment is already done" detectable at
-  // all. Someone who ticked everything off yesterday and was flagged this
-  // morning has NO records for today, so a today-only check returns total=0,
-  // reports "not complete", and the gate stays up for a review they finished
-  // yesterday — with no path to clear it, because clearing it requires posting
-  // an intake for today.
-  const today = getTodayKey();
   const recent = await IntakeRecord.find({ user: userId, assessment: assessmentId })
     .sort({ dayKey: -1 })
     .limit(200)
     .select('taken dayKey')
     .lean();
 
-  if (recent.length === 0) {
-    return { total: 0, taken: 0, complete: false, dayKey: null };
-  }
-
-  // Group by day, newest first, and evaluate today if it exists at all.
-  const byDay = new Map();
-  for (const r of recent) {
-    if (!byDay.has(r.dayKey)) byDay.set(r.dayKey, []);
-    byDay.get(r.dayKey).push(!!r.taken);
-  }
-
-  const dayKey = byDay.has(today) ? today : [...byDay.keys()].sort().pop();
-  const flags = byDay.get(dayKey);
-  const total = flags.length;
-  const taken = flags.filter(Boolean).length;
-
-  return { total, taken, complete: total > 0 && taken === total, dayKey };
-}
-
-/**
- * The actual rule, as a pure function of two facts.
- *
- * Kept free of Mongoose so it can be unit-tested directly — the bug this file
- * fixes was a missing precondition, and a missing precondition is exactly the
- * kind of thing that regresses silently if the only test needs a live database.
- *
- * @param {{intake: {total:number, taken:number, complete:boolean}, openId?: string}} facts
- */
-function decideRaisePriority({ intake, openId } = {}) {
-  if (intake && intake.complete) {
-    return {
-      ok: false,
-      code: 'intake-complete',
-      intake,
-      message:
-        'This assessment is already complete — all of today\u2019s supplements are taken, ' +
-        'so there is no outstanding review to flag. Mark it Standard instead, or flag it ' +
-        'before the day\u2019s plan is finished.',
-    };
-  }
-  if (openId) {
-    return {
-      ok: false,
-      code: 'already-open',
-      intake,
-      openId: String(openId),
-      message:
-        'This user already has an assessment open for priority review. Resolve that one first, ' +
-        'otherwise the two flags stack and the user sees a pause they cannot clear.',
-    };
-  }
-  return { ok: true, intake };
+  return summarizeIntakeDays(recent, getTodayKey());
 }
 
 /**
@@ -214,6 +159,7 @@ async function selfHealOpenPriority(userId) {
 
 module.exports = {
   getTodayKey,
+  summarizeIntakeDays,
   intakeStateFor,
   decideRaisePriority,
   guardRaisePriority,

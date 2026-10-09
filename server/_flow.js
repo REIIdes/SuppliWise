@@ -1,7 +1,7 @@
 ﻿const fs = require('fs');
 const mem = fs.readFileSync(process.env.TEMP + '\\member_token.txt', 'utf8').trim();
 const adm = process.argv[2];
-const B = 'http://localhost:5000/api';
+const B = `${require('./utils/tls').loopbackOrigin()}/api`;
 const MH = () => ({ Authorization: `Bearer ${mem}`, 'Content-Type': 'application/json' });
 const AH = () => ({ Authorization: `Bearer ${adm}`, 'Content-Type': 'application/json' });
 let pass = 0, fail = 0;

@@ -1,3 +1,8 @@
+# The development certificate authority, copied into the Android debug build by
+# scripts/dev-certs.mjs. A trust anchor is treated like key material: never
+# committed, and present only in a debug APK.
+my-react-app/android/app/src/debug/res/raw/
+
 # Environment variables - NEVER commit these
 .env
 server/.env
@@ -35,8 +40,19 @@ server/.env
 # has been sanitized to placeholders — never put a live TOTP seed back in it).
 *credentials*
 *secrets.local*
+# TLS material for the HTTPS development setup (scripts/dev-certs.mjs).
+#
+# A private key must never be committed — that is the plain reason, and it is
+# the whole reason: a key in a public repository is a key everyone can read.
+#
+# The certificate and the local CA are excluded alongside it for a practical
+# reason rather than a secret one: they are machine-local artifacts. The CA is
+# trusted only by the machine that generated it, so a committed copy would be
+# meaningless everywhere else and misleading on the machine that has the real
+# one. `node scripts/dev-certs.mjs` regenerates both. See certs/README.txt.
 *.pem
 *.key
+certs/
 
 # …but `*credentials*` is a FILENAME glob, so it also swallows source code whose
 # name merely contains the word. server/scripts/send-admin-credentials.js was
@@ -67,6 +83,11 @@ my-react-app/dev-dist
 # rewrite ~3 MB, which is what broke the login button. They are user content,
 # not source: never committed.
 server/uploads/
+# Blockchain head anchors: runtime integrity records of the ledger's sealed
+# positions, one file per database (the filename embeds a digest of MONGO_URI).
+# Machine-local state — a fresh clone must rebuild them by re-hashing the chain
+# rather than inheriting someone else's proof of a height it never reached.
+server/uploads/.chain-head.*.anchor
 
 # Editor / tooling state
 .qodo/

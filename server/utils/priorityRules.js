@@ -15,9 +15,33 @@
  * it needs a query.
  */
 
-/** Today in YYYY-MM-DD, matching the dayKey used by IntakeRecord. */
+const { planDayKey } = require('./planDay');
+
+/**
+ * Today in YYYY-MM-DD, matching the dayKey used by IntakeRecord.
+ *
+ * THIS WAS THE NAIVE UTC CALENDAR DATE
+ *   `new Date().toISOString().split('T')[0]`
+ * which is what every other reader of `IntakeRecord.dayKey` used to be, and
+ * stopped being the moment the plan day moved to utils/planDay.js (04:00 -> 04:00
+ * in the user's own zone). The two now disagree for a four-hour window every
+ * day, and the gate reads the wrong day inside it:
+ *
+ *   Take a user in Manila. Their tracker rolls to the 4th at 04:00 Manila, so
+ *   their rows are written under dayKey 2026-10-04. Between 20:00 and 00:00 UTC
+ *   the old answer was 2026-10-03 — the day that just ENDED. `summarizeIntakeDays`
+ *   prefers "today" when today has records, so for those four hours it evaluated
+ *   yesterday's finished plan instead of the one in progress: a legitimate
+ *   Priority flag was refused with "already complete", and a flag already on the
+ *   assessment could be auto-released by `selfHealOpenPriority` on the strength
+ *   of a day the user had already satisfied — a clinical review silently closed
+ *   while today's doses sat unticked.
+ *
+ * Derived from planDayKey rather than restated, so this cannot drift from the
+ * rule the rest of the product uses.
+ */
 function getTodayKey() {
-  return new Date().toISOString().split('T')[0];
+  return planDayKey(new Date());
 }
 
 /** "Nothing tracked yet" — never mutate this; callers get a copy. */

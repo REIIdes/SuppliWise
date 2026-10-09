@@ -59,16 +59,32 @@ async function verifyBatch(req, res) {
     const blocks = await Block_lookup(txHashes);
     let proofsChecked = 0;
     let proofsValid = 0;
+    const problems = [];
     for (const hash of txHashes) {
       const block = blocks.get(hash);
       if (!block) continue;
       proofsChecked += 1;
-      const recomputed = ledger.headerHash(block);
-      if (recomputed === block.hash) proofsValid += 1;
+      // Use checkBlock, not a bare headerHash re-computation. The old check
+      // compared the header hash alone, which is exactly the check that proved
+      // nothing about the transaction: a rewritten payload left the header
+      // untouched and this endpoint still answered `verified: true` to whoever
+      // scanned the bottle. checkBlock re-derives every txHash and every payload
+      // digest as well as the header, so a green result now means the anchored
+      // record is intact.
+      //
+      // `expectedPrev` is unknown here — this endpoint reads individual blocks,
+      // not a contiguous chain — so prevHash linkage is not asserted; the block
+      // and everything inside it is.
+      const reason = ledger.checkBlock(block, block.prevHash);
+      if (!reason) proofsValid += 1;
+      else problems.push({ txHash: hash, blockIndex: block.index, reason });
     }
 
     res.json({
       verified: proofsChecked > 0 && proofsValid === proofsChecked,
+      // Surfaced so a scanner sees WHY a bottle failed rather than a bare
+      // false. Only the failure kind and block number — never payload contents.
+      problems,
       code: batch.code,
       productName: batch.productName,
       brand: batch.brand,

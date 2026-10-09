@@ -17,7 +17,11 @@
 require('dotenv').config();
 const mongoose = require('mongoose');
 
-const BASE = process.env.SMOKE_BASE_URL || 'http://localhost:5000/api';
+// TLS_ENABLED-aware, so the default origin matches whatever the API serves.
+// SMOKE_BASE_URL still wins — pointing this at a remote host is the point of it.
+// Run via `node scripts/withDevCa.mjs test-web3-flows.js` so this process trusts
+// the local development certificate authority.
+const BASE = process.env.SMOKE_BASE_URL || `${require('./utils/tls').loopbackOrigin()}/api`;
 
 let passed = 0;
 const failures = [];

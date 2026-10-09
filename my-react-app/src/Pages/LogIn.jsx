@@ -64,7 +64,7 @@ function LogIn() {
   const [resendCooldown, setResendCooldown] = useState(0);
   const [resendTimer, setResendTimer] = useState(null);
   const [success, setSuccess] = useState('');
-  const [otpTimeLeft, setOtpTimeLeft] = useState(600); // 10 minutes in seconds
+  const [otpTimeLeft, setOtpTimeLeft] = useState(300); // 5 minutes in seconds
   const [otpExpiryTimer, setOtpExpiryTimer] = useState(null);
   const [requiresTwoFactor, setRequiresTwoFactor] = useState(false);
   // Whether the second-factor box is collecting a live authenticator code or a
@@ -168,7 +168,7 @@ function LogIn() {
   };
 
   const startOtpExpiryTimer = () => {
-    setOtpTimeLeft(600); // Reset to 10 minutes
+    setOtpTimeLeft(300); // Reset to 5 minutes
     
     // Clear existing timer if any
     if (otpExpiryTimer) {
@@ -509,7 +509,7 @@ function LogIn() {
     setError('');
     setSuccess('');
     setResendCooldown(0);
-    setOtpTimeLeft(600);
+    setOtpTimeLeft(300);
     if (resendTimer) clearInterval(resendTimer);
     if (otpExpiryTimer) clearInterval(otpExpiryTimer);
     setLoading(false);

@@ -18,6 +18,13 @@ You should have 2 terminals running:
 1. Backend (server) - Port 5000
 2. Frontend (my-react-app) - Port 5173
 
+> **One-time, per machine:** if there is no `certs/` directory yet, create the
+> HTTPS certificate first, or both servers will start on plain HTTP:
+> ```
+> npm run certs
+> ```
+> See [HTTPS_SETUP.md](HTTPS_SETUP.md).
+
 ### Step 2: Restart Backend (REQUIRED)
 
 ```bash
@@ -28,10 +35,14 @@ npm start
 
 **Wait for:**
 ```
-Server running on port 5000
+Server running on https://localhost:5000
 Connected to MongoDB
 [Email] Email service configured successfully
+[tls] serving https (certificate ...\certs\localhost.pem)| hsts=max-age=300s
 ```
+
+`https://` in that first line is the thing to check. If it says `http://`, TLS is
+off — either `certs/` is missing or `TLS_ENABLED` is not `true` in `server/.env`.
 
 ### Step 3: Restart Frontend (Recommended)
 
@@ -44,8 +55,13 @@ npm run dev
 **Wait for:**
 ```
 VITE ready in XXX ms
-Local: http://localhost:5173/
+Local: https://localhost:5173/
 ```
+
+Both servers must agree on the scheme. A mismatch is the one failure in this
+project with no useful error message: an https page requesting an http API is
+blocked by the browser as mixed content, and a proxy aimed at the wrong scheme
+answers 502 — in both cases every request fails and nothing names the cause.
 
 ---
 
@@ -65,7 +81,7 @@ Local: http://localhost:5173/
 
 ### 2. Try Login
 
-1. Go to `http://localhost:5173/login`
+1. Go to `https://localhost:5173/login`
 2. Enter your credentials
 3. Click "Sign In"
 
@@ -218,7 +234,7 @@ start cmd /k "cd my-react-app && npm run dev"
 
 # Wait 10 seconds, then open browser
 timeout /t 10
-start http://localhost:5173/login
+start https://localhost:5173/login
 ```
 
 Save this as `restart.bat` in your SuppliWise folder and run it.

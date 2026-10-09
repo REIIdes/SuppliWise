@@ -273,10 +273,10 @@ function resolveWebOrigin(req) {
     resolveWebOrigin.warned = true;
     console.warn(
       '[password-reset] PUBLIC_WEB_URL is not set. Reset links will point at '
-      + 'http://localhost:5173 and will not work for a real user. Set PUBLIC_WEB_URL.'
+      + 'https://localhost:5173 and will not work for a real user. Set PUBLIC_WEB_URL.'
     );
   }
-  return 'http://localhost:5173';
+  return 'https://localhost:5173';
 }
 
 function buildResetUrl(webOrigin, token) {

@@ -107,10 +107,95 @@ router.get('/chain', async (req, res) => {
 router.get('/chain/verify', async (req, res) => {
   try {
     const result = req.query.full === '1' ? await ledger.audit({ maxAgeMs: 0 }) : await ledger.verify();
-    res.json(result);
+    // A break must be impossible to miss for a client that only reads the body:
+    // `valid:false` alongside a bare reason string is easy for a UI to render as
+    // a neutral "status" row instead of a failure. `ok` is the single boolean a
+    // caller should branch on, and it is deliberately redundant with `valid` so
+    // no existing consumer of `valid` changes behaviour.
+    res.json({ ...result, ok: result.valid !== false });
   } catch (error) {
     console.error('[web3 GET /chain/verify]', error.message);
-    res.status(500).json({ message: 'Could not verify the chain.' });
+    // A verifier that could not run is NOT a healthy chain. Reporting 500 leaves
+    // the caller unable to distinguish "check failed" from "chain failed", and
+    // the honest answer to "is the chain intact?" when we do not know is "not
+    // verified" — so this is an explicit non-ok verdict, not a transport error.
+    res.status(503).json({
+      valid: false,
+      ok: false,
+      verified: false,
+      reason: 'The integrity check could not be completed. The chain has not been verified.',
+      message: 'Could not verify the chain.',
+    });
+  }
+});
+
+// @route   GET /api/web3/chain/status
+// @desc    Integrity status for the UI. Answers the two questions a user or an
+//          operator actually has: is the chain trustworthy, and if not, what is
+//          the state of the damage and what happens next.
+// @access  Private
+router.get('/chain/status', async (req, res) => {
+  try {
+    const v = await ledger.verify();
+    const q = ledger.quarantined;
+    const state = v.valid === false ? 'compromised' : (v.pending ? 'verifying' : 'healthy');
+    res.json({
+      state,
+      ok: v.valid !== false,
+      verified: v.pending !== true && v.valid !== false,
+      height: v.height,
+      difficulty: v.difficulty,
+      checked: v.checked,
+      reason: v.reason || null,
+      brokenAt: typeof v.brokenAt === 'number' ? v.brokenAt : null,
+      // Quarantine is the containment state and it is a DIFFERENT fact from
+      // "we found a break". Exposed separately because the consequences differ:
+      // a break means history is untrustworthy, quarantine means new blocks are
+      // being refused until someone repairs it.
+      quarantined: !!q,
+      quarantine: q
+        ? {
+          since: q.since,
+          reason: q.reason,
+          brokenAt: q.brokenAt,
+          affectedBlocks: q.affectedBlocks,
+          // Truncation cannot be repaired by discarding blocks — the missing
+          // ones are the evidence, so recovery means restoring a backup. Saying
+          // so here stops an operator trying to "repair" a chain that needs a
+          // restore instead.
+          needsBackupRestore: !!q.unrecoverable,
+        }
+        : null,
+      lastGoodIndex: q ? ledger.lastGoodIndex() : null,
+      lastFullAuditAt: (ledger.lastAudit() && ledger.lastAudit().fullAuditAt) || null,
+      lastVerifiedAt: ledger.verifiedAt ? new Date(ledger.verifiedAt).toISOString() : null,
+      incident: ledger.incident
+        ? { reason: ledger.incident.reason, brokenAt: ledger.incident.brokenAt, at: ledger.incident.at }
+        : null,
+      notice: state === 'compromised'
+        ? 'Blockchain records around the affected block are not being treated as verified. Your balances and order history are stored separately and are unaffected.'
+        : null,
+    });
+  } catch (error) {
+    console.error('[web3 GET /chain/status]', error.message);
+    res.status(503).json({ state: 'unknown', ok: false, verified: false, reason: 'Integrity check unavailable.' });
+  }
+});
+
+// @route   GET /api/web3/chain/repairs
+// @desc    The permanent incident + repair log. Exists so "the chain broke and
+//          blocks 3-9 were discarded" is inspectable — a repair truncates the
+//          evidence, so without this there would be no record of it anywhere.
+// @access  Private
+router.get('/chain/repairs', async (req, res) => {
+  try {
+    const { ChainRepair } = require('../../models/Web3');
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 25));
+    const rows = await ChainRepair.find({ key: 'chain' }).sort({ at: -1 }).limit(limit).lean();
+    res.json({ repairs: rows, count: rows.length });
+  } catch (error) {
+    console.error('[web3 GET /chain/repairs]', error.message);
+    res.status(500).json({ message: 'Could not load the chain repair log.' });
   }
 });
 
