@@ -315,6 +315,9 @@ export default function ChatAssistant() {
   const previousOpenRef = useRef(false);
   const threadMenuRef = useRef(null);
   const threadsButtonRef = useRef(null);
+  // Snapshot of the conversation that was active before entering archive-reading.
+  // Restored when the user presses the back button, so the ongoing chat is never lost.
+  const preArchiveSnapshot = useRef(null);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -347,6 +350,7 @@ export default function ChatAssistant() {
     setArchiveLoading(false);
     setMenuOpenFor(null);
     setChatView('chat');
+    preArchiveSnapshot.current = null;
   }, [userId]);
 
   // Follow new content only while the reader is already at the bottom. If a
@@ -512,11 +516,11 @@ export default function ChatAssistant() {
     }
   };
 
-  const startNewConversation = (targetView = 'chat') => {
+  const startNewConversation = () => {
     setActiveThreadId(null);
     setMessages([WELCOME_MESSAGE]);
     setThreadsOpen(false);
-    setChatView(targetView);
+    setChatView('chat');
     followBottomRef.current = true;
   };
 
@@ -548,12 +552,21 @@ export default function ChatAssistant() {
     try {
       await deleteChatThread(threadId);
       if (version !== conversationVersionRef.current) return;
+      // Remove from whichever list holds it
       setThreads((prev) => prev.filter((t) => String(t._id) !== String(threadId)));
+      setArchivedThreads((prev) => prev.filter((t) => String(t._id) !== String(threadId)));
       // Deleting the conversation being viewed returns the
       // panel to a fresh conversation instead of an empty
-      // transcript.
+      // transcript. If we were reading an archived convo,
+      // go back to the archive list.
       if (String(activeThreadId) === String(threadId)) {
-        startNewConversation();
+        if (chatView === 'archive-reading') {
+          setMessages([WELCOME_MESSAGE]);
+          setActiveThreadId(null);
+          setChatView('archive');
+        } else {
+          startNewConversation();
+        }
       }
     } catch (err) {
       if (version !== conversationVersionRef.current) return;
@@ -905,7 +918,7 @@ export default function ChatAssistant() {
                         activeThreadId={activeThreadId}
                         menuOpenFor={menuOpenFor}
                         setMenuOpenFor={setMenuOpenFor}
-                        onOpen={openThread}
+                        onOpen={(thread) => { setChatView('chat'); openThread(thread); }}
                         onPin={togglePinThread}
                         onArchive={archiveThread}
                         onDelete={setDeleteTarget}
@@ -1118,7 +1131,15 @@ export default function ChatAssistant() {
                           activeThreadId={activeThreadId}
                           menuOpenFor={menuOpenFor}
                           setMenuOpenFor={setMenuOpenFor}
-                          onOpen={(thread) => { setChatView('archive-reading'); openThread(thread); }}
+                          onOpen={(thread) => {
+                            // Save the current conversation so back can restore it
+                            preArchiveSnapshot.current = {
+                              threadId: activeThreadId,
+                              messages: messagesRef.current,
+                            };
+                            setChatView('archive-reading');
+                            openThread(thread);
+                          }}
                           onPin={() => {}}
                           onArchive={archiveThread}
                           onDelete={setDeleteTarget}
@@ -1135,7 +1156,17 @@ export default function ChatAssistant() {
                   <button
                     type="button"
                     className="chat-archive-reading-back"
-                    onClick={() => { startNewConversation('archive'); }}
+                    onClick={() => {
+                      // Restore the conversation that was active before archive-reading
+                      const snap = preArchiveSnapshot.current;
+                      if (snap) {
+                        setActiveThreadId(snap.threadId);
+                        setMessages(snap.messages);
+                        preArchiveSnapshot.current = null;
+                        followBottomRef.current = true;
+                      }
+                      setChatView('archive');
+                    }}
                     aria-label="Back to archived chats"
                   >
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
