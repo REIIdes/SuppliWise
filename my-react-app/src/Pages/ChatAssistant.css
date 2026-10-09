@@ -268,9 +268,9 @@
   z-index: 20;
   display: flex;
   flex-direction: column;
-  /* Tall enough to show ~8 conversations before scrolling,
-     capped so it never overflows the chat window. */
+  /* Tall enough to show all conversations, scrolls if needed */
   max-height: min(82%, 540px);
+  overflow-y: auto;
   background: #fff;
   border: 1px solid #e4e7f5;
   border-radius: 12px;
@@ -295,9 +295,6 @@
   display: flex;
   flex-direction: column;
   padding-bottom: 4px;
-  overflow-y: auto;
-  max-height: 260px;
-  overscroll-behavior: contain;
 }
 .chat-thread-item {
   display: flex;
@@ -361,11 +358,12 @@
   top: calc(100% + 4px);
   right: 0;
   z-index: 50;
-  min-width: 160px;
-  background: #1f2937;
-  border-radius: 10px;
-  box-shadow: 0 6px 20px rgba(0,0,0,0.22);
-  padding: 4px;
+  min-width: 165px;
+  background: #ffffff;
+  border: 1px solid #e4e7f5;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(100, 80, 200, 0.12), 0 2px 8px rgba(0,0,0,0.08);
+  padding: 5px;
   animation: ddFadeIn 0.12s ease-out;
 }
 @keyframes ddFadeIn {
@@ -379,22 +377,26 @@
   width: 100%;
   padding: 8px 11px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 8px;
   background: transparent;
-  color: #e5e7eb;
+  color: #374151;
   font-size: 13px;
   font-weight: 500;
   text-align: left;
   cursor: pointer;
-  transition: background 0.1s;
+  transition: background 0.1s, color 0.1s;
 }
-.chat-dd-item:hover { background: rgba(255,255,255,0.09); }
-.chat-dd-item--danger { color: #f87171; }
-.chat-dd-item--danger:hover { background: rgba(248,113,113,0.14); }
+.chat-dd-item svg { color: #9ca3af; flex-shrink: 0; transition: color 0.1s; }
+.chat-dd-item:hover { background: #f0eeff; color: #5b4fcf; }
+.chat-dd-item:hover svg { color: #7c7ce8; }
+.chat-dd-item--danger { color: #dc2626; }
+.chat-dd-item--danger svg { color: #dc2626; }
+.chat-dd-item--danger:hover { background: #fff1f1; color: #b91c1c; }
+.chat-dd-item--danger:hover svg { color: #b91c1c; }
 .chat-dd-separator {
   height: 1px;
-  margin: 3px 8px;
-  background: rgba(255,255,255,0.1);
+  margin: 4px 8px;
+  background: #e8ecf7;
 }
 
 /* ── Archive view (separate screen within history panel) ────── */
