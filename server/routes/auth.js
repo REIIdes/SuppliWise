@@ -858,7 +858,8 @@ router.post('/login', async (req, res) => {
       location: user.lastLoginLocation,
       primaryMethod: 'password',
       // The emailed-code branch needs longer: the user has to go and read mail.
-      ttlMs: mfaMethods.includes('email-otp') ? 10 * 60 * 1000 : mfaTransaction.DEFAULT_TTL_MS,
+      // Extra 2-minute buffer added to absorb clock skew between server and Atlas.
+      ttlMs: mfaMethods.includes('email-otp') ? 12 * 60 * 1000 : mfaTransaction.DEFAULT_TTL_MS,
     });
 
     await SecurityEvent.write({
@@ -1119,7 +1120,7 @@ router.post('/verify-login-otp', async (req, res) => {
       const found = await MfaTransaction.findOne({
         user: str(userId),
         consumedAt: null,
-        expiresAt: { $gt: new Date() },
+        expiresAt: { $gt: new Date(Date.now() - 30000) },
         methods: 'email-otp',
       }).select('_id user').sort({ createdAt: -1 }).lean();
       if (!found) {
