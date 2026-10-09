@@ -268,9 +268,8 @@
   z-index: 20;
   display: flex;
   flex-direction: column;
-  /* Tall enough to show all conversations, scrolls if needed */
-  max-height: min(82%, 540px);
-  overflow-y: auto;
+  /* No max-height — let the panel be exactly as tall as its content.
+     The chat window is fixed height so this can never overflow it. */
   background: #fff;
   border: 1px solid #e4e7f5;
   border-radius: 12px;
