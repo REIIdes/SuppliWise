@@ -1,6 +1,11 @@
 ﻿import { memo, useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { sendChatMessage } from '../api';
+import {
+  sendChatMessage,
+  listChatThreads,
+  getChatThread,
+  deleteChatThread,
+} from '../api';
 import useAuth from '../hooks/useAuth';
 import { PLAN_LABELS } from '../utils/plan';
 import { subscribeOverlays } from '../utils/overlayRegistry';
@@ -145,6 +150,22 @@ const WELCOME_MESSAGE = {
   text: "Hi! I'm **SuppliWise AI** — your health and wellness assistant.\n\nI can help with:\n- Your supplement recommendations and results\n- Supplements, nutrition, vitamins, and wellness questions\n- How to use any feature on SuppliWise\n- Symptoms, diet, sleep, and lifestyle advice\n\nWhat would you like to know?",
 };
 
+// Compact relative stamp for the history menu: "just now",
+// "5m ago", "2h ago", "3d ago", then a plain date.
+const formatThreadTime = (value) => {
+  const when = new Date(value);
+  if (Number.isNaN(when.getTime())) return '';
+  const seconds = Math.max(0, (Date.now() - when.getTime()) / 1000);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return when.toLocaleDateString();
+};
+
 // ── Quick prompts ──────────────────────────────────────────────────────────
 const QUICK_PROMPTS = [
   'How do I start an assessment?',
@@ -171,6 +192,13 @@ export default function ChatAssistant() {
   const [showQuickPrompts, setShowQuickPrompts] = useState(true);
   const [connectionState, setConnectionState] = useState('online');
   const [upgradeInfo, setUpgradeInfo] = useState(null);
+  // Stored conversations: the server keeps the transcripts,
+  // the panel only tracks which one is open and the list the
+  // history menu shows.
+  const [activeThreadId, setActiveThreadId] = useState(null);
+  const [threads, setThreads] = useState([]);
+  const [threadsOpen, setThreadsOpen] = useState(false);
+  const [threadsLoading, setThreadsLoading] = useState(false);
   // Reactive plan object { active, plan, rank } — subscribing re-renders this
   // component the instant the subscription changes, so the gates below always
   // read fresh state. (Destructuring `plan` here would give the tier string,
@@ -192,6 +220,8 @@ export default function ChatAssistant() {
   const conversationVersionRef = useRef(0);
   const followBottomRef = useRef(true);
   const previousOpenRef = useRef(false);
+  const threadMenuRef = useRef(null);
+  const threadsButtonRef = useRef(null);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -211,6 +241,13 @@ export default function ChatAssistant() {
     setConnectionState('online');
     setUpgradeInfo(null);
     setOpen(false);
+    // A stored conversation belongs to the account that wrote
+    // it. Switching accounts starts from scratch; the history
+    // list itself is fetched per account, on demand.
+    setActiveThreadId(null);
+    setThreads([]);
+    setThreadsOpen(false);
+    setThreadsLoading(false);
   }, [userId]);
 
   // Follow new content only while the reader is already at the bottom. If a
@@ -228,9 +265,12 @@ export default function ChatAssistant() {
     previousOpenRef.current = true;
     const timer = setTimeout(() => {
       if (reopened) {
-        el.scrollTop = 0;
+        // A stored conversation reopens at the newest
+        // exchange — where the reader left off — instead
+        // of the top of the transcript.
+        el.scrollTop = el.scrollHeight;
         followBottomRef.current = true;
-        setShowScrollButton(el.scrollHeight > el.clientHeight);
+        setShowScrollButton(false);
       } else if (shouldFollow) {
         el.scrollTop = el.scrollHeight;
         setShowScrollButton(false);
@@ -302,6 +342,19 @@ export default function ChatAssistant() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [open]);
 
+  // Close the history menu when a press lands outside it (and
+  // outside its toggle, whose own handler decides show vs hide).
+  useEffect(() => {
+    if (!threadsOpen) return;
+    const handleMenuClickOutside = (event) => {
+      if (threadMenuRef.current?.contains(event.target)) return;
+      if (threadsButtonRef.current?.contains(event.target)) return;
+      setThreadsOpen(false);
+    };
+    document.addEventListener('mousedown', handleMenuClickOutside);
+    return () => document.removeEventListener('mousedown', handleMenuClickOutside);
+  }, [threadsOpen]);
+
   const scrollToBottom = () => {
     const el = messagesContainerRef.current;
     if (!el) return;
@@ -316,6 +369,76 @@ export default function ChatAssistant() {
       top: el.scrollHeight,
       behavior: 'smooth'
     });
+  };
+
+  // ── Stored conversations ──────────────────────────────────────
+  // Threads are account-scoped on the server; every list, load
+  // and delete goes through the session, so an in-flight
+  // request from a previous account is discarded by the
+  // version guard — the same trick the message sends use.
+  const refreshThreads = async () => {
+    const version = conversationVersionRef.current;
+    setThreadsLoading(true);
+    try {
+      const data = await listChatThreads();
+      if (version !== conversationVersionRef.current) return;
+      setThreads(Array.isArray(data?.threads) ? data.threads : []);
+    } catch (err) {
+      // History is a convenience: a failed load must never
+      // break the chat itself, so the menu just stays empty.
+      if (version !== conversationVersionRef.current) return;
+      setThreads([]);
+    } finally {
+      if (version === conversationVersionRef.current) setThreadsLoading(false);
+    }
+  };
+
+  const startNewConversation = () => {
+    setActiveThreadId(null);
+    setMessages([WELCOME_MESSAGE]);
+    setThreadsOpen(false);
+    followBottomRef.current = true;
+  };
+
+  const openThread = async (thread) => {
+    setThreadsOpen(false);
+    if (String(thread?._id) === String(activeThreadId)) return;
+    const version = conversationVersionRef.current;
+    // The typing indicator doubles as the load state: the old
+    // transcript stays visible beneath it until the stored one
+    // lands, and stays put if the load fails.
+    setLoading(true);
+    try {
+      const data = await getChatThread(thread._id);
+      if (version !== conversationVersionRef.current) return;
+      setActiveThreadId(data?._id ?? null);
+      setMessages((Array.isArray(data?.messages) ? data.messages : [])
+        .map((m) => ({ role: m.role, text: m.text })));
+      followBottomRef.current = true;
+    } catch (err) {
+      if (version !== conversationVersionRef.current) return;
+      console.error('[chat] thread load failed:', err.message);
+    } finally {
+      if (version === conversationVersionRef.current) setLoading(false);
+    }
+  };
+
+  const deleteThread = async (threadId) => {
+    const version = conversationVersionRef.current;
+    try {
+      await deleteChatThread(threadId);
+      if (version !== conversationVersionRef.current) return;
+      setThreads((prev) => prev.filter((t) => String(t._id) !== String(threadId)));
+      // Deleting the conversation being viewed returns the
+      // panel to a fresh conversation instead of an empty
+      // transcript.
+      if (String(activeThreadId) === String(threadId)) {
+        startNewConversation();
+      }
+    } catch (err) {
+      if (version !== conversationVersionRef.current) return;
+      console.error('[chat] thread delete failed:', err.message);
+    }
   };
 
   // Focus the composer when the panel opens and whenever a reply lands, so
@@ -355,13 +478,23 @@ export default function ChatAssistant() {
     setConnectionState('connecting');
 
     // Only successful conversation turns are sent back to the model. Error
-    // bubbles are UI state, not assistant advice, and must not poison context.
+    // bubbles are UI state, not assistant advice, and must not poison
+    // context. The welcome message is the conversation seed, not a
+    // turn — and a stored transcript has no welcome at all, so the
+    // filter matches the welcome text instead of assuming it sits
+    // at index 0.
     const history = messagesRef.current
-      .filter((message, index) => index > 0 && message.kind !== 'error')
+      .filter((message) => message.text !== WELCOME_MESSAGE.text && message.kind !== 'error')
       .slice(-8);
 
     try {
-      const data = await sendChatMessage(q, history);
+      // A stored conversation appends to the server-side
+      // transcript; a fresh one asks the server to seed a
+      // thread from this turn.
+      const threadPayload = activeThreadId
+        ? { threadId: activeThreadId }
+        : { newThread: true };
+      const data = await sendChatMessage(q, history, threadPayload);
       if (version !== conversationVersionRef.current) return;
       const reply = typeof data?.reply === 'string' ? data.reply.trim() : '';
       if (!reply) throw new Error("I couldn't find an answer. Try rephrasing your question.");
@@ -371,6 +504,13 @@ export default function ChatAssistant() {
         text: reply,
         ...(data.source === 'fallback' ? { kind: 'error' } : {}),
       }]);
+      // Adopt the stored conversation so every later turn
+      // appends to it. When the server could not persist
+      // (no threadId), the conversation simply stays in
+      // memory, exactly like before.
+      if (data?.threadId && String(data.threadId) !== String(activeThreadId)) {
+        setActiveThreadId(data.threadId);
+      }
     } catch (err) {
       if (version !== conversationVersionRef.current) return;
       setConnectionState(err.status === 429 ? 'busy' : 'offline');
@@ -511,8 +651,89 @@ export default function ChatAssistant() {
                 </div>
               </div>
             </div>
+            {/* Conversation controls — same gate as the
+                transcript itself: signed in AND entitled. */}
+            {isLoggedIn && livePlan.canAccess('chat') && (
+            <div className="chat-header-actions">
+              <button
+                type="button"
+                className="chat-header-icon-btn"
+                onClick={startNewConversation}
+                aria-label="Start a new conversation"
+                title="Start a new conversation"
+              >
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                ref={threadsButtonRef}
+                className={`chat-header-icon-btn${threadsOpen ? ' active' : ''}`}
+                onClick={() => {
+                  setThreadsOpen((v) => !v);
+                  if (!threadsOpen) refreshThreads();
+                }}
+                aria-label="Chat history"
+                aria-expanded={threadsOpen}
+                title="Chat history"
+              >
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9" />
+                  <polyline points="12 7 12 12 15.5 13.5" />
+                </svg>
+              </button>
+            </div>
+            )}
             <button className="chat-close" onClick={() => setOpen(false)} aria-label="Close">✕</button>
           </div>
+
+          {/* History menu — anchored under the header, inside the
+              window. Same entitlement gate as its toggle. */}
+          {threadsOpen && isLoggedIn && livePlan.canAccess('chat') && (
+            <div className="chat-thread-menu" ref={threadMenuRef} role="menu" aria-label="Past conversations">
+              <div className="chat-thread-menu-head">Conversations</div>
+              {threadsLoading ? (
+                <div className="chat-thread-empty">Loading…</div>
+              ) : threads.length === 0 ? (
+                <div className="chat-thread-empty">No past conversations yet</div>
+              ) : (
+                <div className="chat-thread-list">
+                  {threads.map((t) => (
+                    <div
+                      key={t._id}
+                      role="menuitem"
+                      className={`chat-thread-item${String(t._id) === String(activeThreadId) ? ' active' : ''}`}
+                      onClick={() => openThread(t)}
+                    >
+                      <div className="chat-thread-item-main">
+                        <div className="chat-thread-item-title">{t.title || 'New conversation'}</div>
+                        <div className="chat-thread-item-meta">
+                          {formatThreadTime(t.updatedAt)}
+                          {t.lastText ? ` · ${t.lastText}` : ''}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="chat-thread-delete"
+                        aria-label="Delete conversation"
+                        title="Delete conversation"
+                        onClick={(e) => { e.stopPropagation(); deleteThread(t._id); }}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <polyline points="3 6 5 6 21 6" />
+                          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                          <line x1="10" y1="11" x2="10" y2="17" />
+                          <line x1="14" y1="11" x2="14" y2="17" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {!isLoggedIn ? (
             // Auth Required Screen

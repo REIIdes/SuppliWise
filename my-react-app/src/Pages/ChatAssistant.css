@@ -224,6 +224,123 @@
 .chat-close:hover { background: rgba(255, 255, 255, 0.32); transform: scale(1.06); }
 .chat-close:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
 
+/* ── Header actions: new conversation + history menu ──
+   Two quiet icon buttons between the identity block and
+   the close control. `margin-left:auto` parks the pair
+   against the right edge next to ✕ — the header is a
+   space-between row, which would otherwise centre them. */
+.chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  margin-right: 8px;
+}
+.chat-header-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #fff;
+  opacity: 0.82;
+  cursor: pointer;
+  transition: background 0.18s ease, opacity 0.18s ease;
+}
+.chat-header-icon-btn:hover { background: rgba(255, 255, 255, 0.18); opacity: 1; }
+.chat-header-icon-btn.active { background: rgba(255, 255, 255, 0.24); opacity: 1; }
+.chat-header-icon-btn:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+
+/* ── History menu ──────────────────────────────────────
+   Anchored to the window (the positioned ancestor),
+   directly under the gradient header. It overlays the
+   transcript — it never displaces it. */
+.chat-thread-menu {
+  position: absolute;
+  top: 66px;
+  left: 8px;
+  right: 8px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  max-height: min(58%, 320px);
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #e4e7f5;
+  border-radius: 12px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.16);
+  overscroll-behavior: contain;
+}
+.chat-thread-menu-head {
+  padding: 9px 12px 5px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #9ca3af;
+}
+.chat-thread-list {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 6px;
+}
+.chat-thread-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 7px 10px 7px 12px;
+  cursor: pointer;
+}
+.chat-thread-item:hover { background: #f5f3ff; }
+.chat-thread-item.active { background: #eef0fb; }
+.chat-thread-item-main {
+  flex: 1;
+  min-width: 0;
+}
+.chat-thread-item-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2937;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-thread-item-meta {
+  margin-top: 1px;
+  font-size: 11px;
+  color: #9ca3af;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-thread-delete {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-top: 1px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #b6bcc9;
+  cursor: pointer;
+}
+.chat-thread-delete:hover { background: #fee2e2; color: #dc2626; }
+.chat-thread-delete:focus-visible { outline: 2px solid #dc2626; outline-offset: 1px; }
+.chat-thread-empty {
+  padding: 16px 12px;
+  font-size: 12.5px;
+  color: #9ca3af;
+  text-align: center;
+}
+
 /* ── Disclaimer banner ──────────────────────────────────────────────────
    A quiet advisory, not an alarm. It was a full-width saturated amber strip
    directly under a saturated header — two loud bands stacked, which is what

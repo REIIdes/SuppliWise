@@ -1093,12 +1093,15 @@ export const deleteAssessment = async (assessmentId) => {
   return data;
 };
 
-// Send a chat message to the AI assistant (ULTIMATE only — 403 carries requiresPlan)
-export const sendChatMessage = async (message, history = []) => {
+// Send a chat message to the AI assistant (ULTIMATE only — 403 carries requiresPlan).
+// threadOptions: { threadId } appends to a stored conversation, or
+// { newThread: true } seeds a new one. With neither, the call stays
+// stateless and the client-supplied history is the only context.
+export const sendChatMessage = async (message, history = [], threadOptions = {}) => {
   const res = await apiFetch('/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
-    body: JSON.stringify({ message, history }),
+    body: JSON.stringify({ message, history, ...threadOptions }),
   }, 45000);
   const data = await parseJSON(res);
   if (!res.ok) {
@@ -1115,6 +1118,33 @@ export const sendChatMessage = async (message, history = []) => {
     if (Number.isFinite(retryAfter) && retryAfter > 0) err.retryAfterSeconds = retryAfter;
     throw err;
   }
+  return data;
+};
+
+// Stored AI conversations (ULTIMATE only). The list reads only the
+// denormalised tail fields, so the history menu never downloads
+// transcripts to show a conversation's last line.
+export const listChatThreads = async () => {
+  const res = await apiFetch('/chat/threads', { headers: { ...authHeader() } });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+export const getChatThread = async (threadId) => {
+  const res = await apiFetch(`/chat/threads/${encodeURIComponent(threadId)}`, { headers: { ...authHeader() } });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+export const deleteChatThread = async (threadId) => {
+  const res = await apiFetch(`/chat/threads/${encodeURIComponent(threadId)}`, {
+    method: 'DELETE',
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
   return data;
 };
 
