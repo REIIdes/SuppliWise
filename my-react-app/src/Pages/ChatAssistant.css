@@ -69,9 +69,10 @@
   bottom: 24px;
   right: 28px;
   width: 380px;
-  /* Never taller than the room below the header offset. A flat 580px on a
-     short window pushed the top of the panel — header first — off screen, so
-     the chat appeared to start mid-way down at the disclaimer banner. */
+  /* Fixed height — the window never resizes regardless of what's showing
+     (conversations panel, archive view, quick prompts on/off, etc.). */
+  height: min(580px, calc(100vh - 48px));
+  height: min(580px, calc(100dvh - 48px));
   max-height: min(580px, calc(100vh - 48px));
   max-height: min(580px, calc(100dvh - 48px));
   /* Belt-and-braces: the panel can never be wider than the viewport, so it
@@ -993,6 +994,8 @@
     left: 10px;
     width: auto;
     bottom: 80px;
+    height: min(72vh, calc(100vh - 100px));
+    height: min(72dvh, calc(100dvh - 100px));
     max-height: min(72vh, calc(100vh - 100px));
     max-height: min(72dvh, calc(100dvh - 100px));
     border-radius: 14px;
