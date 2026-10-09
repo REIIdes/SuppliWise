@@ -398,6 +398,38 @@
   background: #e8ecf7;
 }
 
+/* ── Archive reading banner (shows when viewing an archived conversation) ── */
+.chat-archive-reading-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 6px 8px;
+  background: linear-gradient(90deg, #ede9fe 0%, #f0eeff 100%);
+  border-bottom: 1px solid #d4cbf8;
+  font-size: 12px;
+  font-weight: 600;
+  color: #5b4fcf;
+  flex-shrink: 0;
+}
+.chat-archive-reading-banner svg { color: #7c7ce8; flex-shrink: 0; }
+.chat-archive-reading-back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #7c7ce8;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.12s;
+}
+.chat-archive-reading-back:hover { background: rgba(124, 124, 232, 0.15); }
+.chat-archive-reading-back:focus-visible { outline: 2px solid #7c7ce8; outline-offset: 1px; }
+
 /* ── Archive view (separate screen within history panel) ────── */
 .chat-archive-view-header {
   display: flex;

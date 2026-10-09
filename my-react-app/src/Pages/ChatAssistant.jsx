@@ -288,7 +288,7 @@ export default function ChatAssistant() {
   const [archiveLoading, setArchiveLoading] = useState(false);
   // 'conversations' = main history panel, 'archive' = separate archive screen
   const [historyView, setHistoryView] = useState('conversations');
-  // Top-level chat view: 'chat' | 'archive'
+  // Top-level chat view: 'chat' | 'archive' | 'archive-reading'
   const [chatView, setChatView] = useState('chat');
   // Three-dots dropdown — which thread's menu is open
   const [menuOpenFor, setMenuOpenFor] = useState(null);
@@ -516,6 +516,7 @@ export default function ChatAssistant() {
     setActiveThreadId(null);
     setMessages([WELCOME_MESSAGE]);
     setThreadsOpen(false);
+    setChatView('chat');
     followBottomRef.current = true;
   };
 
@@ -1117,7 +1118,7 @@ export default function ChatAssistant() {
                           activeThreadId={activeThreadId}
                           menuOpenFor={menuOpenFor}
                           setMenuOpenFor={setMenuOpenFor}
-                          onOpen={(thread) => { setChatView('chat'); openThread(thread); }}
+                          onOpen={(thread) => { setChatView('archive-reading'); openThread(thread); }}
                           onPin={() => {}}
                           onArchive={archiveThread}
                           onDelete={setDeleteTarget}
@@ -1129,6 +1130,26 @@ export default function ChatAssistant() {
                 </div>
               ) : (
               <>
+              {chatView === 'archive-reading' && (
+                <div className="chat-archive-reading-banner">
+                  <button
+                    type="button"
+                    className="chat-archive-reading-back"
+                    onClick={() => setChatView('archive')}
+                    aria-label="Back to archived chats"
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <polyline points="15 6 9 12 15 18" />
+                    </svg>
+                  </button>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <polyline points="21 8 21 21 3 21 3 8" />
+                    <rect x="1" y="3" width="22" height="5" />
+                    <line x1="10" y1="12" x2="14" y2="12" />
+                  </svg>
+                  Archived Chat
+                </div>
+              )}
               <div className="chat-disclaimer-banner">
                 ⚕️ Educational only — not medical advice. Consult a healthcare provider.
               </div>
