@@ -193,6 +193,7 @@ module.exports = {
   MAX_HISTORY_CONTENT_LENGTH,
   MAX_REPLY_LENGTH,
   normalizeChatRequest,
+  normalizeHistory,
   normalizeThreadRequest,
   recommendationDataFromAssessment,
   buildRecommendationContext,
