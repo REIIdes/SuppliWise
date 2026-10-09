@@ -6,6 +6,8 @@ import {
   getChatThread,
   deleteChatThread,
   togglePinChatThread,
+  listArchivedThreads,
+  toggleArchiveChatThread,
 } from '../api';
 import useAuth from '../hooks/useAuth';
 import { PLAN_LABELS } from '../utils/plan';
@@ -178,6 +180,82 @@ const QUICK_PROMPTS = [
   'What does High priority mean?',
 ];
 
+// ── ThreadItem — reusable row for active and archived lists ───────────────
+function ThreadItem({ t, activeThreadId, menuOpenFor, setMenuOpenFor, onOpen, onPin, onArchive, onDelete, isArchived = false }) {
+  const isActive = String(t._id) === String(activeThreadId);
+  const menuOpen = menuOpenFor === t._id;
+  return (
+    <div
+      role="menuitem"
+      className={`chat-thread-item${isActive ? ' active' : ''}${isArchived ? ' is-archived' : ''}`}
+      onClick={() => onOpen(t)}
+    >
+      <div className="chat-thread-item-main">
+        <div className="chat-thread-item-title">
+          {t.pinned && (
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 5, verticalAlign: 'middle', color: '#7c7ce8' }} aria-hidden="true">
+              <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
+            </svg>
+          )}
+          {t.title || 'New conversation'}
+        </div>
+        <div className="chat-thread-item-meta">
+          {formatThreadTime(t.updatedAt)}
+          {t.lastText ? ` · ${t.lastText}` : ''}
+        </div>
+      </div>
+
+      {/* Three-dots menu */}
+      <div className="chat-thread-dots-wrap">
+        <button
+          type="button"
+          className="chat-thread-dots-btn"
+          aria-label="More options"
+          title="More options"
+          onClick={(e) => { e.stopPropagation(); setMenuOpenFor(menuOpen ? null : t._id); }}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <circle cx="5"  cy="12" r="1.8" />
+            <circle cx="12" cy="12" r="1.8" />
+            <circle cx="19" cy="12" r="1.8" />
+          </svg>
+        </button>
+
+        {menuOpen && (
+          <div className="chat-thread-dropdown" onClick={(e) => e.stopPropagation()}>
+            {!isArchived && (
+              <button className="chat-dd-item" onClick={() => { onPin(t._id); setMenuOpenFor(null); }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill={t.pinned ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
+                </svg>
+                {t.pinned ? 'Unpin' : 'Pin chat'}
+              </button>
+            )}
+            <button className="chat-dd-item" onClick={() => onArchive(t)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="21 8 21 21 3 21 3 8" />
+                <rect x="1" y="3" width="22" height="5" />
+                <line x1="10" y1="12" x2="14" y2="12" />
+              </svg>
+              {isArchived ? 'Unarchive' : 'Archive'}
+            </button>
+            <div className="chat-dd-separator" />
+            <button className="chat-dd-item chat-dd-item--danger" onClick={() => { onDelete(t); setMenuOpenFor(null); }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                <line x1="10" y1="11" x2="10" y2="17" />
+                <line x1="14" y1="11" x2="14" y2="17" />
+              </svg>
+              Delete
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ─────────────────────────────────────────────────────────
 export default function ChatAssistant() {
   const navigate = useNavigate();
@@ -205,6 +283,13 @@ export default function ChatAssistant() {
   // menu's trash button only arms this; the modal's
   // confirm button performs the removal.
   const [deleteTarget, setDeleteTarget] = useState(null);
+  // Archived conversations list + loading state
+  const [archivedThreads, setArchivedThreads] = useState([]);
+  const [archiveLoading, setArchiveLoading] = useState(false);
+  // 'conversations' = main history panel, 'archive' = separate archive screen
+  const [historyView, setHistoryView] = useState('conversations');
+  // Three-dots dropdown — which thread's menu is open
+  const [menuOpenFor, setMenuOpenFor] = useState(null);
   // Reactive plan object { active, plan, rank } — subscribing re-renders this
   // component the instant the subscription changes, so the gates below always
   // read fresh state. (Destructuring `plan` here would give the tier string,
@@ -255,6 +340,10 @@ export default function ChatAssistant() {
     setThreadsOpen(false);
     setThreadsLoading(false);
     setDeleteTarget(null);
+    setArchivedThreads([]);
+    setHistoryView('conversations');
+    setArchiveLoading(false);
+    setMenuOpenFor(null);
   }, [userId]);
 
   // Follow new content only while the reader is already at the bottom. If a
@@ -369,6 +458,18 @@ export default function ChatAssistant() {
     document.addEventListener('mousedown', handleMenuClickOutside);
     return () => document.removeEventListener('mousedown', handleMenuClickOutside);
   }, [threadsOpen, deleteTarget]);
+
+  // Close the three-dots dropdown when clicking outside it
+  useEffect(() => {
+    if (!menuOpenFor) return;
+    const close = (e) => {
+      if (!e.target.closest('.chat-thread-dots-btn') && !e.target.closest('.chat-thread-dropdown')) {
+        setMenuOpenFor(null);
+      }
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [menuOpenFor]);
 
   const scrollToBottom = () => {
     const el = messagesContainerRef.current;
@@ -486,6 +587,50 @@ export default function ChatAssistant() {
     const target = deleteTarget;
     setDeleteTarget(null);
     if (target) await deleteThread(target._id);
+  };
+
+  const archiveThread = async (thread) => {
+    const version = conversationVersionRef.current;
+    setMenuOpenFor(null);
+    try {
+      const data = await toggleArchiveChatThread(thread._id);
+      if (version !== conversationVersionRef.current) return;
+      if (data.archived) {
+        // Move from active list to archived list
+        setThreads((prev) => prev.filter((t) => String(t._id) !== String(thread._id)));
+        setArchivedThreads((prev) => [{ ...thread, archived: true, pinned: false }, ...prev]);
+        // If we archived the open conversation, start fresh
+        if (String(activeThreadId) === String(thread._id)) startNewConversation();
+      } else {
+        // Unarchive: move back to active list, re-sort
+        setArchivedThreads((prev) => prev.filter((t) => String(t._id) !== String(thread._id)));
+        setThreads((prev) =>
+          [...prev, { ...thread, archived: false }].sort((a, b) => {
+            if (a.pinned === b.pinned) return new Date(b.updatedAt) - new Date(a.updatedAt);
+            return b.pinned ? 1 : -1;
+          })
+        );
+      }
+    } catch (err) {
+      if (version !== conversationVersionRef.current) return;
+      console.error('[chat] thread archive failed:', err.message);
+    }
+  };
+
+  const loadArchived = async () => {
+    if (archiveLoading) return;
+    const version = conversationVersionRef.current;
+    setArchiveLoading(true);
+    try {
+      const data = await listArchivedThreads();
+      if (version !== conversationVersionRef.current) return;
+      setArchivedThreads(Array.isArray(data?.threads) ? data.threads : []);
+    } catch (err) {
+      if (version !== conversationVersionRef.current) return;
+      setArchivedThreads([]);
+    } finally {
+      if (version === conversationVersionRef.current) setArchiveLoading(false);
+    }
   };
 
   // Focus the composer when the panel opens and whenever a reply lands, so
@@ -736,80 +881,110 @@ export default function ChatAssistant() {
             <button className="chat-close" onClick={() => setOpen(false)} aria-label="Close">✕</button>
           </div>
 
-          {/* History menu — anchored under the header, inside the
-              window. Same entitlement gate as its toggle. */}
+          {/* History panel — two views: 'conversations' and 'archive' */}
           {threadsOpen && isLoggedIn && livePlan.canAccess('chat') && (
             <div className="chat-thread-menu" ref={threadMenuRef} role="menu" aria-label="Past conversations">
-              <div className="chat-thread-menu-head">Conversations</div>
-              {threadsLoading ? (
-                <div className="chat-thread-empty">Loading…</div>
-              ) : threads.length === 0 ? (
-                <div className="chat-thread-empty">No past conversations yet</div>
-              ) : (
-                <div className="chat-thread-list">
-                  {threads.map((t) => (
-                    <div
-                      key={t._id}
-                      role="menuitem"
-                      className={`chat-thread-item${String(t._id) === String(activeThreadId) ? ' active' : ''}`}
-                      onClick={() => openThread(t)}
-                    >
-                      <div className="chat-thread-item-main">
-                        <div className="chat-thread-item-title">
-                          {t.pinned && (
-                            <svg
-                              width="12"
-                              height="12"
-                              viewBox="0 0 24 24"
-                              fill="currentColor"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              style={{ marginRight: '6px', verticalAlign: 'middle', color: '#7c7ce8' }}
-                              aria-hidden="true"
-                            >
-                              <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
-                            </svg>
-                          )}
-                          {t.title || 'New conversation'}
-                        </div>
-                        <div className="chat-thread-item-meta">
-                          {formatThreadTime(t.updatedAt)}
-                          {t.lastText ? ` · ${t.lastText}` : ''}
-                        </div>
-                      </div>
-                      <div className="chat-thread-actions">
-                        <button
-                          type="button"
-                          className="chat-thread-pin"
-                          aria-label={t.pinned ? "Unpin conversation" : "Pin conversation"}
-                          title={t.pinned ? "Unpin conversation" : "Pin conversation"}
-                          onClick={(e) => { e.stopPropagation(); togglePinThread(t._id); }}
-                        >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill={t.pinned ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                            <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
-                          </svg>
-                        </button>
-                        <button
-                          type="button"
-                          className="chat-thread-delete"
-                          aria-label="Delete conversation"
-                          title="Delete conversation"
-                          onClick={(e) => { e.stopPropagation(); setDeleteTarget(t); }}
-                        >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                            <polyline points="3 6 5 6 21 6" />
-                            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                            <line x1="10" y1="11" x2="10" y2="17" />
-                            <line x1="14" y1="11" x2="14" y2="17" />
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+
+              {/* ── VIEW: Conversations ── */}
+              {historyView === 'conversations' && (<>
+                <div className="chat-thread-menu-head">Conversations</div>
+                {threadsLoading ? (
+                  <div className="chat-thread-empty">Loading…</div>
+                ) : threads.length === 0 ? (
+                  <div className="chat-thread-empty">No past conversations yet</div>
+                ) : (
+                  <div className="chat-thread-list">
+                    {threads.map((t) => (
+                      <ThreadItem
+                        key={t._id}
+                        t={t}
+                        activeThreadId={activeThreadId}
+                        menuOpenFor={menuOpenFor}
+                        setMenuOpenFor={setMenuOpenFor}
+                        onOpen={openThread}
+                        onPin={togglePinThread}
+                        onArchive={archiveThread}
+                        onDelete={setDeleteTarget}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {/* Footer button — opens the separate Archive view */}
+                <button
+                  type="button"
+                  className="chat-archive-nav-btn"
+                  onClick={() => {
+                    setHistoryView('archive');
+                    if (archivedThreads.length === 0) loadArchived();
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <polyline points="21 8 21 21 3 21 3 8" />
+                    <rect x="1" y="3" width="22" height="5" />
+                    <line x1="10" y1="12" x2="14" y2="12" />
+                  </svg>
+                  Archived chats
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: 'auto' }} aria-hidden="true">
+                    <polyline points="9 6 15 12 9 18" />
+                  </svg>
+                </button>
+              </>)}
+
+              {/* ── VIEW: Archive ── */}
+              {historyView === 'archive' && (<>
+                <div className="chat-archive-view-header">
+                  <button
+                    type="button"
+                    className="chat-archive-back-btn"
+                    onClick={() => setHistoryView('conversations')}
+                    aria-label="Back to conversations"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <polyline points="15 6 9 12 15 18" />
+                    </svg>
+                  </button>
+                  <span className="chat-archive-view-title">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <polyline points="21 8 21 21 3 21 3 8" />
+                      <rect x="1" y="3" width="22" height="5" />
+                      <line x1="10" y1="12" x2="14" y2="12" />
+                    </svg>
+                    Archived Chats
+                  </span>
                 </div>
-              )}
+
+                {archiveLoading ? (
+                  <div className="chat-thread-empty">Loading…</div>
+                ) : archivedThreads.length === 0 ? (
+                  <div className="chat-archive-empty">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <polyline points="21 8 21 21 3 21 3 8" />
+                      <rect x="1" y="3" width="22" height="5" />
+                      <line x1="10" y1="12" x2="14" y2="12" />
+                    </svg>
+                    <p>No archived conversations</p>
+                  </div>
+                ) : (
+                  <div className="chat-thread-list">
+                    {archivedThreads.map((t) => (
+                      <ThreadItem
+                        key={t._id}
+                        t={t}
+                        activeThreadId={activeThreadId}
+                        menuOpenFor={menuOpenFor}
+                        setMenuOpenFor={setMenuOpenFor}
+                        onOpen={openThread}
+                        onPin={() => {}}
+                        onArchive={archiveThread}
+                        onDelete={setDeleteTarget}
+                        isArchived
+                      />
+                    ))}
+                  </div>
+                )}
+              </>)}
+
             </div>
           )}
 

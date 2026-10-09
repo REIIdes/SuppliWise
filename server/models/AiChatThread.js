@@ -37,6 +37,7 @@ const aiChatThreadSchema = new mongoose.Schema({
   lastText: { type: String, default: '' },
   messageCount: { type: Number, default: 0 },
   pinned: { type: Boolean, default: false },
+  archived: { type: Boolean, default: false },
   messages: [aiChatMessageSchema],
 }, { timestamps: true });
 

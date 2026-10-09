@@ -342,19 +342,34 @@ router.post('/', protect, requireFeature('chat'), chatLimiter, async (req, res) 
 });
 
 // ── GET /api/chat/threads ──────────────────────────────────────
-// Conversation list for the assistant's history menu. Reads only
-// the denormalised tail fields — never the transcripts.
+// Active (non-archived) conversations for the history menu.
 router.get('/threads', protect, requireFeature('chat'), async (req, res) => {
   try {
-    const threads = await AiChatThread.find({ user: req.user._id })
+    const threads = await AiChatThread.find({ user: req.user._id, archived: { $ne: true } })
       .sort({ pinned: -1, updatedAt: -1 })
-      .limit(50)
-      .select('title updatedAt lastText messageCount pinned')
+      .limit(100)
+      .select('title updatedAt lastText messageCount pinned archived')
       .lean();
     return res.json({ threads });
   } catch (error) {
     console.error('[chat] thread list failed:', error.message);
     return res.status(500).json({ message: 'Could not load conversations.' });
+  }
+});
+
+// ── GET /api/chat/threads/archived ────────────────────────────
+// Archived conversations — shown in the collapsible archive section.
+router.get('/threads/archived', protect, requireFeature('chat'), async (req, res) => {
+  try {
+    const threads = await AiChatThread.find({ user: req.user._id, archived: true })
+      .sort({ updatedAt: -1 })
+      .limit(100)
+      .select('title updatedAt lastText messageCount pinned archived')
+      .lean();
+    return res.json({ threads });
+  } catch (error) {
+    console.error('[chat] archived thread list failed:', error.message);
+    return res.status(500).json({ message: 'Could not load archived conversations.' });
   }
 });
 
@@ -422,6 +437,28 @@ router.patch('/threads/:id/pin', protect, requireFeature('chat'), async (req, re
     return res.json({ pinned: thread.pinned });
   } catch (error) {
     console.error('[chat] thread pin failed:', error.message);
+    return res.status(500).json({ message: 'Could not update the conversation.' });
+  }
+});
+
+// ── PATCH /api/chat/threads/:id/archive ────────────────────────
+// Toggle archive status. Archiving also un-pins the thread.
+router.patch('/threads/:id/archive', protect, requireFeature('chat'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!/^[a-f0-9]{24}$/i.test(id)) {
+      return res.status(400).json({ message: 'Conversation reference is invalid.' });
+    }
+    const thread = await AiChatThread.findOne({ _id: id, user: req.user._id });
+    if (!thread) {
+      return res.status(404).json({ message: 'Conversation not found.' });
+    }
+    thread.archived = !thread.archived;
+    if (thread.archived) thread.pinned = false; // pinned+archived makes no sense
+    await thread.save();
+    return res.json({ archived: thread.archived });
+  } catch (error) {
+    console.error('[chat] thread archive failed:', error.message);
     return res.status(500).json({ message: 'Could not update the conversation.' });
   }
 });

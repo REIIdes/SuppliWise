@@ -269,7 +269,7 @@
   flex-direction: column;
   /* Tall enough to show ~8 conversations before scrolling,
      capped so it never overflows the chat window. */
-  max-height: min(72%, 480px);
+  max-height: min(82%, 540px);
   background: #fff;
   border: 1px solid #e4e7f5;
   border-radius: 12px;
@@ -293,8 +293,9 @@
 .chat-thread-list {
   display: flex;
   flex-direction: column;
-  padding-bottom: 6px;
+  padding-bottom: 4px;
   overflow-y: auto;
+  max-height: 260px;
   overscroll-behavior: contain;
 }
 .chat-thread-item {
@@ -326,48 +327,153 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.chat-thread-actions {
+
+/* ── Three-dots menu ─────────────────────────────── */
+.chat-thread-dots-wrap {
+  position: relative;
   flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 2px;
   margin-top: 1px;
 }
-.chat-thread-pin {
-  flex-shrink: 0;
+.chat-thread-dots-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: #b6bcc9;
+  color: #c4c9d4;
   cursor: pointer;
-  transition: all 0.15s;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
 }
-.chat-thread-pin:hover { background: #f3f4f6; color: #7c7ce8; }
-.chat-thread-pin:focus-visible { outline: 2px solid #7c7ce8; outline-offset: 1px; }
-.chat-thread-delete {
+.chat-thread-item:hover .chat-thread-dots-btn,
+.chat-thread-item.active .chat-thread-dots-btn { opacity: 1; }
+.chat-thread-dots-btn:hover { background: #ede9fe; color: #6d5ffc; }
+.chat-thread-dots-btn:focus-visible { outline: 2px solid #7c7ce8; outline-offset: 1px; opacity: 1; }
+
+/* ── Dropdown ────────────────────────────────────── */
+.chat-thread-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 50;
+  min-width: 160px;
+  background: #1f2937;
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.22);
+  padding: 4px;
+  animation: ddFadeIn 0.12s ease-out;
+}
+@keyframes ddFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.chat-dd-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 11px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #e5e7eb;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.chat-dd-item:hover { background: rgba(255,255,255,0.09); }
+.chat-dd-item--danger { color: #f87171; }
+.chat-dd-item--danger:hover { background: rgba(248,113,113,0.14); }
+.chat-dd-separator {
+  height: 1px;
+  margin: 3px 8px;
+  background: rgba(255,255,255,0.1);
+}
+
+/* ── Archive view (separate screen within history panel) ────── */
+.chat-archive-view-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 8px 6px;
+  border-bottom: 1px solid #e8ecf7;
+  background: #f8f8fd;
+  border-radius: 12px 12px 0 0;
   flex-shrink: 0;
+}
+.chat-archive-back-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 30px;
+  height: 30px;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: 7px;
   background: transparent;
-  color: #b6bcc9;
+  color: #6b7280;
   cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  flex-shrink: 0;
 }
-.chat-thread-delete:hover { background: #fee2e2; color: #dc2626; }
-.chat-thread-delete:focus-visible { outline: 2px solid #dc2626; outline-offset: 1px; }
+.chat-archive-back-btn:hover { background: #ede9fe; color: #7c7ce8; }
+.chat-archive-back-btn:focus-visible { outline: 2px solid #7c7ce8; outline-offset: 1px; }
+.chat-archive-view-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #374151;
+  letter-spacing: 0.01em;
+}
+.chat-archive-view-title svg { color: #9ca3af; flex-shrink: 0; }
+
+/* ── Footer button — navigates to archive view ───────────────── */
+.chat-archive-nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 0;
+  border-top: 1px solid #eef0fb;
+  background: #fafbff;
+  color: #6b7280;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 0 0 12px 12px;
+  transition: background 0.12s, color 0.12s;
+}
+.chat-archive-nav-btn:hover { background: #f0eeff; color: #5b4fcf; }
+.chat-archive-nav-btn svg { flex-shrink: 0; }
+
+/* ── Archive empty state ─────────────────────────────────────── */
+.chat-archive-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px 20px;
+  color: #9ca3af;
+}
+.chat-archive-empty svg { opacity: 0.55; }
+.chat-archive-empty p { margin: 0; font-size: 13px; }
+
+/* ── Archived item title/meta dimmed ─────────────────────────── */
+.chat-thread-item.is-archived .chat-thread-item-title { color: #6b7280; }
+.chat-thread-item.is-archived .chat-thread-item-meta  { color: #b0b6c3; }
+
 .chat-thread-empty {
-  padding: 16px 12px;
+  padding: 14px 12px;
   font-size: 12.5px;
   color: #9ca3af;
   text-align: center;

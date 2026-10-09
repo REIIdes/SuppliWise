@@ -1158,6 +1158,23 @@ export const togglePinChatThread = async (threadId) => {
   return data;
 };
 
+export const listArchivedThreads = async () => {
+  const res = await apiFetch('/chat/threads/archived', { headers: { ...authHeader() } });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+export const toggleArchiveChatThread = async (threadId) => {
+  const res = await apiFetch(`/chat/threads/${encodeURIComponent(threadId)}/archive`, {
+    method: 'PATCH',
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
 // Fetch detailed supplement information (assessment-aware)
 //
 // Three-way timeout budget, and all three parts have to line up or the browser
