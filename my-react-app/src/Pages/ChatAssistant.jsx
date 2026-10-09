@@ -341,12 +341,17 @@ export default function ChatAssistant() {
       // not count as "outside" — the button's own handler decides show vs hide.
       if (chatWindowRef.current?.contains(target)) return;
       if (edgeRef.current?.contains(target)) return;
+      // Root-level modals (the delete confirmation, the upgrade
+      // prompt) render outside the window, so their presses would
+      // otherwise read as "outside" and close the panel the modal
+      // belongs to. While one is up, it owns every press.
+      if (deleteTarget || upgradeInfo) return;
       setOpen(false);
     };
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [open]);
+  }, [open, deleteTarget, upgradeInfo]);
 
   // Close the history menu when a press lands outside it (and
   // outside its toggle, whose own handler decides show vs hide).
