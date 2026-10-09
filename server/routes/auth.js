@@ -1106,10 +1106,17 @@ router.post('/verify-login-otp', async (req, res) => {
     let transaction = null;
     if (mfaToken) {
       if (!mfaTransaction.isValidTokenFormat(mfaToken)) {
+        console.error('[verify-login-otp] invalid token format, length:', mfaToken?.length);
         return res.status(401).json({ message: 'That sign-in attempt has expired. Please sign in again.' });
       }
       const peeked = await mfaTransaction.peek(mfaToken, { method: 'email-otp' });
       if (!peeked) {
+        // Debug: find out why peek returned null
+        try {
+          const MfaTransaction = require('../models/MfaTransaction');
+          const raw = await MfaTransaction.findOne({ tokenHash: mfaTransaction.hashToken(mfaToken) }).select('consumedAt expiresAt attempts maxAttempts methods').lean();
+          console.error('[verify-login-otp] peek returned null. Found in DB:', !!raw, 'state:', JSON.stringify(raw), '| now:', new Date().toISOString());
+        } catch (dbg) { /* best-effort */ }
         return res.status(401).json({ message: 'That sign-in attempt has expired. Please sign in again.' });
       }
       transaction = { _id: peeked._id, user: peeked.user, viaToken: true };
@@ -1206,6 +1213,12 @@ router.post('/verify-login-otp', async (req, res) => {
       ? await mfaTransaction.spend(mfaToken, { method: 'email-otp' })
       : await mfaTransaction.spendById(transaction._id, { method: 'email-otp' });
     if (!spent.ok) {
+      // Debug: log why the spend failed so we can diagnose "expired" errors
+      try {
+        const MfaTransaction = require('../models/MfaTransaction');
+        const raw = await MfaTransaction.findById(transaction._id).select('consumedAt expiresAt attempts maxAttempts methods').lean();
+        console.error('[verify-login-otp] spendById failed. Transaction state:', JSON.stringify(raw), '| now:', new Date().toISOString(), '| viaToken:', transaction.viaToken);
+      } catch (dbg) { /* best-effort debug, never fail */ }
       return res.status(401).json({ message: 'That sign-in attempt has expired. Please sign in again.' });
     }
 
