@@ -373,7 +373,7 @@ async function main() {
 
   // Login must not leak the OTP (dev override must be off in responses).
   const loginLeak = await call('POST', '/auth/login', { body: { email: A.email, password: PROBE_PASSWORD } });
-  check('login response never contains an OTP', loginLeak.status === 200 && !(/\b\d{6}\b/.test(JSON.stringify(loginLeak.data)) && loginLeak.data.otp), JSON.stringify(loginLeak.data).slice(0, 160));
+  check('login response never contains an OTP', loginLeak.status === 200 && !(/\b\d{6}\b/.test(JSON.stringify(loginLeak.data)) && loginLeak.data.otp), `status ${loginLeak.status} ${JSON.stringify(loginLeak.data).slice(0, 160)}`);
   check('login response carries no stack/paths', !FORBIDDEN_LEAK.test(JSON.stringify(loginLeak.data)));
 
   // Error paths must never expose stack traces or file paths.

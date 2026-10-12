@@ -66,12 +66,26 @@ const getBaseUrl = () => {
   if (override) return override;
   if (typeof window !== 'undefined') {
     const { hostname, protocol } = window.location;
-    if (hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
+    // The native shell (Capacitor) serves the app from its own local origin —
+    // `capacitor://localhost` or `https://localhost` — and `localhost` there is
+    // the PHONE, not the machine running the API. Deriving `…:5000` from it
+    // produced a URL that cannot resolve on any real device, which is why the
+    // APK has always needed VITE_API_URL (or a configured `server.host`).
+    // Detecting it explicitly means the requirement is stated rather than
+    // accidental: build the app with VITE_API_URL set to the backend's real
+    // address.
+    const isNativeShell = typeof window.Capacitor !== 'undefined'
+      && window.Capacitor?.isNativePlatform?.() === true;
+    if (hostname && !isNativeShell) {
+      // `https:` maps to https and everything else to http, which is what keeps
+      // an http dev server and an https one both working with no configuration.
       const scheme = protocol === 'https:' ? 'https:' : 'http:';
       return `${scheme}//${hostname}:5000/api`;
     }
   }
-  return 'http://localhost:5000/api';
+  // No window at all (`node --test`, a server-side render). There is no page to
+  // inherit a scheme from; https matches the default the dev servers now use.
+  return 'https://localhost:5000/api';
 };
 const BASE_URL = getBaseUrl();
 
