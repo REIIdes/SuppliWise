@@ -61,14 +61,21 @@ const chatBus = require('../utils/chatEventBus');
 function announce(req, event, threadUserId, opts = {}) {
   const adminKey = String(req.user?._id || '').trim();
   const producerId = req.chatStreamClientId || '';
-  chatBus.publishChat(event, threadUserId, {
-    skipAdmins: adminKey === producerId && Boolean(producerId),
-    ...opts,
-  });
-  // Other consoles of THIS same operator (second tab, another machine): the
-  // bus's admin audience would deliver to them too, but the producer's own
-  // connection must be excluded, so the same-account fan-out is done from the
-  // live-connections map directly.
+  // skipAdmins: the bus would otherwise fan this out to every console
+  // INCLUDING this operator's other tabs — the map loop below delivers to
+  // those with the producer excluded, so both paths must not double-deliver.
+  chatBus.publishChat(event, threadUserId, { skipAdmins: true, ...opts });
+  // Every OTHER operator's console.
+  for (const [adminId, set] of ownAdminStreams) {
+    if (adminId === adminKey) continue;
+    for (const { res, clientId } of [...set]) {
+      if (clientId === producerId) continue;
+      try {
+        sseWrite(res, 'chat', event);
+      } catch { /* dead client — the close handler cleans it up */ }
+    }
+  }
+  // Other consoles of THIS same operator (second tab, another machine).
   const set = adminKey ? ownAdminStreams.get(adminKey) : null;
   if (set) {
     for (const { res, clientId } of [...set]) {
@@ -78,14 +85,12 @@ function announce(req, event, threadUserId, opts = {}) {
       } catch { /* dead client — the close handler cleans it up */ }
     }
   }
-  // Cross-device copies for the member's own streams.
-  if (!opts.skipUserMember) {
-    const memberSet = chatBus.userAudienceHas?.(threadUserId);
-    void memberSet; // (no-op: the bus already fans out to the user audience)
-  }
 }
 
-// AdminAccountId -> Set<{ res, clientId }> of live console streams.
+// AdminAccountId -> Set<{ res, clientId }> of live console streams. The admin
+// fan-out walks this map rather than the bus's admin audience, because the
+// producer's own connection has to be excluded per-connection, and a bus
+// listener cannot tell which connection a write came from.
 const ownAdminStreams = new Map();
 
 /**
