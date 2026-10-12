@@ -1001,6 +1001,20 @@ textarea:focus-visible {
 }
 .sci-view__barrow .sci-back { margin-bottom: 0; }
 
+/* The conversation's subject, read straight after the back pill. It shrinks
+   with an ellipsis rather than pushing the ticket/presence pills onto a
+   second row — the full text lives in the title tooltip and the list row. */
+.sci-view__subject {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--sci-ink);
+  font-size: 14px;
+  font-weight: 800;
+}
+
 /* ── Support presence ("Active Now") ───────────────────────────────────────
    The member-facing status of the support TEAM (the admins behind this
    channel), not of the thread. Driven by the admin console's own poll — see

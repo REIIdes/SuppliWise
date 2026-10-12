@@ -10,9 +10,11 @@ import {
   getSupportOperatorKeys,
   secureMySupportThread,
   shareMySupportThreadWithOperators,
+  getToken,
 } from '../../api';
 import useSecureChat from '../../security/useSecureChat';
 import useAuth from '../../hooks/useAuth';
+import useChatStream from '../../hooks/useChatStream';
 import './SupportInbox.css';
 
 /**
@@ -24,11 +26,13 @@ import './SupportInbox.css';
  *
  * ── Behaviour that is load-bearing, not cosmetic ────────────────────────────
  *
- *  • The list is polled, not pushed. There is no socket layer in this app, and
- *    a support inbox that only updates when you re-click Refresh reads as
- *    broken while you wait for an answer. The poll is paused while the tab is
- *    hidden and while a send is in flight, and a response for a thread the
- *    member has since left is discarded.
+ *  • The list is polled AND pushed. There is no socket layer in this app in the
+ *    sense of a bidirectional one, but GET /support-chat/stream is a one-way
+ *    push channel: the server names the conversation that changed and this
+ *    inbox refetches through the ordinary endpoints. The 12s poll stays as the
+ *    fallback for a stream that cannot connect (a throttled background tab, a
+ *    buffering proxy), and both are paused while a send is in flight, so a
+ *    repaint can never arrive under the member's own message.
  *
  *  • `loaded` is tracked separately from `loading`. The first load no longer
  *    sets state synchronously (see the note on `load` below), so "still
@@ -378,6 +382,19 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
   const threadsRef = useRef([]);
   useEffect(() => { threadsRef.current = threads; }, [threads]);
 
+  // The member's OWN writes come back on the stream too — events are addressed
+  // to the account, and the server cannot tell which of this account's tabs
+  // issued the fetch that made them. This tab remembers its last write per
+  // thread and skips the refetch it does not need: the optimistic append (or
+  // the seal it is mid-way through) already shows the right thing, and
+  // refetching over it is exactly the blink the local append prevents.
+  // Declared up here because openThread's background seal and the send paths
+  // both claim through it.
+  const ownWrite = useRef({ thread: '', at: 0 });
+  const noteOwnWrite = useCallback((id) => {
+    ownWrite.current = { thread: String(id || ''), at: Date.now() };
+  }, []);
+
   const showNotice = useCallback((message) => {
     setNotice(message);
     if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
@@ -496,6 +513,10 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
           }
           if (sealedMessages.length === 0) return;
           const shares = await secure.buildShares(sealingSession);
+          // Claim the write before posting it: the server announces the seal
+          // ahead of its own response, and this tab must not refetch the
+          // transcript it is in the middle of re-sealing.
+          noteOwnWrite(id);
           const sealData = await secureMySupportThread(id, { messages: sealedMessages, keyShares: shares });
           if (!sealData?.thread) return;
           // Adopt only AFTER the server accepted the shares — a key the server
@@ -537,6 +558,9 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
           if (operators.length === 0) return;
           const shares = await secure.rewrapTo(id, operators);
           if (shares.length === 0) return;
+          // Claimed like the seal above: this post announces 'shared' before it
+          // answers, and this tab must not refetch the transcript mid-grant.
+          noteOwnWrite(id);
           await shareMySupportThreadWithOperators(id, shares);
         })().catch((grantError) => {
           // Silent on purpose: a failed grant leaves the thread exactly as it
@@ -552,7 +576,7 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
     } finally {
       if (token === threadToken.current) setLoadingThread(false);
     }
-  }, [secure, showNotice]);
+  }, [secure, showNotice, noteOwnWrite]);
 
   // Deep link from the notification bell: /support?thread=<id> opens THAT
   // conversation. Without this the member landed on the list and had to find the
@@ -580,6 +604,74 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
     /* eslint-enable react-hooks/set-state-in-effect */
     openThreadRef.current(wanted);
   }, [focusThreadId]);
+
+  // ── Live sync ───────────────────────────────────────────────────────────
+  // The 12s poll stays as the fallback, but it can never have covered the one
+  // case that mattered: a reply arriving while the member is ALREADY reading
+  // that conversation. Nothing refetched an open transcript, so the answer sat
+  // on the server invisible until the member clicked away and back. The push
+  // channel closes that gap, and syncs every other tab of this account the
+  // same instant. See server/routes/supportChat.js GET /stream.
+  const activeIdRef = useRef(activeId);
+  useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
+  const sendingRef = useRef(sending);
+  useEffect(() => { sendingRef.current = sending; }, [sending]);
+  const loadListRef = useRef(loadList);
+  useEffect(() => { loadListRef.current = loadList; }, [loadList]);
+
+  // Coalescer: an operator replying in bursts must not storm the transcript
+  // with one full refetch per message. Events within a short window collapse
+  // into a single refresh.
+  const refreshTimer = useRef(null);
+  const scheduleRefresh = useCallback((threadId, openTranscript) => {
+    if (typeof document !== 'undefined' && document.hidden) return;
+    if (sendingRef.current) return;
+    window.clearTimeout(refreshTimer.current);
+    refreshTimer.current = window.setTimeout(() => {
+      loadListRef.current?.();
+      if (openTranscript && threadId && String(activeIdRef.current || '') === threadId) {
+        openThreadRef.current?.(threadId);
+      }
+    }, 400);
+  }, []);
+
+  useEffect(() => () => window.clearTimeout(refreshTimer.current), []);
+
+  const handleStreamEvent = useCallback((event) => {
+    // The same rule that pauses the poll mid-send: a repaint while the member's
+    // own send is in flight reads as the send being dropped.
+    if (sendingRef.current) return;
+    const threadId = String(event?.thread || '');
+    const kind = String(event?.kind || '');
+    if (kind === 'deleted') {
+      // The conversation is gone on the server; holding an open transcript of
+      // it would offer a composer on a 404.
+      if (threadId && String(activeIdRef.current || '') === threadId) {
+        threadToken.current += 1;
+        setActiveId(null);
+        setActive(null);
+      }
+      loadListRef.current?.();
+      return;
+    }
+    // A READ refreshes the row's badge only, never the transcript: opening the
+    // transcript is itself a read on the other side, and refetching it here
+    // would announce another read back — a two-device ping-pong of full
+    // transcript loads, each one a decrypt pass, from anything either side
+    // ever looked at. Messages and state transitions are the news worth
+    // repainting a live conversation for.
+    const opensTranscript = kind === 'message' || kind === 'resolved' || kind === 'reopened';
+    if (threadId && ownWrite.current.thread === threadId && Date.now() - ownWrite.current.at < 5000) return;
+    scheduleRefresh(threadId, opensTranscript);
+  }, [scheduleRefresh]);
+
+  useChatStream({
+    path: '/support-chat/stream',
+    readToken: getToken,
+    onEvent: handleStreamEvent,
+    onPresence: setSupportActive,
+    enabled: Boolean(user?._id),
+  });
 
   // Keep the transcript pinned to the newest message.
   //
@@ -693,6 +785,11 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
       }
     }
 
+    // Claim this thread BEFORE the send: the server pushes the change the
+    // moment the message is written, which can reach this tab before the
+    // request's own response. Without the claim the push would refetch over
+    // the optimistic append below and the member's message would blink.
+    noteOwnWrite(id);
     setSending(true);
     setError('');
     try {
@@ -744,7 +841,7 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
     } finally {
       setSending(false);
     }
-  }, [sending, trimmed, active, showNotice, loadList, secure]);
+  }, [sending, trimmed, active, showNotice, loadList, secure, noteOwnWrite]);
 
   // ── Derived ─────────────────────────────────────────────────────────────
   const activeStatus = active ? statusOf(active.thread.status) : null;
@@ -1176,6 +1273,14 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
                     <IconBack />
                     Chats
                   </button>
+
+                  <span
+                    className="sci-view__subject"
+                    title={active.thread.subject}
+                    aria-label={`Conversation subject: ${active.thread.subject}`}
+                  >
+                    {active.thread.subject}
+                  </span>
 
                   {active.thread.ticketId && (
                     <span

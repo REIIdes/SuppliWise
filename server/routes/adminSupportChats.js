@@ -38,7 +38,7 @@ const {
   participantFor,
 } = require('../utils/chatKeys');
 const { withTicketIds, normalizeTicketSearch } = require('../utils/ticketId');
-const { markAdminActivity, onSupportActiveChange } = require('../utils/supportPresence');
+const { markAdminActivity, addAdminConnection, removeAdminConnection } = require('../utils/supportPresence');
 const { SSE_HEARTBEAT_MS, streamTokenAuth, sseWrite, sseHeaders, tokenExpiryDelayMs } = require('../utils/sse');
 const chatBus = require('../utils/chatEventBus');
 
@@ -139,6 +139,10 @@ const ownAdminStreams = new Map();
  * can already read the thread re-seals it to everybody else.
  */
 const router = express.Router();
+// Same shape as the member router: the stream's ?token= (EventSource cannot
+// set headers) is copied into the Authorization header on THIS path only,
+// ahead of the router-wide protect, so admin auth runs exactly once.
+router.use('/stream', streamTokenAuth);
 router.use(protect, adminOnly);
 
 const THREAD_USER_FIELDS = 'firstName lastName email accountStatus subscriptionPlan';
@@ -223,6 +227,87 @@ async function threadStatusCounts() {
   counts.unread = await ChatThread.countDocuments({ unreadByAdmin: { $gt: 0 } });
   return counts;
 }
+
+// @route   GET /api/admin/chats/stream
+// @desc    SSE push channel for one operator's console. Every change to any
+//          conversation — a member's new message or reply, a colleague's
+//          reply, a resolve, a reopen, an assign, a delete, a seal — arrives
+//          within milliseconds and the queue/panel refetches THAT thread
+//          instead of waiting for the next 12s poll. Invalidation signals
+//          only (no message content), so the read endpoints stay the source
+//          of truth and E2E ciphertext never travels this channel.
+//          Also registers the console's live presence, which is what the
+//          member's "Active Now" reads.
+// @access  Admin — accepts ?token= for EventSource
+router.get('/stream', async (req, res) => {
+  // protect + adminOnly have already run (router-wide, after the path-scoped
+  // token copy above), so a non-admin token cannot reach this line.
+  try {
+    const clientId = String(req.query.clientId || '').slice(0, 40) || `anon-${Date.now()}`;
+    const adminKey = String(req.user._id);
+    // Marks this connection as the producer of any write made through it, so
+    // announce() never echoes a console its own action.
+    req.chatStreamClientId = clientId;
+
+    markAdminActivity();
+    addAdminConnection();
+    sseHeaders(res);
+
+    let closed = false;
+    const sendChat = (event) => {
+      if (closed || res.writableEnded) return;
+      try {
+        sseWrite(res, 'chat', event);
+      } catch { closed = true; }
+    };
+
+    if (!ownAdminStreams.has(adminKey)) ownAdminStreams.set(adminKey, new Set());
+    const entry = { res, clientId };
+    ownAdminStreams.get(adminKey).add(entry);
+
+    // The bus's admin audience is not used by this router's own fan-out (see
+    // the note on ownAdminStreams), but a write published by ANOTHER file —
+    // the member router's, which fans out through announce() there — reaches
+    // consoles through it, so subscribe and let the bus do the cross-file work.
+    const unsubBus = chatBus.subscribeAdmins(sendChat);
+
+    const heartbeat = setInterval(() => {
+      if (closed || res.writableEnded) return;
+      try {
+        res.write(': hb\n\n');
+        // A long-lived connection with no requests in flight still has to keep
+        // stamping presence, or the poll window it replaced would lapse.
+        markAdminActivity();
+      } catch { closed = true; }
+    }, SSE_HEARTBEAT_MS);
+
+    // Admin tokens DO expire (unlike user sessions), and the client renews
+    // them; close shortly before so the console reconnects on a fresh token.
+    const expMs = tokenExpiryDelayMs(req);
+    const expTimer = expMs ? setTimeout(() => cleanup(), expMs) : null;
+
+    function cleanup() {
+      if (closed) return;
+      closed = true;
+      clearInterval(heartbeat);
+      if (expTimer) clearTimeout(expTimer);
+      unsubBus();
+      const set = ownAdminStreams.get(adminKey);
+      if (set) {
+        set.delete(entry);
+        if (set.size === 0) ownAdminStreams.delete(adminKey);
+      }
+      removeAdminConnection();
+      try { res.end(); } catch { /* already closed */ }
+    }
+
+    req.on('close', cleanup);
+  } catch (error) {
+    console.error('[admin/chats GET /stream]', error.message);
+    if (!res.headersSent) res.status(500).json({ message: 'Could not open the conversation stream.' });
+    else try { res.end(); } catch { /* ignore */ }
+  }
+});
 
 // @route   GET /api/admin/chats
 // @desc    The support queue: filters, search, counts
@@ -349,6 +434,9 @@ router.get('/:id', async (req, res) => {
 
     await ChatThread.updateOne({ _id: thread._id }, { $set: { unreadByAdmin: 0 } });
     await withTicketIds([thread]);
+    // The member's side shows whether support has READ their message; push the
+    // read instead of letting their "seen" state lag a poll behind.
+    announce(req, { kind: 'read', thread: thread._id, by: 'admin' }, thread.user?._id || thread.user);
 
     // For plaintext threads, include member public key so the admin client can
     // auto-seal if it has encryption capability. This enables automatic
@@ -476,6 +564,11 @@ router.post('/:id/messages', async (req, res) => {
     }).catch((notifyError) => {
       console.error('[admin/chats member bell]', notifyError.message);
     });
+
+    // The member learns about the reply on their own stream the instant it is
+    // written, and every other console repaints the queue row. Published
+    // before the response — see announce()'s ordering note.
+    announce(req, { kind: 'message', thread: thread._id, by: 'admin' }, thread.user);
 
     return res.status(201).json({
       message: 'Reply sent.',
@@ -694,7 +787,13 @@ router.post('/:id/keys', async (req, res) => {
         },
       },
       { new: true }
-    ).lean();
+    ).populate('user', THREAD_USER_FIELDS).lean();
+
+    // A grant changes what a COLLEAGUE can read, so their open console (and
+    // the member's own inbox preview) repaints now rather than at the poll.
+    if (shares.length > 0) {
+      announce(req, { kind: 'shared', thread: thread._id, by: 'admin' }, thread.user);
+    }
 
     return res.json({
       message: `Access granted to ${shares.length} recipient${shares.length === 1 ? '' : 's'}.`,
@@ -722,7 +821,9 @@ router.post('/:id/secure', async (req, res) => {
     if (!mongoose.isValidObjectId(req.params.id)) {
       return res.status(400).json({ message: 'Invalid conversation.' });
     }
-    const thread = await ChatThread.findById(req.params.id).lean();
+    const thread = await ChatThread.findById(req.params.id)
+      .populate('user', THREAD_USER_FIELDS)
+      .lean();
     if (!thread) return res.status(404).json({ message: 'Conversation not found.' });
     if (isEncrypted(thread)) {
       return res.json({
@@ -741,7 +842,13 @@ router.post('/:id/secure', async (req, res) => {
       throw new ChatInputError('There is nothing to encrypt in this conversation yet.');
     }
 
-    const memberParticipant = participantForUser(thread.user);
+    // `thread.user` is a raw ObjectId on some reads and a populated document on
+    // others (GET /:id and the responses the console adopts are populated). The
+    // id is the only thing that may reach participantForUser/announce — an
+    // object there stringifies to `user:[object Object]`, which the share
+    // validator rejects and the event bus cannot route.
+    const threadUserId = thread.user?._id || thread.user;
+    const memberParticipant = participantForUser(threadUserId);
     const shares = normalizeKeyShares(req.body?.keyShares, {
       isAllowed: (participant) => participant.startsWith('admin:') || participant === memberParticipant,
     });
@@ -768,7 +875,14 @@ router.post('/:id/secure', async (req, res) => {
       }
     );
 
-    const updated = await ChatThread.findById(thread._id).lean();
+    // The member's inbox reads the row's encryption badge and its previews
+    // from the thread summary, which just changed under them.
+    announce(req, { kind: 'sealed', thread: thread._id, by: 'admin' }, threadUserId);
+
+    // Populated like GET /:id: the console adopts whatever these three endpoints
+    // answer as its loaded thread, and a view without `user` paints
+    // "Unknown account" over the member panel the operator was just reading.
+    const updated = await ChatThread.findById(thread._id).populate('user', THREAD_USER_FIELDS).lean();
     return res.json({
       message: `This conversation is now end-to-end encrypted (${sealed.length} message${sealed.length === 1 ? '' : 's'} sealed).`,
       thread: toThreadView(updated, participantFor(req)),
@@ -812,6 +926,11 @@ router.post('/:id/resolve', async (req, res) => {
       { new: true }
     ).populate('user', THREAD_USER_FIELDS).lean();
     if (!updated) return res.status(404).json({ message: 'Conversation not found.' });
+
+    // The member's thread becomes read-only on their side the moment this
+    // lands — their open inbox must lock the composer immediately, not after
+    // a poll (or, worse, let them type into a 409).
+    announce(req, { kind: 'resolved', thread: updated._id, by: 'admin' }, updated.user?._id || updated.user);
 
     // Tell the member their thread is closed, so a resolved conversation in
     // their list is explained rather than looking like data loss. Fire-and-forget
@@ -859,6 +978,9 @@ router.post('/:id/reopen', async (req, res) => {
     ).populate('user', THREAD_USER_FIELDS).lean();
     if (!updated) return res.status(404).json({ message: 'Conversation not found.' });
 
+    // The mirror of the resolve: the member's composer unlocks live.
+    announce(req, { kind: 'reopened', thread: updated._id, by: 'admin' }, updated.user?._id || updated.user);
+
     // The member has to know the thread is live again: it is closed and
     // read-only on their side, and nothing else would tell them it reopened.
     UserNotification.create({
@@ -893,12 +1015,17 @@ router.post('/:id/assign', async (req, res) => {
       { _id: req.params.id },
       { $set: { assignedTo: alias } },
       { new: true }
-    ).lean();
+    ).populate('user', THREAD_USER_FIELDS).lean();
     if (!updated) return res.status(404).json({ message: 'Conversation not found.' });
     // Carries this operator's own wrapped key like every other thread response.
     // The console REPLACES its loaded thread with whatever comes back from these
     // three endpoints, so a view that quietly dropped `keyShares` would strip
     // the admin's ability to read the very conversation they just acted on.
+    //
+    // Colleagues' queues show the owner chip — repaint it live rather than
+    // leaving a stale "unassigned" until the next poll. The member does not
+    // read assignments at all, so the bus's user copy is skipped here.
+    announce(req, { kind: 'assign', thread: updated._id, by: 'admin' }, updated.user?._id || updated.user, { skipUser: true });
     return res.json({ thread: toThreadView(updated, participantFor(req)) });
   } catch (error) {
     console.error('[admin/chats POST /:id/assign]', error.message);
@@ -915,6 +1042,10 @@ router.delete('/:id', async (req, res) => {
     if (!mongoose.isValidObjectId(req.params.id)) {
       return res.status(400).json({ message: 'Invalid conversation.' });
     }
+    // Read the OWNER before the delete: it is the only moment the member's id
+    // is still on hand to address the push to, and their inbox must drop the
+    // conversation the instant it is gone rather than showing a row that 404s.
+    const existing = await ChatThread.findById(req.params.id).select('user').lean();
     const thread = await ChatThread.findByIdAndDelete(req.params.id).select('_id').lean();
     if (!thread) return res.status(404).json({ message: 'Conversation not found.' });
     // Messages are NOT cascaded by mongoose here (no ref middleware in this
@@ -922,6 +1053,7 @@ router.delete('/:id', async (req, res) => {
     // means a failure leaves messages that are unreachable by any route rather
     // than a thread pointing at a transcript that is still queryable.
     await ChatMessage.deleteMany({ thread: thread._id });
+    announce(req, { kind: 'deleted', thread: thread._id, by: 'admin' }, existing?.user || thread.user);
     return res.json({ message: 'Conversation deleted.' });
   } catch (error) {
     console.error('[admin/chats DELETE /:id]', error.message);

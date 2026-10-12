@@ -490,6 +490,16 @@ app.use('/api/insights', insightsRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/security', securityRoutes);
 app.use('/api/web3', web3Routes);
+// The admin console's Chat stream is an EventSource, which cannot set an
+// Authorization header, so its ?token= has to be copied into the header BEFORE
+// anything under /api/admin authenticates: routes/admin.js registers
+// `router.use(protect, adminOnly)` for the WHOLE prefix and is mounted ahead of
+// the chats router, so the copy inside routes/adminSupportChats.js runs far too
+// late there. It is the same one-liner routes/subscription.js needs for the same
+// reason; scoped to this exact path, so no other admin endpoint can present a
+// credential through a query string (which is logged everywhere).
+const { streamTokenAuth } = require('./utils/sse');
+app.use('/api/admin/chats/stream', streamTokenAuth);
 app.use('/api/admin', adminRoutes);
 // The admin "Chat management" queue. A separate file rather than more of
 // routes/admin.js, but mounted under the same /api/admin prefix so it inherits

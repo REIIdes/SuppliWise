@@ -525,6 +525,112 @@ const TICKET_PATTERN = /^SW-[0-9ABCDEFGHJKMNPQRSTVWXYZ]{8}$/;
   const asStranger = await openWrappedKey(soloShare, strangerIdentity.privateKey);
   check('a different identity cannot', asStranger === null);
 
+  // ── 15. The push streams must authenticate the only way a browser can ────
+  // An EventSource cannot set an Authorization header, so both chat streams
+  // accept the access token as `?token=` — and ONLY those two paths may, since
+  // a credential in a URL ends up in access logs. If the member stream ever
+  // stops accepting it the inbox degrades silently to 12 s polling with no
+  // error anywhere: `useChatStream` treats a failed connect as "behave like
+  // before". That invisible failure is exactly what this section makes loud.
+  console.log('\n15. push streams');
+  const sse = async (path, { token, query } = {}) => {
+    const url = `${BASE}${path}${query && token ? `?token=${encodeURIComponent(token)}` : ''}`;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 4000);
+    let status = 0;
+    let type = '';
+    let head = '';
+    try {
+      const res = await fetch(url, {
+        headers: {
+          Accept: 'text/event-stream',
+          ...(!query && token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        signal: ctrl.signal,
+      });
+      status = res.status;
+      type = res.headers.get('content-type') || '';
+      if (res.ok && res.body) {
+        for await (const chunk of res.body) {
+          head += Buffer.from(chunk).toString('utf8');
+          // Opened means a real frame arrived: the `: hello` comment, or the
+          // presence snapshot the console sends before it.
+          if (head.includes(': hello') || head.includes('event:')) break;
+        }
+      } else {
+        head = (await res.text().catch(() => '')).slice(0, 120);
+      }
+    } catch { /* aborted or closed early — `status`/`head` say how far it got */ }
+    clearTimeout(timer);
+    ctrl.abort();
+    // Authenticated = the route answered an event stream. A rejected connect
+    // never gets here: protect answers JSON 401/403 first. Whether a frame has
+    // arrived yet is not part of it — the admin console stays silent until
+    // something changes or the 25 s heartbeat comments the socket, and the
+    // wake-up checks below are what prove pushing works.
+    const opened = status === 200 && type.includes('text/event-stream');
+    return { opened, status, head: head.replace(/\s+/g, ' ').slice(0, 80) };
+  };
+
+  const memberStream = await sse('/support-chat/stream', { token: alice.token, query: true });
+  check(`the member stream opens on the EventSource query token (${memberStream.status} ${memberStream.head})`,
+    memberStream.opened);
+  const bareStream = await sse('/support-chat/stream');
+  check(`the member stream still refuses an unauthenticated connect (${bareStream.status})`,
+    bareStream.status === 401);
+  const adminStream = await sse('/admin/chats/stream', { token: adminToken, query: true });
+  check(`the admin stream opens on the EventSource query token (${adminStream.status} ${adminStream.head})`,
+    adminStream.opened);
+  const memberOnAdmin = await sse('/admin/chats/stream', { token: alice.token, query: true });
+  check(`a member token cannot open the admin stream (${memberOnAdmin.status})`,
+    memberOnAdmin.status === 401 || memberOnAdmin.status === 403);
+  const memberOnQueue = await sse('/admin/chats?limit=1', { token: alice.token, query: true });
+  check(`the query-token allowance is scoped to the stream paths only (${memberOnQueue.status})`,
+    memberOnQueue.status === 401);
+
+  // And the stream must actually STREAM: a write on one side wakes the other
+  // side's open connection. Without this the channel could authenticate, stay
+  // open, and push nothing forever — the app would look healthy and still be
+  // running on 12 s polls.
+  const wake = async (path, token, trigger) => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    let frames = '';
+    const reading = (async () => {
+      const res = await fetch(`${BASE}${path}?token=${encodeURIComponent(token)}`, {
+        headers: { Accept: 'text/event-stream' },
+        signal: ctrl.signal,
+      });
+      for await (const chunk of res.body) {
+        frames += Buffer.from(chunk).toString('utf8');
+        if (frames.includes('event: chat')) break;
+      }
+    })().catch(() => { /* aborted once the event landed, or the window closed */ });
+    await new Promise((resolve) => setTimeout(resolve, 500)); // let it establish
+    const sent = await trigger();
+    await reading;
+    clearTimeout(timer);
+    ctrl.abort();
+    return { sent, frames: frames.replace(/\s+/g, ' ').slice(0, 160) };
+  };
+
+  const ping = await call(alice.token, '/support-chat', 'POST',
+    { subject: 'Stream wake-up probe', body: 'Does an admin reply push to my open stream?' });
+  check(`the probe thread opened (${ping.status})`, ping.status === 201 || ping.status === 200);
+
+  const memberWoke = await wake('/support-chat/stream', alice.token, () =>
+    call(adminToken, `/admin/chats/${ping.data.thread._id}/messages`, 'POST', { body: 'reply to wake the member' }));
+  check(`an admin reply pushes a chat event to the member's open stream (${memberWoke.sent.status} ${memberWoke.frames})`,
+    memberWoke.sent.status === 201 && memberWoke.frames.includes('event: chat'));
+
+  const adminWoke = await wake('/admin/chats/stream', adminToken, () =>
+    call(alice.token, `/support-chat/${ping.data.thread._id}/messages`, 'POST', { body: 'follow-up to wake the console' }));
+  check(`a member message pushes a chat event to the admin's open stream (${adminWoke.sent.status} ${adminWoke.frames})`,
+    adminWoke.sent.status === 201 && adminWoke.frames.includes('event: chat'));
+
+  await ChatThread.deleteMany({ _id: ping.data.thread._id });
+  await ChatMessage.deleteMany({ thread: ping.data.thread._id });
+
   // ── cleanup ──────────────────────────────────────────────────────────────
   for (const u of [alice.user, bob.user]) {
     await ChatThread.deleteMany({ user: u._id });

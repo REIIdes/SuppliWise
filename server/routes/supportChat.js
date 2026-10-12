@@ -81,6 +81,27 @@ function announce(req, event, threadUserId) {
 const ownStreams = new Map();
 
 /**
+ * Console-only announcement: the admin consoles need to know, and the member's
+ * OWN tabs must not hear it.
+ *
+ * 'read' is the case that makes this necessary rather than merely tidier. A
+ * member's tab refetches a thread → that GET marks it read → if the mark were
+ * pushed back to the member's own connections, their client would refresh the
+ * transcript → which GETs the thread → which marks it read again. A loop that
+ * is invisible on one device and a refetch storm on two. Nothing on the
+ * member's side needs a push about their own reading — the badge is already
+ * right locally and the poll reconciles another tab within twelve seconds —
+ * while the console genuinely must stop glowing for a reply that has been seen.
+ */
+function announceAdmins(req, event, threadUserId) {
+  try {
+    chatBus.publishChat(event, threadUserId, { skipUser: true });
+  } catch (error) {
+    console.error('[support-chat announce]', error.message);
+  }
+}
+
+/**
  * SUPPORT CHAT — the member's side of the conversation.
  *
  * Mounted at /api/support-chat, which is deliberately a DIFFERENT path from
@@ -117,6 +138,12 @@ const ownStreams = new Map();
  * where an administrator will see it.
  */
 const router = express.Router();
+// The stream authenticates with ?token= because EventSource cannot set an
+// Authorization header, and that token must be copied into the header BEFORE
+// protect runs — so it is registered as pre-middleware on this one path,
+// ahead of the router-wide protect. Every other route in this file still
+// requires the header, exactly as before. See utils/sse.js.
+router.use('/stream', streamTokenAuth);
 router.use(protect);
 
 const requireUserAccount = (req, res) => {
@@ -279,17 +306,10 @@ async function appendMessage({ thread, author, authorName, payload }) {
 //          source of truth and E2E ciphertext never travels this channel.
 //          Falls back to the polls if the stream cannot connect.
 // @access  Private (user) — accepts ?token= for EventSource
-router.get('/stream', streamTokenAuth, async (req, res) => {
-  // Own guard rather than the router-wide protect: a query token is copied
-  // into the header by streamTokenAuth, and only THIS route may accept it —
-  // the shape routes/subscription.js /stream already proved.
-  let authed = false;
-  await protect(req, res, () => { authed = true; });
-  if (!authed || res.writableEnded || res.headersSent) return;
-  if (req.user.role === 'admin') {
-    if (!res.headersSent) res.status(403).json({ message: 'User account required.' });
-    return;
-  }
+router.get('/stream', async (req, res) => {
+  // protect has already run (router-wide, after the path-scoped token copy
+  // above); this is the same refusal every other route in this file makes.
+  if (!requireUserAccount(req, res)) return;
   try {
     const clientId = String(req.query.clientId || '').slice(0, 40) || `anon-${Date.now()}`;
     const userId = String(req.user._id);
@@ -675,8 +695,9 @@ router.get('/:id', async (req, res) => {
 
     // Tell every admin console this thread just became read on the member's
     // side: their unread badge and "priority until seen" ordering must not
-    // keep glowing for a reply the member has already opened.
-    announce(req, { kind: 'read', thread: thread._id, by: 'user' }, req.user._id);
+    // keep glowing for a reply the member has already opened. Console-only —
+    // see announceAdmins for the refetch loop this avoids.
+    announceAdmins(req, { kind: 'read', thread: thread._id, by: 'user' }, req.user._id);
 
     return res.json({
       thread: toThreadView({ ...thread, unreadByUser: 0 }, memberParticipant(req)),

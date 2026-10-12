@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ConfirmModal from '../ConfirmModal/ConfirmModal';
 import useSecureChat from '../../security/useSecureChat';
+import useChatStream from '../../hooks/useChatStream';
 import './AdminSupportChats.css';
 
 /**
@@ -273,6 +274,16 @@ export default function AdminSupportChats({ request, focusThreadId = '' }) {
   // the first and the second adoption would cache a key that opens nothing.
   const sealInFlight = useRef(new Set());
 
+  // This console's OWN writes come back on the stream too: events are addressed
+  // to the Chat channels, and the server cannot tell which operator's browser
+  // issued the fetch that made them. The tab remembers its last write per
+  // thread and skips the refetch it does not need — its optimistic append (or
+  // the seal it is mid-way through) already shows the right thing.
+  const ownWrite = useRef({ thread: '', at: 0 });
+  const noteOwnWrite = useCallback((id) => {
+    ownWrite.current = { thread: String(id || ''), at: Date.now() };
+  }, []);
+
   const showNotice = useCallback((message) => {
     setNotice(message);
     if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
@@ -417,6 +428,11 @@ export default function AdminSupportChats({ request, focusThreadId = '' }) {
               wrapped: await session.shareWith(memberKey.publicKey),
             });
           }
+          // Claimed before the post: the seal is announced ahead of this
+          // request's own response, and a transcript refresh mid-seal would
+          // read a thread whose key has not been adopted yet — the one state
+          // this feature must never show.
+          noteOwnWrite(id);
           const sealed = await request(`/chats/${id}/secure`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -454,7 +470,7 @@ export default function AdminSupportChats({ request, focusThreadId = '' }) {
     } finally {
       if (token === threadToken.current) setLoadingThread(false);
     }
-  }, [request, secure, showNotice]);
+  }, [request, secure, showNotice, noteOwnWrite]);
 
   // Deep link from the admin bell: a "New support conversation" event carries
   // `chats?thread=<id>`, so the queue opens ON that conversation rather than
@@ -523,6 +539,87 @@ export default function AdminSupportChats({ request, focusThreadId = '' }) {
     setPinned(true);
   }, []);
 
+  // ── Live sync ───────────────────────────────────────────────────────────
+  // The queue's 12s poll stays as the fallback, but it never covered the case
+  // that mattered: an open TRANSCRIPT. A member's next message — or a
+  // colleague's reply, resolve or grant in another console — sat invisible
+  // until the operator clicked out of the conversation and back in. The push
+  // channel names the conversation that changed, and this console refetches it
+  // through the ordinary endpoints. See server/routes/adminSupportChats.js.
+  const activeIdRef = useRef(activeId);
+  useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
+  const sendingRef = useRef(sending);
+  useEffect(() => { sendingRef.current = sending; }, [sending]);
+  const busyRef = useRef(busy);
+  useEffect(() => { busyRef.current = busy; }, [busy]);
+  const filtersRef = useRef({ status, activeSearch, category });
+  useEffect(() => {
+    filtersRef.current = { status, activeSearch, category };
+  }, [status, activeSearch, category]);
+
+  const reloadQueue = useCallback(() => {
+    const f = filtersRef.current;
+    loadRef.current(f.status, f.activeSearch, f.category);
+  }, []);
+
+  // Coalescer: a member typing several quick messages must not storm the panel
+  // with one full transcript load per event.
+  const refreshTimer = useRef(null);
+  const scheduleRefresh = useCallback((threadId, openTranscript) => {
+    if (typeof document !== 'undefined' && document.hidden) return;
+    if (sendingRef.current) return;
+    window.clearTimeout(refreshTimer.current);
+    refreshTimer.current = window.setTimeout(() => {
+      reloadQueue();
+      if (openTranscript && threadId && String(activeIdRef.current || '') === threadId) {
+        openThreadRef.current?.(threadId);
+      }
+    }, 400);
+  }, [reloadQueue]);
+
+  useEffect(() => () => window.clearTimeout(refreshTimer.current), []);
+
+  const handleStreamEvent = useCallback((event) => {
+    // The same rule that pauses the poll mid-send: a repaint while this
+    // console's own reply or state change is in flight reads as the action
+    // being dropped — and mid-resolve it would repaint the panel the button
+    // is about to answer for.
+    if (sendingRef.current || busyRef.current) return;
+    const threadId = String(event?.thread || '');
+    const kind = String(event?.kind || '');
+    // This console made the change — its own handler has already painted the
+    // result, and a refetch here would race it (or, mid-seal, read a thread
+    // whose key has not been adopted on this device yet).
+    if (threadId && ownWrite.current.thread === threadId && Date.now() - ownWrite.current.at < 5000) return;
+    if (kind === 'deleted') {
+      if (threadId && String(activeIdRef.current || '') === threadId) {
+        closeThread();
+        showNotice('This conversation was deleted.');
+      }
+      reloadQueue();
+      return;
+    }
+    // A READ refreshes the QUEUE only, never the transcript: refetching an
+    // open transcript is itself a read on this side, which announces another
+    // read to the member — whose client would refresh, announce, and so on.
+    // Messages and state transitions are the news worth repainting a live
+    // conversation for.
+    const opensTranscript = kind === 'message' || kind === 'resolved' || kind === 'reopened';
+    scheduleRefresh(threadId, opensTranscript);
+  }, [scheduleRefresh, reloadQueue, closeThread, showNotice]);
+
+  useChatStream({
+    path: '/admin/chats/stream',
+    // EventSource cannot set an Authorization header, so this one path takes
+    // the admin token from the query string — the same value the dashboard's
+    // `request` helper puts in the header of every other call.
+    readToken: () => {
+      try { return localStorage.getItem('adminToken') || ''; } catch { return ''; }
+    },
+    onEvent: handleStreamEvent,
+    enabled: Boolean(adminAccountId),
+  });
+
   // ── Reply ───────────────────────────────────────────────────────────────
   const trimmed = draft.trim();
   const canSend = trimmed.length > 0 && trimmed.length <= MAX_MESSAGE && !sending;
@@ -551,6 +648,9 @@ export default function AdminSupportChats({ request, focusThreadId = '' }) {
       }
     }
 
+    // Claim the thread before the send: the server announces the reply ahead of
+    // its own response, and this console must not refetch over the append below.
+    noteOwnWrite(id);
     setSending(true);
     setError('');
     try {
@@ -593,12 +693,15 @@ export default function AdminSupportChats({ request, focusThreadId = '' }) {
     } finally {
       setSending(false);
     }
-  }, [sending, trimmed, active, request, showNotice, status, activeSearch, category, secure]);
+  }, [sending, trimmed, active, request, showNotice, status, activeSearch, category, secure, noteOwnWrite]);
 
   // ── Resolve / reopen ────────────────────────────────────────────────────
   const applyState = useCallback(async (path, fallback) => {
     if (!active || busy) return;
     const id = active.thread._id;
+    // Claimed before the call: the resolve/reopen push is published ahead of
+    // the response, and this console's own panel is about to be updated by it.
+    noteOwnWrite(id);
     setBusy(true);
     setError('');
     try {
@@ -619,7 +722,7 @@ export default function AdminSupportChats({ request, focusThreadId = '' }) {
     } finally {
       setBusy(false);
     }
-  }, [active, busy, request, showNotice, status, activeSearch, category]);
+  }, [active, busy, request, showNotice, status, activeSearch, category, noteOwnWrite]);
 
   const runDelete = useCallback(async () => {
     if (!confirmDelete || busy) return;
@@ -628,6 +731,7 @@ export default function AdminSupportChats({ request, focusThreadId = '' }) {
     setBusy(true);
     setError('');
     try {
+      noteOwnWrite(id);
       await request(`/chats/${id}`, { method: 'DELETE' });
       if (activeId === id) closeThread();
       showNotice('Conversation deleted.');
@@ -637,7 +741,7 @@ export default function AdminSupportChats({ request, focusThreadId = '' }) {
     } finally {
       setBusy(false);
     }
-  }, [confirmDelete, busy, request, showNotice, closeThread, activeId, status, activeSearch, category]);
+  }, [confirmDelete, busy, request, showNotice, closeThread, activeId, status, activeSearch, category, noteOwnWrite]);
 
   // ── Granting access to a sealed conversation ───────────────────────────
   //
@@ -674,6 +778,10 @@ export default function AdminSupportChats({ request, focusThreadId = '' }) {
         setError('This conversation’s key is not on this device, so access cannot be granted from here.');
         return;
       }
+      // Claimed before the post: the grant push is published ahead of this
+      // response, and this console is already showing the panel the grant
+      // updates.
+      noteOwnWrite(id);
       const data = await request(`/chats/${id}/keys`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -687,7 +795,7 @@ export default function AdminSupportChats({ request, focusThreadId = '' }) {
     } finally {
       setSealing(false);
     }
-  }, [active, sealing, secure, recipients, request, showNotice]);
+  }, [active, sealing, secure, recipients, request, showNotice, noteOwnWrite]);
 
   // ── Keyboard triage ─────────────────────────────────────────────────────
   // Working a queue is walking a list. Up/Down move the selection, Escape goes

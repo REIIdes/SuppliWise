@@ -71,11 +71,14 @@ function deliver(fn, event, audience) {
  */
 function publishChat(event, threadUserId, opts = {}) {
   const key = keyOf(threadUserId);
-  if (!key || !event || !event.kind) return;
+  if (!event || !event.kind) return;
+  // The consoles are told even when the thread's member id is missing or
+  // unusable — a queue that stops updating because one document is malformed
+  // is worse than a queue that gets an event it cannot act on.
   if (!opts.skipAdmins) {
     for (const fn of [...adminListeners]) deliver(fn, event, 'admin');
   }
-  if (opts.skipUser) return;
+  if (opts.skipUser || !key) return;
   const set = userListeners.get(key);
   if (set) {
     for (const fn of [...set]) deliver(fn, event, 'user');
