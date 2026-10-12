@@ -379,6 +379,10 @@ class Ledger {
   constructor() {
     this.difficulty = DIFFICULTY;
     this.queue = Promise.resolve();
+    // Appends arriving inside the coalescing window ride into the drain below:
+    // [{ txs:[normalized…], resolve, reject }].
+    this.appendWindow = [];
+    this.appendTimer = null;
     this.initPromise = null;
     this.height = -1;
     this.tip = GENESIS_PREV_HASH;
@@ -847,26 +851,58 @@ class Ledger {
   // REFUSES while the chain is quarantined — see assertNotQuarantined. Appending
   // to a chain already known to be broken buries the corruption deeper on every
   // call and mints new proofs that inherit the defect.
+  //
+  // Appends COALESCE: an append submitted while an earlier block is still being
+  // written joins a window instead of queueing its own block. Each block is one
+  // network round-trip (a remote Mongo insert is 100–500 ms), so twenty
+  // concurrent anchors used to make the twentieth caller wait ten-plus seconds
+  // just for its turn to mine. The window folds them into one block carrying
+  // every tx, and each caller still receives its own tx hashes.
   append(txs) {
     this.assertNotQuarantined();
     const list = (Array.isArray(txs) ? txs : [txs]).filter(Boolean);
     if (!list.length) {
       return Promise.reject(new Error('Nothing to append'));
     }
+    // A malformed tx must fail only its own caller — normalize before joining
+    // a window that other callers have already paid into.
+    let normalized;
+    try {
+      normalized = list.map(normalizeTx);
+    } catch (err) {
+      return Promise.reject(err);
+    }
+    return new Promise((resolve, reject) => {
+      this.appendWindow.push({ txs: normalized, resolve, reject });
+      if (this.appendTimer) return;
+      // Short window: it only has to catch the synchronous burst. Latecomers
+      // arrive while the drain's block is still writing and simply queue into
+      // the NEXT drain's window — no longer timer needed.
+      this.appendTimer = setTimeout(() => {
+        this.appendTimer = null;
+        this.drainAppendWindow();
+      }, 10);
+    });
+  }
+
+  drainAppendWindow() {
+    if (!this.appendWindow.length) return;
+    const batch = this.appendWindow.splice(0, this.appendWindow.length);
+    const groups = batch.map((b) => b.txs);
     const run = async () => {
       await this.init();
-      const normalized = list.map(normalizeTx);
+      const txs = groups.flat();
       const index = this.height + 1;
       const timestamp = Date.now();
       const v = commitVersionForNewBlocks();
-      const header = { index, timestamp, prevHash: this.tip, txs: normalized };
+      const header = { index, timestamp, prevHash: this.tip, txs };
       const { nonce, hash } = mineHeader(header);
       // `v` and `difficulty` are stored per block, not read from the environment
       // at verify time. A block has to keep verifying under the rules it was
       // actually mined under, so raising CHAIN_DIFFICULTY later cannot
       // retroactively mark months of history as broken.
       await Block.create({
-        index, timestamp, prevHash: this.tip, nonce, hash, v, difficulty: DIFFICULTY, txs: normalized,
+        index, timestamp, prevHash: this.tip, nonce, hash, v, difficulty: DIFFICULTY, txs,
       });
       this.height = index;
       this.tip = hash;
@@ -874,13 +910,18 @@ class Ledger {
       // high-water mark only once a check actually re-hashes it. Recording it
       // here would mean a block that was written but never verified still counts
       // as "proven", and would mask a truncation back to this point.
-      return { index, hash, txs: normalized.map((t) => t.txHash) };
+      return { index, hash };
     };
     // Chain onto the queue regardless of the previous outcome, but keep a
     // rejected job from poisoning the chain for later appends.
     const job = this.queue.then(run, run);
     this.queue = job.catch(() => {});
-    return job;
+    job.then(
+      ({ index, hash }) => batch.forEach((b, i) => b.resolve({
+        index, hash, txs: groups[i].map((t) => t.txHash),
+      })),
+      (err) => batch.forEach((b) => b.reject(err)),
+    );
   }
 
   // Recent blocks, newest first.

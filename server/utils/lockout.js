@@ -23,6 +23,9 @@ const MAX_ENTRIES = 2000;
 const OFFENSE_DECAY_MS = 30 * 24 * 60 * 60 * 1000;
 
 const crypto = require('crypto');
+// Members are named by an opaque reference in the admin bell, never by email —
+// see utils/memberPrivacy.js for why.
+const privacy = require('./memberPrivacy');
 
 // Browsers never expose MAC addresses to web apps, so bypass resistance
 // binds IP + device fingerprint instead: rotating IPs alone won't dodge an
@@ -428,7 +431,12 @@ function notifyOnce(key, ttlMs, fn) {
 // evidence) and, when the user is known, to the user (UserNotification for
 // their next sign-in). Throttled to one alert per hour per account.
 function reportAccountLockout({ email, userId, alias, minutes, lockKey }) {
-  const who = email || (userId ? `user ${userId}` : null) || (alias ? `admin "${alias}"` : 'unknown account');
+  // The throttle key is the subject's identity as the CALLER knows it. Most
+  // paths pass `userId`; the password path in routes/auth.js only has the email,
+  // because the account is not resolved yet — so `email` stays in this list.
+  // Dropping it made every password lockout fall through to 'unknown', which
+  // collapses them onto one shared key: the second real lockout in an hour was
+  // silently swallowed as a duplicate of the first.
   const key = `lockout-notify:${email || userId || alias || 'unknown'}`;
   notifyOnce(key, 60 * 60 * 1000, async () => {
     let evidence = '';
@@ -439,33 +447,60 @@ function reportAccountLockout({ email, userId, alias, minutes, lockKey }) {
       if (entry && entry.fps.length > 0) bits.push(`device: ${entry.fps.join(', ')}`);
       if (bits.length > 0) evidence = ` [${bits.join(' | ')}]`;
     } catch { /* evidence is best-effort */ }
-    const AdminEvent = require('../models/AdminEvent');
-    await AdminEvent.create({
-      type: 'security',
-      title: 'Sign-in locked out',
-      detail: `${who} locked out for ~${minutes} minute(s) after continuous failed attempts.${evidence} Escalates to 24 h if abuse continues.`,
-    }).catch(() => {});
+
+    // Resolve the member ONCE, before either notice is written, because both need
+    // them: the bell's opaque reference needs the account id (an email cannot be
+    // hashed into one), and the member's own notification needs the row.
+    //
+    // Doing this before the AdminEvent is what keeps the two in step. When the
+    // bell was written first and the lookup came afterwards, a lockout reported
+    // by email produced a reference for `undefined` — which memberReference
+    // renders as the fixed string "Member 2222", so every such row in the
+    // console was identical and identified nobody.
+    let member = null;
     try {
       const User = require('../models/User');
-      const user = userId
+      member = userId
         ? await User.findById(userId).select('_id email').lean()
         : email
           ? await User.findOne({ email: String(email).toLowerCase() }).select('_id email').lean()
           : null;
-      if (user) {
+    } catch { /* best-effort: the bell below still reports the lockout */ }
+
+    // Members are named by an opaque reference; an admin alias is named in full.
+    // Both choices are deliberate — see utils/memberPrivacy.js. An admin alias
+    // is a colleague's to know, and it is what the Security page acts on.
+    const subject = alias
+      ? `admin "${alias}"`
+      : member?._id
+        ? privacy.memberReference(member._id)
+        : 'An account';
+
+    const AdminEvent = require('../models/AdminEvent');
+    await AdminEvent.create({
+      type: 'security',
+      title: 'Sign-in locked out',
+      detail: `${subject} locked out for ~${minutes} minute(s) after continuous failed attempts.${evidence} Escalates to 24 h if abuse continues.`,
+      link: 'security',
+      linkLabel: 'Open the Security center',
+    }).catch(() => {});
+    try {
+      if (member) {
         const UserNotification = require('../models/UserNotification');
         await UserNotification.create({
-          user: user._id,
+          user: member._id,
           type: 'info',
           title: 'Too many failed sign-in attempts',
           detail: `Sign-in was temporarily paused for your account (~${minutes} minute(s)). If this wasn't you, please change your password once you're back in.`,
+          link: '/profile?section=security',
+          linkLabel: 'Review your account security',
         }).catch(() => {});
         // Email twin of the in-app notice (fire-and-await inside the
         // throttled block only — still never blocks the auth response).
-        if (user.email) {
+        if (member.email) {
           try {
             const { sendStatusEmail } = require('./email');
-            await sendStatusEmail(user.email, 'lockout', { minutes }).catch(() => {});
+            await sendStatusEmail(member.email, 'lockout', { minutes }).catch(() => {});
           } catch { /* email never breaks lockout reporting */ }
         }
       }

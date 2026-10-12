@@ -342,8 +342,8 @@ File `server/index.js`. `TRUST_PROXY=true` now enables `app.set('trust proxy', 1
 #### L5 — Partial account enumeration via `forgot-password` — **Open (accepted)**
 File `server/routes/auth.js`. *Scenario* — responses are deliberately generic ("If an account exists…"), but a successful response carries a `userId` an unknown address does not. *Why not fixed here* — the value is required by the reset flow as currently designed (the client needs it to POST `/reset-password`); removing it changes the contract. *Verified* — a live probe with an unknown address returned generic `200` and **no** `userId`.
 
-#### L6 — Admin provisioning email carries a plaintext password and TOTP seed — **Open (accepted)**
-File `server/utils/email.js`. Intentional first-run delivery over TLS, and the email itself instructs the recipient to change the password. *Recommendation* — add a forced-change-on-first-login flow and stop sending the TOTP seed by mail.
+#### L6 — ~~Admin provisioning email carries a plaintext password and TOTP seed~~ — **Resolved**
+*Closed.* The sender that put an administrator's password and TOTP seed into a message has been removed from `server/utils/email.js`, together with its console control, its HTTP routes and its operator script. There is no remaining code path that emails an administrator credential: `ADMIN_EMAILS` now carries account-status and reset mail only, and a lost administrator password is recovered through the reset-code flow.
 
 #### L7 — `express.json` body limit is 10 MB — **Open (accepted)**
 File `server/index.js`. Required by base64 banner uploads (≤3 MB) and profile pictures (≤2 MB) after JSON overhead. The uploads are individually size-checked with `413` responses; a per-route limit would be the improvement.

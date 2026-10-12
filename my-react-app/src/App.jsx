@@ -231,6 +231,7 @@ function SubscriptionStoreMount() {
 function ProtectedRoute({ children }) {
   // Reactive: re-renders when the session appears/disappears without a reload.
   const { token } = useAuth();
+  const location = useLocation();
   if (isAdminJwt(token)) return <Navigate to="/admin/login" replace />;
   if (token) return children;
   // No USER token in this tab — two SEPARATE logics decide the destination:
@@ -244,7 +245,24 @@ function ProtectedRoute({ children }) {
   //      original "logged in as admin, the session goes to User login" fix,
   //      still fully working for admin-only tabs).
   if (!hasUserSignedOut() && hasAdminSession()) return <Navigate to="/admin" replace />;
-  return <Navigate to="/login" replace />;
+  // The return address travels in router state, which is the contract LogIn
+  // and SignIn already honour: they read `state.redirectTo` and run it through
+  // safeRedirectPath before navigating, so only a same-origin, non-auth path
+  // can ever be resumed into.
+  //
+  // This used to be a bare <Navigate to="/login" replace />, and it burned
+  // every deep link that reached a protected route while signed out. The
+  // pricing page's "See your current plan" → /profile?view=billing is the
+  // shape that hurt most: the visitor signed in and landed on the dashboard,
+  // never on the billing card they had asked for, with nothing explaining
+  // where it went.
+  return (
+    <Navigate
+      to="/login"
+      replace
+      state={{ redirectTo: `${location.pathname}${location.search}` }}
+    />
+  );
 }
 
 // Public-only Route - logged-in users never see login/signup forms again.

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useLocation, useNavigate, Link } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import {
   getPlanCatalogue,
@@ -34,6 +34,9 @@ import {
 } from '../subscription/cancelSheetActions';
 import { buildProofCopy } from '../subscription/paymentCopy';
 import { daysLeftFrom } from '../utils/plan';
+// Every destination this page navigates to is a constant from here, so a
+// renamed route is one edit in one file rather than a silent dead link.
+import { ROUTES, PRICING_ANCHORS } from '../utils/routes';
 // ── Icons (inline SVG, so they render identically on every platform) ───────
 import './PricingPage.css';
 const CheckIcon = ({ size = 15 }) => (
@@ -426,7 +429,7 @@ export default function PricingPage() {
   const choosePlan = useCallback(
     (planId) => {
       if (planId === 'free') {
-        navigate(isSignedIn ? '/dashboard' : '/signup');
+        navigate(isSignedIn ? ROUTES.dashboard : ROUTES.signup);
         return;
       }
       if (!isSignedIn) {
@@ -435,7 +438,7 @@ export default function PricingPage() {
         // form resumes from (it runs the value through safeRedirectPath, so only a
         // same-origin path like this one survives) — a query param would be
         // silently dropped and the user would land on the dashboard instead.
-        navigate('/login', { state: { redirectTo: '/pricing' } });
+        navigate(ROUTES.login, { state: { redirectTo: ROUTES.pricing } });
         return;
       }
       // Always start on the summary step. Where it goes from there depends on the
@@ -475,7 +478,7 @@ export default function PricingPage() {
   // sheet can say "one is already waiting" before they press anything.
   const openCancel = useCallback(() => {
     if (!isSignedIn) {
-      navigate('/login', { state: { redirectTo: '/pricing' } });
+      navigate(ROUTES.login, { state: { redirectTo: ROUTES.pricing } });
       return;
     }
     setCancelError('');
@@ -605,7 +608,93 @@ export default function PricingPage() {
       body.classList.remove('pricing-scroll-locked');
       window.scrollTo(0, scrollY);
     };
-  }, [cancelOpen, closeCancel]); // ── The purchase itself ─────────────────────────────────────────────────
+  }, [cancelOpen, closeCancel]);
+
+  // ── Hash deep links — where "Change plan" actually goes ─────────────────
+  // The info column's "Change plan" button points at /pricing#plans, and the
+  // plans grid (not the sticky dock above it — see PricingPage.css) carries
+  // that id. Scrolling is done HERE because a hash on a client-side navigation
+  // makes the browser do nothing: history.pushState never fires a scroll, and
+  // App's ScrollToTop is keyed on the PATHNAME — which does not change when
+  // the link is clicked from this very page. That combination is precisely why
+  // pointing "Change plan" at the bare /pricing (as it used to) produced a
+  // button that moved the URL and nothing else.
+  //
+  // Keyed on the location OBJECT rather than location.pathname: the link's
+  // whole reason for existing is to be used while already on /pricing, and an
+  // effect keyed on the pathname would never run in exactly that case.
+  const location = useLocation();
+  useEffect(() => {
+    const id = location.hash ? location.hash.slice(1) : '';
+    if (!id) return undefined;
+    let cancelled = false;
+    const timers = new Set();
+    const clearTimers = () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+      timers.clear();
+    };
+    const scrollToAnchor = () => {
+      if (cancelled) return;
+      const target = document.getElementById(id);
+      // Not rendered yet: leave it to a retry (the cold-load case below).
+      if (!target) return;
+      // behavior 'auto', NOT 'smooth' — and this is a measured decision, not
+      // laziness. Chrome SKIPS smooth scrolling in a document that is not
+      // visible: a tab opened with middle-click / Ctrl+click (exactly the
+      // affordance these links exist to keep) loads while hidden, a smooth
+      // scroll is dropped on the floor, and the reader who switches to that
+      // tab finds the page still at the top — the deep link silently failing.
+      // An instant scroll runs in every visibility state. A hash link jumping
+      // straight to its section is also what every other site does.
+      target.scrollIntoView({ block: 'start', behavior: 'auto' });
+      // Landed — so no retry may run after this. A timer that fires once the
+      // reader has already moved on would yank them back to the grid, which
+      // is exactly the kind of unexplained jump that reads as a glitch.
+      clearTimers();
+    };
+    // The retries exist for ONE case: a cold load, where the grid renders only
+    // once the catalogue arrives. They are SCHEDULED BEFORE the synchronous
+    // attempt on purpose — scheduling after it would leave them armed even
+    // when that attempt has already landed, because the set it clears is still
+    // empty at that point.
+    [16, 50, 150, 400, 800].forEach((ms) => {
+      timers.add(window.setTimeout(scrollToAnchor, ms));
+    });
+    scrollToAnchor();
+    return () => {
+      cancelled = true;
+      clearTimers();
+    };
+  }, [location]);
+
+  /**
+   * The click half of the hash link.
+   *
+   * The effect above reacts to the router's location changing, which covers
+   * every way of ARRIVING at /pricing#plans — from another page, from a
+   * bookmark, from a cold load. It cannot cover a second click of the same
+   * link: when the URL already ends in #plans, the router treats the
+   * navigation as a non-event, no location object is produced, and the effect
+   * never runs. The reader would press "Change plan" and watch nothing
+   * happen. So the scroll is ALSO done in the click itself, before the
+   * navigation is a non-event.
+   *
+   * Only the column whose destination is an anchor ON this page takes part;
+   * the two /profile links have no hash and fall straight through to normal
+   * navigation.
+   *
+   * Same `behavior: 'auto'` as the effect, deliberately: the two can fire from
+   * one click, and a glide interrupted by an instant jump is itself the kind
+   * of jank this file exists to avoid.
+   */
+  const onInfoLinkClick = useCallback((column) => {
+    const hash = column.action.to.includes('#') ? column.action.to.split('#')[1] : '';
+    if (!hash) return;
+    const target = document.getElementById(hash);
+    if (target) target.scrollIntoView({ block: 'start', behavior: 'auto' });
+  }, []);
+
+  // ── The purchase itself ─────────────────────────────────────────────────
   const confirmPurchase = useCallback(async () => {
     // Guard on the in-flight plan, not just the button's disabled state: a
     // second invocation (double-click racing the re-render, a keyboard repeat, a
@@ -988,7 +1077,7 @@ export default function PricingPage() {
           {currencyNote} Switch plans whenever you like — nothing renews on its own.
         </p>
         {loadError ? (
-          <div className="pricing-load-error" role="alert">
+          <div className="pricing-load-error" id={PRICING_ANCHORS.plans} role="alert">
             <InfoIcon /> <span>{loadError}</span>
             <button
               type="button"
@@ -999,13 +1088,18 @@ export default function PricingPage() {
             </button>
           </div>
         ) : loading || !catalogue ? (
-          <div className="pricing-grid" aria-hidden="true">
+          <div className="pricing-grid" id={PRICING_ANCHORS.plans} aria-hidden="true">
             {[0, 1, 2, 3].map((i) => (
               <div key={i} className="pricing-skeleton" />
             ))}
           </div>
         ) : (
-          <div className="pricing-grid">
+          // The id is on all THREE branches of this ternary, and that is safe
+          // because exactly one renders at a time. The anchor has to SURVIVE
+          // the loading and error states: the info column's "Change plan" is
+          // live on every one of them, so its target cannot be an element that
+          // only exists once the catalogue has loaded.
+          <div className="pricing-grid" id={PRICING_ANCHORS.plans}>
             {cards.map(
               ({
                 planId,
@@ -1152,7 +1246,11 @@ export default function PricingPage() {
                 <h3 className="pricing-info__title">{column.title}</h3>
                 <p className="pricing-info__body">{column.body}</p>
                 {/*                  A real link, not a button that navigates. These read as navigation ("Read                  Security & Trust", "Change plan"), and a <button> announcing itself as an                  action breaks the things a link is for: middle-click and Ctrl+click open a                  new tab, a screen reader announces navigation rather than an action, and the                  status bar shows where it goes.                 */}
-                <Link className="pricing-info__link" to={column.action.to}>
+                <Link
+                  className="pricing-info__link"
+                  to={column.action.to}
+                  onClick={() => onInfoLinkClick(column)}
+                >
                   {column.action.label}
                   <ArrowIcon size={13} />
                 </Link>

@@ -4,13 +4,13 @@
 
 ### Terminal 1 - Backend Server
 ```cmd
-cd C:\Users\johnr\SuppliWise\server
+cd <your-project-folder>\server
 node index.js
 ```
 
 ### Terminal 2 - Frontend Development Server
 ```cmd
-cd C:\Users\johnr\SuppliWise\my-react-app
+cd <your-project-folder>\my-react-app
 npm run dev
 ```
 
@@ -31,9 +31,9 @@ The error "Unexpected end of JSON input" happens when:
 
 ## How to Check if Backend is Running
 
-Open browser and go to: `http://localhost:5000`
+Open browser and go to: `https://localhost:5000/api/health` when HTTPS dev certs are installed, otherwise `http://localhost:5000/api/health`
 
-- If you see a message or "Cannot GET /", backend is running ✅
+- If you see `{"status":"Server is running"}`, backend is running ✅
 - If you see "can't reach this page" or connection refused, backend is NOT running ❌
 
 ## Current Status Check
@@ -60,5 +60,5 @@ EMAIL_PASS=your_app_password
 ## Troubleshooting
 
 1. **Backend won't start**: Check MongoDB connection in `.env`
-2. **Frontend can't connect**: Make sure backend is on port 5000
-3. **CORS errors**: Check `index.js` has CORS enabled for `http://localhost:5173`
+2. **Frontend can't connect**: Make sure backend is on port 5000 and the frontend is using the same scheme (`https` when TLS is enabled)
+3. **CORS errors**: Check `index.js` allows both `http://localhost:5173` and `https://localhost:5173` for development

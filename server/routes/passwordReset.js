@@ -23,6 +23,10 @@ const recovery = require('../utils/passwordRecovery');
 const { describePasswordRules } = require('../utils/passwordRules');
 const { limitReachedHandler } = require('../utils/lockout');
 const { isTransientInfrastructureError } = require('../utils/transientError');
+// Capability reporting and the SMS transport. Used only for "is this method
+// available on this deployment" — never for anything account-specific.
+const sms = require('../utils/sms');
+const webauthnConfig = require('../utils/webauthn');
 
 const router = express.Router();
 
@@ -201,6 +205,49 @@ router.post('/recovery-email', requestLimiter, async (req, res) => {
   }
 });
 
+/**
+ * POST /api/auth/password-reset/phone-code
+ *
+ * Text a recovery code to the account's verified number. Answers 200 with the
+ * same body whether or not the address exists or has one — see
+ * requestPhoneCode() for why that is not a limitation.
+ *
+ * On `requestLimiter`, not `factorLimiter`, for the same reason
+ * /recovery-email is: this endpoint sends nothing that has to be guessed, so it
+ * is a request rather than a credential attempt.
+ */
+router.post('/phone-code', requestLimiter, async (req, res) => {
+  try {
+    const result = await recovery.requestPhoneCode({ email: req.body?.email, req });
+    return res.status(result.status).json({
+      message: result.message,
+      ...(typeof result.retryAfterSeconds === 'number'
+        ? { retryAfterSeconds: result.retryAfterSeconds }
+        : {}),
+    });
+  } catch (error) {
+    return fail(res, error, 'password-reset/phone-code');
+  }
+});
+
+/**
+ * POST /api/auth/password-reset/phone
+ *
+ * Redeem a texted recovery code for the same reset grant the emailed link
+ * produces.
+ */
+router.post('/phone', factorLimiter, async (req, res) => {
+  try {
+    return sendResult(res, await recovery.withPhoneCode({
+      email: req.body?.email,
+      code: req.body?.code,
+      req,
+    }));
+  } catch (error) {
+    return fail(res, error, 'password-reset/phone');
+  }
+});
+
 /** Shared error tail: honest about our outages, mute about everything else. */
 function fail(res, error, context) {
   console.error(`[${context}]`, error.message);
@@ -221,6 +268,31 @@ router.use(requestLimiter);
 // limiter above still applies, which is plenty.
 router.get('/rules', (req, res) => {
   res.json(describePasswordRules());
+});
+
+/**
+ * Which recovery methods this deployment can actually perform.
+ *
+ * REPORTS SERVER CONFIGURATION, NEVER ACCOUNT STATE. It answers "is an SMS
+ * provider configured", which is a property of the deployment and identical for
+ * every caller — not "does this address have a phone", which would be an
+ * enumeration oracle. Nothing about any account is read or returned.
+ *
+ * Its purpose is to stop the client offering a button that cannot work. Without
+ * it, a user on a deployment with no SMS provider picks "text me a code", is
+ * told — truthfully, and for anti-enumeration reasons — that a code is on its
+ * way, and waits for a message that was never sent. Telling them the method is
+ * unavailable is both more honest and more useful.
+ */
+router.get('/capabilities', (req, res) => {
+  res.json({
+    recoveryMethods: {
+      sms: sms.isConfigured(),
+      // The client already checks this locally via WebAuthn feature detection;
+      // reported here so both answers come from one place.
+      passkey: webauthnConfig.isConfigured(),
+    },
+  });
 });
 
 /**

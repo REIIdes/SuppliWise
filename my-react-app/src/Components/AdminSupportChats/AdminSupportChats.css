@@ -634,17 +634,6 @@
   white-space: nowrap;
 }
 
-.asc-chip--assignee { background: var(--asc-all-wash); color: var(--asc-all-deep); }
-
-.asc-flag {
-  padding: 3px 9px;
-  border-radius: 999px;
-  background: #fdecec;
-  color: #a32121;
-  font-size: 10.5px;
-  font-weight: 800;
-}
-
 /* ── Conversation view ────────────────────────────────────────────────── */
 .asc-placeholder {
   display: flex;
@@ -765,33 +754,9 @@
   flex-wrap: wrap;
 }
 
-.asc-view__member {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  padding: 9px 11px;
-  border: 1px solid var(--asc-line);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.85);
-}
-
-.asc-view__memberText {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-.asc-view__memberText strong { color: var(--asc-ink); font-size: 13.5px; }
-.asc-view__memberText em {
-  color: var(--asc-muted);
-  font-size: 11.5px;
-  font-style: normal;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .asc-stateBtn {
   flex: 0 0 auto;
+  align-self: center;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -811,25 +776,7 @@
 .asc-stateBtn:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.05); }
 .asc-stateBtn:disabled { opacity: 0.55; cursor: not-allowed; }
 
-.asc-view__meta {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  gap: 8px 14px;
-  flex-wrap: wrap;
-  color: var(--asc-muted);
-  font-size: 11.5px;
-}
-.asc-view__meta span { position: relative; }
-.asc-view__meta span + span::before {
-  content: '·';
-  position: absolute;
-  left: -9px;
-  color: #c2ccc6;
-}
-.asc-view__metaOk { color: var(--asc-resolved-deep); font-weight: 700; }
-
-/* ── Transcript ───────────────────────────────────────────────────────── */
+/* ── Transcript ──────────────────────────────────────────────────────── */
 .asc-transcript { position: relative; }
 
 .asc-resolved {
@@ -1105,7 +1052,6 @@
   .asc-search { min-width: 0; width: 100%; }
   .asc-field--search { flex: 1 1 200px; }
   .asc-view__head { grid-template-columns: 1fr; }
-  .asc-view__member { flex-wrap: wrap; }
   .asc-stateBtn { width: 100%; justify-content: center; }
   .asc-locked { flex-wrap: wrap; }
   .asc-locked__text { flex: 1 1 100%; order: 3; }
@@ -1136,4 +1082,104 @@
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* ── Ticket references ──────────────────────────────────────────────────────
+   The queue is triaged by subject and member, so the ticket id is a third,
+   quieter thing: small, monospaced, and in the row so it can be read out
+   without opening the thread. In the header it becomes the copy button. */
+.asc-thread__ticket {
+  padding: 2px 6px;
+  margin-left: 2px;
+  border-radius: 5px;
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  color: #4338ca;
+  font-size: 9.5px;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+.asc-ticket {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.22);
+  color: #4338ca;
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 0.16s ease, background 0.16s ease, color 0.16s ease,
+              border-color 0.16s ease, box-shadow 0.16s ease;
+}
+.asc-ticket svg { flex-shrink: 0; opacity: 0.65; }
+.asc-ticket:hover {
+  transform: translateY(-1px);
+  background: rgba(99, 102, 241, 0.18);
+  box-shadow: 0 4px 12px -6px rgba(99, 102, 241, 0.5);
+}
+.asc-ticket--copied {
+  background: rgba(16, 185, 129, 0.16);
+  border-color: rgba(16, 185, 129, 0.4);
+  color: #047857;
+  letter-spacing: 0.02em;
+}
+.asc-ticket--copied svg { display: none; }
+
+/* ── Encryption affordances ─────────────────────────────────────────────────
+   Emerald = sealed. Same convention as the member side, so an operator moving
+   between the two inboxes reads the same colour the same way. */
+/* A sealed conversation shows as a label, not a button: opening a thread
+   seals it automatically once both sides hold a key, so there is nothing
+   for the operator to press. Same pill the member inbox uses. */
+.asc-e2e {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid #bbe7d4;
+  background: #ecfbf5;
+  color: #0f7a55;
+  font-size: 10.5px;
+  font-weight: 750;
+}
+.asc-e2e svg { width: 11px; height: 11px; flex: 0 0 auto; }
+
+.asc-thread__lock { margin-right: 4px; vertical-align: -1px; color: #10b981; }
+.asc-msglock { font-style: italic; color: #94a3b8; }
+
+/* Grants a sealed thread to colleagues; sits in the header tag row. */
+.asc-grant {
+  flex: none;
+  padding: 5px 11px;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #10b981 0%, #0ea5e9 100%);
+  color: #fff;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 750;
+  cursor: pointer;
+  box-shadow: 0 6px 16px -8px rgba(16, 185, 129, 0.7);
+}
+.asc-grant:disabled { opacity: 0.6; cursor: default; box-shadow: none; }
+
+/* A caution states in the same amber the member inbox uses, so "this needs a
+   look" reads the same on both sides. */
+.asc-warn {
+  margin: 0 0 10px;
+  padding: 8px 11px;
+  border-radius: 9px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #92400e;
+  font-size: 12px;
+  line-height: 1.5;
 }

@@ -52,6 +52,10 @@ const totpSecret = require('../utils/totpSecret');
 // The MFA transaction: the server-side MFA_REQUIRED state that replaces a bare
 // user id at the second factor. See utils/mfaTransaction.js.
 const mfaTransaction = require('../utils/mfaTransaction');
+// SMS as an ALTERNATIVE second factor. Never a primary method, never the only
+// one — see utils/sms.js for why, and mfaTransaction.methodsFor() for the
+// structural guarantee.
+const sms = require('../utils/sms');
 const rateLimits = require('../utils/rateLimits');
 const Passkey = require('../models/Passkey');
 const BackupCode = require('../models/BackupCode');
@@ -262,11 +266,33 @@ const MAX_OTP_ATTEMPTS = otpChallenge.MAX_ATTEMPTS;
 // it only stops an unredeemed code from staying useful for as long.
 const OTP_TTL_MS = 5 * 60 * 1000;
 
-// How long a single delivery may take before it is treated as failed. The
-// transporter is pooled, so a healthy relay answers in a few hundred ms; this
-// bound exists only so a hung SMTP server can never hold a sign-in open
-// forever, turning a slow mail server into a dead login button.
-const OTP_DELIVERY_TIMEOUT_MS = 10000;
+// The same window in the unit the client needs, published on every response that
+// starts an OTP countdown.
+//
+// The client used to hardcode its own copy of this number. That is a second
+// source of truth for a value only the server enforces, so the two drifted the
+// first time either side was edited — and the symptom is a timer counting down
+// over a code that is already dead. Sending it removes the guess: the UI renders
+// exactly the window the server will honour.
+const OTP_TTL_SECONDS = OTP_TTL_MS / 1000;
+
+// How long a single delivery may take before it is treated as failed.
+//
+// The transporter is pooled, so a healthy relay answers in a few hundred ms. The
+// bound exists so a hung SMTP server can never hold a sign-in open forever,
+// turning a slow mail server into a dead login button.
+//
+// IT IS TEN SECONDS, AND THAT IS VISIBLE TO USERS. This was a hardcoded literal.
+// Ten seconds is generous for a relay and hopeless for a degraded one: a provider
+// under load, a throttled Gmail app-password account, or a relay on a slow link
+// all exceed it regularly, and the user then gets "We could not send your
+// verification code" roughly ten seconds after pressing Sign in — with no way to
+// tell that our mail provider was slow rather than their request being wrong.
+//
+// Configurable, with the production default UNCHANGED, and floored so a typo
+// cannot turn the bound off. Read through utils/rateLimits.js for why a bad value
+// is reported loudly and then ignored rather than obeyed.
+const OTP_DELIVERY_TIMEOUT_MS = rateLimits.limit('EMAIL_DELIVERY_TIMEOUT_MS', 10) * 1000;
 
 // A one-time code is only useful if it can be DELIVERED, so delivery is part
 // of the request and its real outcome is what the caller answers with.
@@ -746,9 +772,14 @@ router.post('/login', async (req, res) => {
       console.error(`[login] could not record sign-in metadata for ${maskEmail(user.email)}: ${err.message}`);
     }
     const isNewDevice = !!(previousUserAgent && previousUserAgent !== user.lastLoginUserAgent);
-    if (isNewDevice) {
-      AdminEvent.create({ type: 'new-device-login', title: 'New device login', detail: `${user.email} signed in from ${user.lastLoginLocation}.`, user: user._id }).catch(() => {});
-    }
+    // NOTE: no AdminEvent here. A sign-in on a new device is the MEMBER's
+    // security event, not an operator's work item — the member already gets it
+    // in their own bell and by email, just below. It used to be written to
+    // AdminEvent as type 'new-device-login' with the member's email and
+    // location in the detail, which put a member's account-security activity
+    // into a shared admin queue they never opted into. The audit record that
+    // actually belongs to the platform — who, when, from what address — is
+    // SecurityEvent below, which is append-only and not a notification.
     // Neutral wording on purpose: an unfamiliar device is worth a look, not
     // proof of an attack.
     await SecurityEvent.write({
@@ -766,6 +797,8 @@ router.post('/login', async (req, res) => {
         await UserNotification.create({
           user: user._id, type: 'info', title: 'New sign-in to your account',
           detail: `Your account was signed in from a device we had not seen before (${user.lastLoginLocation || 'location unknown'}). If this wasn't you, change your password and sign out other devices.`,
+          link: '/profile?section=security',
+          linkLabel: 'Review your account security',
         }).catch(() => {});
         if (process.env.EMAIL_USER && process.env.EMAIL_PASSWORD) {
           const { sendStatusEmail } = require('../utils/email');
@@ -848,7 +881,15 @@ router.post('/login', async (req, res) => {
     }
     const mfaMethods = mfaTransaction.methodsFor(
       { twoFactorEnabled: user.twoFactorEnabled, twoFactorMethod },
-      { passkeys: passkeyCount, backupCodeCount: backupCount },
+      {
+        passkeys: passkeyCount,
+        backupCodeCount: backupCount,
+        // The account's own eligibility decides this, from the document read
+        // above — never from anything the client sent. An unverified number, an
+        // account that never opted in, and a deployment with no provider
+        // configured all resolve to false and the method simply is not offered.
+        phoneSecondFactor: sms.eligibleForSecondFactor(user),
+      },
     );
     const mfaToken = await mfaTransaction.start({
       user: user._id,
@@ -902,6 +943,9 @@ router.post('/login', async (req, res) => {
       userId: user._id,
       mfaTransaction: mfaToken,
       mfaMethods,
+      // The window the server will actually enforce, so the countdown on the
+      // client cannot disagree with it. Never the code itself.
+      expiresInSeconds: OTP_TTL_SECONDS,
       // Lets the client label the step honestly: "your second factor" when the
       // user chose email as their method, plain email verification otherwise.
       twoFactorMethod: user.twoFactorEnabled === true ? 'email' : null,
@@ -1006,7 +1050,7 @@ router.post('/verify-admin-2fa', async (req, res) => {
   // once signed, so putting it in the payload would leave the client believing
   // "change required" for the life of the token even after the password is
   // changed - and the client would keep redirecting to a page it no longer needs.
-  return res.json({ token: adminToken(account), role: 'admin', alias: account.alias, mustChangePassword });
+  return res.json({ token: adminToken(account), role: 'admin', id: String(account._id), alias: account.alias, mustChangePassword });
 });
 
 // @route   POST /api/auth/admin-refresh
@@ -1236,6 +1280,256 @@ router.post('/verify-login-otp', async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SMS AS AN ALTERNATIVE SECOND FACTOR
+//
+// Two endpoints, and both are gated the same way: a LIVE MFA transaction opened
+// by the password step is required before any code is sent or accepted.
+//
+// WHY THAT GATE IS THE WHOLE POINT
+// --------------------------------
+// Without it, /send-login-sms would be an UNAUTHENTICATED endpoint that spends
+// money and texts an arbitrary subscriber. Given a user id it would happily
+// message anyone, forever, to no purpose — a billing attack against the
+// deployment's provider account and a spam relay into someone's handset. The
+// transaction is what proves a password was checked for that account in the last
+// few minutes, so requiring it means only someone who already has the password
+// can make the account send a message.
+//
+// WHY THE CODE IS NOT SENT AT /login
+// ---------------------------------
+// A text message costs money and interrupts a person. Sending one on every
+// password submission would bill for codes the user never asked for and train
+// people to ignore the messages entirely. So /login only ADVERTISES the method
+// (via mfaMethods) and the client asks for a code on demand.
+//
+// It is also why `sms-otp` is never the sole entry in that list — see
+// utils/mfaTransaction.methodsFor(). If the carrier drops the message, the user
+// simply types an authenticator code instead.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Issue a one-time code over SMS for the current sign-in.
+ *
+ * The account is resolved from the transaction, never from the request body. A
+ * client that claims a user id it did not verify gets a transaction for a
+ * different account or none at all, and is refused identically either way.
+ */
+router.post('/send-login-sms', async (req, res) => {
+  const userId = str(req.body?.userId);
+  const mfaToken = str(req.body?.mfaTransaction);
+
+  try {
+    // Same two-path resolution as every other second-factor route: the token
+    // when present, and a bare user id ONLY while a live transaction exists for
+    // it. See utils/mfaTransaction.js for why the legacy path is safe.
+    let transaction = null;
+    if (mfaToken) {
+      if (!mfaTransaction.isValidTokenFormat(mfaToken)) {
+        return res.status(401).json({ message: 'That sign-in attempt has expired. Please sign in again.' });
+      }
+      const peeked = await mfaTransaction.peek(mfaToken, { method: 'sms-otp' });
+      if (!peeked) {
+        return res.status(401).json({ message: 'That sign-in attempt has expired. Please sign in again.' });
+      }
+      transaction = peeked;
+    } else {
+      if (!mongoose.isValidObjectId(userId)) {
+        return res.status(401).json({ message: 'That sign-in attempt has expired. Please sign in again.' });
+      }
+      const found = await MfaTransaction.findOne({
+        user: userId,
+        consumedAt: null,
+        expiresAt: { $gt: new Date() },
+        methods: 'sms-otp',
+      }).select('_id user').sort({ createdAt: -1 }).lean();
+      if (!found) {
+        return res.status(401).json({ message: 'That sign-in attempt has expired. Please sign in again.' });
+      }
+      transaction = found;
+    }
+
+    const user = await User.findById(transaction.user);
+    if (!user) {
+      return res.status(401).json({ message: 'That sign-in attempt has expired. Please sign in again.' });
+    }
+
+    // The cooldown is SHARED with the emailed code on purpose. One key, one
+    // bucket: a caller must not be able to alternate between the two methods to
+    // double the number of messages an account sends in a minute.
+    const rateKey = String(user._id);
+    const lastRequest = otpRateLimitMap.get(rateKey);
+    if (lastRequest && Date.now() - lastRequest < OTP_COOLDOWN_MS) {
+      return res.status(429).json({
+        message: 'Please wait before requesting another text message.',
+        remainingSeconds: Math.ceil((OTP_COOLDOWN_MS - (Date.now() - lastRequest)) / 1000),
+      });
+    }
+
+    // Re-derived from the database, never from the request: the transaction only
+    // PROVES the password step happened, it does not prove this account is still
+    // allowed to receive a text.
+    if (!sms.eligibleForSecondFactor(user)) {
+      // Refused identically to a missing transaction. "This account cannot use
+      // text messages" would confirm the account exists to someone holding a
+      // stale id.
+      return res.status(401).json({ message: 'That sign-in attempt has expired. Please sign in again.' });
+    }
+
+    // Deliver BEFORE storing, for the same reason /login does. A stored proof the
+    // user never received is worse than no proof: the account looks configured
+    // and the code is unsatisfiable.
+    const code = otpChallenge.generateOtp();
+    const delivered = await sms.sendSms({
+      to: user.phoneNumber,
+      body: sms.verificationBody(code),
+      purpose: 'login',
+    });
+    if (!delivered.ok) {
+      console.error(`[auth/send-login-sms] delivery failed for ${str(user._id).slice(0, 8)}…: ${delivered.reason}`);
+      return res.status(503).json({ message: sms.failureMessage(delivered.reason) });
+    }
+
+    // Namespace under `sms_` so an emailed code and a texted code can never
+    // verify against each other: otpChallenge mixes this key into the HMAC, so
+    // the same six digits under two purposes produce two unrelated digests.
+    otpStore.set(`sms_login_${user._id}`, otpChallenge.buildEntry({
+      otp: code,
+      context: `sms_login_${user._id}`,
+      ttlMs: OTP_TTL_MS,
+      maxAttempts: MAX_OTP_ATTEMPTS,
+    }));
+    otpRateLimitMap.set(rateKey, Date.now());
+
+    res.json({
+      message: 'We sent a verification code by text message.',
+      expiresInSeconds: OTP_TTL_SECONDS,
+      // Masked, so the client can confirm which number without us handing the
+      // number back to anyone who asked for it.
+      destination: require('../utils/phoneNumber').maskPhone(user.phoneNumber),
+    });
+  } catch (error) {
+    return authFailure(res, error, 'send-login-sms');
+  }
+});
+
+/**
+ * Verify the texted code and issue the session.
+ *
+ * Structurally identical to /verify-login-otp — same transaction resolution,
+ * same lockout key, same atomic spend, same single rejection message — with two
+ * differences that matter: the transaction is spent with `sms-otp`, and the
+ * resulting session records that it was opened by a text message.
+ */
+router.post('/verify-login-sms', async (req, res) => {
+  const { userId, otp, remember } = req.body;
+  const mfaToken = str(req.body?.mfaTransaction);
+
+  try {
+    if (!userId || !otp) {
+      return res.status(400).json({ message: 'User ID and OTP are required' });
+    }
+
+    let transaction = null;
+    if (mfaToken) {
+      if (!mfaTransaction.isValidTokenFormat(mfaToken)) {
+        return res.status(401).json({ message: 'That sign-in attempt has expired. Please sign in again.' });
+      }
+      const peeked = await mfaTransaction.peek(mfaToken, { method: 'sms-otp' });
+      if (!peeked) {
+        return res.status(401).json({ message: 'That sign-in attempt has expired. Please sign in again.' });
+      }
+      transaction = { _id: peeked._id, user: peeked.user, viaToken: true };
+    } else {
+      if (!mongoose.isValidObjectId(str(userId))) {
+        return res.status(401).json({ message: 'That sign-in attempt has expired. Please sign in again.' });
+      }
+      const found = await MfaTransaction.findOne({
+        user: str(userId),
+        consumedAt: null,
+        expiresAt: { $gt: new Date() },
+        methods: 'sms-otp',
+      }).select('_id user').sort({ createdAt: -1 }).lean();
+      if (!found) {
+        return res.status(401).json({ message: 'That sign-in attempt has expired. Please sign in again.' });
+      }
+      transaction = { _id: found._id, user: found.user, viaToken: false };
+    }
+
+    // Same lockout key as the emailed code, so the two methods share one budget
+    // rather than offering the account twice the guesses.
+    const otpLockKey = accountKey('otp-user', transaction.user);
+    const otpLockedMs = lockRemainingMs(otpLockKey);
+    if (otpLockedMs > 0) {
+      reportAccountLockout({ userId: String(transaction.user), minutes: Math.ceil(otpLockedMs / 60000), lockKey: otpLockKey });
+      return res.status(429).json({
+        message: `Too many incorrect attempts. Try again in ${Math.ceil(otpLockedMs / 60000)} minute(s).`,
+        remainingSeconds: Math.ceil(otpLockedMs / 1000),
+        escalated: true,
+        lockedBy: 'account',
+      });
+    }
+
+    const user = await User.findById(transaction.user);
+    if (!user) {
+      return res.status(401).json({ message: OTP_REJECTION_MESSAGE });
+    }
+    if (user.accountStatus && user.accountStatus !== 'active') {
+      return res.status(403).json({ message: 'This account is not active.' });
+    }
+
+    // Eligibility is re-checked at VERIFICATION, not only at send time. The
+    // account could have removed its number, turned the opt-in off, or lost
+    // provider configuration in the minutes between the two requests, and a code
+    // issued under the old rules must not still open a session.
+    if (!sms.eligibleForSecondFactor(user)) {
+      return res.status(401).json({ message: OTP_REJECTION_MESSAGE });
+    }
+
+    const otpKey = `sms_login_${user._id}`;
+    const verdict = otpChallenge.consume(otpStore, otpKey, str(otp).trim());
+    if (!verdict.ok) {
+      if (verdict.outcome === 'locked') {
+        recordOtpOffense(otpLockKey);
+        return res.status(429).json({ message: 'Too many incorrect attempts. Please request a new code.' });
+      }
+      // One message for every failure — a wrong code, an expired one, and one
+      // that was never sent must be indistinguishable.
+      return res.status(400).json({ message: OTP_REJECTION_MESSAGE });
+    }
+
+    clearOffenses(otpLockKey);
+
+    const spent = transaction.viaToken
+      ? await mfaTransaction.spend(mfaToken, { method: 'sms-otp' })
+      : await mfaTransaction.spendById(transaction._id, { method: 'sms-otp' });
+    if (!spent.ok) {
+      return res.status(401).json({ message: 'That sign-in attempt has expired. Please sign in again.' });
+    }
+
+    const { token, rememberToken } = await completeSignIn({
+      user,
+      authMethod: AUTH_METHODS.SMS_OTP,
+      mfaVerified: user.twoFactorEnabled === true,
+      req,
+      location: user.lastLoginLocation || '',
+      remember,
+      reason: 'Signed in with a text message code',
+      eventType: 'mfa-success',
+    });
+
+    res.json({
+      ...publicUser(user),
+      token,
+      authMethod: AUTH_METHODS.SMS_OTP,
+      mfaVerified: user.twoFactorEnabled === true,
+      ...(rememberToken ? { rememberToken } : {}),
+    });
+  } catch (error) {
+    return authFailure(res, error, 'verify-login-sms');
+  }
+});
+
 // @route   POST /api/auth/remember
 // @desc    OPT-IN "save my login": swap a stored remember credential for a
 //          fresh access JWT for the SAME still-current session. No session is
@@ -1344,6 +1638,8 @@ router.post('/verify-2fa', protect, async (req, res) => {
         type: 'info',
         title: 'Two-factor authentication enabled',
         detail: 'Google Authenticator is now required at sign-in. If this wasn\'t you, disable it and change your password immediately.',
+        link: '/profile?section=security',
+        linkLabel: 'Review your account security',
       }).catch(() => {});
     } catch { /* best-effort */ }
     res.json({ message: 'Two-factor authentication enabled successfully.', twoFactorEnabled: true });
@@ -1518,6 +1814,8 @@ router.post('/disable-2fa', protect, async (req, res) => {
         detail: method === 'email'
           ? 'Email sign-in codes were turned off. If this wasn\'t you, re-enable two-factor authentication and change your password immediately.'
           : 'Google Authenticator was turned off. If this wasn\'t you, re-enable it and change your password immediately.',
+        link: '/profile?section=security',
+        linkLabel: 'Review your account security',
       }).catch(() => {});
     } catch { /* best-effort */ }
     res.json({ message: 'Two-factor authentication has been disabled successfully.', twoFactorEnabled: false });
@@ -1583,6 +1881,7 @@ router.post('/resend-login-otp', async (req, res) => {
 
     res.json({
       message: 'Verification code sent to your email successfully',
+      expiresInSeconds: OTP_TTL_SECONDS,
     });
   } catch (error) {
     return authFailure(res, error, 'resend-login-otp');
@@ -1852,6 +2151,8 @@ router.post('/change-password', protect, async (req, res) => {
         detail: killed > 0
           ? `Your password was changed and ${killed} other ${killed === 1 ? 'session was' : 'sessions were'} signed out. If this wasn't you, reset your password and contact support immediately.`
           : "Your password was just changed. If this wasn't you, reset it and contact support immediately.",
+        link: '/profile?section=security',
+        linkLabel: 'Review your account security',
       }).catch(() => {});
     } catch { /* best-effort trail */ }
 
@@ -1892,6 +2193,8 @@ router.post('/sign-out-all', protect, async (req, res) => {
         detail: revoked > 0
           ? `${revoked} other ${revoked === 1 ? 'session was' : 'sessions were'} signed out. Saved logins on those devices were removed too.`
           : 'No other active sessions were found.',
+        link: '/profile?section=security',
+        linkLabel: 'Review your account security',
       }).catch(() => {});
     } catch { /* best-effort trail */ }
 
@@ -1969,6 +2272,8 @@ router.post('/two-factor-method', protect, async (req, res) => {
         detail: method === 'email'
           ? 'Sign-in codes are now sent to your email address. This is weaker than an authenticator app — it protects your password, but not an attacker who already has your mailbox.'
           : 'Your authenticator app is now the second factor used at sign-in.',
+        link: '/profile?section=security',
+        linkLabel: 'Review your account security',
       }).catch(() => {});
     } catch { /* best-effort trail */ }
 
@@ -2052,6 +2357,7 @@ router.post('/request-email-otp', async (req, res) => {
 
     res.json({
       message: 'Verification code sent to your email successfully',
+      expiresInSeconds: OTP_TTL_SECONDS,
     });
   } catch (error) {
     console.error('[request-email-otp]', error.message);
@@ -2320,6 +2626,8 @@ router.put('/profile', async (req, res) => {
           type: 'info',
           title: 'Password changed',
           detail: 'Your password was just changed. If this wasn\'t you, reset it and contact support immediately.',
+          link: '/profile?section=security',
+          linkLabel: 'Review your account security',
         }).catch(() => {});
       } catch { /* best-effort */ }
     }

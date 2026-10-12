@@ -14,12 +14,17 @@ import './SupportChatPage.css';
  * "Talk to support" button useful: someone cancelling a plan because they paid
  * by transfer lands with "Payment" already chosen and the form open, instead of
  * a blank inbox they have to work out how to use.
+ *
+ * `?thread=<id>` opens ONE conversation directly. Every "Support replied to
+ * your message" bell links here, so the member lands on the reply itself
+ * instead of on the list, having to spot which of twenty threads it was.
  */
 export default function SupportChatPage() {
   const [searchParams] = useSearchParams();
   // 'new=1' opens the composer straight away — set by the pricing page.
   const startComposing = searchParams.get('new') === '1';
   const topic = searchParams.get('topic') || 'payment';
+  const thread = searchParams.get('thread') || '';
 
   return (
     <div className="support-page">
@@ -28,6 +33,7 @@ export default function SupportChatPage() {
         <SupportInbox
           initialCategory={topic}
           startComposing={startComposing}
+          focusThreadId={thread}
         />
       </main>
     </div>

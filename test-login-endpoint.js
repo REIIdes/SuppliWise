@@ -1,7 +1,10 @@
 // Test script to verify login endpoint returns OTP requirement
 // Run: node test-login-endpoint.js
-
-const fetch = require('node-fetch');
+//
+// Uses the same loopback-origin helper as the server, so it follows HTTPS when
+// TLS is enabled instead of hard-coding a dead http://localhost:5000 URL.
+require('./server/utils/envFile').reloadFromDisk();
+const tls = require('./server/utils/tls');
 
 console.log('🧪 Testing Login Endpoint...\n');
 
@@ -11,11 +14,12 @@ const TEST_PASSWORD = 'YourPassword123'; // <-- CHANGE THIS
 
 async function testLogin() {
   try {
-    console.log(`📤 Sending login request to http://localhost:5000/api/auth/login`);
+    const loginUrl = `${process.env.API_ORIGIN || tls.loopbackOrigin()}/api/auth/login`;
+    console.log(`📤 Sending login request to ${loginUrl}`);
     console.log(`   Email: ${TEST_EMAIL}`);
     console.log(`   Password: ${'*'.repeat(TEST_PASSWORD.length)}\n`);
 
-    const response = await fetch('http://localhost:5000/api/auth/login', {
+    const response = await fetch(loginUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -52,7 +56,7 @@ async function testLogin() {
     console.error('❌ Error:', error.message);
     console.log('\n⚠️  Make sure:');
     console.log('   1. Backend server is running (npm start in server folder)');
-    console.log('   2. Server is on port 5000');
+    console.log(`   2. API origin is reachable at ${process.env.API_ORIGIN || tls.loopbackOrigin()}`);
     console.log('   3. You have a valid test user account');
   }
 }

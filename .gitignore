@@ -54,14 +54,6 @@ server/.env
 *.key
 certs/
 
-# …but `*credentials*` is a FILENAME glob, so it also swallows source code whose
-# name merely contains the word. server/scripts/send-admin-credentials.js was
-# written and wired into package.json as `npm run send-admin-credentials`, and
-# this one line then dropped it from every clone — leaving a documented npm
-# script pointing at a file git refused to carry. Re-admit the code; the real
-# secret material (*.pem, *.key, sanitized AdminNames.md) stays excluded.
-!server/scripts/send-admin-credentials.js
-
 # Logs (server stdout/stderr can contain PII)
 *.log
 server/*.log

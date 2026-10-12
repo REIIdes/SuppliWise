@@ -1417,6 +1417,58 @@ export const recoverWithPasskey = async () => {
   return data; // { message, resetToken, expiresAt }
 };
 
+/**
+ * Which recovery methods this deployment can actually perform.
+ *
+ * Reports server configuration only — never anything about an account — so it is
+ * safe to call before signing in. Used to hide a method that cannot work rather
+ * than letting someone choose it and wait for a message that never comes.
+ */
+export const getRecoveryCapabilities = async () => {
+  const res = await apiFetch('/auth/password-reset/capabilities');
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data; // { recoveryMethods: { sms, passkey } }
+};
+
+/**
+ * Ask the server to text a recovery code to the account's verified number.
+ *
+ * Always resolves, exactly like `requestRecoveryEmailReset`: the server cannot
+ * answer honestly about whether the address has a verified phone without
+ * becoming an enumeration oracle, so there is nothing to branch on. The
+ * `retryAfterSeconds` the server may return is advisory — it reflects the
+ * account's own cooldown, which is per-account, so a different address would not
+ * have it.
+ */
+export const requestPhoneReset = async (email) => {
+  const res = await apiFetch('/auth/password-reset/phone-code', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw recoveryError(res.status, data?.message);
+  return data; // { message, retryAfterSeconds? }
+};
+
+/**
+ * Redeem a texted recovery code.
+ *
+ * Sibling of `recoverWithAuthenticator`, and deliberately identical in shape:
+ * both take an email plus a six-digit code and return the same grant.
+ */
+export const recoverWithPhoneCode = async (email, code) => {
+  const res = await apiFetch('/auth/password-reset/phone', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, code }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw recoveryError(res.status, data?.message);
+  return data; // { message, resetToken, expiresAt }
+};
+
 // ── Account security dashboard (/api/security) ─────────────────────────────
 // Step-up is passed as the X-Step-Up header. The token is short-lived and
 // bound to the session that earned it, so it is held in component state only —
@@ -1563,6 +1615,91 @@ export const removeRecoveryEmail = async (stepUp) => {
   const res = await apiFetch('/security/recovery-email', {
     method: 'DELETE',
     headers: { ...authHeader(), ...(stepUp ? { 'X-Step-Up': stepUp } : {}) },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+/**
+ * Text a confirmation code to a candidate phone number (not yet saved).
+ *
+ * The number is sent in E.164 form. This layer deliberately does NOT try to
+ * guess a country code — the server refuses anything without an explicit `+`,
+ * and the error it returns names the requirement, so the user is told exactly
+ * what to type rather than having the number silently sent to the wrong country.
+ */
+export const requestRecoveryPhone = async (phoneNumber, stepUp) => {
+  const res = await apiFetch('/security/recovery-phone/request', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader(), ...(stepUp ? { 'X-Step-Up': stepUp } : {}) },
+    body: JSON.stringify({ phoneNumber }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data; // { message, expiresInSeconds }
+};
+
+/** Confirm the candidate number and activate it. */
+export const verifyRecoveryPhone = async (code) => {
+  const res = await apiFetch('/security/recovery-phone/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify({ code }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data; // { message, recoveryPhone }
+};
+
+/** Allow or stop the number standing in as a second factor. Requires stepUp. */
+export const setRecoveryPhoneSecondFactor = async (enabled, stepUp) => {
+  const res = await apiFetch('/security/recovery-phone/second-factor', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...authHeader(), ...(stepUp ? { 'X-Step-Up': stepUp } : {}) },
+    body: JSON.stringify({ enabled }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data; // { message, asSecondFactor }
+};
+
+/** Remove the recovery phone. Requires stepUp. */
+export const removeRecoveryPhone = async (stepUp) => {
+  const res = await apiFetch('/security/recovery-phone', {
+    method: 'DELETE',
+    headers: { ...authHeader(), ...(stepUp ? { 'X-Step-Up': stepUp } : {}) },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+/**
+ * Ask the server to text a second-factor code for the current sign-in.
+ *
+ * Requires the MFA transaction token from /login: the server will not text
+ * anything without one, because sending is a paid side effect and an endpoint
+ * that could be reached without proving the password would be a way to spend
+ * money on anyone who knows an email address.
+ */
+export const sendLoginSms = async (userId, mfaTransaction) => {
+  const res = await apiFetch('/auth/send-login-sms', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, mfaTransaction }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data; // { message, expiresInSeconds, destination }
+};
+
+/** Redeem a texted second-factor code and complete the sign-in. */
+export const verifyLoginSms = async (payload) => {
+  const res = await apiFetch('/auth/verify-login-sms', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
   });
   const data = await parseJSON(res);
   if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
@@ -1794,8 +1931,14 @@ export const deleteAllReadNotifications = async () => {
 };
 
 // Titles the server uses for account-security events (lockout.js, admin.js,
-// auth.js). Matched exactly so assessment notices never leak into the
-// security feed.
+// auth.js, totp.js, passkeys.js, recoveryCodes.js, security.js). Matched
+// exactly so assessment and support notices never leak into the security feed.
+//
+// This list ONLY decides what the Profile page labels as security activity.
+// Where a notice navigates is decided by `link` on the row, resolved server-side
+// in server/utils/notificationLinks.js — which carries its own SECURITY_TITLES
+// for the same titles. A test pins the two lists together, so adding a title to
+// one without the other fails the suite rather than quietly half-working.
 const SECURITY_NOTIFICATION_TITLES = new Set([
   'Too many failed sign-in attempts',
   "You're back online",
@@ -1803,10 +1946,21 @@ const SECURITY_NOTIFICATION_TITLES = new Set([
   'Your account is active again',
   'Two-factor authentication enabled',
   'Two-factor authentication disabled',
+  'Two-factor method changed',
   'Password changed',
+  'New sign-in to your account',
+  'Signed out other devices',
+  'A passkey was added to your account',
+  'A passkey was removed from your account',
+  'Recovery codes generated',
+  'Recovery codes replaced',
+  'A recovery code was used',
+  'Backup codes generated',
+  'Recovery email changed',
+  'Recovery phone changed',
 ]);
 
-// True for account-security notices → these deep-link to Profile Security.
+// True for account-security notices → these belong on Profile → Security.
 export const isSecurityNotification = (item) =>
   !!item && item.type !== 'severe-flag' && SECURITY_NOTIFICATION_TITLES.has(item.title);
 
@@ -1932,15 +2086,22 @@ export const getMySupportThreads = async (limit = 20) => {
   });
   const data = await parseJSON(res);
   if (!res.ok) throwFriendly(res.status, data);
-  return data; // { threads[], unreadCount }
+  return data; // { threads[], unreadCount, supportActive }
 };
 
-/** Start a conversation. `body` is the opening message and is required. */
-export const startSupportThread = async ({ subject = '', category = 'other', body = '' } = {}) => {
+/**
+ * Start a conversation.
+ *
+ * `body` is the opening message and is required — OR `cipher` is, together with
+ * a subject and the wrapped key shares, when this browser seals it. Exactly one
+ * of the two, chosen by the caller from whether end-to-end encryption is
+ * actually available and whether the support team has a published key.
+ */
+export const startSupportThread = async (payload = {}) => {
   const res = await apiFetch('/support-chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
-    body: JSON.stringify({ subject, category, body }),
+    body: JSON.stringify(payload),
   });
   const data = await parseJSON(res);
   if (!res.ok) throwFriendly(res.status, data);
@@ -1964,12 +2125,17 @@ export const getSupportThread = async (threadId) => {
  * is an administrator's decision and reopening one too, so there is no member
  * endpoint that can change a thread's resolved state; SupportInbox shows a
  * read-only panel in that case instead of a composer.
+ *
+ * A sealed conversation sends `cipher` and no `body`, and the server refuses the
+ * other way round. Both shapes go through the same function because the THREAD
+ * decides which is legal, not the caller — see utils/chatEncryption.js on the
+ * server and src/security/useSecureChat.js for who decides here.
  */
-export const replyToSupportThread = async (threadId, body) => {
+export const replyToSupportThread = async (threadId, payload = {}) => {
   const res = await apiFetch(`/support-chat/${encodeURIComponent(threadId)}/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
-    body: JSON.stringify({ body }),
+    body: JSON.stringify(payload),
   });
   const data = await parseJSON(res);
   if (!res.ok) throwFriendly(res.status, data);
@@ -1981,6 +2147,89 @@ export const replyToSupportThread = async (threadId, body) => {
 // server/utils/supportChat.js for why a member must not be able to reach them —
 // so a member bundle that could call them would be calling endpoints that do not
 // exist. Keep this list and the server's member router in step.
+
+// ── End-to-end encryption ──────────────────────────────────────────────────
+//
+// The member's half of the key exchange. Everything here is a plain
+// request/response: the server publishes public keys and routes wrapped copies
+// of conversation keys, and never sees an unwrapped one. See
+// src/security/secureChat.js for what actually seals a message.
+
+/** This account's published public key, and whether a recovery copy exists. */
+export const getMySecureKey = async () => {
+  const res = await apiFetch('/support-chat/encryption/key', { headers: { ...authHeader() } });
+  const data = await parseJSON(res);
+  if (!res.ok) throwFriendly(res.status, data);
+  return data; // { key: { keyId, publicKey, hasRecovery, recoveryHint } }
+};
+
+/**
+ * Publish a public key. Called on every visit — a no-op when it is unchanged —
+ * so a member who signs in on a new machine is told, once, that their older
+ * conversations will not open there.
+ */
+export const publishMySecureKey = async (key) => {
+  const res = await apiFetch('/support-chat/encryption/key', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify(key),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throwFriendly(res.status, data);
+  return data; // { key, replacedKeyId }
+};
+
+/** Store the private key, sealed under a recovery code the member saved. */
+export const saveMySecureRecovery = async (wrapped, hint) => {
+  const res = await apiFetch('/support-chat/encryption/recovery', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify({ recoveryWrapped: wrapped, hint }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throwFriendly(res.status, data);
+  return data; // { key }
+};
+
+/**
+ * The operator public keys a member needs before opening a sealed conversation.
+ * `canEncrypt` is false when nobody at support has registered a key yet, which
+ * is the one state in which a new conversation has to be sent as plain text —
+ * sealing it would produce a ticket nobody could read.
+ */
+export const getSupportOperatorKeys = async () => {
+  const res = await apiFetch('/support-chat/encryption/operators', { headers: { ...authHeader() } });
+  const data = await parseJSON(res);
+  if (!res.ok) throwFriendly(res.status, data);
+  return data; // { operators[], canEncrypt }
+};
+
+/** Seal an existing conversation: swap its plaintext for ciphertexts. */
+export const secureMySupportThread = async (threadId, { messages, keyShares }) => {
+  const res = await apiFetch(`/support-chat/${encodeURIComponent(threadId)}/secure`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify({ messages, keyShares }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throwFriendly(res.status, data);
+  return data; // { message, thread }
+};
+
+// Re-share a sealed conversation's key with the support team. Only this
+// browser holding the content key can produce valid shares, so this is the
+// member-side twin of the admin console's "Grant access" — the way a
+// conversation that support cannot open gets opened.
+export const shareMySupportThreadWithOperators = async (threadId, shares) => {
+  const res = await apiFetch(`/support-chat/${encodeURIComponent(threadId)}/keys`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify({ shares }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throwFriendly(res.status, data);
+  return data; // { message, thread }
+};
 
 // Get user's personalized supplement plan
 export const getMyPlan = async () => {

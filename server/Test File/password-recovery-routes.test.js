@@ -43,6 +43,13 @@ test('the recovery methods are mounted on the paths the client calls', () => {
     'POST /passkey/options',
     'POST /passkey/verify',
     'POST /recovery-email',
+    // The texted recovery route, split into asking for a code and redeeming it.
+    // Two endpoints rather than one because sending is unauthenticated and must
+    // answer generically, while redeeming is a credential check.
+    'POST /phone-code',
+    'POST /phone',
+    // Capability reporting, so the client can hide a method that cannot run.
+    'GET /capabilities',
     // The pre-existing emailed flow must survive alongside them.
     'GET /rules',
     'POST /request',
@@ -70,7 +77,7 @@ test('the recovery routes are registered BEFORE requestLimiter', () => {
     'expected exactly one router-wide middleware layer'
   );
 
-  for (const name of ['recovery-code', 'authenticator', 'recovery-email']) {
+  for (const name of ['recovery-code', 'authenticator', 'recovery-email', 'phone-code', 'phone']) {
     const at = stack.findIndex((layer) => layer.route && layer.route.path === `/${name}`);
     assert.ok(at !== -1, `route not found: ${name}`);
     assert.ok(

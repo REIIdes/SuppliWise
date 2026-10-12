@@ -104,6 +104,8 @@ async function mintBatch(req, res, eventType) {
       type: 'info',
       title: eventType === 'backup-codes-regenerated' ? 'Recovery codes replaced' : 'Recovery codes generated',
       detail: 'A new set of recovery codes was generated for your account. Your previous set no longer works. If this was not you, change your password and contact support.',
+      link: '/profile?section=security',
+      linkLabel: 'Review your recovery codes',
     }).catch(() => {});
 
     // The ONLY time the plaintext exists outside the user's screen. It is not
@@ -263,6 +265,8 @@ router.post('/verify', redeemLimiter, async (req, res) => {
     type: 'info',
     title: 'A recovery code was used',
     detail: 'One of your recovery codes was used to sign in. If this was not you, change your password and generate a new set of recovery codes immediately.',
+    link: '/profile?section=security',
+    linkLabel: 'Review your account security',
   }).catch(() => {});
 
   return res.json({

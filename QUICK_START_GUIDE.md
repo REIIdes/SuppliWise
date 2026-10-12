@@ -14,14 +14,14 @@
 cd server
 npm start
 ```
-The server should start on `http://localhost:5000`
+The server should start on `https://localhost:5000` when the local dev certificate is installed, otherwise `http://localhost:5000`
 
 #### 2. Start Frontend
 ```bash
 cd my-react-app
 npm run dev
 ```
-The frontend should start on `http://localhost:5173`
+The frontend should start on `https://localhost:5173` when the local dev certificate is installed, otherwise `http://localhost:5173`
 
 ---
 

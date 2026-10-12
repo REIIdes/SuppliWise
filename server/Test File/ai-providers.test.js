@@ -330,9 +330,22 @@ test('every credential the shipped .env.example declares is recognised as a plac
 
   assert.ok(declared.length >= 4, `expected the example to declare every provider key, saw ${declared.length}`);
   for (const [, name, value] of declared) {
+    // The rule is "nothing shipped here may read as a LIVE credential", and an
+    // EMPTY value satisfies that: resolveKey() trims it to '' and returns null,
+    // so the panel reports the provider as not configured — which is exactly
+    // right for an optional integration. It is not a placeholder, so it must
+    // not be forced to be one.
+    //
+    // That distinction matters: `TEXTBEE_API_KEY=` is shipped empty on purpose,
+    // alongside `SMS_PROVIDER=` and `TEXTBEE_DEVICE_ID=`. Writing
+    // `your_textbee_api_key_here` there instead would satisfy this assertion
+    // while utils/sms.js — which only asks whether the value is non-empty —
+    // would then report TextBee as CONFIGURED on a fresh clone. Empty is the
+    // safer of the two.
+    const shipped = String(value == null ? '' : value).trim();
     assert.equal(
-      isPlaceholderKey(value), true,
-      `${name}=${value} is shipped as a placeholder but would read as a live credential`
+      isPlaceholderKey(shipped) || shipped === '', true,
+      `${name}=${value} is shipped as something that would read as a live credential`
     );
   }
 

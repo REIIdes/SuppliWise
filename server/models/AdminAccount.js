@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const chatEncryptionKeySchema = require('./chatEncryptionKeySchema');
 
 const adminAccountSchema = new mongoose.Schema({
   alias: { type: String, required: true, unique: true, trim: true },
@@ -35,6 +36,19 @@ const adminAccountSchema = new mongoose.Schema({
   // When the password was last set by this account's owner. Null means it has
   // never been changed, which is what a freshly generated account looks like.
   passwordChangedAt: { type: Date, default: null },
+
+  // ── End-to-end encryption identity ──────────────────────────────────────
+  // The PUBLIC half of the operator's P-256 key pair, and a copy of the private
+  // half sealed under a RECOVERY CODE the operator saved. Identical in shape to
+  // the member's, because both sides of a support conversation run the same
+  // protocol against the same envelopes.
+  //
+  // Two operators are two identities, not one shared one. A shared key would
+  // mean either every operator can read every operator's mail, or a departing
+  // colleague takes the ability to decrypt with them; per-account keys mean
+  // granting a colleague access is an explicit, auditable act
+  // (POST /api/admin/chats/:id/keys) rather than a property of the role.
+  chatEncryptionKey: chatEncryptionKeySchema(),
 }, { timestamps: true });
 
 module.exports = mongoose.model('AdminAccount', adminAccountSchema);

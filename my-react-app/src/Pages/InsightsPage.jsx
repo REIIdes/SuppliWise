@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import { getInsights, getToken } from '../api';
@@ -36,7 +36,7 @@ function InsightsPage() {
   // response, which is when the whole card is a spinner anyway.
   const [planDayKey, setPlanDayKey] = useState('');
 
-  const fetchInsightsData = async () => {
+  const fetchInsightsData = useCallback(async () => {
     try {
       setLoading(true);
       setError('');
@@ -139,7 +139,14 @@ function InsightsPage() {
       setTodaysStats({ taken: 0, total: 0, percentage: 0 });
       setLoading(false);
     }
-  };
+  }, [livePlan]);
+
+  // Read through a ref so the mount/plan-event effect keeps a stable trigger set
+  // while always invoking the LATEST closure (same loadRef pattern as the
+  // queue pages) — a SUBSCRIPTION_EVENT that fires after state has moved on
+  // must fetch with fresh values, not the mount-time snapshot.
+  const fetchLatestRef = useRef(fetchInsightsData);
+  useEffect(() => { fetchLatestRef.current = fetchInsightsData; }, [fetchInsightsData]);
 
   // Initial data load on mount + auth guard — server is source of truth for plan gating.
   // Re-fetches instantly whenever the subscription changes anywhere in the app.
@@ -149,9 +156,8 @@ function InsightsPage() {
       navigate('/login');
       return;
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on mount is intentional
-    fetchInsightsData();
-    const onPlan = () => fetchInsightsData();
+    fetchLatestRef.current();
+    const onPlan = () => fetchLatestRef.current();
     window.addEventListener(SUBSCRIPTION_EVENT, onPlan);
     return () => window.removeEventListener(SUBSCRIPTION_EVENT, onPlan);
   }, [navigate]);

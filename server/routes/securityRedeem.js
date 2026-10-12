@@ -149,6 +149,8 @@ module.exports = function registerSecurityRedeem(router, { sensitiveLimiter }) {
         await UserNotification.create({
           user: user._id, type: 'info', title: 'A recovery code was used',
           detail: 'One of your recovery codes was used to sign in. If this was not you, change your password and generate a new set of recovery codes.',
+          link: '/profile?section=security',
+          linkLabel: 'Review your account security',
         }).catch(() => {});
         if (process.env.EMAIL_USER && process.env.EMAIL_PASSWORD) {
           await sendStatusEmail(user.email, 'new-device', {}).catch(() => {});

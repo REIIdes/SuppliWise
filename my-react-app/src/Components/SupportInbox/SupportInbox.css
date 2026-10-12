@@ -333,7 +333,6 @@
 .sci-thread:focus-visible,
 .sci-back:focus-visible,
 .sci-filter:focus-visible,
-.sci-chip:focus-visible,
 input:focus-visible,
 textarea:focus-visible {
   outline: 3px solid rgba(16, 185, 129, 0.42);
@@ -579,7 +578,9 @@ textarea:focus-visible {
    ═══════════════════════════════════════════════════════════════════════════ */
 .sci-body {
   display: grid;
-  grid-template-columns: minmax(268px, 344px) 1fr;
+  /* One pane at a time at every width: the list fills the page, and opening a
+     conversation hides the list so the thread takes its place. */
+  grid-template-columns: 1fr;
   /* `minmax(0, 1fr)`, not the default `auto` row. An auto row is sized by its
      content, so one long transcript made the row 780px tall, the row overflowed
      this element, and the "height left over" the flex chain handed down was
@@ -591,6 +592,12 @@ textarea:focus-visible {
   flex: 1 1 auto;
   min-height: 0;
 }
+
+/* The list is hidden while a conversation is open, and the (empty) thread pane
+   is hidden while you are in the list — so the visible pane always fills the
+   whole width. */
+.sci-body--reading .sci-list { display: none; }
+.sci-body:not(.sci-body--reading) .sci-view { display: none; }
 
 .sci-list,
 .sci-view {
@@ -837,28 +844,18 @@ textarea:focus-visible {
 .sci-thread--pending { border-left-color: #a5b4fc; }
 .sci-thread--resolved { border-left-color: #86efac; }
 
-/* ── Topic chip (thread header) ────────────────────────────────────────── */
-.sci-topic {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 11px 3px 4px;
-  border-radius: 999px;
-  background: var(--sci-accent-soft);
-  color: var(--sci-accent-ink);
-  font-size: 11.5px;
-  font-weight: 800;
+/* Priority until seen: a support reply the member has not opened yet floats
+   to the top of the list (server sort + client mirror) and is tinted here.
+   Opening the thread clears `unreadByUser`, and the row drops back into
+   ordinary recency order on the next render. Declared after the tone rails
+   so the amber "new reply" rail wins while it lasts. */
+.sci-thread--priority {
+  border-left-color: #f59e0b;
+  background: linear-gradient(100deg, #fffaf0 0%, #fff5ea 100%);
 }
-.sci-topic__icon {
-  display: grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: #fff;
-  color: var(--sci-accent-ink);
-}
-.sci-topic__icon svg { width: 13px; height: 13px; }
+.sci-thread--priority:hover { background: linear-gradient(100deg, #fff6e6 0%, #ffefdd 100%); }
+.sci-thread--priority .sci-thread__top strong { color: #92400e; }
+.sci-thread--priority .sci-thread__preview { color: #4b5563; font-weight: 600; }
 
 /* ── Empty states ──────────────────────────────────────────────────────── */
 .sci-empty {
@@ -995,6 +992,72 @@ textarea:focus-visible {
 .sci-view__head--pending  { --sci-accent: #6366f1; }
 .sci-view__head--resolved { --sci-accent: #10b981; }
 
+/* The whole header is one row now: back, ticket reference, presence. */
+.sci-view__barrow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.sci-view__barrow .sci-back { margin-bottom: 0; }
+
+/* ── Support presence ("Active Now") ───────────────────────────────────────
+   The member-facing status of the support TEAM (the admins behind this
+   channel), not of the thread. Driven by the admin console's own poll — see
+   server/utils/supportPresence.js. Green + pulse = somebody is at the desk;
+   grey = nobody is, and replies come when they're back. */
+.sci-presence {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  background: #f1f5f4;
+  color: #6b7c74;
+  font-size: 11.5px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.sci-presence__dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+}
+.sci-presence--on {
+  background: #e7f9f0;
+  color: #047857;
+}
+.sci-presence--on .sci-presence__dot {
+  background: #10b981;
+  animation: sci-presence-pulse 1.8s ease-out infinite;
+}
+@keyframes sci-presence-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.45); }
+  70% { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+/* ── E2E label (beside the presence pill) ──────────────────────────────────
+   The thread's encryption state, shown as a status label rather than a
+   button: support's access to the key is re-granted automatically on open,
+   so there is nothing for the member to press here. Same pill shape as the
+   presence chip so the header reads as one family of labels. */
+.sci-e2e {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1px solid #bbe7d4;
+  background: #ecfbf5;
+  color: #0f7a55;
+  font-size: 11.5px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.sci-e2e svg { width: 13px; height: 13px; flex: 0 0 auto; }
+
 .sci-back {
   display: inline-flex;
   align-items: center;
@@ -1013,44 +1076,6 @@ textarea:focus-visible {
 }
 .sci-back:hover { background: var(--sci-wash); border-color: #a7c9ba; transform: translateX(-2px); }
 .sci-back svg { width: 15px; height: 15px; }
-
-.sci-view__titlerow {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  margin-bottom: 8px;
-}
-.sci-view__subject {
-  margin: 0;
-  min-width: 0;
-  color: var(--sci-ink);
-  font-size: 18px;
-  font-weight: 800;
-  line-height: 1.32;
-  letter-spacing: -0.01em;
-  overflow-wrap: anywhere;
-}
-
-.sci-view__tags {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  flex-wrap: wrap;
-}
-.sci-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 11px;
-  border-radius: 999px;
-  font-size: 11.5px;
-  font-weight: 800;
-}
-.sci-chip--open     { background: #fff4e2; color: #b45309; }
-.sci-chip--pending  { background: #eef0ff; color: #4338ca; }
-.sci-chip--resolved { background: #e7f9f0; color: #047857; }
-
-.sci-view__meta { margin: 8px 0 0; color: var(--sci-faint); font-size: 12px; }
 
 .sci-view__body {
   display: flex;
@@ -1285,16 +1310,12 @@ textarea:focus-visible {
 .support-page__main::-webkit-scrollbar-thumb:hover { background: #9fc4b4; background-clip: content-box; }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   RESPONSIVE — one pane at a time below 900px
+   RESPONSIVE — the panes were already one-at-a-time; below 900px they just get
+   taller floors and a stacked hero.
    ═══════════════════════════════════════════════════════════════════════════ */
 @media (max-width: 900px) {
-  .sci-body { grid-template-columns: 1fr; }
-
-  /* Without this both panes stack, so "open a conversation" pushes the list out
-     of view above it and the member cannot get back. */
-  .sci-body--reading .sci-list { display: none; }
-  .sci-body:not(.sci-body--reading) .sci-view { display: none; }
-
+  /* The one-pane-at-a-time swap lives in the base rules above now, so nothing
+     extra is needed here beyond the mobile sizing of the panes. */
   .sci-list,
   .sci-view { min-height: 440px; }
 
@@ -1343,9 +1364,7 @@ textarea:focus-visible {
   .sci-stat__n { font-size: 16px; }
 
   .sci-view__head { padding: 11px 16px 12px; }
-  .sci-view__subject { font-size: 16.5px; }
-  .sci-back { margin-bottom: 7px; padding: 4px 10px 4px 7px; }
-  .sci-view__meta { margin-top: 6px; }
+  .sci-back { padding: 4px 10px 4px 7px; }
   .sci-messages { padding: 14px 16px; }
   .sci-list__head { padding: 12px 14px 10px; }
   .sci-list__titlerow { margin-bottom: 9px; }
@@ -1369,7 +1388,6 @@ textarea:focus-visible {
   .sci-reply__foot { justify-content: flex-end; }
   .sci-view__head { padding: 12px 14px 13px; }
   .sci-messages { padding: 14px 13px; }
-  .sci-view__subject { font-size: 16.5px; }
   .sci-msg { max-width: 92%; }
   .sci-closed { padding: 14px; }
 }
@@ -1389,6 +1407,7 @@ textarea:focus-visible {
   .sci-skel__line,
   .sci-spinner,
   .sci-stat__flag,
+  .sci-presence--on .sci-presence__dot,
   .sci-placeholder__art {
     animation: none !important;
   }
@@ -1410,3 +1429,117 @@ textarea:focus-visible {
     transform: none;
   }
 }
+
+/* ── Ticket references ──────────────────────────────────────────────────────
+   The short quotable id (SW-4KQ7M2XB) sits beside the subject in the list
+   and in the thread header, where in the header it becomes a copy button. It
+   is deliberately monospaced and letter-spaced: it is an identifier, it is
+   read aloud, and it has to be copied exactly rather than skimmed. */
+.sci-ticket {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sci-indigo) 12%, #fff);
+  border: 1px solid color-mix(in srgb, var(--sci-indigo) 22%, #fff);
+  color: color-mix(in srgb, var(--sci-indigo) 82%, #0f172a);
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.sci-ticket svg { width: 11px; height: 11px; }
+
+.sci-ticketbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 10px;
+  padding: 4px 9px;
+  border: 1px solid color-mix(in srgb, var(--sci-indigo) 26%, #fff);
+  border-radius: 999px;
+  background: #fff;
+  color: color-mix(in srgb, var(--sci-indigo) 85%, #0f172a);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+}
+.sci-ticketbtn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px -8px color-mix(in srgb, var(--sci-indigo) 55%, transparent);
+}
+.sci-ticketbtn--done {
+  background: color-mix(in srgb, var(--sci-emerald) 16%, #fff);
+  border-color: color-mix(in srgb, var(--sci-emerald) 40%, #fff);
+  color: color-mix(in srgb, var(--sci-emerald) 78%, #064e3b);
+}
+/* Read-only ticket badge — users can see the reference but not copy it */
+.sci-ticketbtn--readonly {
+  cursor: default;
+  pointer-events: none;
+  user-select: text;
+}
+.sci-ticketbtn--readonly:hover {
+  transform: none;
+  box-shadow: none;
+}
+.sci-ticketbtn svg { width: 12px; height: 12px; }
+.sci-ticketbtn svg:last-child { opacity: 0.55; width: 11px; height: 11px; }
+
+/* ── Encryption affordances ─────────────────────────────────────────────────
+   States are carried by the SAME hue grammar the rest of the page uses: a
+   positive/secure thing is emerald, a caution is amber, a failure is rose.
+   Nothing here adds a new accent family. */
+.sci-makewsecure {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 1px dashed var(--sci-faint);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--sci-muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.16s ease, color 0.16s ease, background 0.16s ease;
+}
+.sci-makewsecure:hover:not(:disabled) {
+  border-color: var(--sci-emerald);
+  color: color-mix(in srgb, var(--sci-emerald) 78%, #064e3b);
+  background: color-mix(in srgb, var(--sci-emerald) 8%, #fff);
+}
+.sci-makewsecure:disabled { opacity: 0.55; cursor: default; }
+.sci-makewsecure svg { width: 12px; height: 12px; }
+
+.sci-lockmini {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 5px;
+  vertical-align: -1px;
+  color: var(--sci-emerald);
+}
+.sci-lockmini svg { width: 11px; height: 11px; }
+
+.sci-msglock {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-style: italic;
+  color: #94a3b8;
+}
+.sci-msglock svg { width: 12px; height: 12px; }
+
+.sci-alert--warn {
+  background: color-mix(in srgb, #f59e0b 10%, #fff);
+  border-color: color-mix(in srgb, #f59e0b 34%, #fff);
+  color: #92400e;
+}
+.sci-alert--warn .sci-alert__icon { color: #d97706; }

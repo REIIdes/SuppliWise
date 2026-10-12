@@ -9,13 +9,18 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "notify-admins": "node scripts/notify-admins.js",
-    "send-admin-credentials": "node scripts/send-admin-credentials.js",
     "test": "node --test \"Test File/*.test.js\"",
     "test:flows": "node scripts/withDevCa.mjs test-subscription-flows.js",
     "glitch-hunt": "node scripts/withDevCa.mjs glitch-hunt.js",
     "glitch-hunt:web3": "node scripts/withDevCa.mjs glitch-hunt-web3.js",
     "verify:bc-monitor": "node scripts/withDevCa.mjs verify-bc-monitor.js",
+    "audit:bell-links": "node scripts/audit-bell-links.js",
+    "verify:bell-links": "node scripts/withDevCa.mjs scripts/e2e-notification-links.js",
+    "verify:legacy-bell-links": "node scripts/withDevCa.mjs scripts/verify-legacy-bell-links.js",
+    "cleanup:bell-walkthrough": "node scripts/withDevCa.mjs scripts/cleanup-bell-walkthrough.js",
+    "mint-admin-token": "node scripts/mint-admin-token.js",
+    "audit:notification-boundary": "node scripts/audit-notification-boundary.js",
+    "verify:notification-boundary": "node scripts/withDevCa.mjs scripts/verify-notification-boundary.js",
     "check": "node scripts/check-syntax.js"
   },
   "dependencies": {

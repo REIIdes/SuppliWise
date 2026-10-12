@@ -139,8 +139,10 @@ test('every column links somewhere this app actually serves', () => {
   for (const column of columns) {
     const to = column.action.to;
     assert.ok(typeof to === 'string' && to.startsWith('/'), `${column.id}: bad link "${to}"`);
-    // Strip the query: /profile?view=billing is served by the /profile route.
-    const path = to.split('?')[0];
+    // Strip the query AND the hash: /profile?view=billing is served by the
+    // /profile route, and /pricing#plans by the /pricing route. A link with a
+    // query or a hash is still one URL whose PATH half is the route.
+    const path = to.split('?')[0].split('#')[0];
     assert.ok(routes.has(path), `${column.id} links to "${path}", which is not a route`);
     if (to.includes('?')) {
       const view = to.split('view=')[1];

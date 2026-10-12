@@ -75,6 +75,10 @@ function describe() {
     auth: limit('AUTH_RATE_LIMIT_MAX', 20),
     authLocal: limit('AUTH_RATE_LIMIT_MAX_LOCAL', 200),
     security: limit('SECURITY_RATE_LIMIT_MAX', 60),
+    // Not a rate limit, but the same failure mode: a literal buried in a route
+    // that an operator needs to be able to raise without a code change. See the
+    // OTP delivery timeout in routes/auth.js.
+    emailDeliveryTimeoutSeconds: limit('EMAIL_DELIVERY_TIMEOUT_MS', 10),
     test: isTest,
   };
 }

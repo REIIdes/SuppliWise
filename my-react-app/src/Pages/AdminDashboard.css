@@ -421,46 +421,108 @@
   top: calc(var(--admin-topbar-h, 60px) + 8px);
   right: 24px;
   left: auto;
-  width: min(360px, calc(100vw - 36px));
+  width: min(400px, calc(100vw - 36px));
   /* Never taller than the viewport minus the topbar, so the list always has
      something to scroll and the panel never runs off the bottom edge. */
-  max-height: min(420px, calc(100vh - var(--admin-topbar-h, 60px) - 28px));
+  max-height: min(520px, calc(100vh - var(--admin-topbar-h, 60px) - 28px));
   display: flex;
   flex-direction: column;
-  padding: 18px;
+  padding: 0;
   border: 1px solid var(--admin-line);
   background: #fff;
-  box-shadow: 0 22px 48px -22px rgba(23,35,31,.55);
-  border-radius: 16px;
+  box-shadow: 0 26px 56px -22px rgba(23, 35, 31, 0.55);
+  border-radius: 18px;
   overflow: visible;
   /* Long unbroken strings (ids, URLs, plan names) used to widen the row and
      force a horizontal scrollbar across the text. */
   overflow-wrap: break-word;
 }
-/* Colour rail across the top */
+
+/* ── Header ───────────────────────────────────────────────────────────────
+   A tinted band across the top rather than bare text on white. It carries the
+   count — which used to live only in the bell's badge, and so was unreadable
+   the moment the panel covered it — and it is the one place in the panel
+   allowed to be colourful at rest. */
+.admin-notif-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 0;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--admin-line);
+  background: linear-gradient(135deg, #f0fdf4, #ecfeff 55%, #eef2ff);
+  border-radius: 18px 18px 0 0;
+}
+
+.admin-notif-panel__heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .admin-notif-panel h3 {
   margin-bottom: 0;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 800;
   letter-spacing: -0.01em;
+  color: #0f172a;
   /* Gives up width first (ellipsis) so the header actions keep full labels. */
   flex: 0 1 auto;
   min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.admin-notif-panel h3::before {
+
+/* The count, in words as well as digits. */
+.admin-notif-panel__count {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  font: 700 11px/1 Arial, sans-serif;
+  color: #047857;
+  background: #d1fae5;
+  border-radius: 999px;
+  padding: 5px 9px;
+  white-space: nowrap;
+}
+
+.admin-notif-panel__count::before {
   content: '';
-  flex-shrink: 0;
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #f97316, #e11d48);
-  box-shadow: 0 0 0 4px rgba(225,29,72,.16);
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+}
+
+.admin-notif-panel__count--clear {
+  color: #475569;
+  background: #f1f5f9;
+}
+
+.admin-notif-panel__count--clear::before {
+  background: #94a3b8;
+  box-shadow: none;
+}
+
+/* The footer hint. The panel opens on hover, and a hover-opened surface with no
+   explanation of what pressing a row does reads as a dead list. */
+.admin-notif-panel__hint {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 9px 16px 11px;
+  border-top: 1px solid var(--admin-line);
+  background: #fcfdfe;
+  border-radius: 0 0 18px 18px;
+  font: 600 11.5px Arial, sans-serif;
+  color: #9aa0a6;
+  text-align: center;
 }
 
 /* Scroll area for the items — header stays pinned above it. flex:1 + min-height:0
@@ -473,6 +535,9 @@
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: #d1d5db transparent;
+  /* Rows are cards now, not full-bleed lines, so the list needs padding and the
+     accent rail needs somewhere to sit. */
+  padding: 8px;
 }
 .admin-notif-panel__list::-webkit-scrollbar {
   width: 6px;
@@ -509,31 +574,24 @@
   border-bottom: 10px solid #fff;
 }
 
-/* Item entrance: light stagger so the list reads as it arrives.
+/* Item entrance: a light stagger so the list reads as it arrives.
    `backwards` not `both` — a filled `to { transform }` outranks normal author
-   rules and would permanently kill .notification:hover translateX(3px) below. */
+   rules and would permanently kill the hover lift on .nd-row. */
 @keyframes admin-notif-item-in {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.admin-notif-panel__list .notification {
+.admin-notif-panel__list .nd-row {
   animation: admin-notif-item-in 0.28s ease backwards;
 }
-.admin-notif-panel__list .notification:nth-child(1) { animation-delay: 0.04s; }
-.admin-notif-panel__list .notification:nth-child(2) { animation-delay: 0.08s; }
-.admin-notif-panel__list .notification:nth-child(3) { animation-delay: 0.12s; }
-.admin-notif-panel__list .notification:nth-child(4) { animation-delay: 0.16s; }
-.admin-notif-panel__list .notification:nth-child(5) { animation-delay: 0.2s; }
-.admin-notif-panel__list .notification:nth-child(6) { animation-delay: 0.24s; }
-.admin-notif-panel__list .notification:nth-child(n + 7) { animation-delay: 0.28s; }
-.admin-notif-panel__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-  margin-bottom: 10px;
-}
+.admin-notif-panel__list .nd-row:nth-child(1) { animation-delay: 0.04s; }
+.admin-notif-panel__list .nd-row:nth-child(2) { animation-delay: 0.08s; }
+.admin-notif-panel__list .nd-row:nth-child(3) { animation-delay: 0.12s; }
+.admin-notif-panel__list .nd-row:nth-child(4) { animation-delay: 0.16s; }
+.admin-notif-panel__list .nd-row:nth-child(5) { animation-delay: 0.2s; }
+.admin-notif-panel__list .nd-row:nth-child(6) { animation-delay: 0.24s; }
+.admin-notif-panel__list .nd-row:nth-child(n + 7) { animation-delay: 0.28s; }
+
 /* One wrapping group for both actions — the h3 above ellipsises first so the
    two labels can never overlap each other on a narrow panel. */
 .admin-notif-panel__actions {
@@ -556,44 +614,36 @@
   white-space: nowrap;
   transition: background .15s ease, color .15s ease;
 }
-.admin-notif-panel__action:hover {
-  background: linear-gradient(120deg, #ecfdf5, #d1fae5);
+.admin-notif-panel__action:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.85);
   color: #065f46;
 }
 .admin-notif-panel__action--danger {
   color: #b91c1c;
 }
-.admin-notif-panel__action--danger:hover {
+.admin-notif-panel__action--danger:hover:not(:disabled) {
   background: #fef2f2;
   color: #991b1b;
 }
-/* Already read: keep the row for context but drop it back from the eye. */
-.notification--read {
-  border-left-color: #c8cfd3 !important;
-  background: #f8faf9;
-  opacity: .72;
+.admin-notif-panel__action:focus-visible {
+  outline: 2px solid #10b981;
+  outline-offset: 1px;
 }
-.notification--read strong {
-  font-weight: 600;
-}
-.notification--flag {
-  border-left-color: #e11d48 !important;
-  background: linear-gradient(100deg, #fff1f2, #ffe4e6);
-  border-radius: 0 10px 10px 0;
+.admin-notif-panel__action:disabled {
+  opacity: .55;
+  cursor: default;
 }
 
-/* A paid upgrade request. Amber rather than red: it is money waiting to be
-   released, not a health concern, and it must not read as an emergency. */
-.notification--request {
-  border-left-color: #d97706 !important;
-  background: linear-gradient(100deg, #fffbeb, #fef3c7);
-  border-radius: 0 10px 10px 0;
+/* Already read: keep the row for context but drop it back from the eye. The
+   accent family survives, because "what kind of thing was this" is still the
+   question the tile answers when somebody scrolls back through history. */
+.admin-notif-panel__list .nd-row:not(.nd-row--unread) {
+  opacity: .74;
 }
+
 /* Stand-in for the delete button on rows that cannot be deleted (live config
-   warnings): tells the admin these are fixable, not dismissable. Scoped under
-   .notification-panel to outrank the global `.notification span` rule, which
-   otherwise repaints it muted grey. */
-.notification-panel .notification__live {
+   warnings): tells the admin these are fixable, not dismissable. */
+.admin-notif-panel .notification__live {
   flex: 0 0 auto;
   align-self: flex-start;
   font: 700 10px Arial, sans-serif;
@@ -605,29 +655,6 @@
   padding: 3px 8px;
   margin-top: 0;
   white-space: nowrap;
-}
-/* Fixed square box, top-aligned: as a float the × drifted into the middle of
-   the detail text and sat on top of it. */
-.notification__delete {
-  flex: 0 0 24px;
-  align-self: flex-start;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 24px;
-  background: none;
-  border: none;
-  color: #9aa0a6;
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0;
-  border-radius: 6px;
-  transition: color .15s ease, background .15s ease;
-}
-.notification__delete:hover {
-  color: #b91c1c;
-  background: #fee2e2;
 }
 
 /* ── User list ───────────────────────────────────────────────────────── */
@@ -1726,7 +1753,12 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
 
 @media (max-width: 820px) { .admin-shell .profile-layout__main { gap: 18px; } }
 
-/* Base notification row: accent rail, rounded */
+/* Base notification row: accent rail, rounded.
+   `.notification-panel .notification` and `.notification__body` used to live
+   here too. Both are gone: the panel's rows are now `.nd-row` from
+   notifications/notificationAccents.css, the same component the member bell
+   uses, so the two consoles cannot drift apart again. The bare `.notification`
+   selector below is kept ONLY for the legacy rows the AI panel still renders. */
 .notification {
   position: relative;
   border-left: 3px solid #d46b35;
@@ -1734,48 +1766,6 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
   margin: 10px 0;
   font: 13px Arial, sans-serif;
   color: var(--admin-ink);
-}
-.notification-panel .notification {
-  /* Flex row: text block + a fixed-width action box. The old float:right on
-     the delete button made it land in the middle of the last line of detail
-     text, and long words forced a horizontal scrollbar across the panel. */
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  border: none;
-  border-left: 3px solid #d46b35;
-  border-radius: 0 10px 10px 0;
-  padding: 11px 10px 11px 12px;
-  margin: 6px 0;
-  cursor: pointer;
-  overflow-wrap: anywhere;
-  transition: background .15s ease, transform .15s ease, opacity .15s ease;
-}
-
-/* min-width:0 is what lets the text shrink and wrap inside the flex row
-   instead of pushing the delete button past the panel edge. */
-.notification__body {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.notification-panel .notification:hover {
-  background: linear-gradient(100deg, #f7faf7, #f2f6f3);
-  transform: translateX(3px);
-}
-.notification-panel .notification strong {
-  display: block;
-  font-weight: 700;
-  color: var(--admin-ink);
-  margin-bottom: 2px;
-  overflow-wrap: anywhere;
-}
-.notification-panel .notification__detail {
-  display: block;
-  color: #4d565c;
-  font: 400 12px/1.45 Arial, sans-serif;
-  margin-top: 3px;
-  overflow-wrap: anywhere;
 }
 /* ═══════════════════════════════════════════════════════════════════════════
    AI MANAGEMENT — the provider panel.
@@ -3948,7 +3938,7 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
    item-stagger rules above so source order wins). */
 @media (prefers-reduced-motion: reduce) {
   .admin-notif-panel,
-  .admin-notif-panel .notification {
+  .admin-notif-panel .nd-row {
     animation: none;
   }
 }
@@ -5446,246 +5436,6 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
   background: linear-gradient(135deg, #f43f5e, #be123c);
   box-shadow: 0 12px 24px -14px rgba(190, 18, 60, .95);
 }
-/* Indigo, not the emerald of `--enable`: green is this panel's "your account
-   is fine" colour, and reusing it for an action that sends mail to six
-   inboxes would read as a status. */
-.adm-btn--primary {
-  background: linear-gradient(135deg, #4f6bed, #3730a3);
-  box-shadow: 0 12px 24px -14px rgba(55, 48, 163, .95);
-}
-/* A disabled primary must still read as a button, not as body text — it is
-   disabled because no address is configured, and that reason is shown in the
-   hint below it, so it has to look like a thing you would otherwise press. */
-.adm-btn:disabled {
-  cursor: not-allowed;
-  filter: grayscale(.75);
-  opacity: .55;
-  transform: none;
-}
-
-/* ── Credential-update notice ───────────────────────────────────────────────
-   The one control in this panel that leaves the server, so it is separated
-   from the list below it rather than sitting in the listbar with the filter
-   reset: a mis-click on it is not undoable, and a button that clears a view
-   filter should not sit a centimetre from it. */
-.adm-notice {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin: 14px 0 0;
-  padding: 15px 18px;
-  border: 1px solid #d7e3fd;
-  border-radius: 16px;
-  background: linear-gradient(120deg, #f5f9ff, #eef4ff);
-}
-.adm-notice__text { min-width: 0; }
-.adm-notice__title {
-  display: block;
-  margin: 0 0 3px;
-  font: 800 13px/1.3 Arial, sans-serif;
-  color: #1e3a8a;
-}
-.adm-notice__body {
-  margin: 0;
-  font: 400 12.5px/1.5 Arial, sans-serif;
-  color: #475569;
-}
-.adm-notice__hint {
-  margin: 8px 0 0;
-  font: 400 12px/1.55 Arial, sans-serif;
-  color: #b45309;
-}
-.adm-notice__hint code {
-  padding: 1px 5px;
-  border-radius: 5px;
-  background: #fff7ed;
-  border: 1px solid #fed7aa;
-  font: 600 11.5px ui-monospace, Menlo, Consolas, monospace;
-}
-
-/* The report after a send. Amber rather than red when partial: a rejected
-   address is an operational problem to fix, not a failure of the system, and
-   red here would wrongly imply the administrators were not reached. */
-.adm-notice__result {
-  margin: 10px 0 0;
-  padding: 13px 16px;
-  border: 1px solid #bbf7d0;
-  border-radius: 14px;
-  background: #f0fdf4;
-}
-.adm-notice__result--partial { border-color: #fed7aa; background: #fffbeb; }
-.adm-notice__result-line {
-  margin: 0 0 5px;
-  font: 400 12.5px/1.5 Arial, sans-serif;
-  color: #166534;
-}
-.adm-notice__result--partial .adm-notice__result-line { color: #92400e; }
-.adm-notice__result-line--bad { color: #b91c1c; }
-.adm-notice__result-line--warn { color: #b45309; }
-.adm-notice__result .adm-btn--ghost { margin-top: 7px; }
-
-/* Confirmation. Modal because the action is irreversible and reaches other
-   people's inboxes — an inline confirm next to the button is the pattern
-   people click through without reading. */
-.adm-confirm {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  display: grid;
-  place-items: center;
-  padding: 20px;
-  background: rgba(15, 23, 42, .55);
-  backdrop-filter: blur(2px);
-}
-.adm-confirm__box {
-  width: min(520px, 100%);
-  padding: 24px;
-  border-radius: 18px;
-  background: #fff;
-  box-shadow: 0 24px 60px -20px rgba(15, 23, 42, .45);
-}
-.adm-confirm__title {
-  margin: 0 0 10px;
-  font: 800 17px/1.3 Arial, sans-serif;
-  color: #0f172a;
-}
-.adm-confirm__body {
-  margin: 0 0 10px;
-  font: 400 13px/1.55 Arial, sans-serif;
-  color: #475569;
-}
-.adm-confirm__body--warn { color: #b45309; }
-.adm-confirm__body code {
-  padding: 1px 5px;
-  border-radius: 5px;
-  background: #fff7ed;
-  border: 1px solid #fed7aa;
-  font: 600 12px ui-monospace, Menlo, Consolas, monospace;
-}
-/* The exact sentence the recipients will receive, so the operator approves
-   the real wording rather than a description of it. */
-.adm-confirm__quote {
-  margin: 0 0 12px;
-  padding: 11px 14px;
-  border-left: 3px solid #4f6bed;
-  border-radius: 0 10px 10px 0;
-  background: #f8fafc;
-  font: 600 13px/1.5 Arial, sans-serif;
-  color: #1e3a8a;
-}
-.adm-confirm__actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 9px;
-  margin-top: 16px;
-}
-
-/* ── Credential hand-off ──────────────────────────────────────────────────
-   A second .adm-notice variant, in amber rather than the notice's blue. The
-   colour is the only thing distinguishing the two strips, and it has to: one
-   sends a sentence, the other sends live passwords, and an operator should not
-   have to read both to tell them apart. */
-.adm-notice--warn {
-  border-color: #fed7aa;
-  background: linear-gradient(120deg, #fffbf5, #fff7ed);
-}
-.adm-notice--warn .adm-notice__title { color: #9a3412; }
-
-/* The standing warning inside the dialog. Restated at the point of action
-   rather than only on the strip, because the strip is scrolled away from by the
-   time the operator reaches the button. */
-.adm-handoff__warn {
-  margin: 0 0 14px;
-  padding: 11px 13px;
-  border: 1px solid #fed7aa;
-  border-left: 3px solid #ea580c;
-  border-radius: 10px;
-  background: #fff7ed;
-  font: 400 12.5px/1.55 Arial, sans-serif;
-  color: #9a3412;
-}
-
-.adm-handoff__rows {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  max-height: 260px;
-  margin: 0 0 14px;
-  padding: 12px;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  background: #f8fafc;
-  overflow-y: auto;
-}
-.adm-handoff__row {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.adm-handoff__label {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
-}
-.adm-handoff__alias {
-  font: 800 12.5px/1.3 Arial, sans-serif;
-  color: #0f172a;
-}
-.adm-handoff__email {
-  min-width: 0;
-  font: 400 11.5px/1.3 Arial, sans-serif;
-  color: #64748b;
-  overflow-wrap: anywhere;
-}
-.adm-handoff__input,
-.adm-handoff__textarea {
-  width: 100%;
-  padding: 8px 10px;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  background: #fff;
-  font: 400 13px/1.4 Arial, sans-serif;
-  color: #0f172a;
-}
-.adm-handoff__input:focus,
-.adm-handoff__textarea:focus {
-  outline: none;
-  border-color: #6366f1;
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, .16);
-}
-.adm-handoff__textarea { resize: vertical; }
-.adm-handoff__label-text {
-  display: block;
-  margin-bottom: 4px;
-  font: 700 12.5px/1.3 Arial, sans-serif;
-  color: #334155;
-}
-/* An alias with no authenticator key in .env. Shown in place of the field
-   rather than as a disabled one, so the operator can see WHY there is nothing
-   to type — the server would refuse to mail this alias a half-message. */
-.adm-handoff__blocked {
-  margin: 0;
-  padding: 7px 10px;
-  border: 1px dashed #fcd34d;
-  border-radius: 8px;
-  background: #fffbeb;
-  font: 600 11.5px/1.45 Arial, sans-serif;
-  color: #b45309;
-}
-.adm-handoff__blocked code {
-  padding: 1px 4px;
-  border-radius: 4px;
-  background: #fef3c7;
-  font: 600 11px ui-monospace, Menlo, Consolas, monospace;
-}
-
-@media (max-width: 640px) {
-  .adm-notice { flex-direction: column; align-items: stretch; }
-  .adm-notice .adm-btn { width: 100%; }
-}
-
 .adm-btn--ghost {
   margin-top: 6px;
   border: 1px solid var(--admin-line);

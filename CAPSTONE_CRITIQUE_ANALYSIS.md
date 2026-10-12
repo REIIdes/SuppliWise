@@ -448,10 +448,6 @@ in prompts with a tripwire probe, server-owned chat context, schema-derived dele
 email: 'verbojanrich20@gmail.com',
 password: 'Janrich@101.com',        // PLAINTEXT, in a TRACKED file
 ```
-```js
-// server/scripts/send-admin-credentials.js:6-8, 244
-npm run send-admin-credentials -- --password AdminDevs=Devs101
-```
 
 Remote is **public** (`github.com/REIIdes/SuppliWise`, confirmed via `.git/logs/HEAD:1`). Your own
 `securityAudit.js:240-244` still lists four `URGENT:` rotations — **six commits later, none done.**

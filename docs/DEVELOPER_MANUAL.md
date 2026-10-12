@@ -130,8 +130,8 @@ SuppliWise/
 │   │   ├── engine.js              the ONLY state mutator
 │   │   └── seed.js                idempotent bootstrap
 │   ├── utils/                     62 modules (see §7, §9, §11)
-│   ├── scripts/                   check-syntax · notify-admins
-│   │                              send-admin-credentials
+│   ├── scripts/                   check-syntax · picture migration
+│   │                              account restore
 │   ├── tools/patch.js             one-shot verified replacement
 │   ├── Test File/                 63 *.test.js · node:test
 │   └── test-*.js                  HTTP smoke suites
@@ -1095,20 +1095,17 @@ distinguish an OS-provided variable from one that only exists because `.env` def
 `node --test` gives each test file **its own process**, so harness files must load `.env`
 themselves.
 
-### 14.5 Administrator credential tooling
+### 14.5 Administrator credentials are never emailed
 
-Two deliberately separate code paths, not one with a flag — precisely so the recurring
-channel can never grow a password field.
+There is no code path — console, script or route — that puts an administrator's password
+or TOTP seed into a message. `ADMIN_EMAILS` carries account-status mail (lockout, back
+online, ban, reactivation) and the password reset/change confirmations, and nothing else.
 
-| Command | Carries | Schedule |
-|---|---|---|
-| `npm run notify-admins` | alias only, **secret-free** | Safe to re-run and automate |
-| `npm run send-admin-credentials -- --password Alias:'…'` | alias, password, **TOTP seed** | **One-time only.** Never scheduled |
-
-Both support `--dry-run`. The hand-off refuses to send a partial set: an administrator with
-an address but no seed or no password cannot finish signing in, so the script reports every
-unusable alias and exits 1 rather than mailing half a credential set. Split `--password` on
-the **first** colon, so a password may itself contain colons.
+An administrator who has lost their credentials uses `POST /api/auth/forgot-password`
+(or the sign-in page's "Forgot password?"): the server mails a reset code to the address
+on file and the new password is set in the browser. The plaintext password is never
+transmitted, logged, or recoverable — `.env` stores a one-way hash, and Mongo stores
+another.
 
 ---
 

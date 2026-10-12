@@ -4,7 +4,7 @@ import { BASE_URL, parseJSON } from '../api';
 import { emitAuthChanged } from '../auth/authState';
 import './AdminLogin.css';
 
-function AdminLoginEyeIcon({ open }) {
+function EyeIcon({ open }) {
   return open ? (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
          strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -78,14 +78,15 @@ function AdminLogin() {
         }
       } catch { /* ignore */ }
       localStorage.setItem('adminToken', data.token);
-      // `mustChangePassword` is stored with the session because it is a property
-      // of THIS sign-in, not of the immutable JWT: once the password is changed
-      // the token is still valid but the flag is false, and the client has to be
-      // able to tell the difference without another round trip.
-      localStorage.setItem('admin', JSON.stringify({ role: 'admin', alias: data.alias, mustChangePassword: !!data.mustChangePassword }));
-      // Land on the password screen when the server says the account is still
-      // using a temporary password. This is a convenience, not the enforcement:
-      // the server refuses every other admin route until the flag clears.
+      localStorage.setItem('admin', JSON.stringify({
+        role: 'admin',
+        // The AdminAccount id. Chat management needs it to derive the
+        // operator's end-to-end encryption identity (`admin:<id>` must match
+        // the server's participantForAdmin, which is signed from the token).
+        id: data.id ? String(data.id) : '',
+        alias: data.alias,
+        mustChangePassword: !!data.mustChangePassword,
+      }));
       navigate(data.mustChangePassword ? '/admin/change-password' : '/admin');
     } catch (err) {
       setError(err.message);
@@ -93,8 +94,6 @@ function AdminLogin() {
       setLoading(false);
     }
   };
-
-  // (password visibility icon lives at module scope as AdminLoginEyeIcon)
 
   return (
     <div className="al-page">
@@ -109,7 +108,7 @@ function AdminLogin() {
 
           <div className="al-logo">
             <span className="al-logo__mark">
-              <svg width="24" height="24" viewBox="0 0 100 100" fill="none">
+              <svg width="26" height="26" viewBox="0 0 100 100" fill="none">
                 <g transform="rotate(-40,50,50)">
                   <rect x="22" y="36" width="56" height="28" rx="14"
                         fill="none" stroke="white" strokeWidth="9"/>
@@ -121,10 +120,11 @@ function AdminLogin() {
           </div>
 
           <div className="al-left__copy">
-            <span className="al-eyebrow">Restricted area</span>
+            <span className="al-eyebrow">Restricted access</span>
             <h1 className="al-left__heading">Control Panel</h1>
             <p className="al-left__sub">
               Secure administrative access for authorised personnel only.
+              All sessions are monitored and audited.
             </p>
           </div>
 
@@ -139,7 +139,7 @@ function AdminLogin() {
             </li>
             <li>
               <span className="al-features__dot al-features__dot--amber" />
-              Complete, tamper-evident audit trail
+              Complete tamper-evident audit trail
             </li>
           </ul>
 
@@ -168,11 +168,17 @@ function AdminLogin() {
       {/* ── Right form panel ─────────────────────────────── */}
       <div className="al-right">
 
-        {/* Branding repeats here so small screens (where .al-left is hidden)
-            still show who this panel belongs to. */}
+        {/* Mobile branding — shown when left panel is hidden */}
         <div className="al-mobile-brand">
-          <svg width="30" height="30" viewBox="0 0 100 100" fill="none" aria-hidden="true">
-            <rect width="100" height="100" rx="24" fill="#d46b35"/>
+          <svg width="32" height="32" viewBox="0 0 100 100" fill="none" aria-hidden="true">
+            <rect width="100" height="100" rx="24"
+                  fill="url(#al-mob-grad)"/>
+            <defs>
+              <linearGradient id="al-mob-grad" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stopColor="#7c3aed"/>
+                <stop offset="100%" stopColor="#4f46e5"/>
+              </linearGradient>
+            </defs>
             <g transform="rotate(-40,50,50)">
               <rect x="22" y="36" width="56" height="28" rx="14"
                     fill="none" stroke="white" strokeWidth="8"/>
@@ -192,12 +198,12 @@ function AdminLogin() {
           <div className="al-card__header">
             <span className="al-kicker">SUPPLIWISE CONTROL PANEL</span>
             <h2 className="al-card__title">
-              {challengeId ? 'Two-factor verification' : 'Admin access'}
+              {challengeId ? 'Verify your identity' : 'Admin access'}
             </h2>
             <p className="al-card__sub">
               {challengeId
-                ? 'Open Google Authenticator and enter the current 6-digit code.'
-                : 'This area is restricted to authorised administrators.'}
+                ? 'Open your authenticator app and enter the current 6-digit code.'
+                : 'This area is restricted to authorised administrators only.'}
             </p>
 
             <ol className="al-steps" aria-label="Sign-in progress">
@@ -275,22 +281,23 @@ function AdminLogin() {
                     onClick={() => setShowPassword(v => !v)}
                     aria-label={showPassword ? 'Hide password' : 'Show password'}
                   >
-                    <AdminLoginEyeIcon open={showPassword} />
+                    <EyeIcon open={showPassword} />
                   </button>
                 </div>
               </div>
 
               <button className="al-submit" disabled={loading}>
-                {loading
-                  ? <><span className="al-spinner" aria-hidden="true"/> Checking credentials…</>
-                  : <>
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-                           strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                      </svg>
-                      Continue securely
-                    </>
-                }
+                {loading ? (
+                  <><span className="al-spinner" aria-hidden="true"/> Checking credentials…</>
+                ) : (
+                  <>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                    </svg>
+                    Continue securely
+                  </>
+                )}
               </button>
             </>
           ) : (
@@ -301,7 +308,7 @@ function AdminLogin() {
                   <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/>
                   <line x1="12" y1="18" x2="12.01" y2="18"/>
                 </svg>
-                <span>Open your authenticator app and enter the current code.</span>
+                <span>Open your authenticator app (e.g. Google Authenticator) and enter the current code.</span>
               </div>
 
               <div className="al-field">
@@ -321,17 +328,27 @@ function AdminLogin() {
                 />
               </div>
 
+              <div className="al-secure-badge" aria-live="polite">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                     strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                  <polyline points="9 12 11 14 15 10"/>
+                </svg>
+                Credentials verified — complete 2FA to access the dashboard
+              </div>
+
               <button className="al-submit" disabled={loading || otp.length !== 6}>
-                {loading
-                  ? <><span className="al-spinner" aria-hidden="true"/> Verifying…</>
-                  : <>
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-                           strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <polyline points="20 6 9 17 4 12"/>
-                      </svg>
-                      Open dashboard
-                    </>
-                }
+                {loading ? (
+                  <><span className="al-spinner" aria-hidden="true"/> Verifying…</>
+                ) : (
+                  <>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                    Open dashboard
+                  </>
+                )}
               </button>
 
               <button

@@ -51,7 +51,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -59,6 +59,36 @@ const here = dirname(fileURLToPath(import.meta.url));
 const SERVER_ROOT = resolve(here, '..');
 const REPO_ROOT = resolve(SERVER_ROOT, '..');
 const CA_FILE = join(REPO_ROOT, 'certs', 'rootCA.pem');
+const ENV_FILE = join(SERVER_ROOT, '.env');
+
+/**
+ * Read one key out of the server's .env, without loading dotenv.
+ *
+ * This file decides whether the API is serving TLS, and the ONLY thing that
+ * says so is `TLS_ENABLED=true` in server/.env — a file npm does not read and
+ * a shell does not either. Checking `process.env.TLS_ENABLED` alone therefore
+ * saw nothing in every ordinary `npm run`, skipped the certificate authority,
+ * and every probe below it died with "fetch failed" against a perfectly good
+ * certificate. The server's own settings have to be read from the server's own
+ * settings file.
+ *
+ * The same precedence Vite's config uses: an OS-provided value wins, so a
+ * container or CI that sets it externally is not second-guessed.
+ */
+function readServerEnv(key) {
+  const fromProcess = String(process.env[key] ?? '').trim();
+  if (fromProcess) return fromProcess;
+  try {
+    const line = readFileSync(ENV_FILE, 'utf8')
+      .split(/\r?\n/)
+      .find((l) => l.trim().startsWith(`${key}=`));
+    if (!line) return '';
+    // A quoted value is a value; only a `#` comment is stripped.
+    return line.slice(line.indexOf('=') + 1).trim().replace(/^["']|["']$/g, '');
+  } catch {
+    return '';
+  }
+}
 
 const args = process.argv.slice(2);
 if (!args.length) {
@@ -101,8 +131,9 @@ if (!existsSync(target)) {
 }
 
 // Nothing to add when the API is not serving TLS. A plain-HTTP run must behave
-// exactly as it did before this script existed.
-const tlsEnabled = String(env.TLS_ENABLED || '').trim().toLowerCase() === 'true';
+// exactly as it did before this script existed. Read from the server's own .env
+// — see readServerEnv above for why the ambient environment is not enough.
+const tlsEnabled = readServerEnv('TLS_ENABLED').toLowerCase() === 'true';
 
 if (tlsEnabled && existsSync(CA_FILE)) {
   // `--use-system-ca` when this Node has it, because that trusts the whole OS

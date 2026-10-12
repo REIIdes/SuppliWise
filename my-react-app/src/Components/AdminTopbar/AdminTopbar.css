@@ -163,6 +163,18 @@
   box-shadow: 0 8px 18px -8px rgba(225,29,72,.9);
 }
 
+.admin-topbar__icon-btn:focus-visible {
+  outline: 2px solid #f97316;
+  outline-offset: 2px;
+}
+
+/* Press. Safe to transform: the notification panel is a SIBLING of this
+   button, so the button cannot become the containing block for the
+   position:fixed panel the dashboard anchors to the viewport. */
+.admin-topbar__icon-btn:active {
+  transform: translateY(0) scale(0.92);
+}
+
 /* Unread badge */
 .admin-topbar__badge {
   position: absolute;
@@ -181,6 +193,15 @@
   pointer-events: none;
   border: 2px solid #18342a;
   box-shadow: 0 3px 8px rgba(225,29,72,.7);
+  /* One arrival animation. The badge is repainted on every 10 s poll, so a
+     transition here would fire forever; the animation does not, because the
+     element itself is only mounted while there is something unread. */
+  animation: admin-notif-badge-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes admin-notif-badge-in {
+  from { opacity: 0; transform: scale(0.5); }
+  to   { opacity: 1; transform: scale(1); }
 }
 
 /* Profile button */
@@ -486,11 +507,15 @@ img.admin-topbar__dropdown-avatar { display: block; object-fit: cover; }
 
 /* ── Reduced motion ─────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
-  .admin-topbar__status-dot { animation: none; }
-  .admin-topbar__dropdown { animation: none; }
+  .admin-topbar__status-dot,
+  .admin-topbar__dropdown,
+  .admin-topbar__badge { animation: none; }
   .admin-topbar__icon-btn,
   .admin-topbar__profile,
   .admin-topbar__menu-item,
   .admin-topbar__chev { transition: none; }
-  .admin-topbar__menu-item:hover { transform: none; }
+  .admin-topbar__menu-item:hover,
+  .admin-topbar__icon-btn:hover,
+  .admin-topbar__icon-btn.is-open,
+  .admin-topbar__icon-btn:active { transform: none; }
 }

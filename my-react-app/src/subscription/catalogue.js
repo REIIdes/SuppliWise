@@ -37,6 +37,11 @@
 // `featureChips`, and a page that holds its own copy of the feature registry is
 // the drift this file exists to prevent. Bullets come from the server payload.
 import { PLAN_LABELS, normalizePlanId } from './features.js';
+// Where each column's link goes, built by the one module that knows which
+// routes exist. These used to be literal strings here, and one of them
+// ('/pricing' for "Change plan", on the page that renders it) was a dead
+// link — see src/utils/routes.js for the whole story.
+import { profileView, pricingPath, PRICING_ANCHORS } from '../utils/routes.js';
 
 /**
  * Per-plan presentation, keyed by the canonical plan id.
@@ -172,7 +177,7 @@ export function buildInfoColumns(plans = [], standardPeriodDays = 30) {
       icon: 'gauge',
       title: 'What each plan unlocks',
       body: `Every feature listed on a card above is switched on by that plan and nothing else. ${historySentence}`,
-      action: { label: 'See your current plan', to: '/profile?view=billing' },
+      action: { label: 'See your current plan', to: profileView('billing') },
     },
     {
       id: 'period',
@@ -181,7 +186,7 @@ export function buildInfoColumns(plans = [], standardPeriodDays = 30) {
       body: `A purchase is ${days} days of access. Nothing renews automatically and nothing is `
         + 'charged unless you choose it. When those days run out your account goes back '
         + 'to Free — your assessments and history are kept, not deleted.',
-      action: { label: 'Manage your plan', to: '/profile?view=billing' },
+      action: { label: 'Manage your plan', to: profileView('billing') },
     },
     {
       id: 'renewal',
@@ -192,7 +197,11 @@ export function buildInfoColumns(plans = [], standardPeriodDays = 30) {
         + 'away. Buying a DIFFERENT plan replaces it: a fresh term from today, and the '
         + 'days left on your old plan are forfeited. The checkout tells you which one '
         + 'applies before you pay.',
-      action: { label: 'Change plan', to: '/pricing' },
+      // '#plans', not the bare page: the reader is already ON /pricing when
+      // they reach this column, so the destination has to be the plan grid.
+      // A link to the page it sits on is a no-op (same pathname ⇒ no scroll,
+      // no re-render), which is exactly what this button used to do.
+      action: { label: 'Change plan', to: pricingPath(PRICING_ANCHORS.plans) },
     },
   ];
 }

@@ -8,6 +8,9 @@ const Session = require('../models/Session');
 const Passkey = require('../models/Passkey');
 const { describeFactor } = require('../utils/strongestFactor');
 const UserNotification = require('../models/UserNotification');
+const { adminLinkFor, withLinks } = require('../utils/notificationLinks');
+const { isAdminBellEvent } = require('../utils/notificationAudience');
+const { scrubAdminEvent } = require('../utils/memberPrivacy');
 const SubscriptionRequest = require('../models/SubscriptionRequest');
 const SubscriptionCancelRequest = require('../models/SubscriptionCancelRequest');
 const IntakeRecord = require('../models/IntakeRecord');
@@ -497,7 +500,16 @@ router.patch('/users/:id/account', async (req, res) => {
     const before = await User.findById(req.params.id).select('accountStatus email').lean();
     const user = await User.findByIdAndUpdate(req.params.id, update, { new: true }).select(adminUserFields).lean();
     if (!user) return res.status(404).json({ message: 'User not found.' });
-    await AdminEvent.create({ type: 'account', title: 'Account updated', detail: `${user.email} is now ${user.accountStatus} with ${user.accountRole} role.`, user: user._id });
+    await AdminEvent.create({
+      type: 'account',
+      title: 'Account updated',
+      // The state change is the work; the identity is on the user row the link
+      // opens. No email broadcast into a shared bell — see utils/memberPrivacy.js.
+      detail: `An account became ${user.accountStatus} with the ${user.accountRole} role.`,
+      user: user._id,
+      link: 'users',
+      linkLabel: 'Open User management',
+    });
     // Email + in-app notice on ban / reactivation transitions only.
     const was = before ? before.accountStatus : null;
     if (status && was !== status && (status === 'banned' || (was === 'banned' && status === 'active'))) {
@@ -511,6 +523,11 @@ router.patch('/users/:id/account', async (req, res) => {
           detail: lifted
             ? 'Your account was reactivated — you can sign in again right now.'
             : 'An administrator restricted your account. Contact support if you believe this is a mistake.',
+          // A restriction is a support question; a reactivation is a security
+          // one. Sending a ban notice to the billing page would be the same
+          // class of bug as the support bell landing on assessments.
+          link: lifted ? '/profile?section=security' : '/support',
+          linkLabel: lifted ? 'Review your account security' : 'Contact support',
         }).catch(() => {});
       } catch { /* best-effort */ }
       try {
@@ -571,8 +588,13 @@ router.delete('/users/:id/lockout', async (req, res) => {
     await AdminEvent.create({
       type: 'security',
       title: 'Lockout cleared by admin',
-      detail: `${user.email || req.params.id} can sign in again.`,
-      user: req.params.id,
+        // No address. An operator clearing a lockout already sees the account
+        // in front of them; the bell records that the action happened. See
+        // utils/memberPrivacy.js.
+        detail: 'A sign-in lockout was cleared — the account can sign in again.',
+        user: req.params.id,
+      link: 'users',
+      linkLabel: 'Open User management',
     }).catch(() => {});
     // "Back online" twin: in-app notice + email so the user knows instantly.
     try {
@@ -582,6 +604,8 @@ router.delete('/users/:id/lockout', async (req, res) => {
         type: 'info',
         title: "You're back online",
         detail: 'The sign-in pause on your account was lifted — you can sign in again right now.',
+        link: '/profile?section=security',
+        linkLabel: 'Review your account security',
       }).catch(() => {});
     } catch { /* best-effort */ }
     try {
@@ -618,12 +642,17 @@ router.delete('/users/:id', async (req, res) => {
 
     // 4. Keep an audit trail of the removal (Mongo has no FK, so the id may
     //    dangle on purpose — that is what makes it an audit record).
-    const who = `${user.firstName || ''} ${user.lastName || ''}`.trim();
     await AdminEvent.create({
       type: 'account',
       title: 'Account deleted',
-      detail: `${user.email}${who ? ` (${who})` : ''} was permanently deleted with all related data.`,
+      // No email, no name. A deletion is a consequential platform event worth
+      // recording, but the bell is shared and the account is already gone —
+      // nothing in the bell can be acted on by knowing who it was. The audit
+      // trail holds the specifics; see utils/memberPrivacy.js.
+      detail: 'An account was permanently deleted with all related data.',
       user: userId,
+      link: 'users',
+      linkLabel: 'Open User management',
     });
 
     res.json({ message: `${user.email} was permanently deleted.`, email: user.email });
@@ -704,6 +733,8 @@ router.patch('/admins/:id', async (req, res) => {
       type: 'account',
       title: 'Administrator updated',
       detail: `${admin.alias} is now ${admin.enabled ? 'enabled' : 'disabled'}.`,
+      link: 'admins',
+      linkLabel: 'Open Admin management',
     }).catch(() => {});
     res.json({ admin });
   } catch (error) {
@@ -736,295 +767,13 @@ router.delete('/admins/:id/lockout', async (req, res) => {
       type: 'security',
       title: 'Admin lockout cleared',
       detail: `${target.alias} can sign in again.`,
+      link: 'admins',
+      linkLabel: 'Open Admin management',
     }).catch(() => {});
     res.json({ message: 'Lockout cleared. The administrator can sign in again.' });
   } catch (error) {
     console.error('[admin/admin-lockout]', error.message);
     res.status(500).json({ message: 'Unable to clear the lockout.' });
-  }
-});
-
-// ── Administrator credential notices ─────────────────────────────────────
-// Emails every configured administrator that the stored form of their
-// credentials changed. It carries NO secret — see sendAdminCredentialUpdateEmail
-// in utils/email.js for why a recurring channel must not. The recipients come
-// from the ADMIN_EMAILS value in .env, and both this route and the
-// `notify-admins` script resolve them through utils/adminCredentialNotice.js,
-// so the button and the terminal can never disagree about who was reached.
-
-// @route   GET /api/admin/admins/credential-notice/preview
-// @desc    Who the notice would reach, and who has no address on file. Shown
-//          before the send so an operator sees the recipients rather than
-//          discovering a missing address after pressing the button.
-// @access  Private (Admin)
-router.get('/admins/credential-notice/preview', (req, res) => {
-  try {
-    const { configuredAdminEmails, adminAccountsMissingEmail } = require('../utils/adminAccounts');
-    const { DEFAULT_CREDENTIAL_UPDATE_DESCRIPTION } = require('../utils/email');
-    res.json({
-      description: DEFAULT_CREDENTIAL_UPDATE_DESCRIPTION,
-      recipients: configuredAdminEmails(),
-      missingEmail: adminAccountsMissingEmail(),
-      // Reported, not enforced here: whether a send is actually possible
-      // depends on the SMTP config, which the security panel already probes.
-      emailConfigured: Boolean(process.env.EMAIL_USER && process.env.EMAIL_PASSWORD),
-    });
-  } catch (error) {
-    console.error('[admin/credential-notice/preview]', error.message);
-    res.status(500).json({ message: 'Unable to read the administrator address list.' });
-  }
-});
-
-// A send is slow (one SMTP round trip per admin, deliberately not concurrent)
-// and, more importantly, it is real email that a human will receive. Without a
-// cooldown the button is a mailgun pointed at the whole admin team, and an
-// accidental double-click sends every administrator a duplicate security
-// notice — which reads to them as though a compromise happened twice.
-const LAST_CREDENTIAL_NOTICE_AT = { at: 0 };
-const CREDENTIAL_NOTICE_COOLDOWN_MS = 60_000;
-
-// @route   POST /api/admin/admins/notify-credentials
-// @desc    Email every configured administrator the credential-update notice.
-// @access  Private (Admin)
-router.post('/admins/notify-credentials', async (req, res) => {
-  const { notifyAllAdminsAboutCredentials } = require('../utils/adminCredentialNotice');
-
-  const body = req.body || {};
-  // The recipient list is server-side config, so `description` is the only
-  // field a caller may influence — and it is capped because it is rendered
-  // into the message.
-  const description = String(body.description || '').trim().slice(0, 400);
-  // Not a security control (the address list is not caller-controlled) — this
-  // exists so the endpoint cannot be pointed at an arbitrary recipient list,
-  // which would turn an admin-only route into an open relay with an audit
-  // trail pointing at whoever pressed it.
-  if (body.to !== undefined || body.recipients !== undefined) {
-    return res.status(400).json({ message: 'Recipients are configured on the server, not per request.' });
-  }
-
-  const elapsed = Date.now() - LAST_CREDENTIAL_NOTICE_AT.at;
-  if (elapsed < CREDENTIAL_NOTICE_COOLDOWN_MS) {
-    const retryAfter = Math.ceil((CREDENTIAL_NOTICE_COOLDOWN_MS - elapsed) / 1000);
-    return res.status(429).json({
-      message: `Please wait ${retryAfter} second${retryAfter === 1 ? '' : 's'} before sending this notice again.`,
-      retryAfterSeconds: retryAfter,
-    });
-  }
-
-  try {
-    const report = await notifyAllAdminsAboutCredentials({
-      description,
-      triggeredBy: (req.user && req.user.alias) || 'operator',
-    });
-    // Only consumed once the send actually ran, so a rejected request does not
-    // leave the operator locked out of a notice they never sent.
-    LAST_CREDENTIAL_NOTICE_AT.at = Date.now();
-
-    if (report.unconfigured) {
-      return res.status(400).json({
-        message: 'No administrator email addresses are configured. Add ADMIN_EMAILS to server/.env and restart the server.',
-        ...report,
-      });
-    }
-
-    const by = (req.user && req.user.alias) || 'an administrator';
-    await AdminEvent.create({
-      type: 'security',
-      title: 'Credential update notice sent to administrators',
-      detail: `${report.delivered.length} of ${report.recipients} delivered by ${by}.`
-        + (report.missingEmail.length ? ` No address on file for: ${report.missingEmail.join(', ')}.` : ''),
-    }).catch(() => {});
-
-    // 207: the batch ran and at least one address was rejected. Reporting this
-    // as a plain 200 would let the console paint "sent to everyone" over a list
-    // where someone demonstrably was not reached.
-    const partial = report.failed.length > 0;
-    res.status(partial ? 207 : 200).json({
-      message: partial
-        ? `Notice sent to ${report.delivered.length} of ${report.recipients} administrator(s). ${report.failed.length} address(es) were rejected.`
-        : `Notice sent to ${report.recipients} administrator(s).`,
-      ...report,
-    });
-  } catch (error) {
-    console.error('[admin/notify-credentials]', error.message);
-    res.status(500).json({ message: 'Unable to send the administrator notice.' });
-  }
-});
-
-// ── One-time administrator credential hand-off ───────────────────────────
-// A DIFFERENT SEND FROM THE ONE ABOVE, and the difference is the whole point.
-//
-// The notice above tells administrators their stored credentials changed. It
-// carries no secret, and never will: AdminNames.md records that this project's
-// real TOTP seeds were committed to a public repository, and the fix for that
-// was to keep every recurring channel secret-free.
-//
-// This endpoint is the other, sanctioned path — `sendAdminCredentialsEmail` in
-// utils/email.js, which exists precisely to deliver a password and an
-// authenticator key once. It is a separate module (utils/adminCredentialHandoff.js)
-// rather than an option on the notice, so nothing here can widen what the notice
-// sends. See that module's header for the full reasoning.
-//
-// It does not rotate anything: the passwords are the ones the accounts already
-// have, supplied by the operator because .env stores a one-way hash and the
-// plaintext is not recoverable from it.
-
-/**
- * A send is slow (one SMTP round trip per admin, deliberately not concurrent)
- * and — far more importantly — it puts live passwords in real inboxes. Unlike
- * the notice above, a duplicate here is not a confusing message: the same
- * credential landing twice is a second copy in a forwarding rule somewhere. So
- * this cooldown is longer, and it is separate from the notice's rather than
- * shared, so pressing one button does not lock the other out.
- */
-const LAST_CREDENTIAL_HANDOFF_AT = { at: 0 };
-const CREDENTIAL_HANDOFF_COOLDOWN_MS = 10 * 60_000;
-
-/**
- * Accept the operator's password map and return only the aliases it carries.
- *
- * The VALUES are the point of this endpoint and must never be logged, echoed in
- * an error, or written to an audit row — so the only thing that leaves this
- * function is a count and a list of names. Anything that needs to say "that
- * alias had no password" asks this for the names, never the map.
- *
- * A password is not trimmed: leading and trailing spaces are characters the
- * administrator chose, and silently trimming one would mail them a password that
- * does not work. An all-whitespace password IS rejected, because that is a field
- * nobody filled in rather than a password somebody set.
- *
- * @returns {{ok: true, passwords: Record<string,string>}|{ok: false, message: string}}
- */
-function readPasswordMap(body) {
-  const raw = body.passwords;
-  if (raw === undefined || raw === null) {
-    return { ok: false, message: 'No passwords were supplied. .env stores a one-way hash, so the server cannot read them back — pass the password each administrator already has.' };
-  }
-  if (typeof raw !== 'object' || Array.isArray(raw)) {
-    return { ok: false, message: '`passwords` must be an object of alias → password.' };
-  }
-
-  const passwords = {};
-  for (const [alias, value] of Object.entries(raw)) {
-    const key = String(alias || '').trim();
-    if (!key) continue;
-    if (typeof value !== 'string' || !value.trim()) continue;   // unsupplied, not empty
-    passwords[key] = value;
-  }
-  if (Object.keys(passwords).length === 0) {
-    return { ok: false, message: 'No usable password was supplied. Every value was empty.' };
-  }
-  return { ok: true, passwords };
-}
-
-// @route   GET /api/admin/admins/credential-handoff/preview
-// @desc    Who the hand-off would reach, and which of them are ready. The
-//          operator has to type a password per administrator, so they need to
-//          know which aliases exist and which have an authenticator key before
-//          they start typing — and NOT before they can see that one alias has no
-//          key in .env and would be silently skipped.
-// @access  Private (Admin)
-router.get('/admins/credential-handoff/preview', (req, res) => {
-  try {
-    const { configuredAdminEmails, configuredAdminAccounts } = require('../utils/adminAccounts');
-    const { DEFAULT_CREDENTIAL_UPDATE_DESCRIPTION } = require('../utils/email');
-
-    const accounts = new Map(configuredAdminAccounts().map((account) => [account.alias, account]));
-    const recipients = configuredAdminEmails();
-
-    res.json({
-      description: DEFAULT_CREDENTIAL_UPDATE_DESCRIPTION,
-      // Alias + address only. Whether an alias HAS a key is a boolean here; the
-      // key itself is never in a response, for the same reason the notice
-      // preview does not include one.
-      recipients: recipients.map(({ alias, email }) => ({
-        alias,
-        email,
-        hasTotpSecret: Boolean(accounts.get(alias) && String(accounts.get(alias).totpSecret || '').trim()),
-      })),
-      missingEmail: require('../utils/adminAccounts').adminAccountsMissingEmail(),
-      // Stated in the response so the UI can warn before the operator types six
-      // passwords: this sends live secrets.
-      carriesSecrets: true,
-      rotatesCredentials: false,
-      emailConfigured: Boolean(process.env.EMAIL_USER && process.env.EMAIL_PASSWORD),
-    });
-  } catch (error) {
-    console.error('[admin/credential-handoff/preview]', error.message);
-    res.status(500).json({ message: 'Unable to read the administrator address list.' });
-  }
-});
-
-// @route   POST /api/admin/admins/credential-handoff
-// @desc    Email every configured administrator their alias, password and
-//          authenticator key. Body: { passwords: { Alias: "..." } }.
-// @access  Private (Admin)
-router.post('/admins/credential-handoff', async (req, res) => {
-  const { handoffAdminCredentials } = require('../utils/adminCredentialHandoff');
-
-  const body = req.body || {};
-  // Same reasoning as the notice above: the recipient list is server-side config,
-  // so this endpoint must not be pointable at an arbitrary list. That would turn
-  // an admin-only route into an open relay carrying live passwords.
-  if (body.to !== undefined || body.recipients !== undefined) {
-    return res.status(400).json({ message: 'Recipients are configured on the server, not per request.' });
-  }
-
-  const supplied = readPasswordMap(body);
-  if (!supplied.ok) return res.status(400).json({ message: supplied.message });
-
-  const description = String(body.description || '').trim().slice(0, 400);
-
-  const elapsed = Date.now() - LAST_CREDENTIAL_HANDOFF_AT.at;
-  if (elapsed < CREDENTIAL_HANDOFF_COOLDOWN_MS) {
-    const retryAfter = Math.ceil((CREDENTIAL_HANDOFF_COOLDOWN_MS - elapsed) / 1000);
-    return res.status(429).json({
-      message: `Please wait ${Math.ceil(retryAfter / 60)} minute(s) before sending credentials again.`,
-      retryAfterSeconds: retryAfter,
-    });
-  }
-
-  try {
-    const report = await handoffAdminCredentials({
-      passwords: supplied.passwords,
-      description,
-      triggeredBy: (req.user && req.user.alias) || 'operator',
-    });
-
-    if (report.unconfigured) {
-      return res.status(400).json({
-        message: 'No administrator email addresses are configured. Add ADMIN_EMAILS to server/.env and restart the server.',
-        ...report,
-      });
-    }
-
-    // Consumed only once the send actually ran, so a rejected request does not
-    // lock the operator out of a hand-off they never made.
-    LAST_CREDENTIAL_HANDOFF_AT.at = Date.now();
-
-    const by = (req.user && req.user.alias) || 'an administrator';
-    // Aliases and counts only — never a password, a hash or a seed.
-    await AdminEvent.create({
-      type: 'security',
-      title: 'Administrator credentials sent by email',
-      detail: `${report.delivered.length} of ${report.recipients} delivered by ${by}.`
-        + (report.missingPassword.length ? ` No password supplied for: ${report.missingPassword.join(', ')}.` : '')
-        + (report.missingSecret.length ? ` No authenticator key for: ${report.missingSecret.join(', ')}.` : ''),
-    }).catch(() => {});
-
-    // 207: the batch ran and at least one address was rejected. A plain 200 here
-    // would let the console paint "sent to everyone" over a list where someone
-    // demonstrably has no password.
-    const partial = report.failed.length > 0;
-    res.status(partial ? 207 : 200).json({
-      message: partial
-        ? `Credentials sent to ${report.delivered.length} of ${report.recipients} administrator(s). ${report.failed.length} address(es) were rejected.`
-        : `Credentials sent to ${report.delivered.length} administrator(s).`,
-      ...report,
-    });
-  } catch (error) {
-    console.error('[admin/credential-handoff]', error.message);
-    res.status(500).json({ message: 'Unable to send the administrator credentials.' });
   }
 });
 
@@ -1119,11 +868,15 @@ async function applySubscriptionAction(req, { userId, action, options }) {
   );
 
   // Durable admin audit trail, independent of the per-user subscription log.
-  const who = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
   AdminEvent.create({
     type: 'subscription',
     title: `Subscription ${action}`,
-    detail: `${who} — ${PLAN_LABELS[state.currentPlan]} (${state.subscriptionDuration}), source ${state.subscriptionSource.toUpperCase()}.`,
+    // The plan change is the point; which member it belonged to is on the
+    // subscription queue the link opens. No name or email — see
+    // utils/memberPrivacy.js.
+    detail: `${PLAN_LABELS[state.currentPlan]} (${state.subscriptionDuration}), source ${state.subscriptionSource.toUpperCase()}.`,
+    link: 'subscriptions',
+    linkLabel: 'Open Subscription management',
   }).catch((auditError) => {
     // An audit row must never fail a change that already succeeded — but it must
     // never vanish silently either.
@@ -1331,7 +1084,16 @@ function notifyRequestOwner(request, user, approved, { planLabel, days, formatte
       + (note ? ` Note from the reviewer: ${note}` : '')
     : `We could not approve your ${planLabel} request.`
       + (note ? ` Reason given: ${note}` : ' Please check the payment receipt and try again, or contact support.');
-  return UserNotification.create({ user, type: 'info', title, detail })
+  // Plan / billing news belongs on the billing surface, not the assessment
+  // history the bell used to default to.
+  return UserNotification.create({
+    user,
+    type: 'info',
+    title,
+    detail,
+    link: approved ? '/profile?section=billing' : '/support',
+    linkLabel: approved ? 'View your plan' : 'Contact support',
+  })
     .catch((notifyError) => console.error('[admin/subscription-request] user notice', notifyError.message));
 }
 
@@ -1727,7 +1489,14 @@ function notifyCancelOwner(userId, { planLabel, approved, note }) {
       + (note ? ` Note from the reviewer: ${note}` : '')
     : `We did not cancel your ${planLabel} plan, so nothing has changed and your access continues.`
       + (note ? ` Reason given: ${note}` : '');
-  return UserNotification.create({ user: userId, type: 'info', title, detail })
+  return UserNotification.create({
+    user: userId,
+    type: 'info',
+    title,
+    detail,
+    link: approved ? '/profile?section=billing' : '/support',
+    linkLabel: approved ? 'View your plan' : 'Contact support',
+  })
     .catch((notifyError) => console.error('[admin/subscription-cancel] user notice', notifyError.message));
 }
 
@@ -3102,16 +2871,27 @@ router.get('/notifications', async (req, res) => {
         createdAt: new Date(),
         read: false,
         dismissible: false,
+        // A config warning is something an admin has to go and fix, so it
+        // redirects to the Security centre where the check is described.
+        link: 'security',
+        linkLabel: 'Open the Security center',
       }));
     const adminId = String(req.user._id);
-    const events = await AdminEvent.find().sort({ createdAt: -1 }).limit(30).lean();
+    // The admin stream is a queue of work for an operator, not a log of member
+    // activity. Anything that belongs to ONE member's own bell — a sign-in on
+    // a new device, for instance — is excluded here rather than in each writer,
+    // so a route that forgets to think about its audience cannot leak a member's
+    // security events into the console by default.
+    const events = await AdminEvent.find().sort({ createdAt: -1 }).limit(60).lean();
     // Read state is per-admin (readBy), so it is resolved here for the caller
     // rather than shipped as a raw array for every client to interpret.
-    const persisted = events.map(event => ({
-      ...event,
-      read: Array.isArray(event.readBy) && event.readBy.some(id => String(id) === adminId),
-      dismissible: true,
-    }));
+    const persisted = withLinks(events, adminLinkFor)
+      .filter(isAdminBellEvent)
+      .map(event => ({
+        ...scrubAdminEvent(event),
+        read: Array.isArray(event.readBy) && event.readBy.some(id => String(id) === adminId),
+        dismissible: true,
+      }));
     const unreadCount = [...security, ...persisted].filter(item => !item.read).length;
     res.json({ unreadCount, notifications: [...security, ...persisted] });
   } catch (error) {
@@ -3149,6 +2929,25 @@ router.post('/notifications/read-all', async (req, res) => {
   } catch (error) {
     console.error('[admin/notifications/read-all]', error.message);
     res.status(500).json({ message: 'Unable to mark notifications as read.' });
+  }
+});
+
+// @route   PATCH /api/admin/notifications/:id/read
+// @desc    Mark one admin notification as read
+// @access  Admin
+router.patch('/notifications/:id/read', async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid notification.' });
+    const event = await AdminEvent.findByIdAndUpdate(
+      req.params.id,
+      { $addToSet: { readBy: req.user._id } },
+      { new: true }
+    ).lean();
+    if (!event) return res.status(404).json({ message: 'Notification not found.' });
+    res.json({ notification: event });
+  } catch (error) {
+    console.error('[admin/notifications/:id/read]', error.message);
+    res.status(500).json({ message: 'Unable to mark notification as read.' });
   }
 });
 

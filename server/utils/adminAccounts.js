@@ -234,10 +234,10 @@ function parseAdminEmails(raw) {
  * by address, with a stable order.
  *
  * De-duplication matters because the value is hand-edited in .env and a
- * repeated pair would otherwise send the same admin two copies of a security
- * notice — which reads to the recipient as though something alarming happened
- * twice. Last value wins for a repeated alias, matching how a duplicated
- * environment variable behaves elsewhere in the boot sequence.
+ * repeated pair would otherwise resolve one administrator to the same mailbox
+ * twice — which overstates how many people a delivery actually reaches. Last
+ * value wins for a repeated alias, matching how a duplicated environment
+ * variable behaves elsewhere in the boot sequence.
  *
  * @param {NodeJS.ProcessEnv} [env] injectable for tests
  * @returns {Array<{alias: string, email: string}>}
@@ -251,37 +251,13 @@ function configuredAdminEmails(env = process.env) {
   const unique = [];
   for (const entry of byAlias.values()) {
     // Same address under two aliases is a shared mailbox, not two people.
-    // Dropping the duplicate keeps the send honest about how many people were
-    // actually reached; the caller reports the real recipient count.
+    // Dropping the duplicate keeps the list honest about how many people it
+    // actually names; the caller reports the real recipient count.
     if (seenAddresses.has(entry.email)) continue;
     seenAddresses.add(entry.email);
     unique.push(entry);
   }
   return unique;
-}
-
-/**
- * Aliases that are real admin accounts but have no usable address in
- * ADMIN_EMAILS.
- *
- * WHY THIS IS NOT DERIVABLE FROM THE OTHER TWO
- * --------------------------------------------
- * `configuredAdminAccounts` and `configuredAdminEmails` are independent lists,
- * and nothing else in the codebase compares them. Without this, an operator who
- * adds a fifth admin account and forgets the matching `alias=address` entry
- * gets a send that reports "4 delivered" and no indication that a fifth
- * person exists who was never told anything. The gap between the two lists is
- * the actual failure mode, so it is named rather than left for someone to spot
- * by eye.
- *
- * @param {NodeJS.ProcessEnv} [env] injectable for tests
- * @returns {string[]} aliases, in account order
- */
-function adminAccountsMissingEmail(env = process.env) {
-  const withEmail = new Set(configuredAdminEmails(env).map((entry) => entry.alias));
-  return configuredAdminAccounts(env)
-    .map((account) => account.alias)
-    .filter((alias) => !withEmail.has(alias));
 }
 
 /**
@@ -311,7 +287,6 @@ module.exports = {
   persistAdminPasswordToEnv,
   parseAdminEmails,
   configuredAdminEmails,
-  adminAccountsMissingEmail,
   ENTRY_SEPARATOR,
   ENV_PATH,
 };

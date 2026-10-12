@@ -106,6 +106,9 @@ async function notifyChainIncident(incident) {
           type: 'info',
           title: copyText.userTitle,
           detail: copyText.userDetail,
+          // Ledger news belongs on the ledger, not the assessment history.
+          link: '/web3',
+          linkLabel: 'View the blockchain ledger',
         })),
         { ordered: false } // one bad row must not abandon the rest of the batch
       );
@@ -124,6 +127,8 @@ async function notifyChainIncident(incident) {
       title: copyText.adminTitle,
       detail: copyText.adminDetail,
       user: null,
+      link: 'security',
+      linkLabel: 'Open the Security center',
     }));
     if (docs.length) await AdminEvent.insertMany(docs, { ordered: false });
     delivered.admins = docs.length;
@@ -178,6 +183,8 @@ async function notifyChainRecovered(incident) {
           type: 'info',
           title: 'Blockchain records verified healthy again',
           detail,
+          link: '/web3',
+          linkLabel: 'View the blockchain ledger',
         })),
         { ordered: false }
       );

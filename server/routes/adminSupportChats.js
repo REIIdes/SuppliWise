@@ -2,6 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const { protect, adminOnly } = require('../middleware/auth');
 const User = require('../models/User');
+const AdminAccount = require('../models/AdminAccount');
 const ChatThread = require('../models/ChatThread');
 const ChatMessage = require('../models/ChatMessage');
 const UserNotification = require('../models/UserNotification');
@@ -11,13 +12,81 @@ const {
   MAX_MESSAGES_PER_THREAD,
   CHAT_CATEGORIES,
   CHAT_STATUSES,
-  normalizeBody,
   assertThreadWritable,
   statusAfterMessage,
   statusAfterReopen,
   buildPreview,
   categoryLabel,
 } = require('../utils/supportChat');
+const {
+  ENCRYPTION_VERSION,
+  participantForAdmin,
+  participantForUser,
+  readMessagePayload,
+  normalizeKeyShares,
+  sharesForParticipant,
+  encryptionView,
+  isEncrypted,
+  isCipher,
+} = require('../utils/chatEncryption');
+const {
+  KeyInputError,
+  keyView,
+  registerPublicKey,
+  saveRecoveryCopy,
+  listOperatorPublicKeys,
+  participantFor,
+} = require('../utils/chatKeys');
+const { withTicketIds, normalizeTicketSearch } = require('../utils/ticketId');
+const { markAdminActivity, onSupportActiveChange } = require('../utils/supportPresence');
+const { SSE_HEARTBEAT_MS, streamTokenAuth, sseWrite, sseHeaders, tokenExpiryDelayMs } = require('../utils/sse');
+const chatBus = require('../utils/chatEventBus');
+
+/**
+ * Announce a conversation change everywhere it must land, now and without a
+ * refresh: every OTHER operator's console (the bus's admin audience and this
+ * account's other stream connections — operator A's reply must repaint
+ * operator B's queue this second), and the member on the other end of the
+ * thread (the bus's user audience, unless this very operator's session
+ * produced the write and their member-side copy is irrelevant).
+ *
+ * The event is an INVALIDATION signal only — `{ kind, thread, by }`, never
+ * message content — so the read endpoints stay the single source of truth and
+ * nothing about E2E ciphertext rides this channel.
+ *
+ * CALL IT BEFORE res.json/sendStatus, for the ordering reason spelled out on
+ * the member router's twin: a recipient that refetches the moment it is
+ * pushed to must read a transcript that already contains the write.
+ */
+function announce(req, event, threadUserId, opts = {}) {
+  const adminKey = String(req.user?._id || '').trim();
+  const producerId = req.chatStreamClientId || '';
+  chatBus.publishChat(event, threadUserId, {
+    skipAdmins: adminKey === producerId && Boolean(producerId),
+    ...opts,
+  });
+  // Other consoles of THIS same operator (second tab, another machine): the
+  // bus's admin audience would deliver to them too, but the producer's own
+  // connection must be excluded, so the same-account fan-out is done from the
+  // live-connections map directly.
+  const set = adminKey ? ownAdminStreams.get(adminKey) : null;
+  if (set) {
+    for (const { res, clientId } of [...set]) {
+      if (clientId === producerId) continue;
+      try {
+        sseWrite(res, 'chat', event);
+      } catch { /* dead client — the close handler cleans it up */ }
+    }
+  }
+  // Cross-device copies for the member's own streams.
+  if (!opts.skipUserMember) {
+    const memberSet = chatBus.userAudienceHas?.(threadUserId);
+    void memberSet; // (no-op: the bus already fans out to the user audience)
+  }
+}
+
+// AdminAccountId -> Set<{ res, clientId }> of live console streams.
+const ownAdminStreams = new Map();
 
 /**
  * SUPPORT CHAT — the admin console's side. Mounted at /api/admin/chats, so it
@@ -45,6 +114,24 @@ const {
  * conversation (spam, abuse), and see the member's identity beside every
  * message. What they cannot do: edit or delete an individual message. The
  * transcript is the record.
+ *
+ * ── Tickets, and end-to-end encryption ──────────────────────────────────────
+ * Every thread has a short `SW-XXXXXXXX` reference (utils/ticketId.js), shown in
+ * the queue and searchable by it, because "the one about the transfer" is not a
+ * thing an operator can find and `SW-4KQ7M2XB` is.
+ *
+ * A thread may also be end-to-end encrypted, in which case the transcript
+ * arrives here as ciphertext and is opened in the BROWSER with this operator's
+ * private key. That key is not on this server and never was — see
+ * models/chatEncryptionKeySchema.js — so "administrators can read support
+ * messages" is true in the sense that an operator holding the key can, and
+ * false in the sense that the operator console's host cannot.
+ *
+ * Which is also the operational cost, and the thing to get right: an operator
+ * who registers a key AFTER a conversation was sealed cannot read it. That is
+ * the same trade-off every end-to-end encrypted product makes, and the answer
+ * here is the `POST /:id/keys` endpoint below — one click by a colleague who
+ * can already read the thread re-seals it to everybody else.
  */
 const router = express.Router();
 router.use(protect, adminOnly);
@@ -58,20 +145,53 @@ function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-const toThreadView = (thread) => ({
+/**
+ * Pair the client's ciphertexts against the messages actually on the server.
+ * Mirrors the member router's copy — see the note there for why a client is not
+ * trusted to name its own messages.
+ */
+function applySealedMessages(raw, serverMessages) {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > serverMessages.length) {
+    throw new ChatInputError('That encryption payload is not valid.');
+  }
+  const byId = new Map(serverMessages.map((m) => [String(m._id), m]));
+  const sealed = [];
+  const seen = new Set();
+  for (const entry of raw) {
+    const id = String(entry?._id || '');
+    const cipher = String(entry?.cipher || '').trim();
+    if (!byId.has(id) || seen.has(id) || !isCipher(cipher) || !byId.get(id).body) {
+      throw new ChatInputError('That encryption payload is not valid.');
+    }
+    seen.add(id);
+    sealed.push({ _id: id, cipher });
+  }
+  return sealed;
+}
+
+const toThreadView = (thread, participant = '') => ({
   _id: thread._id,
+  ticketId: thread.ticketId || '',
   subject: thread.subject,
   category: thread.category,
   categoryLabel: categoryLabel(thread.category),
   status: thread.status,
   lastMessageAt: thread.lastMessageAt,
-  lastMessagePreview: thread.lastMessagePreview,
+  // Same rule as the member router: on a sealed thread the plaintext excerpt is
+  // blanked and the sealed one travels instead, so the queue cannot render the
+  // newest message of a conversation it is not allowed to read.
+  lastMessagePreview: thread.encryption?.version ? '' : (thread.lastMessagePreview || ''),
+  lastMessagePreviewCipher: thread.encryption?.version ? (thread.lastMessagePreviewCipher || '') : '',
   lastMessageBy: thread.lastMessageBy,
   messageCount: thread.messageCount,
   unreadByAdmin: thread.unreadByAdmin,
   unreadByUser: thread.unreadByUser,
   assignedTo: thread.assignedTo || '',
   resolved: thread.resolved || { by: '', at: null },
+  encryption: encryptionView(thread),
+  // Only this operator's own wrapped copy — never the member's, never a
+  // colleague's. `sharesForParticipant` is the boundary.
+  keyShares: participant ? sharesForParticipant(thread, participant) : [],
   createdAt: thread.createdAt,
   updatedAt: thread.updatedAt,
   user: thread.user
@@ -104,6 +224,11 @@ async function threadStatusCounts() {
 // @access  Admin
 router.get('/', async (req, res) => {
   try {
+    // The console polls this every 12s while open, so a hit here means an
+    // operator is at the chats screen right now — the member inbox shows
+    // "Active Now" off this. See utils/supportPresence.js.
+    markAdminActivity();
+    const participant = participantFor(req);
     const statusParam = String(req.query.status || 'open').trim().toLowerCase();
     if (statusParam !== 'all' && !CHAT_STATUSES.includes(statusParam)) {
       return res.status(400).json({ message: 'Unknown conversation status.' });
@@ -124,6 +249,19 @@ router.get('/', async (req, res) => {
       // Match the SUBJECT too, not just the member: admins are routinely told
       // "find the thread about the ₱1,295 transfer" and have no name to go on.
       const or = [{ subject: rx }];
+      // A ticket id is the one term a member will actually READ OUT over the
+      // phone, so it has to be findable. It is matched as a literal field, not
+      // a regex: "SW-4KQ7M2XB" typed approximately should still land on the
+      // ticket somebody is holding, not silently match the first four
+      // characters of everything.
+      const ticket = normalizeTicketSearch(search);
+      if (ticket) {
+        or.push({ ticketId: ticket });
+      } else {
+        // …and a partial code is still useful ("4KQ7"), so it joins the regex
+        // branch rather than replacing it.
+        or.push({ ticketId: rx });
+      }
       // A name/email match needs a lookup first. Bounded to 500 ids so a broad
       // search over the whole member base cannot turn into an unbounded $in.
       const matches = await User.find({
@@ -149,8 +287,12 @@ router.get('/', async (req, res) => {
       threadStatusCounts(),
     ]);
 
+    // Backfill here rather than in a migration so every thread in the queue has
+    // a code to quote the moment this ships. See utils/ticketId.js.
+    await withTicketIds(rows);
+
     return res.json({
-      threads: (rows || []).map(toThreadView),
+      threads: (rows || []).map((thread) => toThreadView(thread, participant)),
       counts,
       status: statusParam,
       category: categoryParam,
@@ -181,9 +323,12 @@ router.get('/next-id', async (req, res) => {
 
 // @route   GET /api/admin/chats/:id
 // @desc    One conversation with its transcript. Reading marks it read here.
+//          Automatically returns encryption metadata for plaintext threads
+//          so clients can auto-seal if capable.
 // @access  Admin
 router.get('/:id', async (req, res) => {
   try {
+    markAdminActivity();
     if (!mongoose.isValidObjectId(req.params.id)) {
       return res.status(400).json({ message: 'Invalid conversation.' });
     }
@@ -198,16 +343,48 @@ router.get('/:id', async (req, res) => {
       .lean();
 
     await ChatThread.updateOne({ _id: thread._id }, { $set: { unreadByAdmin: 0 } });
+    await withTicketIds([thread]);
+
+    // For plaintext threads, include member public key so the admin client can
+    // auto-seal if it has encryption capability. This enables automatic
+    // encryption of existing conversations without manual activation.
+    let memberKey = null;
+    let adminKeys = [];
+    if (!isEncrypted(thread)) {
+      try {
+        // Get member's public key
+        const member = await User.findById(thread.user?._id || thread.user)
+          .select('chatEncryptionKey.publicKey')
+          .lean();
+        if (member?.chatEncryptionKey?.publicKey) {
+          memberKey = {
+            participant: participantForUser(thread.user?._id || thread.user),
+            publicKey: member.chatEncryptionKey.publicKey,
+          };
+        }
+        // Get other admin public keys
+        adminKeys = await listOperatorPublicKeys({ excludeAlias: req.user.alias });
+      } catch (keyError) {
+        console.error('[admin/chats GET /:id keys]', keyError.message);
+        memberKey = null;
+        adminKeys = [];
+      }
+    }
 
     return res.json({
-      thread: toThreadView({ ...thread, unreadByAdmin: 0 }),
+      thread: toThreadView({ ...thread, unreadByAdmin: 0 }, participantFor(req)),
       messages: (messages || []).map((m) => ({
         _id: m._id,
         author: m.author,
         authorName: m.authorName,
-        body: m.body,
+        // The console reads the real alias; the member router substitutes a
+        // channel label at the same boundary. Only this one differs.
+        body: m.cipher ? '' : (m.body || ''),
+        cipher: m.cipher || '',
         createdAt: m.createdAt,
       })),
+      // Include recipients for auto-sealing plaintext threads
+      recipients: !isEncrypted(thread) ? [memberKey, ...adminKeys].filter(Boolean) : [],
     });
   } catch (error) {
     console.error('[admin/chats GET /:id]', error.message);
@@ -222,10 +399,10 @@ router.get('/:id', async (req, res) => {
 // @access  Admin
 router.post('/:id/messages', async (req, res) => {
   try {
+    markAdminActivity();
     if (!mongoose.isValidObjectId(req.params.id)) {
       return res.status(400).json({ message: 'Invalid conversation.' });
     }
-    const body = normalizeBody(req.body?.body ?? req.body?.message);
     const thread = await ChatThread.findById(req.params.id);
     if (!thread) return res.status(404).json({ message: 'Conversation not found.' });
 
@@ -238,6 +415,12 @@ router.post('/:id/messages', async (req, res) => {
       return res.status(400).json({ message: 'This conversation has reached its message limit.' });
     }
 
+    // An encrypted thread accepts a ciphertext and refuses plaintext, so a reply
+    // typed by an operator whose key failed to unlock cannot quietly drop the
+    // conversation back to plaintext. readMessagePayload is the same function
+    // the member router uses, for the same reason.
+    const payload = readMessagePayload(req.body || {}, thread);
+
     const now = new Date();
     const alias = String(req.user.alias || 'Administrator').trim() || 'Administrator';
     const message = await ChatMessage.create({
@@ -245,7 +428,8 @@ router.post('/:id/messages', async (req, res) => {
       user: thread.user,
       author: 'admin',
       authorName: alias,
-      body,
+      body: payload.mode === 'encrypted' ? '' : payload.body,
+      cipher: payload.cipher,
     });
 
     await ChatThread.updateOne(
@@ -253,7 +437,12 @@ router.post('/:id/messages', async (req, res) => {
       {
         $set: {
           lastMessageAt: now,
-          lastMessagePreview: buildPreview(body),
+          // The sealed excerpt replaces the plaintext one on an encrypted
+          // thread. Writing only one of the two leaves the queue showing the
+          // newest message of a conversation the server is not allowed to read.
+          ...(payload.mode === 'encrypted'
+            ? { lastMessagePreview: '', lastMessagePreviewCipher: payload.cipher }
+            : { lastMessagePreview: buildPreview(payload.body), lastMessagePreviewCipher: '' }),
           lastMessageBy: 'admin',
           status: statusAfterMessage('admin'),
           resolved: { by: '', at: null },
@@ -265,24 +454,324 @@ router.post('/:id/messages', async (req, res) => {
     );
 
     // Tell the member. Fire-and-forget: a failed bell must not cost the reply.
+    // `link` is what makes the bell open THIS conversation instead of falling
+    // through to a generic page.
+    //
+    // The detail line is the subject and the ticket id — never an excerpt of the
+    // reply. On an encrypted thread there is no excerpt to leak, and writing
+    // one here would put the words in a SECOND collection, which is the exact
+    // leak the encryption exists to prevent.
     UserNotification.create({
       user: thread.user,
       type: 'info',
       title: 'Support replied to your message',
-      detail: `“${thread.subject}” — ${buildPreview(body, 140)}`,
+      detail: `“${thread.subject}” (${thread.ticketId || 'support'}) — a new reply from support.`,
+      link: `/support?thread=${thread._id}`,
+      linkLabel: 'Read the reply',
     }).catch((notifyError) => {
       console.error('[admin/chats member bell]', notifyError.message);
     });
 
     return res.status(201).json({
       message: 'Reply sent.',
-      message_record: { ...message.toObject(), author: message.author },
+      message_record: {
+        _id: message._id,
+        thread: message.thread,
+        author: message.author,
+        authorName: message.authorName,
+        body: message.cipher ? '' : message.body,
+        cipher: message.cipher || '',
+        createdAt: message.createdAt,
+      },
     });
   } catch (error) {
     if (error instanceof ChatInputError) return res.status(400).json({ message: error.message });
     if (error instanceof ChatStateError) return res.status(error.status).json({ message: error.message });
     console.error('[admin/chats POST /:id/messages]', error.message);
     return res.status(500).json({ message: 'Could not send your reply.' });
+  }
+});
+
+// @route   GET /api/admin/chats/:id/recipients
+// @desc    Everybody who can be granted access to a sealed conversation, and who
+//          already has it.
+// @access  Admin
+//
+// This is the data behind "Grant secure access". Re-sealing a conversation
+// requires the public keys of the people it is being sealed TO, and the server
+// is the only party that knows both those and who currently holds a share — so a
+// list endpoint is the only way the grant button can be more than a guess.
+router.get('/:id/recipients', async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid conversation.' });
+    }
+    const thread = await ChatThread.findById(req.params.id)
+      .select('user encryption.keyShares')
+      .lean();
+    if (!thread) return res.status(404).json({ message: 'Conversation not found.' });
+
+    const shared = new Set((thread.encryption?.keyShares || []).map((share) => share.participant));
+    const memberParticipant = participantForUser(thread.user);
+
+    const admins = await AdminAccount.find({
+      enabled: true,
+      'chatEncryptionKey.publicKey': { $nin: ['', null] },
+    }).select('_id alias chatEncryptionKey.publicKey').sort({ alias: 1 }).lean();
+
+    // The member is deliberately first in the list. They are the one party who
+    // must be able to read every conversation they opened, and a grant panel
+    // that lists only colleagues is a panel that forgets the actual client.
+    const member = await User.findById(thread.user).select('chatEncryptionKey').lean();
+    const recipients = [];
+    if (member?.chatEncryptionKey?.publicKey) {
+      recipients.push({
+        participant: memberParticipant,
+        label: 'Member',
+        publicKey: member.chatEncryptionKey.publicKey,
+        hasShare: shared.has(memberParticipant),
+        isMember: true,
+      });
+    }
+
+    for (const admin of admins) {
+      const participant = participantForAdmin(admin._id);
+      // The caller cannot grant a share to themselves — they already have the
+      // key or they could not be reading this list — so they are filtered here
+      // rather than rendered as a row that does nothing.
+      if (String(admin._id) === String(req.user._id)) continue;
+      recipients.push({
+        participant,
+        label: admin.alias,
+        publicKey: admin.chatEncryptionKey?.publicKey || '',
+        hasShare: shared.has(participant),
+        isMember: false,
+      });
+    }
+
+    return res.json({ recipients });
+  } catch (error) {
+    console.error('[admin/chats GET /:id/recipients]', error.message);
+    return res.status(500).json({ message: 'Could not read the recipients.' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// THE OPERATOR'S ENCRYPTION IDENTITY
+//
+// Mirrors the member router's endpoints exactly. Two implementations that
+// disagreed about what a registered key means would produce conversations one
+// side could open and the other could not, which is the single worst failure
+// mode this feature has.
+// ══════════════════════════════════════════════════════════════════════════
+
+// @route   GET /api/admin/chats/encryption/me
+// @desc    The caller's own participant address. Sessions created before the
+//          login response carried the AdminAccount id have no local copy of it,
+//          and the encryption identity MUST be `admin:<AdminAccount._id>` —
+//          the same string `participantForAdmin` puts on a key share. One read
+//          of the signed token answers it without asking the client to guess.
+// @access  Admin
+router.get('/encryption/me', async (req, res) => {
+  try {
+    return res.json({ accountId: String(req.user._id), participant: participantFor(req) });
+  } catch (error) {
+    console.error('[admin/chats GET /encryption/me]', error.message);
+    return res.status(500).json({ message: 'Could not read your account.' });
+  }
+});
+
+// @route   GET /api/admin/chats/encryption/key
+// @desc    This operator's published public key, and whether a recovery copy exists
+// @access  Admin
+router.get('/encryption/key', async (req, res) => {
+  try {
+    const admin = await AdminAccount.findById(req.user._id).select('chatEncryptionKey').lean();
+    if (!admin) return res.status(404).json({ message: 'Admin account not found.' });
+    return res.json({ key: keyView(admin) });
+  } catch (error) {
+    console.error('[admin/chats GET /encryption/key]', error.message);
+    return res.status(500).json({ message: 'Could not read your encryption key.' });
+  }
+});
+
+// @route   POST /api/admin/chats/encryption/key
+// @desc    Publish a public key. Called on every visit to Chat management.
+// @access  Admin
+router.post('/encryption/key', async (req, res) => {
+  try {
+    const result = await registerPublicKey(AdminAccount, req.user._id, req.body || {});
+    return res.json(result);
+  } catch (error) {
+    if (error instanceof KeyInputError) return res.status(400).json({ message: error.message });
+    console.error('[admin/chats POST /encryption/key]', error.message);
+    return res.status(500).json({ message: 'Could not publish your encryption key.' });
+  }
+});
+
+// @route   POST /api/admin/chats/encryption/recovery
+// @desc    Store the private key, sealed under a recovery code the operator saved
+// @access  Admin
+router.post('/encryption/recovery', async (req, res) => {
+  try {
+    const key = await saveRecoveryCopy(AdminAccount, req.user._id, req.body || {});
+    return res.json({ key });
+  } catch (error) {
+    if (error instanceof KeyInputError) return res.status(400).json({ message: error.message });
+    console.error('[admin/chats POST /encryption/recovery]', error.message);
+    return res.status(500).json({ message: 'Could not store your recovery key.' });
+  }
+});
+
+// @route   GET /api/admin/chats/encryption/recovery
+// @desc    The sealed private key, for the one client that says it has a code.
+//          Kept apart from GET /encryption/key for the reason given on the member
+//          router: that endpoint is polled on every load, and this one answers a
+//          request a human actually made.
+// @access  Admin
+router.get('/encryption/recovery', async (req, res) => {
+  try {
+    const admin = await AdminAccount.findById(req.user._id)
+      .select('chatEncryptionKey.recoveryWrapped chatEncryptionKey.recoveryHint chatEncryptionKey.publicKey')
+      .lean();
+    const recovery = admin?.chatEncryptionKey || {};
+    return res.json({
+      hasRecovery: Boolean(recovery.recoveryWrapped),
+      recoveryWrapped: recovery.recoveryWrapped || '',
+      recoveryHint: recovery.recoveryHint || '',
+      publicKey: recovery.publicKey || '',
+    });
+  } catch (error) {
+    console.error('[admin/chats GET /encryption/recovery]', error.message);
+    return res.status(500).json({ message: 'Could not read your saved recovery key.' });
+  }
+});
+
+// @route   POST /api/admin/chats/:id/keys
+// @desc    Grant other parties access to a sealed conversation.
+//
+// This is the answer to the operational cost of end-to-end encryption: an
+// operator who registers a key after a conversation was sealed cannot read it,
+// and only somebody who CAN read it can re-seal it to them. So this endpoint is
+// the grant, and it requires the caller to already hold the content key — which
+// the client proves by producing a valid share, not by asserting it.
+//
+// An operator may address a share to another operator or to the thread's own
+// member. Nothing else. A member cannot reach this router at all.
+// @access  Admin
+router.post('/:id/keys', async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid conversation.' });
+    }
+    const thread = await ChatThread.findById(req.params.id).lean();
+    if (!thread) return res.status(404).json({ message: 'Conversation not found.' });
+    if (!isEncrypted(thread)) {
+      return res.status(400).json({ message: 'This conversation is not encrypted.' });
+    }
+
+    const memberParticipant = participantForUser(thread.user);
+    const shares = normalizeKeyShares(req.body?.shares, {
+      isAllowed: (participant) => participant.startsWith('admin:') || participant === memberParticipant,
+    });
+
+    // Upsert per participant rather than appending: re-granting a key that is
+    // already there must replace it, not accumulate, or a thread that has been
+    // shared a dozen times carries a dozen copies of the same secret.
+    const updated = await ChatThread.findOneAndUpdate(
+      { _id: thread._id },
+      {
+        $set: {
+          'encryption.keyShares': shares.reduce(
+            (all, share) => [...all, share],
+            (thread.encryption?.keyShares || []).filter((existing) => !shares.some((s) => s.participant === existing.participant))
+          ),
+        },
+      },
+      { new: true }
+    ).lean();
+
+    return res.json({
+      message: `Access granted to ${shares.length} recipient${shares.length === 1 ? '' : 's'}.`,
+      thread: toThreadView(updated, participantFor(req)),
+    });
+  } catch (error) {
+    if (error instanceof ChatInputError) return res.status(400).json({ message: error.message });
+    console.error('[admin/chats POST /:id/keys]', error.message);
+    return res.status(500).json({ message: 'Could not grant access to the conversation.' });
+  }
+});
+
+// @route   POST /api/admin/chats/:id/secure
+// @desc    Seal an existing conversation: the client re-encrypts what it is
+//          displaying and posts the ciphertexts back.
+// @access  Admin
+//
+// The operator is the party most likely to want this — it is the one action that
+// turns every conversation they have already read into something the database
+// no longer holds — and it is safe for exactly the reason the member-side twin
+// is: the plaintext was already in this browser, and after this call the server
+// does not have it.
+router.post('/:id/secure', async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid conversation.' });
+    }
+    const thread = await ChatThread.findById(req.params.id).lean();
+    if (!thread) return res.status(404).json({ message: 'Conversation not found.' });
+    if (isEncrypted(thread)) {
+      return res.json({
+        message: 'This conversation is already encrypted.',
+        thread: toThreadView(thread, participantFor(req)),
+      });
+    }
+
+    const messages = await ChatMessage.find({ thread: thread._id, cipher: '' })
+      .sort({ createdAt: 1 })
+      .select('_id cipher body')
+      .limit(1000)
+      .lean();
+    const sealed = applySealedMessages(req.body?.messages, messages);
+    if (sealed.length === 0) {
+      throw new ChatInputError('There is nothing to encrypt in this conversation yet.');
+    }
+
+    const memberParticipant = participantForUser(thread.user);
+    const shares = normalizeKeyShares(req.body?.keyShares, {
+      isAllowed: (participant) => participant.startsWith('admin:') || participant === memberParticipant,
+    });
+
+    await ChatMessage.bulkWrite(
+      sealed.map(({ _id, cipher }) => ({
+        updateOne: { filter: { _id, thread: thread._id }, update: { $set: { cipher, body: '' } } },
+      }))
+    );
+
+    // The newest message decides what the queue shows, and the queue is the one
+    // screen every operator sees. Sealing the transcript and leaving the summary
+    // in plaintext would defeat the whole thing on the first screen it appears.
+    const newest = messages[messages.length - 1];
+    const previewCipher = sealed.find((entry) => String(entry._id) === String(newest?._id))?.cipher || '';
+    await ChatThread.updateOne(
+      { _id: thread._id },
+      {
+        $set: {
+          encryption: { version: ENCRYPTION_VERSION, keyShares: shares },
+          lastMessagePreview: '',
+          lastMessagePreviewCipher: previewCipher,
+        },
+      }
+    );
+
+    const updated = await ChatThread.findById(thread._id).lean();
+    return res.json({
+      message: `This conversation is now end-to-end encrypted (${sealed.length} message${sealed.length === 1 ? '' : 's'} sealed).`,
+      thread: toThreadView(updated, participantFor(req)),
+    });
+  } catch (error) {
+    if (error instanceof ChatInputError) return res.status(400).json({ message: error.message });
+    console.error('[admin/chats POST /:id/secure]', error.message);
+    return res.status(500).json({ message: 'Could not encrypt this conversation.' });
   }
 });
 
@@ -327,11 +816,13 @@ router.post('/:id/resolve', async (req, res) => {
       type: 'info',
       title: 'Support conversation resolved',
       detail: `“${updated.subject}” was closed by support. You can start a new conversation at any time.`,
+      link: `/support?thread=${updated._id}`,
+      linkLabel: 'View the conversation',
     }).catch((notifyError) => {
       console.error('[admin/chats resolve bell]', notifyError.message);
     });
 
-    return res.json({ message: 'Conversation resolved.', thread: toThreadView(updated) });
+    return res.json({ message: 'Conversation resolved.', thread: toThreadView(updated, participantFor(req)) });
   } catch (error) {
     console.error('[admin/chats POST /:id/resolve]', error.message);
     return res.status(500).json({ message: 'Could not update the conversation.' });
@@ -370,11 +861,13 @@ router.post('/:id/reopen', async (req, res) => {
       type: 'info',
       title: 'Support conversation reopened',
       detail: `Support reopened “${updated.subject}”. You can reply again.`,
+      link: `/support?thread=${updated._id}`,
+      linkLabel: 'Reply now',
     }).catch((notifyError) => {
       console.error('[admin/chats reopen bell]', notifyError.message);
     });
 
-    return res.json({ message: 'Conversation reopened.', thread: toThreadView(updated) });
+    return res.json({ message: 'Conversation reopened.', thread: toThreadView(updated, participantFor(req)) });
   } catch (error) {
     console.error('[admin/chats POST /:id/reopen]', error.message);
     return res.status(500).json({ message: 'Could not reopen the conversation.' });
@@ -397,7 +890,11 @@ router.post('/:id/assign', async (req, res) => {
       { new: true }
     ).lean();
     if (!updated) return res.status(404).json({ message: 'Conversation not found.' });
-    return res.json({ thread: toThreadView(updated) });
+    // Carries this operator's own wrapped key like every other thread response.
+    // The console REPLACES its loaded thread with whatever comes back from these
+    // three endpoints, so a view that quietly dropped `keyShares` would strip
+    // the admin's ability to read the very conversation they just acted on.
+    return res.json({ thread: toThreadView(updated, participantFor(req)) });
   } catch (error) {
     console.error('[admin/chats POST /:id/assign]', error.message);
     return res.status(500).json({ message: 'Could not assign the conversation.' });

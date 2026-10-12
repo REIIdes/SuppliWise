@@ -3,10 +3,13 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import {
   isPasskeySupported,
+  getRecoveryCapabilities,
   recoverWithAuthenticator,
   recoverWithPasskey,
+  recoverWithPhoneCode,
   recoverWithRecoveryCode,
   requestPasswordReset,
+  requestPhoneReset,
   requestRecoveryEmailReset,
 } from '../api';
 import './PasswordReset.css';
@@ -146,6 +149,18 @@ const ALTERNATIVE_METHODS = [
     blurb: 'Send the link to the secondary address on your account instead.',
     needsEmail: true,
   },
+  {
+    id: 'phone',
+    label: 'Text message',
+    icon: 'phone',
+    blurb: 'We text a code to the phone number saved on your account.',
+    needsEmail: true,
+    // Only offered when the server can actually send. Without this the user
+    // picks it, is told — truthfully, because the answer must not reveal
+    // whether the account has a number — that a code is on its way, and waits
+    // for a message this deployment never sends.
+    requiresCapability: 'sms',
+  },
 ];
 
 /** Recovery codes are printed as XXXXX-XXXXX. */
@@ -207,11 +222,45 @@ function ForgotPassword() {
   const [recoveryNote, setRecoveryNote] = useState('');
 
   const passkeyAvailable = isPasskeySupported();
-  // Surfaced, not filtered. Whether an account HAS a passkey or codes is
-  // exactly the thing the server refuses to disclose — a list that silently
-  // dropped unavailable methods would turn the panel back into an enumeration
-  // oracle, and the client would learn a fact the API deliberately hides.
-  const availableMethods = ALTERNATIVE_METHODS;
+
+  // Deployment capability — NOT account state. This is the one filter that is
+  // safe here, and the distinction matters: nothing above says whether a given
+  // account has a passkey or recovery codes, because that is exactly what the
+  // server refuses to disclose and a list built from it would turn this panel
+  // back into an enumeration oracle. Whether the SERVER has an SMS provider
+  // configured is a property of the installation, identical for every caller,
+  // so hiding a method that physically cannot run leaks nothing.
+  const [capabilities, setCapabilities] = useState(null);
+  // Set when the capability call ITSELF failed, which is different from the
+  // server answering "no". The distinction decides whether a method is hidden:
+  //
+  //   • server said sms:false  -> hide. The method genuinely cannot run, and a
+  //     button that leads nowhere is worse than no button.
+  //   • the call FAILED       -> show. We do not know, and silently deleting a
+  //     working recovery route because a metadata call timed out would leave
+  //     someone who has lost their authenticator with fewer ways back in than
+  //     they started with. Failing open is the safer direction when the cost of
+  //     being wrong is an extra option rather than a locked-out account.
+  //   • still loading          -> hide, so the list does not flicker as it loads.
+  const [capabilitiesFailed, setCapabilitiesFailed] = useState(false);
+  useEffect(() => {
+    let live = true;
+    getRecoveryCapabilities()
+      .then((data) => { if (live) setCapabilities(data?.recoveryMethods || null); })
+      .catch(() => { if (live) setCapabilitiesFailed(true); });
+    return () => { live = false; };
+  }, []);
+
+  const availableMethods = ALTERNATIVE_METHODS.filter((m) => {
+    if (!m.requiresCapability) return true;
+    if (capabilitiesFailed) return true;
+    return capabilities?.[m.requiresCapability] === true;
+  });
+
+  // True once a text has actually been asked for. Turns the phone method from
+  // one click into two: request the code, then enter it. Without this the user
+  // would be shown a code field for a code nothing had been asked to send.
+  const [phoneCodeSent, setPhoneCodeSent] = useState(false);
 
   const trimmed = email.trim();
   const fieldProblem = trimmed ? emailProblem(email) : '';
@@ -290,6 +339,11 @@ function ForgotPassword() {
     setMethodError('');
     setRecoveryNote('');
     setSecret('');
+    // Switching away from — or back to — the phone method restarts it at step
+    // one. Carrying `phoneCodeSent` across a round trip would leave the user
+    // looking at a code field for a code that was asked for against a different
+    // address, or before the server had issued one at all.
+    setPhoneCodeSent(false);
   };
 
   /**
@@ -324,8 +378,11 @@ function ForgotPassword() {
       setMethodError('Enter a recovery code in the form XXXXX-XXXXX.');
       return;
     }
-    if (method === 'authenticator' && !/^\d{6,8}$/.test(secret.trim())) {
-      setMethodError('Enter the 6-digit code from your authenticator app.');
+    if ((method === 'authenticator' || (method === 'phone' && phoneCodeSent))
+      && !/^\d{6,8}$/.test(secret.trim())) {
+      setMethodError(method === 'phone'
+        ? 'Enter the 6-digit code we texted you.'
+        : 'Enter the 6-digit code from your authenticator app.');
       return;
     }
 
@@ -350,6 +407,21 @@ function ForgotPassword() {
       }
       if (method === 'authenticator') {
         const data = await recoverWithAuthenticator(trimmed, secret.trim());
+        continueToReset(data.resetToken);
+        return;
+      }
+      if (method === 'phone') {
+        // Two steps, and which one runs depends on whether a code was asked for.
+        // The answer is the same generic sentence either way — the server must
+        // not reveal whether this account has a number — so the only honest way
+        // to show progress is to say what we did, not what it found out.
+        if (!phoneCodeSent) {
+          const data = await requestPhoneReset(trimmed);
+          setPhoneCodeSent(true);
+          setRecoveryNote(data?.message || 'If that account has a verified phone number, we have sent a code to it.');
+          return;
+        }
+        const data = await recoverWithPhoneCode(trimmed, secret.trim());
         continueToReset(data.resetToken);
         return;
       }
@@ -548,12 +620,12 @@ function ForgotPassword() {
                 <form className="pwreset-alt-form" onSubmit={handleMethodSubmit} noValidate>
                   <div className="pwreset-field">
                     <label htmlFor="pwreset-secret">
-                      {method === 'recovery-code' ? 'Recovery code' : method === 'authenticator' ? 'Authenticator code' : 'Confirm with your passkey'}
+                      {method === 'recovery-code' ? 'Recovery code' : method === 'authenticator' ? 'Authenticator code' : method === 'phone' ? 'Text message code' : 'Confirm with your passkey'}
                     </label>
 
                     {/* The passkey has no text field at all — the button IS the
                         input, and the browser's own prompt does the rest. */}
-                    {method !== 'passkey' && (
+                    {method !== 'passkey' && (method !== 'phone' || phoneCodeSent) && (
                       <input
                         id="pwreset-secret"
                         name="secret"
@@ -566,10 +638,14 @@ function ForgotPassword() {
                         }}
                         placeholder={method === 'recovery-code' ? 'XXXXX-XXXXX' : '000000'}
                         autoComplete="one-time-code"
-                        inputMode={method === 'authenticator' ? 'numeric' : 'text'}
+                        inputMode={method === 'recovery-code' ? 'text' : 'numeric'}
                         maxLength={method === 'recovery-code' ? 11 : 8}
                         disabled={methodBusy}
-                        autoFocus
+                        // The phone method shows no field until a code has been
+                        // asked for, so focusing a hidden-input's target on
+                        // mount would scroll nowhere. Every other method starts
+                        // with its field visible.
+                        autoFocus={method !== 'phone' || phoneCodeSent}
                       />
                     )}
 
@@ -577,7 +653,16 @@ function ForgotPassword() {
                       <p className="pwreset-hint">
                         {method === 'recovery-code'
                           ? 'Each code works once. Using one here still lets you set a new password.'
-                          : 'Codes change every 30 seconds, so type the current one.'}
+                          : method === 'phone'
+                            // Step one has no field at all, so this is the only
+                            // guidance on screen. It states what was asked for
+                            // without claiming the code exists — the server's
+                            // answer is deliberately the same for an account that
+                            // has no number.
+                            ? (phoneCodeSent
+                              ? 'Enter the code we sent to the number on your account.'
+                              : 'We will ask the server to send a code to the number saved on your account.')
+                            : 'Codes change every 30 seconds, so type the current one.'}
                       </p>
                     )}
                   </div>
@@ -604,7 +689,12 @@ function ForgotPassword() {
                         ? 'Use my passkey'
                         : method === 'recovery-email'
                           ? 'Send to my backup email'
-                          : 'Continue'}
+                          : method === 'phone'
+                            // The button describes the step that is about to run,
+                            // not the method. After a code is requested it is
+                            // verifying one; before, it is asking for one.
+                            ? (phoneCodeSent ? 'Verify code' : 'Text me a code')
+                            : 'Continue'}
                   </button>
                 </form>
               )}

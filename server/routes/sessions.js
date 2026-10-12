@@ -56,6 +56,7 @@ const AUTH_METHOD_LABELS = {
   totp: 'Authenticator app',
   'backup-code': 'Recovery code',
   'email-otp': 'Emailed code',
+  'sms-otp': 'Text message',
   remember: 'Saved login',
 };
 

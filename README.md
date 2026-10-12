@@ -316,10 +316,8 @@ A separate identity space at `/admin`, guarded by `protect` + `adminOnly` and a 
 
 ### Administrator credential tooling
 
-- `npm run notify-admins` — a **secret-free** notice that stored credentials changed. Safe to re-run.
-- `npm run send-admin-credentials` — a **one-time hand-off** carrying alias, password and TOTP seed. Never scheduled.
-
-These are kept as two separate code paths rather than one with a flag, precisely so the recurring channel can never grow a password field.
+- No administrator password or authenticator key is ever emailed, by any channel, on any schedule.
+- An administrator who has lost theirs resets it from `/admin/login` — the reset code goes to the address in `ADMIN_EMAILS` and the password is set in the browser, never transmitted as a credential.
 
 ---
 
@@ -749,7 +747,7 @@ npm run dev
 ```
 ```
 Connected to MongoDB
-Server running on port 5000
+Server running on https://localhost:5000
 ```
 
 **Terminal 2 — Frontend:**
@@ -758,7 +756,7 @@ cd my-react-app
 npm run dev
 ```
 
-Open **http://localhost:5173** 🎉
+Open **https://localhost:5173** 🎉 when the local development certificate is installed. If you explicitly disabled dev HTTPS or have not generated the certificate yet, use **http://localhost:5173** instead.
 
 ### Testing on Mobile Devices
 
@@ -767,8 +765,8 @@ Open **http://localhost:5173** 🎉
    ```bash
    ipconfig     # Windows — look for "IPv4 Address" (e.g. 192.168.0.102)
    ```
-2. On your phone, go to `http://YOUR_IP:5173`
-3. Some browsers force HTTPS — you may need `https://` instead
+2. On your phone, go to `https://YOUR_IP:5173` when dev HTTPS is enabled, otherwise `http://YOUR_IP:5173`
+3. The frontend and backend must agree on scheme. If the browser reports a network or mixed-content error, check whether dev TLS is on before switching between `http://` and `https://`
 4. If passkeys or secure cookies misbehave on a LAN origin, set `ALLOW_LAN_ORIGINS=true` **in development only**
 
 **Installing PWA on Mobile:**
@@ -897,7 +895,7 @@ SuppliWise/
 │   │                                  # secretBox, authFlow, mfaTransaction, entitlements,
 │   │                                  # planCatalogue, subscriptionState, paymentInstructions,
 │   │                                  # aiProviders, email, pictures, device, geo, currency, ...
-│   ├── scripts/                       # notify-admins, send-admin-credentials, picture migration
+│   ├── scripts/                       # syntax gate, picture migration, account restore
 │   ├── Test File/                     # 45 server test files
 │   └── index.js                       # App, helmet, CORS, limiters, body metering, route mounting
 │

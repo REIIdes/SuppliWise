@@ -32,6 +32,10 @@ const rateLimits = require('../utils/rateLimits');
 // Generation, digest storage and atomic single-use consumption of emailed codes.
 // One module, so this flow cannot end up with a weaker policy than the others.
 const otpChallenge = require('../utils/otpChallenge');
+// SMS delivery, plus the eligibility rules that every read path shares so
+// "can this account use a text message?" is answered the same way everywhere.
+const sms = require('../utils/sms');
+const { normalizePhone, maskPhone } = require('../utils/phoneNumber');
 const { strongestFactor } = require('../utils/strongestFactor');
 const {
   accountKey, recordOffense, lockRemainingMs, recordAccountFailure, clearOffenses, lockMeta,
@@ -180,7 +184,7 @@ router.post('/step-up', sensitiveLimiter, async (req, res) => {
 router.get('/summary', async (req, res) => {
   try {
     const user = await User.findById(req.user._id)
-      .select('twoFactorEnabled twoFactorMethod twoFactorSecretEnc passwordChangedAt recoveryEmail recoveryEmailVerifiedAt')
+      .select('twoFactorEnabled twoFactorMethod twoFactorSecretEnc passwordChangedAt recoveryEmail recoveryEmailVerifiedAt phoneNumber phoneNumberVerifiedAt phoneNumberAsSecondFactor')
       .lean();
     if (!user) return res.status(404).json({ message: 'Account not found.' });
 
@@ -236,6 +240,21 @@ router.get('/summary', async (req, res) => {
       recoveryEmail: {
         address: user.recoveryEmail || null,
         verified: !!user.recoveryEmailVerifiedAt,
+      },
+      recoveryPhone: {
+        // Masked for the same reason the recovery email is reported by value:
+        // the owner knows their own number, and a security panel that echoes a
+        // full contact detail into a page is one more place it can leak from.
+        number: user.phoneNumber ? maskPhone(user.phoneNumber) : null,
+        verified: !!user.phoneNumberVerifiedAt,
+        // Whether this deployment can deliver at all. A CAPABILITY report the UI
+        // uses to avoid offering a button that cannot work — never an
+        // authorisation input.
+        available: sms.isConfigured(),
+        // Whether the number may stand in for a second factor at sign-in.
+        // Forced false when delivery is impossible, so the panel can never show
+        // an active setting the server would not honour.
+        asSecondFactor: sms.eligibleForSecondFactor(user),
       },
       backupCodes: { remaining: backupRemaining, total: BackupCode.CODE_COUNT },
       sessions: { trusted: trustedCount, active: activeCount },
@@ -412,6 +431,8 @@ router.post('/backup-codes/generate', sensitiveLimiter, requireStepUp, async (re
       await UserNotification.create({
         user: user._id, type: 'info', title: 'Backup codes generated',
         detail: 'New recovery codes were generated for your account. If you did not do this, change your password and contact support.',
+        link: '/profile?section=security',
+        linkLabel: 'Review your recovery codes',
       }).catch(() => {});
     } catch { /* best-effort */ }
 
@@ -460,7 +481,23 @@ router.delete('/backup-codes', sensitiveLimiter, requireStepUp, async (req, res)
 //
 // Format: { email, digest, expiresAt, attempts, maxAttempts }
 const recoveryEmailProofs = new Map();
-const RECOVERY_PROOF_TTL_MS = 15 * 60 * 1000;
+
+// Sweepers for the two proof stores below. A proof is removed when it is
+// verified, but a person who requests a code and walks away never verifies it —
+// so without a sweep, every abandoned request leaves an entry behind for the life
+// of the process. These run on write, so the stores stay bounded by the expiry
+// window rather than by uptime.
+const sweepEmailProofs = otpChallenge.createSweeper(recoveryEmailProofs);
+
+// ALIGNED WITH THE OTHER EMAILED CODES.
+//
+// This was 15 minutes while the login and email-change codes are 5, and the
+// client counted this one down from 5 — so the two sides disagreed by ten
+// minutes, in the direction that makes the UI give up while the server would
+// still have accepted the code. One window, published on the response, is the
+// only way the two stay in step.
+const RECOVERY_PROOF_TTL_MS = 5 * 60 * 1000;
+const RECOVERY_PROOF_TTL_SECONDS = RECOVERY_PROOF_TTL_MS / 1000;
 
 // Wrong codes allowed before the proof is destroyed.
 //
@@ -529,15 +566,35 @@ router.post('/recovery-email/request', sensitiveLimiter, requireStepUp, async (r
     // Only the digest is retained. The key encodes the account, so a proof can
     // never be presented by anyone other than the account it was issued to, and
     // the purpose is fixed by the route it was requested from.
-    recoveryEmailProofs.set(String(user._id), otpChallenge.buildEntry({
+    // THE STORE KEY AND THE HMAC CONTEXT MUST BE THE SAME STRING.
+    //
+    // This route stored the entry under the bare account id while building the
+    // digest with the `recovery_email_`-prefixed context. `consume()` verifies
+    // against an HMAC keyed by the STORE KEY, so those two disagreed and EVERY
+    // code came back `mismatch` — setting a recovery email was impossible, and
+    // the failure surfaced only as "That confirmation code is not correct.", the
+    // same message a genuinely wrong code produces. Nothing in the suite covered
+    // the happy path, so it went unnoticed.
+    //
+    // The key is namespaced so context and key are one value by construction.
+    // That fixes the flow and keeps the purpose separation the prefix was always
+    // meant to give: a code issued here cannot be presented to the phone route.
+    const proofKey = `recovery_email_${user._id}`;
+    recoveryEmailProofs.set(proofKey, otpChallenge.buildEntry({
       otp,
-      context: `recovery_email_${user._id}`,
+      context: proofKey,
       ttlMs: RECOVERY_PROOF_TTL_MS,
       maxAttempts: RECOVERY_PROOF_MAX_ATTEMPTS,
     }));
-    recoveryEmailProofs.get(String(user._id)).email = email;
+    recoveryEmailProofs.get(proofKey).email = email;
+    sweepEmailProofs();
 
-    res.json({ message: `We sent a confirmation code to ${email}.` });
+    res.json({
+      message: `We sent a confirmation code to ${email}.`,
+      // The window the server will enforce, so the client's countdown cannot
+      // disagree with it. Never the code itself.
+      expiresInSeconds: RECOVERY_PROOF_TTL_SECONDS,
+    });
   } catch (error) {
     console.error('[security/recovery-email/request]', error.message);
     res.status(500).json({ message: 'Could not send the confirmation code.' });
@@ -553,7 +610,7 @@ router.post('/recovery-email/request', sensitiveLimiter, requireStepUp, async (r
 router.post('/recovery-email/verify', sensitiveLimiter, async (req, res) => {
   try {
     const code = str(req.body?.code).trim();
-    const key = String(req.user._id);
+    const key = `recovery_email_${req.user._id}`;
     if (!recoveryEmailProofs.has(key)) {
       return res.status(400).json({ message: 'Request a new confirmation code.' });
     }
@@ -597,6 +654,8 @@ router.post('/recovery-email/verify', sensitiveLimiter, async (req, res) => {
       await UserNotification.create({
         user: user._id, type: 'info', title: 'Recovery email changed',
         detail: `Your recovery email was set to ${maskLocal(proofEmail)}. If this was not you, change your password and contact support immediately.`,
+        link: '/profile?section=security',
+        linkLabel: 'Review your account security',
       }).catch(() => {});
       if (process.env.EMAIL_USER && process.env.EMAIL_PASSWORD) {
         await sendStatusEmail(user.email, 'recovery-email', { address: maskLocal(proofEmail) }).catch(() => {});
@@ -622,7 +681,7 @@ router.delete('/recovery-email', sensitiveLimiter, requireStepUp, async (req, re
     user.recoveryEmail = '';
     user.recoveryEmailVerifiedAt = null;
     await user.save();
-    recoveryEmailProofs.delete(String(req.user._id));
+    recoveryEmailProofs.delete(`recovery_email_${req.user._id}`);
 
     await SecurityEvent.write({
       user: user._id, type: 'recovery-email-changed', success: true,
@@ -632,6 +691,255 @@ router.delete('/recovery-email', sensitiveLimiter, requireStepUp, async (req, re
   } catch (error) {
     console.error('[security/recovery-email DELETE]', error.message);
     res.status(500).json({ message: 'Could not remove your recovery email.' });
+  }
+});
+
+// ── Recovery phone ──────────────────────────────────────────────────────────
+//
+// Structurally the same three routes as the recovery email above, and kept
+// deliberately parallel so there is one shape to learn and one shape to audit.
+//
+// WHAT IS DIFFERENT, AND WHY
+// --------------------------
+//   • The number is normalised to E.164 before anything else happens, and is
+//     re-validated at the point of USE inside utils/sms.js. A value that is not
+//     a canonical number cannot become an outgoing message, whatever is stored.
+//   • The candidate number is NOT saved when the code is requested, only when it
+//     is verified. An unverified number is inert — see models/User.js.
+//   • Removing it also revokes its second-factor opt-in, because leaving that
+//     set on an account with no number would be a flag claiming protection the
+//     account does not have.
+//
+// The proof store holds an HMAC digest and never the code, exactly as the email
+// proof store does.
+const recoveryPhoneProofs = new Map();
+// Declared after the store itself: createSweeper() closes over the Map, so
+// initialising it above this declaration would hit the temporal dead zone and
+// crash the whole server at require time.
+const sweepPhoneProofs = otpChallenge.createSweeper(recoveryPhoneProofs);
+
+// Same window as every other code in the application, published on the response
+// so the client countdown cannot disagree with the server.
+const PHONE_PROOF_TTL_MS = 5 * 60 * 1000;
+const PHONE_PROOF_TTL_SECONDS = PHONE_PROOF_TTL_MS / 1000;
+const PHONE_PROOF_MAX_ATTEMPTS = otpChallenge.MAX_ATTEMPTS;
+
+// @route   POST /api/security/recovery-phone/request
+// @desc    Text a confirmation code to a candidate phone number. Nothing is
+//          stored until that code comes back, and it can never be used to sign
+//          in on its own.
+// @access  Private + step-up
+router.post('/recovery-phone/request', sensitiveLimiter, requireStepUp, async (req, res) => {
+  try {
+    const candidate = normalizePhone(req.body?.phoneNumber);
+    if (!candidate) {
+      return res.status(400).json({
+        message: 'Enter a valid phone number with its country code, for example +44 7700 900123.',
+      });
+    }
+
+    // Refused outright when this deployment cannot deliver. Better a clear
+    // answer here than a user typing their number twice to no effect.
+    if (!sms.isConfigured()) {
+      return res.status(503).json({
+        message: 'Text messages are not set up on this server yet. Please use another way to recover your account.',
+      });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: 'Account not found.' });
+    if (candidate === user.phoneNumber && user.phoneNumberVerifiedAt) {
+      return res.status(409).json({ message: 'That phone number is already verified.' });
+    }
+
+    // Deliver BEFORE answering, for the same reason /recovery-email/request
+    // does: a code the user never receives must not be announced as sent, and
+    // must not be left behind as a "pending" proof nothing can complete.
+    const code = otpChallenge.generateOtp();
+    const delivered = await sms.sendSms({
+      to: candidate,
+      body: sms.verificationBody(code),
+      purpose: 'phone-verification',
+    });
+    if (!delivered.ok) {
+      console.error(`[security/recovery-phone] delivery failed for ${str(req.user._id).slice(0, 8)}…: ${delivered.reason}`);
+      // The message distinguishes a gateway that will keep failing (no credit,
+      // no signal) from one worth retrying, so the user is not sent round in
+      // circles by advice that cannot possibly work.
+      return res.status(503).json({ message: sms.failureMessage(delivered.reason) });
+    }
+
+    // THE STORE KEY AND THE HMAC CONTEXT MUST BE THE SAME STRING.
+    //
+    // `otpChallenge.consume(store, key, code)` verifies against an HMAC built
+    // with `key` as the context, so an entry created with a different context
+    // can never match — every submission comes back `mismatch`. The key is
+    // therefore namespaced here so context and key are one value by
+    // construction, which also gives the purpose separation this prefix was
+    // always meant to provide: a code issued for the recovery phone cannot be
+    // presented to the recovery-email route, or to any other flow.
+    const proofKey = `recovery_phone_${user._id}`;
+    recoveryPhoneProofs.set(proofKey, otpChallenge.buildEntry({
+      otp: code,
+      context: proofKey,
+      ttlMs: PHONE_PROOF_TTL_MS,
+      maxAttempts: PHONE_PROOF_MAX_ATTEMPTS,
+    }));
+    // The candidate travels on the proof entry, not on the user document, so it
+    // is captured only by whoever can also read the digest.
+    recoveryPhoneProofs.get(proofKey).phoneNumber = candidate;
+    // Swept on write: a proof whose code is never entered would otherwise stay
+    // for the life of the process.
+    sweepPhoneProofs();
+
+    res.json({
+      message: `We sent a confirmation code to ${maskPhone(candidate)}.`,
+      expiresInSeconds: PHONE_PROOF_TTL_SECONDS,
+    });
+  } catch (error) {
+    console.error('[security/recovery-phone/request]', error.message);
+    res.status(500).json({ message: 'Could not send the confirmation code.' });
+  }
+});
+
+// @route   POST /api/security/recovery-phone/verify
+// @desc    Confirm the candidate number and activate it.
+// @access  Private
+router.post('/recovery-phone/verify', sensitiveLimiter, async (req, res) => {
+  try {
+    const code = str(req.body?.code).trim();
+    const key = `recovery_phone_${req.user._id}`;
+    if (!recoveryPhoneProofs.has(key)) {
+      return res.status(400).json({ message: 'Request a new confirmation code.' });
+    }
+
+    // Verify AND consume, atomically — `consume()` has no await between its
+    // check and its delete, so two concurrent submissions of one valid code
+    // cannot both win, and it enforces the attempt budget on the challenge
+    // itself rather than relying on an IP limiter.
+    const verdict = otpChallenge.consume(recoveryPhoneProofs, key, code);
+    if (!verdict.ok) {
+      if (verdict.outcome === 'locked') {
+        return res.status(429).json({ message: 'Too many incorrect codes. Request a new confirmation code.' });
+      }
+      // expired / missing / malformed / mismatch share one answer.
+      return res.status(400).json({ message: 'That confirmation code is not correct.' });
+    }
+    const { phoneNumber: candidate } = verdict.entry;
+
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: 'Account not found.' });
+
+    user.phoneNumber = candidate;
+    user.phoneNumberVerifiedAt = new Date();
+    await user.save();
+
+    await SecurityEvent.write({
+      user: user._id, type: 'recovery-phone-changed', success: true,
+      ip: req.ip, userAgent: req.get('user-agent'), reason: 'Recovery phone verified',
+    });
+
+    // Always notify the PRIMARY mailbox. A silent change here is the one thing an
+    // attacker holding a live session could do without the owner noticing — and
+    // the owner is the one who can tell it happened.
+    try {
+      const UserNotification = require('../models/UserNotification');
+      await UserNotification.create({
+        user: user._id, type: 'info', title: 'Recovery phone changed',
+        detail: `Your recovery phone was set to ${maskPhone(candidate)}. If this was not you, change your password and contact support immediately.`,
+        link: '/profile?section=security',
+        linkLabel: 'Review your account security',
+      }).catch(() => {});
+      if (process.env.EMAIL_USER && process.env.EMAIL_PASSWORD) {
+        await sendStatusEmail(user.email, 'recovery-email', { address: maskPhone(candidate) }).catch(() => {});
+      }
+    } catch { /* best-effort */ }
+
+    res.json({
+      message: 'Recovery phone verified.',
+      recoveryPhone: { number: maskPhone(candidate), verified: true, asSecondFactor: false },
+    });
+  } catch (error) {
+    console.error('[security/recovery-phone/verify]', error.message);
+    res.status(500).json({ message: 'Could not verify that code.' });
+  }
+});
+
+// @route   PATCH /api/security/recovery-phone/second-factor
+// @desc    Allow, or stop, a verified number standing in as a second factor at
+//          sign-in. Separate from having the number, because the two carry
+//          different risk: a recovery route is used when access is already lost,
+//          whereas this one hands a swapped SIM a way past an authenticator on
+//          every ordinary sign-in.
+// @access  Private + step-up
+router.patch('/recovery-phone/second-factor', sensitiveLimiter, requireStepUp, async (req, res) => {
+  try {
+    const enabled = req.body?.enabled;
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({ message: 'Send enabled as true or false.' });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: 'Account not found.' });
+
+    // The opt-in is meaningless without a number that actually works, and this
+    // is the one place that could otherwise let an account set the flag and
+    // never be able to use it.
+    if (enabled === true && !sms.isEligible(user)) {
+      return res.status(400).json({
+        message: 'Verify a working phone number first.',
+      });
+    }
+
+    user.phoneNumberAsSecondFactor = enabled === true;
+    await user.save();
+
+    await SecurityEvent.write({
+      user: user._id, type: 'recovery-phone-changed', success: true,
+      ip: req.ip, userAgent: req.get('user-agent'),
+      reason: enabled === true
+        ? 'Phone enabled as an alternative second factor'
+        : 'Phone disabled as a second factor',
+    });
+
+    res.json({
+      message: enabled === true
+        ? 'Your phone can now be used as an alternative second factor.'
+        : 'Your phone will no longer be offered as a second factor.',
+      asSecondFactor: user.phoneNumberAsSecondFactor === true,
+    });
+  } catch (error) {
+    console.error('[security/recovery-phone/second-factor]', error.message);
+    res.status(500).json({ message: 'Could not update that setting.' });
+  }
+});
+
+// @route   DELETE /api/security/recovery-phone
+// @desc    Remove the recovery phone AND its second-factor opt-in. Requires
+//          step-up.
+// @access  Private + step-up
+router.delete('/recovery-phone', sensitiveLimiter, requireStepUp, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: 'Account not found.' });
+    if (!user.phoneNumber) return res.status(409).json({ message: 'No recovery phone is set.' });
+
+    user.phoneNumber = '';
+    user.phoneNumberVerifiedAt = null;
+    // Cleared with the number: an opt-in pointing at nothing is a flag claiming
+    // protection the account no longer has.
+    user.phoneNumberAsSecondFactor = false;
+    await user.save();
+    recoveryPhoneProofs.delete(`recovery_phone_${req.user._id}`);
+
+    await SecurityEvent.write({
+      user: user._id, type: 'recovery-phone-changed', success: true,
+      ip: req.ip, userAgent: req.get('user-agent'), reason: 'Recovery phone removed',
+    });
+    res.json({ message: 'Recovery phone removed.' });
+  } catch (error) {
+    console.error('[security/recovery-phone DELETE]', error.message);
+    res.status(500).json({ message: 'Could not remove your recovery phone.' });
   }
 });
 

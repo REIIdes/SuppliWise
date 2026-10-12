@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { changePassword, getSecuritySummary, setTwoFactorMethod } from '../../api';
 import StepUpDialog from './StepUpDialog';
-import { BackupCodesCard, RecoveryEmailCard } from './RecoveryPanel';
+import { BackupCodesCard, RecoveryEmailCard, RecoveryPhoneCard } from './RecoveryPanel';
 import SessionActivity from './SessionActivity';
 import PasskeyPanel from './PasskeyPanel';
 import './ProfileSecurityControls.css';
@@ -452,6 +452,7 @@ export default function ProfileSecurityControls({
         onRetry={refreshSummary}
       />
       <RecoveryEmailCard summary={summary} onRequireStepUp={requireStepUp} onChanged={refreshSummary} />
+      <RecoveryPhoneCard summary={summary} onRequireStepUp={requireStepUp} onChanged={refreshSummary} />
 
       {/* ── Sessions & Activity ─────────────────────────────────────────── */}
       <SessionActivity onRequireStepUp={requireStepUp} onChanged={refreshSummary} />

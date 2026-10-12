@@ -24,6 +24,14 @@ const adminEventSchema = new mongoose.Schema({
   // Deep-link targets for interactable notifications
   assessmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Assessment', default: null },
   linkUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  // Console tab this event belongs to, written by the route that raises it.
+  // The admin bell deep-links on this, so a "support-chat" event opens Chat
+  // management and a "subscription-request" opens Subscription management,
+  // instead of everything defaulting to the overview. Mirrors the `tab` ids in
+  // my-react-app/src/Pages/AdminDashboard.jsx.
+  link: { type: String, default: '' },
+  // Label for the redirect button; the client supplies a default when blank.
+  linkLabel: { type: String, default: '' },
 }, { timestamps: true });
 
 // Admin panels sort/filter events by recency and type

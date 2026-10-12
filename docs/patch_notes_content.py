@@ -1278,40 +1278,15 @@ A(p("The current-administrator check matches on alias rather than identifier, be
     "endpoint does not return an identifier. Disabling your own account is not offered, the "
     "server refuses it, and the server also refuses to disable the last enabled administrator."))
 
-A(h3("Credential-update notice - secret-free (NEW)"))
-A(p("A recurring email telling every configured administrator that the stored form of their "
-    "credentials changed. It deliberately carries no password and no authenticator key, because "
-    "this project's real seeds were once committed to a public repository."))
+A(h3("Administrator credentials are never emailed"))
+A(p("There is no console button, npm script or route that puts an administrator's password or "
+    "authenticator key into a message. `ADMIN_EMAILS` carries account-status mail and the "
+    "password reset/change confirmations, and nothing else."))
 A(bullets(
-    "A preview endpoint returns the exact sentence and the exact recipient list before anything "
-    "is sent.",
-    "The send endpoint enforces a sixty-second cooldown, caps the description at 400 characters, "
-    "refuses a caller-supplied recipient list - which would otherwise make it an open relay with "
-    "an audit trail pointing at whoever pressed the button - and answers 207 Multi-Status on "
-    "partial delivery.",
-    "The console reports delivered, failed and missing-address lists."))
-
-A(h3("One-time credential hand-off - carries secrets, kept separate (NEW)"))
-A(p("Emails each administrator their own alias, password and authenticator key exactly once. It "
-    "is a separate endpoint, module and cooldown from the recurring notice, precisely so that "
-    "nothing can widen what the recurring notice is able to send."))
-A(bullets(
-    "The preview returns booleans describing whether a key exists, never the seed itself.",
-    "The send endpoint enforces a ten-minute cooldown, rejects caller-supplied recipients, and "
-    "answers 207 on partial delivery.",
-    "The password map accessor returns only aliases and a count. Values are never logged, echoed "
-    "in an error, or written to an audit row.",
-    "Passwords are not trimmed, because leading and trailing spaces are characters the "
-    "administrator chose; an all-whitespace value is reported as not filled in.",
-    "Aliases with no configured authenticator key are blocked before the operator types "
-    "anything.",
-    "Sends are sequential rather than concurrent.",
-    "The dialog opens with empty password state every time and clears it unconditionally on "
-    "close."))
-A(files("my-react-app/src/Pages/AdminDashboard.jsx",
-        "server/utils/adminAccounts.js",
-        "server/utils/adminCredentialNotice.js",
-        "server/utils/adminCredentialHandoff.js"))
+    "A lost administrator password is recovered through the same reset-code flow as a user "
+    "account, so the plaintext is never transmitted, logged or recoverable.",
+    "The Admins panel therefore has no outbound-mail controls at all: the only administrator "
+    "rows it shows are enable/disable and clear-lockout."))
 
 A(h2("4.6 Subscription management"))
 
@@ -1810,22 +1785,14 @@ A(h2("5.5 Operational scripts"))
 A(table(
     ["Script", "Purpose"],
     [
-        ["notify-admins", "The recurring credential-change notice, runnable without a database or "
-                          "a running server, with a dry-run mode and distinct exit codes for "
-                          "full success, partial delivery and nothing sent"],
-        ["send-admin-credentials", "The one-time secret hand-off. Passwords are passed as "
-                                   "arguments rather than packed into a delimiter-joined string, "
-                                   "because a real password may contain the delimiters"],
         ["migrate-pictures-to-disk", "A one-off, idempotent migration of inline base64 profile and "
-                                     "banner images out of the database and onto disk, with a "
-                                     "dry-run mode"],
+                                      "banner images out of the database and onto disk, with a "
+                                      "dry-run mode"],
         ["restore-lost-account", "Post-incident account restoration that preserves the original "
-                                 "identifier so already-written image filenames remain valid"],
+                                  "identifier so already-written image filenames remain valid"],
     ],
     [4, 8]))
-A(files("server/scripts/notify-admins.js",
-        "server/scripts/send-admin-credentials.js",
-        "server/scripts/migrate-pictures-to-disk.js",
+A(files("server/scripts/migrate-pictures-to-disk.js",
         "server/scripts/restore-lost-account.js"))
 
 # === 6. Security programme ================================================
@@ -1968,7 +1935,7 @@ A(bullets(
     "The client password checklist is asserted rule-by-rule against the server policy.",
     "A test database guard refuses to run destructive tests against the application database - "
     "it exists because an earlier harness version dropped the live data.",
-    "The administrator credential hand-off tests assert that a password rewrite touches only the "
+    "The administrator password tests assert that a `.env` rewrite touches only the "
     "named entry, leaves neighbours byte-identical, and that a rebuild after a change restores "
     "the chosen password.",
     "The priority override suite covers concurrency, prototype pollution, direct-object reference "
@@ -2058,7 +2025,7 @@ A(table(
         ["AI control", "server/utils/aiProviders.js, envFile.js, server/routes/admin.js"],
         ["Security programme", "server/utils/securityAudit.js, attack_probes.js, lockout.js, floodGuard.js, password.js, passwordRules.js, totp.js, my-react-app/src/utils/securityReport.js"],
         ["Mobile and PWA", "my-react-app/public/manifest.json, vite.config.js, capacitor.config.json, android/, src/Components/PWAInstallPrompt.jsx"],
-        ["Operational scripts", "server/scripts/ (notify-admins, send-admin-credentials, migrate-pictures-to-disk, restore-lost-account)"],
+        ["Operational scripts", "server/scripts/ (migrate-pictures-to-disk, restore-lost-account)"],
         ["Test harnesses", "server/Test File/ (44 files, 6 harnesses), my-react-app/src/**/*.test.js (9 files)"],
         ["Manuals", "docs/USER_MANUAL.md, docs/USER_GUIDE.md, docs/DEVELOPER_MANUAL.md, docs/DEVELOPER_GUIDE.md"],
     ],

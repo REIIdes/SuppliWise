@@ -123,6 +123,20 @@ async function anchor(type, actor, { public: pub = null, secret = null }) {
   }
 }
 
+// Anchor several txs as ONE block. Same never-throws contract as anchor(), and
+// the returned `txs[i]` corresponds to `entries[i]`. A route that commits N
+// facts in one request (e.g. minting every eligible achievement) pays one
+// ledger append instead of N — serialized appends were the round-trip
+// bottleneck under concurrent checks.
+async function anchorMany(entries) {
+  try {
+    return await ledger.append(entries);
+  } catch (err) {
+    console.error('[web3 anchorMany]', err.message);
+    return { index: -1, hash: '', txs: entries.map(() => '') };
+  }
+}
+
 // ── Wallets / decentralized identity (feature 5) ──────────────────────────
 async function ensureSystemWallets() {
   for (const sys of SYSTEM_WALLETS) {
@@ -390,6 +404,7 @@ module.exports = {
   assertParamValue,
   setParam,
   anchor,
+  anchorMany,
   ensureSystemWallets,
   ensureWalletForUser,
   getWalletDoc,

@@ -1,0 +1,309 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   NOTIFICATION ACCENTS — the one place hue is decided.
+
+   Both bells used to keep their own private palette: the member panel was green
+   and grey, the admin panel orange and grey, and neither knew what the other
+   did. A support reply looked different in each console, and neither matched
+   the icon that was supposed to tell you what it was.
+
+   One family per KIND, declared once here, read by both. `--nk-*` names are
+   prefixed so they cannot collide with a page that already owns `--accent` or
+   `--primary`.
+
+   ── How the hues are chosen ────────────────────────────────────────────────
+
+   Every family needs four values, and each answers a different question:
+
+     --nk-ink      the icon and rail.        saturated, never used as text
+     --nk-bg       the icon tile / wash.     very light tint of the hue
+     --nk-text     the label on that tint.  ≥4.5:1 against --nk-bg
+     --nk-glow     the unread dot, badge.   saturated
+
+   The split matters: colour is allowed to be VIBRANT where it is decoration
+   (a tile, a rail, a dot) and is deliberately NOT allowed to be vibrant where
+   it is read (the message text is always `--nd-ink`). Saturated text on white
+   is how a "vibrant" redesign quietly destroys legibility — so here, vibrance
+   and contrast are separated by role rather than traded off.
+
+   Hues are spaced far apart in the wheel (indigo / amber / rose / violet / cyan
+   / teal / sky) so a glance can name the family without reading the label, and
+   no two adjacent rows in a panel are the same hue.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.nd-root {
+  /* Support — a conversation with a person. */
+  --nk-support-ink: #6366f1;
+  --nk-support-bg: #eef2ff;
+  --nk-support-text: #3730a3;
+
+  /* Security — account safety. */
+  --nk-security-ink: #d97706;
+  --nk-security-bg: #fff7ed;
+  --nk-security-text: #9a3412;
+
+  /* Health — a priority review. The one family that must feel urgent. */
+  --nk-health-ink: #e11d48;
+  --nk-health-bg: #fff1f2;
+  --nk-health-text: #9f1239;
+
+  /* Assessment — a record, not a concern. */
+  --nk-assessment-ink: #0891b2;
+  --nk-assessment-bg: #ecfeff;
+  --nk-assessment-text: #155e75;
+
+  /* Billing — plans and money. */
+  --nk-billing-ink: #7c3aed;
+  --nk-billing-bg: #f5f3ff;
+  --nk-billing-text: #5b21b6;
+
+  /* Chain — the ledger. */
+  --nk-chain-ink: #0891b2;
+  --nk-chain-bg: #cffafe;
+  --nk-chain-text: #155e75;
+
+  /* Account — who somebody is, not whether they are safe. */
+  --nk-account-ink: #0d9488;
+  --nk-account-bg: #f0fdfa;
+  --nk-account-text: #115e59;
+
+  /* Anything with no family of its own. */
+  --nk-info-ink: #2563eb;
+  --nk-info-bg: #eff6ff;
+  --nk-info-text: #1e40af;
+}
+
+/* Bind the four values above to one set of working names, so a row only ever
+   says `--nk-ink` and the family is chosen once in a class. Setting them on the
+   same selector as the tokens would redeclare them; this is the indirection. */
+.nd-root,
+.nd-kind-support { --nk-ink: var(--nk-support-ink); --nk-bg: var(--nk-support-bg); --nk-text: var(--nk-support-text); }
+.nd-kind-security { --nk-ink: var(--nk-security-ink); --nk-bg: var(--nk-security-bg); --nk-text: var(--nk-security-text); }
+.nd-kind-health { --nk-ink: var(--nk-health-ink); --nk-bg: var(--nk-health-bg); --nk-text: var(--nk-health-text); }
+.nd-kind-assessment { --nk-ink: var(--nk-assessment-ink); --nk-bg: var(--nk-assessment-bg); --nk-text: var(--nk-assessment-text); }
+.nd-kind-billing { --nk-ink: var(--nk-billing-ink); --nk-bg: var(--nk-billing-bg); --nk-text: var(--nk-billing-text); }
+.nd-kind-chain { --nk-ink: var(--nk-chain-ink); --nk-bg: var(--nk-chain-bg); --nk-text: var(--nk-chain-text); }
+.nd-kind-account { --nk-ink: var(--nk-account-ink); --nk-bg: var(--nk-account-bg); --nk-text: var(--nk-account-text); }
+.nd-kind-info { --nk-ink: var(--nk-info-ink); --nk-bg: var(--nk-info-bg); --nk-text: var(--nk-info-text); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SHARED SURFACES — the parts both consoles agree on.
+
+   The two bells are structurally different (one is a navbar flyout anchored to
+   a 36px circle, the other a console panel under a 40px bar), so their shells
+   cannot literally be the same box. Everything BELOW describes what a row looks
+   like, and that is identical in both — which is the point.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* The icon tile. Replaces the ⚑ glyph: one shape per family, so a panel is
+   readable by silhouette alone. */
+.nd-tile {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  background: var(--nk-bg, #f1f5f9);
+  color: var(--nk-ink, #64748b);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--nk-ink, #64748b) 14%, transparent);
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.18s ease;
+}
+
+.nd-tile svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* Read state, as a word. A dot alone told you something was new; it could not
+   tell you what, and at 9px it was invisible to half the panel. */
+.nd-state {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--nk-text, #475569);
+  background: var(--nk-bg, #f1f5f9);
+  border-radius: 999px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+
+/* Unread adds a live dot to the same pill, so "new" is signalled twice —
+   once in colour and once in shape — rather than by colour alone. */
+.nd-state--unread::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--nk-ink, #2563eb);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--nk-ink, #2563eb) 18%, transparent);
+}
+
+/* A row. Hover lifts the tile and tints the row with its own family, so the
+   panel feels like a set of coloured cards rather than a grey list. */
+.nd-row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 10px 10px 11px;
+  border-radius: 13px;
+  cursor: pointer;
+  overflow: hidden;
+  /* The rail. Sits behind the padding, so a long title never crowds it. */
+  box-shadow: inset 3px 0 0 -1px var(--nk-ink, transparent);
+  background: transparent;
+  transition: background 0.16s ease, transform 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow-wrap: anywhere;
+}
+
+.nd-row:hover {
+  background: var(--nk-bg, #f6faf7);
+}
+
+.nd-row:hover .nd-tile {
+  transform: scale(1.06) rotate(-3deg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--nk-ink, #64748b) 26%, transparent),
+    0 6px 14px -6px color-mix(in srgb, var(--nk-ink, #64748b) 60%, transparent);
+}
+
+/* Unread rows carry the family wash at rest, so an unread support reply is
+   visibly different from an unread security notice before you read either. */
+.nd-row--unread {
+  background: color-mix(in srgb, var(--nk-bg, #f0fdf4) 70%, transparent);
+}
+
+.nd-row--unread:hover {
+  background: var(--nk-bg, #f0fdf4);
+}
+
+.nd-row:focus-visible {
+  outline: 2px solid var(--nk-ink, #2563eb);
+  outline-offset: -2px;
+}
+
+.nd-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nd-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--nd-ink, #111827);
+  overflow-wrap: anywhere;
+}
+
+.nd-detail {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--nd-muted, #4b5563);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.nd-time {
+  font-size: 11.5px;
+  line-height: 1.3;
+  color: var(--nd-faint, #9ca3af);
+}
+
+/* The delete affordance. Always present, transparent at rest — a control that
+   only exists on hover cannot be found by touch, where there is no hover. */
+.nd-remove {
+  flex: 0 0 24px;
+  align-self: flex-start;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--nd-faint, #c4c9d1);
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.nd-remove:hover:not(:disabled) {
+  color: #dc2626;
+  background: #fef2f2;
+}
+
+.nd-remove:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.nd-remove:focus-visible {
+  outline: 2px solid #dc2626;
+  outline-offset: 1px;
+}
+
+/* The empty state. The old one was a line of grey text; an inbox with nothing
+   in it is a good outcome and is allowed to look like one. */
+.nd-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 30px 16px 32px;
+  text-align: center;
+}
+
+.nd-empty__art {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 15px;
+  background: #f1f5f9;
+  color: #94a3b8;
+  margin-bottom: 2px;
+}
+
+.nd-empty__art svg {
+  width: 22px;
+  height: 22px;
+}
+
+.nd-empty__title {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--nd-ink, #0f172a);
+}
+
+.nd-empty__body {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--nd-muted, #64748b);
+  max-width: 24ch;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Colour and shadow are not movement, so the family tint survives; the lift
+     and the stagger do not. */
+  .nd-row,
+  .nd-tile {
+    transition: none;
+  }
+
+  .nd-row:hover .nd-tile {
+    transform: none;
+  }
+}

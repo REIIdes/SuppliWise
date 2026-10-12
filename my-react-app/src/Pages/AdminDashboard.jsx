@@ -21,6 +21,13 @@ import AdminTopbar from '../Components/AdminTopbar/AdminTopbar';
 import AdminSubscriptionPanel from '../Components/AdminSubscriptionPanel/AdminSubscriptionPanel';
 import AdminSubscriptionRequests from '../Components/AdminSubscriptionRequests/AdminSubscriptionRequests';
 import AdminSupportChats from '../Components/AdminSupportChats/AdminSupportChats';
+import NotificationDetailModal from '../Components/NotificationDetailModal/NotificationDetailModal';
+import NotificationGlyph from '../notifications/NotificationGlyph';
+import { resolveAdminTarget, visualKind } from '../notifications/notificationTargets';
+import '../notifications/notificationAccents.css';
+import SessionExpiryModal from '../Components/SessionExpiryModal/SessionExpiryModal';
+import ConfirmLogoutModal from '../Components/ConfirmLogoutModal/ConfirmLogoutModal';
+import ConfirmModal from '../Components/ConfirmModal/ConfirmModal';
 
 // 'profile' (Settings) is intentionally NOT in this list: it was removed from
 // the sidebar and now lives behind the avatar pill menu in the topbar
@@ -127,9 +134,6 @@ function subscriptionExpiryLabel(user) {
 // Owns its 1 s ticker so the rest of the dashboard does NOT re-render every
 // second (previously the whole page re-rendered 210× per idle session).
 // Memoized: only this badge updates as the countdown ticks.
-import SessionExpiryModal from '../Components/SessionExpiryModal/SessionExpiryModal';
-import ConfirmLogoutModal from '../Components/ConfirmLogoutModal/ConfirmLogoutModal';
-import ConfirmModal from '../Components/ConfirmModal/ConfirmModal';
 
 const AdminIdleStatus = memo(function AdminIdleStatus({ deadlineRef, idleLimitSeconds, warningSeconds, onExpire, onStay }) {
   // Seeded from the SERVER's window when it is known, falling back to the
@@ -347,15 +351,6 @@ function AdminDashboard() {
   const usersRef = useRef(users);
   useEffect(() => { usersRef.current = users; }, [users]);
   const [admins, setAdmins] = useState([]);
-  // Outcome of the last "Email all admins" run, or null. Kept as a report
-  // rather than a boolean because the send is partial-able: the panel has to be
-  // able to say "4 of 6 reached, 2 rejected" instead of one pass/fail.
-  const [credentialNotice, setCredentialNotice] = useState(null);
-  // Outcome of the last "Email credentials" run, or null. Kept as a report for
-  // the same reason as credentialNotice above: this send is partial-able too,
-  // and additionally has per-alias gaps (no password typed, no authenticator key
-  // in .env) that the operator has to be shown by name.
-  const [credentialHandoff, setCredentialHandoff] = useState(null);
   // Timestamp of the last admins-list fetch (anchors the lockout countdown,
   // same pattern as usersFetchedAt).
   const [adminsFetchedAt, setAdminsFetchedAt] = useState(() => Date.now());
@@ -392,6 +387,16 @@ function AdminDashboard() {
   const unreadCount = notifications.filter(n => !n.read).length;
   const readCount = notifications.length - unreadCount;
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  // The notification row whose detail window is open. `null` = no window.
+  // Rows are NOT navigated to on click any more — the window is where Mark as
+  // read / Delete / Go there live. See notifications/notificationTargets.js.
+  const [detail, setDetail] = useState(null);
+  const [detailBusy, setDetailBusy] = useState(null);
+  const [detailError, setDetailError] = useState('');
+  // A specific support conversation to open when Chat management next mounts —
+  // set by a "New support conversation" bell so the admin lands on the thread
+  // instead of on a queue they have to scan.
+  const [focusThreadId, setFocusThreadId] = useState('');
   // Destructive-action guard: which user is awaiting confirmation, which row
   // is mid-request, and the one-shot success banner shown afterwards.
   const [pendingDeleteUser, setPendingDeleteUser] = useState(null);
@@ -573,7 +578,7 @@ function AdminDashboard() {
       throw new Error(data?.message || 'Choose your own password before continuing.');
     }
     if (response.status === 401 || response.status === 403) { localStorage.removeItem('adminToken'); localStorage.removeItem('admin'); navigate('/admin/login'); throw new Error('Your admin session has expired.'); }
-    if (!response.ok) throw new Error(data?.message || 'Unable to load admin data.');
+    if (!response.ok) { const error = new Error(data?.message || 'Unable to load admin data.'); error.status = response.status; throw error; }
     return data;
   }, [navigate]);
 
@@ -597,6 +602,11 @@ function AdminDashboard() {
 
   const openSecurityCenter = useCallback((monitorKey = null) => {
     setFocusMonitorKey(monitorKey);
+    // Leaving Chat management for any reason discards a deep-linked thread, so
+    // coming back to the queue by hand starts on the queue rather than
+    // re-opening a conversation from minutes ago. Never called to go TO chats,
+    // so there is no case where this would clear a focus being applied.
+    setFocusThreadId('');
     setTab('security');
   }, []);
 
@@ -647,95 +657,6 @@ function AdminDashboard() {
       return null;
     }
   }, [request, loadAdmins]);
-
-  // Preview of the credential-update notice: the exact wording the server will
-  // use, plus who it would reach. Read-only, so the Admins panel can show an
-  // operator the real sentence and the real recipient list before anything is
-  // sent, instead of a description of what is about to happen.
-  const previewCredentialNotice = useCallback(async () => {
-    try {
-      const data = await request('/admins/credential-notice/preview');
-      setError('');
-      return data;
-    } catch (requestError) {
-      setError(requestError.message);
-      return null;
-    }
-  }, [request]);
-
-  // Email every configured administrator that the stored form of their
-  // credentials changed. Sends NO secret — the notice says *that* the
-  // credential changed and nothing about its value, because a recurring mail
-  // carrying live passwords and authenticator keys is how this project's seeds
-  // leaked through a public repository in the first place (see AdminNames.md).
-  //
-  // Returns the server's report rather than throwing, because the outcome is
-  // genuinely partial-able: a rejected address must be *shown*, not converted
-  // into a single red "failed" that hides the four people who were reached.
-  const notifyCredentials = useCallback(async () => {
-    try {
-      const data = await request('/admins/notify-credentials', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      });
-      setCredentialNotice(data);
-      setError('');
-      return data;
-    } catch (requestError) {
-      // 429 is the cooldown, and the server's message already says how long to
-      // wait, so it is shown rather than replaced with a generic failure.
-      setCredentialNotice(null);
-      setError(requestError.message);
-      return null;
-    }
-  }, [request]);
-
-  // ── One-time credential hand-off ─────────────────────────────────────────
-  // A DIFFERENT SEND from notifyCredentials above, and the difference is the
-  // whole point. The notice says "your stored credentials were upgraded" and
-  // carries no secret; this one emails each administrator their alias, their
-  // password and their authenticator key, exactly once, deliberately.
-  //
-  // It is kept as a separate endpoint and a separate control rather than an
-  // option on the notice, so nothing here can widen what the recurring notice
-  // sends. AdminNames.md records that this project's real TOTP seeds were
-  // committed to a public repository; the fix for that was to keep every
-  // recurring channel secret-free, and merging the two would undo it.
-  //
-  // The passwords are typed by the operator and are NOT sent to this component's
-  // parent, never stored in it, and never logged. They exist only in the dialog's
-  // local state and in the one request body that carries them.
-
-  const previewCredentialHandoff = useCallback(async () => {
-    try {
-      const data = await request('/admins/credential-handoff/preview');
-      setError('');
-      return data;
-    } catch (requestError) {
-      setError(requestError.message);
-      return null;
-    }
-  }, [request]);
-
-  const handoffCredentials = useCallback(async (passwords, description) => {
-    try {
-      const data = await request('/admins/credential-handoff', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ passwords, description }),
-      });
-      setCredentialHandoff(data);
-      setError('');
-      return data;
-    } catch (requestError) {
-      // 429 is the cooldown, and the server's message already says how long to
-      // wait, so it is shown rather than replaced with a generic failure.
-      setCredentialHandoff(null);
-      setError(requestError.message);
-      return null;
-    }
-  }, [request]);
 
   // "Check now" on the AI panel. This forces a fresh probe server-side — the  // GET path serves a cached check for up to 30 s — so an admin who has just
   // rotated a key sees the verdict now instead of on a later poll.
@@ -1250,9 +1171,20 @@ function AdminDashboard() {
     }
   }, [request, appearance]);
 
+  // Overview's cards jump straight to another tab, bypassing the sidebar. They
+// are a path out of Chat management too, so they clear the deep-linked thread
+// for the same reason handleTabClick does.
+  const navigateToTab = useCallback((next) => {
+    setFocusThreadId('');
+    setTab(next);
+  }, []);
+
   // Avatar-pill menu → jump into the Settings (profile) tab. That tab was
   // removed from the sidebar, so this menu is its only entry point.
   const openSettings = useCallback((section) => {
+    // Leaving Chat management discards any deep-linked thread — see
+    // openSecurityCenter for why this has to happen on every path out.
+    setFocusThreadId('');
     setTab('profile');
     if (section === 'edit') setEditProfileOpen(true);
     const targetId = section === 'edit' ? 'admin-edit-profile' : 'admin-account-card';
@@ -1311,22 +1243,9 @@ function AdminDashboard() {
     }
   };
 
-  const markAsRead = async (notificationId) => {
-    try {
-      await request('/notifications/read', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ notificationIds: [notificationId] }),
-      });
-      // The row stays, now dimmed: the server keeps returning read events, so
-      // dropping it here used to make "mark as read" look like a no-op once
-      // the 10 s poll restored it.
-      setNotifications(current => current.map(n => (n._id === notificationId ? { ...n, read: true } : n)));
-    } catch (requestError) {
-      setError(requestError.message);
-    }
-  };
-
+  // Marking one row read now happens in the detail window (detailMarkRead) —
+  // pressing a row no longer marks it implicitly, because pressing a row is no
+  // longer an implicit "I have read this".
   const markAllAdminRead = async () => {
     try {
       await request('/notifications/read-all', { method: 'POST' });
@@ -1334,6 +1253,9 @@ function AdminDashboard() {
       // them unread. Dimming them here would just flicker back on the next
       // poll — and a failing check is not something an admin can "read" away.
       setNotifications(current => current.map(n => (n.dismissible === false ? n : { ...n, read: true })));
+      // Keep an open window in step — otherwise it goes on offering "Mark as
+      // read" for a row that is already read.
+      setDetail(current => (current && current.dismissible !== false ? { ...current, read: true } : current));
     } catch (requestError) {
       setError(requestError.message);
     }
@@ -1376,21 +1298,84 @@ function AdminDashboard() {
   };
 
   const handleNotificationClick = (notification) => {
-    // Severe flags deep-link to Assessment Management (user list pre-fetches there)
-    if (notification.type === 'severe-flag') {
-      handleTabClick('assessment-management');
-    } else if (notification.type === 'subscription-request') {
-      // A paid upgrade request is the one notification whose whole point is a
-      // queue someone has to work through, so it lands on that tab directly.
-      handleTabClick('subscriptions');
-    } else if (notification.type === 'security') {
-      openSecurityCenter();
-    }
-    if (notification._id && !notification.read) {
-      markAsRead(notification._id);
-    }
+    // Pressing a row opens the DETAIL WINDOW. It used to navigate straight
+    // away, and the destination was picked from the type here in the browser —
+    // which is how a support-chat bell ended up somewhere useless. The target
+    // now rides on the row (`link`, written by the route that raised it) and is
+    // resolved in notifications/notificationTargets.js. See goToAdminTarget.
+    setDetailError('');
+    setDetailBusy(null);
+    setDetail(notification);
     setShowNotifications(false);
+    // Same hover latch as the member bell: the pointer is still over the bell,
+    // so without this the panel reopens behind the window.
+    notifHoverSuppressedRef.current = !!notifBellRef.current?.matches(':hover');
   };
+
+  // Apply a resolved target. Defined AFTER handleTabClick below, because it
+  // calls it — hoisting it would be a temporal-dead-zone read at render time.
+  // Declared as a plain function, not useCallback: handleTabClick is recreated
+  // on every render, so memoising around it would buy nothing.
+  const goToAdminTarget = (target) => {
+    if (!target) return;
+    setDetail(null);
+    setShowNotifications(false);
+    cancelNotifClose();
+    // handleTabClick cancels any pending Security-center focus, so the security
+    // branch goes through openSecurityCenter to keep that behaviour intact.
+    if (target.tab === 'security') {
+      openSecurityCenter();
+    } else {
+      handleTabClick(target.tab);
+    }
+    // One-shot: Chat management unmounts on tab change and resets its own
+    // guard, so leaving the tab (handleTabClick above) clears this again. The
+    // set MUST come after handleTabClick, which clears it for non-chat tabs.
+    if (target.threadId) setFocusThreadId(target.threadId);
+  };
+
+  const detailMarkRead = useCallback(async () => {
+    if (!detail || detail.read || !detail._id) return;
+    const id = detail._id;
+    try {
+      setDetailBusy('read');
+      await request('/notifications/read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notificationIds: [id] }),
+      });
+      setNotifications(current => current.map(n => (n._id === id ? { ...n, read: true } : n)));
+      setDetail(current => (current && current._id === id ? { ...current, read: true } : current));
+      setDetailError('');
+    } catch (requestError) {
+      setDetailError(requestError.message);
+    } finally {
+      setDetailBusy(null);
+    }
+  }, [detail, request]);
+
+  const detailDelete = useCallback(async () => {
+    if (!detail || !detail._id) return;
+    const id = detail._id;
+    try {
+      setDetailBusy('delete');
+      await request(`/notifications/${id}`, { method: 'DELETE' });
+      setNotifications(current => current.filter(n => n._id !== id));
+      setDetail(null);
+      setDetailError('');
+    } catch (requestError) {
+      setDetailError(requestError.message);
+    } finally {
+      setDetailBusy(null);
+    }
+  }, [detail, request]);
+
+  // ── The detail window ────────────────────────────────────────────────────
+  const closeDetail = useCallback(() => {
+    setDetail(null);
+    setDetailBusy(null);
+    setDetailError('');
+  }, []);
 
   const handleTabClick = (item) => {
     setTab(item);
@@ -1399,6 +1384,11 @@ function AdminDashboard() {
     // monitor, visited Users, then came back via the sidebar would land on a
     // Security Center still filtered to that one monitor with no visible cause.
     clearMonitorFocus();
+    // Same rule for a deep-linked support conversation. Chat management
+    // unmounts when the tab changes and its one-shot focus guard resets, so
+    // leaving the tab without clearing this would re-open the same thread every
+    // time the admin came back to the queue by hand.
+    if (item !== 'chats') setFocusThreadId('');
     // Pre-fetch full lists the first time heavy tabs are opened
     if (item === 'assessment-management' && allUsers.length === 0) {
       request('/users?search=').then(data => {
@@ -1546,13 +1536,22 @@ function AdminDashboard() {
               positioning takes it out of this flow. */}
           {showNotifications && (
             <div
-              className="notification-panel admin-notif-panel"
+              className="notification-panel admin-notif-panel nd-root"
               ref={notifPanelRef}
               onPointerEnter={handleNotifHoverEnter}
               onPointerLeave={handleNotifHoverLeave}
             >
               <div className="admin-notif-panel__header">
-                <h3>System notifications</h3>
+                <span className="admin-notif-panel__heading">
+                  <h3>System notifications</h3>
+                  {/* The count is restated here in words. The bell's badge is
+                      covered by the moment the panel opens, which left the
+                      header able to say nothing at all about how much is
+                      waiting. */}
+                  <span className={`admin-notif-panel__count${unreadCount > 0 ? '' : ' admin-notif-panel__count--clear'}`}>
+                    {unreadCount > 0 ? `${unreadCount} unread` : 'All clear'}
+                  </span>
+                </span>
                 {/* Both actions share one wrapping group: the title ellipsises
                     first so the two labels never collide with each other. */}
                 <div className="admin-notif-panel__actions">
@@ -1578,48 +1577,101 @@ function AdminDashboard() {
               </div>
               <div className="admin-notif-panel__list">
               {notifications.length
-                ? notifications.map((notification, index) => (
+                ? notifications.map((notification, index) => {
+                  const kind = visualKind(notification, 'admin');
+                  const target = resolveAdminTarget(notification);
+                  return (
                     <div
-                      className={`notification${notification.read ? ' notification--read' : ''}${notification.type === 'severe-flag' ? ' notification--flag' : ''}${notification.type === 'subscription-request' ? ' notification--request' : ''}`}
+                      className={[
+                        'nd-row',
+                        `nd-kind-${kind}`,
+                        notification.read ? '' : 'nd-row--unread',
+                        notification.dismissible === false ? 'nd-row--live' : '',
+                      ].filter(Boolean).join(' ')}
                       key={notification._id || `live-${index}`}
                       onClick={() => handleNotificationClick(notification)}
                       role="button"
                       tabIndex={0}
+                      aria-label={`${notification.read ? 'Read' : 'Unread'}: ${notification.title}`}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleNotificationClick(notification);
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          handleNotificationClick(notification);
+                        }
                       }}
-                      title={notification.type === 'severe-flag'
-                        ? 'Open Assessment Management'
-                        : notification.type === 'subscription-request'
-                          ? 'Open Subscription management'
-                          : notification.type === 'security' ? 'Open Security tab' : 'Dismiss'}
+                      title={target ? `Details — ${target.label}` : 'Details'}
                     >
                       {/* Title + detail live in their own flex child so the
                           delete button is a sibling, never a float that
                           drifts into the middle of the text. */}
-                      <div className="notification__body">
-                        <strong>{notification.title}</strong>
-                        {notification.detail && <span className="notification__detail">{notification.detail}</span>}
-                      </div>
+                      <span className="nd-tile">
+                        <NotificationGlyph kind={kind} />
+                      </span>
+                      <span className="nd-body">
+                        <span className="nd-title">{notification.title}</span>
+                        {notification.detail && <span className="nd-detail">{notification.detail}</span>}
+                      </span>
+                      <span className={`nd-state${notification.read ? '' : ' nd-state--unread'}`}>
+                        {notification.read ? 'Read' : 'New'}
+                      </span>
                       {notification.dismissible === false ? (
                         <span className="notification__live">Fix</span>
                       ) : (
                         <button
                           type="button"
-                          className="notification__delete"
-                          aria-label="Delete notification"
+                          className="nd-remove"
+                          aria-label={`Delete: ${notification.title}`}
                           onClick={(e) => notification._id && deleteAdminNotification(e, notification._id)}
                         >
-                          ×
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                               strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+                            <path d="M18 6L6 18M6 6l12 12" />
+                          </svg>
                         </button>
                       )}
                     </div>
-                  ))
-                : <p className="admin-muted">No new notifications.</p>
+                  );
+                })
+                : (
+                  <div className="nd-empty" role="status">
+                    <span className="nd-empty__art">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M20.5 8.5A8.5 8.5 0 0 0 4 8.5c0 6.5-2.5 8.5-2.5 8.5h21S20.5 15 20.5 8.5" />
+                        <path d="M9 20.5a3.2 3.2 0 0 0 6 0" />
+                        <path d="M9.5 11.5l1.8 1.8 3.4-3.6" />
+                      </svg>
+                    </span>
+                    <p className="nd-empty__title">All clear</p>
+                    <p className="nd-empty__body">
+                      New conversations, priority flags and requests will appear here.
+                    </p>
+                  </div>
+                )
               }
               </div>
+              {notifications.length > 0 && (
+                <p className="admin-notif-panel__hint" aria-hidden="true">
+                  Select a notification to see the full message
+                </p>
+              )}
             </div>
           )}
+
+          {/* The notification detail window. A SIBLING of the panel, not a child:
+              rendering it inside would let the panel's own close-on-outside-click
+              handler unmount it the moment it opened. */}
+          <NotificationDetailModal
+            item={detail}
+            kind="admin"
+            target={detail ? resolveAdminTarget(detail) : null}
+            busy={detailBusy}
+            canDelete={!!detail?.dismissible}
+            error={detailError}
+            onClose={closeDetail}
+            onMarkRead={detailMarkRead}
+            onDelete={detailDelete}
+            onGoTo={() => goToAdminTarget(resolveAdminTarget(detail))}
+          />
 
           <header className="admin-header">
             <div>
@@ -1664,11 +1716,11 @@ function AdminDashboard() {
           {error && <div className="admin-alert danger" role="alert">{error}</div>}
           {notice && <div className="admin-alert success" role="status">{notice}</div>}
 
-          {tab === 'overview'               && <div className="admin-tab-panel"><Overview overview={overview} onNavigate={setTab} monitor={monitor} onOpenSecurity={openSecurityCenter} /></div>}
+          {tab === 'overview'               && <div className="admin-tab-panel"><Overview overview={overview} onNavigate={navigateToTab} monitor={monitor} onOpenSecurity={openSecurityCenter} /></div>}
           {tab === 'users'                  && <div className="admin-tab-panel"><Users users={users} setUsers={setUsers} usersFetchedAt={usersFetchedAt} search={search} setSearch={value => { searchRef.current = value; setSearch(value); }} loadUsers={loadUsers} request={request} onSubscriptionChanged={applySubscriptionUpdate} updateAccount={updateAccount} deleteAccount={deleteAccount} deletingUserId={deletingUserId} unlockUser={unlockUser} expandedUser={expandedUser} setExpandedUser={setExpandedUser} /></div>}
-          {tab === 'admins'                 && <div className="admin-tab-panel"><Admins admins={admins} adminsFetchedAt={adminsFetchedAt} search={adminSearch} setSearch={value => { adminSearchRef.current = value; setAdminSearch(value); }} loadAdmins={loadAdmins} toggleAdmin={toggleAdmin} unlockAdmin={unlockAdmin} currentAdmin={profile} expandedAdmin={expandedAdmin} setExpandedAdmin={setExpandedAdmin} notifyCredentials={notifyCredentials} previewCredentialNotice={previewCredentialNotice} credentialNotice={credentialNotice} clearCredentialNotice={() => setCredentialNotice(null)} previewCredentialHandoff={previewCredentialHandoff} handoffCredentials={handoffCredentials} credentialHandoff={credentialHandoff} clearCredentialHandoff={() => setCredentialHandoff(null)} /></div>}
+          {tab === 'admins'                 && <div className="admin-tab-panel"><Admins admins={admins} adminsFetchedAt={adminsFetchedAt} search={adminSearch} setSearch={value => { adminSearchRef.current = value; setAdminSearch(value); }} loadAdmins={loadAdmins} toggleAdmin={toggleAdmin} unlockAdmin={unlockAdmin} currentAdmin={profile} expandedAdmin={expandedAdmin} setExpandedAdmin={setExpandedAdmin} /></div>}
           {tab === 'subscriptions'          && <div className="admin-tab-panel"><AdminSubscriptionRequests request={request} /></div>}
-          {tab === 'chats'                   && <div className="admin-tab-panel"><AdminSupportChats request={request} /></div>}
+          {tab === 'chats'                   && <div className="admin-tab-panel"><AdminSupportChats request={request} focusThreadId={focusThreadId} /></div>}
           {tab === 'assessment-management'  && <div className="admin-tab-panel"><AssessmentManagement users={allUsers} /></div>}
           {tab === 'ai'                     && <div className="admin-tab-panel"><AiPanel ai={ai} onCheckNow={checkAiNow} checking={checkingAi} reload={aiReload} /></div>}
           {tab === 'security'               && <div className="admin-tab-panel"><SecurityStatus monitor={monitor} onDownloadReport={() => downloadReportRef.current()} detection={ai?.detection} focusMonitorKey={focusMonitorKey} /></div>}
@@ -3378,7 +3430,7 @@ function isSameAdmin(row, current) {
 // Every class here is namespaced `adm-`, so none of it can leak into — or be
 // moved by — the Users queue, the profile panel or the rest of the console.
 // ════════════════════════════════════════════════════════════════════════════
-function Admins({ admins, adminsFetchedAt, search, setSearch, loadAdmins, toggleAdmin, unlockAdmin, currentAdmin, expandedAdmin, setExpandedAdmin, notifyCredentials, previewCredentialNotice, credentialNotice, clearCredentialNotice, previewCredentialHandoff, handoffCredentials, credentialHandoff, clearCredentialHandoff }) {
+function Admins({ admins, adminsFetchedAt, search, setSearch, loadAdmins, toggleAdmin, unlockAdmin, currentAdmin, expandedAdmin, setExpandedAdmin }) {
   const handleAdminToggle = (adminId) => {
     setExpandedAdmin(expandedAdmin === adminId ? null : adminId);
   };
@@ -3402,103 +3454,6 @@ function Admins({ admins, adminsFetchedAt, search, setSearch, loadAdmins, toggle
     window.clearTimeout(debounceTimer.current);
     loadAdmins();
   };
-
-  // ── Credential-update notice ─────────────────────────────────────────────
-  // The dialog previews the wording the server will use, so it asks rather than
-  // hard-coding the sentence here. A copy in this file and a copy in
-  // utils/email.js would eventually disagree, and the operator would be shown
-  // one sentence while their administrators received another.
-  //
-  // The preview is fetched on open, not on mount: the ADMIN_EMAILS value in .env
-  // changes on restart, and a list captured when the panel first rendered would
-  // show a retired address for the life of the session. The fetch itself lives
-  // in the parent (it owns `request` and the shared error banner), so this
-  // component stays presentational.
-  const [noticePreview, setNoticePreview] = useState(null);
-  // Holds the wording the recipients will receive, or null when the dialog is
-  // closed. Deliberately not a boolean: "open with no text" is a state the send
-  // must not be reachable from.
-  const [confirmNotice, setConfirmNotice] = useState(null);
-  const [sendingNotice, setSendingNotice] = useState(false);
-  const confirmNoticeText = String(confirmNotice || '').trim();
-
-  const openConfirm = async () => {
-    const data = await previewCredentialNotice();
-    if (!data) { setNoticePreview(null); setConfirmNotice(null); return; }
-    setNoticePreview(data);
-    setConfirmNotice(data.description || '');
-  };
-
-  // ── Credential hand-off dialog ────────────────────────────────────────────
-  // Holds the preview (who will be reached, who has no key in .env), the
-  // passwords the operator typed, and the wording. Open is a boolean rather than
-  // being inferred from the preview, so a fetch that failed still leaves a
-  // dialog that says so instead of an empty one.
-  const [handoffPreview, setHandoffPreview] = useState(null);
-  const [handoffOpen, setHandoffOpen] = useState(false);
-  const [handoffSending, setHandoffSending] = useState(false);
-  const [handoffPasswords, setHandoffPasswords] = useState({});
-  const [handoffDescription, setHandoffDescription] = useState('');
-
-  // Every open starts from empty. Without this, a half-typed set of six
-  // passwords would still be in state the next time the button is pressed — the
-  // opposite of what an operator closing a dialog that contains live secrets
-  // expects.
-  const openHandoff = async () => {
-    const data = await previewCredentialHandoff();
-    setHandoffPasswords({});
-    setHandoffDescription(data?.description || '');
-    setHandoffPreview(data);
-    setHandoffOpen(true);
-  };
-
-  // Cleared unconditionally on close. The typed passwords must not outlive the
-  // dialog, whether it was sent, cancelled or dismissed.
-  const closeHandoff = () => {
-    if (handoffSending) return;
-    setHandoffOpen(false);
-    setHandoffPreview(null);
-    setHandoffPasswords({});
-    setHandoffDescription('');
-  };
-
-  // Only aliases with something typed are sent. Sending `{}` for a blank field
-  // would make the server report that alias as a failed send rather than as one
-  // the operator never filled in.
-  const handoffReady = useMemo(
-    () => Object.entries(handoffPasswords)
-      .filter(([, value]) => String(value || '').trim())
-      .map(([alias]) => alias),
-    [handoffPasswords]
-  );
-
-  const handoffRows = useMemo(
-    () => (handoffPreview?.recipients || []).map(entry => ({
-      ...entry,
-      password: handoffPasswords[entry.alias] || '',
-      ready: Boolean(String(handoffPasswords[entry.alias] || '').trim()),
-    })),
-    [handoffPreview, handoffPasswords]
-  );
-
-  // Resolved from the preview rather than from `admins`, so the dialog lists
-  // who the SERVER will mail. Defaulted to an empty list so a preview that has
-  // not loaded cannot render "undefined" in a confirmation being approved.
-  const previewRecipients = useMemo(
-    () => (noticePreview?.recipients || []).map(entry => entry.alias),
-    [noticePreview]
-  );
-  const previewMissing = useMemo(
-    () => noticePreview?.missingEmail || [],
-    [noticePreview]
-  );
-
-  // How many people the notice would reach, from the same list the rows render,
-  // so the button's count and the visible rows can never disagree.
-  const adminsWithEmail = useMemo(
-    () => admins.filter(admin => Boolean(admin.email)).length,
-    [admins]
-  );
 
   // ── The three states an operator actually triages on ─────────────────────
   // Classified ONCE here and reused by the stat cards, the filter and the row
@@ -3626,343 +3581,6 @@ function Admins({ admins, adminsFetchedAt, search, setSearch, loadAdmins, toggle
             codes are never sent to this page, so they cannot be displayed here.
           </span>
         </p>
-
-        {/* ── Credential-update notice ───────────────────────────────────
-            Lives directly under the "secrets stay on the server" promise,
-            because it is the one control in this panel that leaves the server.
-            The two are adjacent on purpose: this button is the only thing here
-            that puts words in someone else's inbox, and the sentence above is
-            the reason it carries no secret.
-
-            Confirmation is not optional. This sends real mail to every
-            administrator, the server rate-limits it, and a mis-click that
-            silently fired would put a duplicate security notice in six
-            inboxes — which reads to each recipient as though a compromise
-            happened twice. So the button opens a dialog that shows the exact
-            sentence and the exact recipient list before anything is sent. */}
-        <div className="adm-notice">
-          <div className="adm-notice__text">
-            <span className="adm-notice__title">Credential-update notice</span>
-            <p className="adm-notice__body">
-              Emails every administrator with an address on file to say their stored
-              credentials were upgraded. No password or authenticator key is ever
-              included in the message.
-            </p>
-          </div>
-          <button
-            type="button"
-            className="adm-btn adm-btn--primary"
-            onClick={openConfirm}
-            disabled={adminsWithEmail === 0}
-            title={adminsWithEmail === 0 ? 'No administrator has an address configured in server/.env' : undefined}
-          >
-            Email all admins
-          </button>
-        </div>
-
-        {adminsWithEmail === 0 && (
-          <p className="adm-notice__hint" role="note">
-            No administrator has an address on file. Add an{' '}
-            <code>ADMIN_EMAILS</code> line to <code>server/.env</code> and restart the
-            server, for example <code>ADMIN_EMAILS=AdminDevs=you@example.com</code>.
-          </p>
-        )}
-
-        {/* The report. Rendered as a list rather than one line, because the
-            useful fact after a partial send is *who* was not reached — "4 of 6"
-            leaves the operator guessing which two. */}
-        {credentialNotice && (
-          <div
-            className={`adm-notice__result${credentialNotice.failed?.length ? ' adm-notice__result--partial' : ''}`}
-            role="status"
-          >
-            <p className="adm-notice__result-line">{credentialNotice.message}</p>
-            {credentialNotice.delivered?.length > 0 && (
-              <p className="adm-notice__result-line">
-                <strong>Reached:</strong> {credentialNotice.delivered.map(a => a.alias).join(', ')}
-              </p>
-            )}
-            {credentialNotice.failed?.length > 0 && (
-              <p className="adm-notice__result-line adm-notice__result-line--bad">
-                <strong>Not reached:</strong> {credentialNotice.failed.map(a => a.alias).join(', ')}
-              </p>
-            )}
-            {credentialNotice.missingEmail?.length > 0 && (
-              <p className="adm-notice__result-line adm-notice__result-line--warn">
-                <strong>No address on file:</strong> {credentialNotice.missingEmail.join(', ')}
-              </p>
-            )}
-            <button type="button" className="adm-btn adm-btn--ghost" onClick={clearCredentialNotice}>
-              Dismiss
-            </button>
-          </div>
-        )}
-
-        {confirmNotice !== null && (
-          <div
-            className="adm-confirm"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Confirm the credential-update notice"
-            onKeyDown={event => { if (event.key === 'Escape' && !sendingNotice) setConfirmNotice(null); }}
-          >
-            <div className="adm-confirm__box">
-              <h4 className="adm-confirm__title">Email {adminsWithEmail} administrator(s)?</h4>
-              <p className="adm-confirm__body">Each one receives a notice saying:</p>
-              <blockquote className="adm-confirm__quote">{confirmNoticeText}</blockquote>
-              {/* The actual aliases, from the server's own resolved list. A
-                  count alone would leave the operator unable to tell whether
-                  the person they expected is in it — and this list comes from
-                  ADMIN_EMAILS, not from the visible rows, so it can include an
-                  alias the current search has filtered out. That difference is
-                  why it is shown rather than inferred. */}
-              {previewRecipients.length > 0 ? (
-                <p className="adm-confirm__body">
-                  <strong>Recipients:</strong> {previewRecipients.join(', ')}
-                </p>
-              ) : (
-                <p className="adm-confirm__body adm-confirm__body--warn">
-                  No administrator has an address on file yet, so nothing will be sent. Add an{' '}
-                  <code>ADMIN_EMAILS</code> line to <code>server/.env</code> and restart the
-                  server.
-                </p>
-              )}
-              {previewMissing.length > 0 && (
-                <p className="adm-confirm__body adm-confirm__body--warn">
-                  <strong>Will be skipped, no address on file:</strong> {previewMissing.join(', ')}
-                </p>
-              )}
-              <p className="adm-confirm__body">
-                No password or authenticator key is included in the message.
-              </p>
-              <div className="adm-confirm__actions">
-                <button
-                  type="button"
-                  className="adm-btn adm-btn--ghost"
-                  onClick={() => setConfirmNotice(null)}
-                  disabled={sendingNotice}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="adm-btn adm-btn--primary"
-                  disabled={sendingNotice}
-                  onClick={async () => {
-                    setSendingNotice(true);
-                    await notifyCredentials();
-                    setSendingNotice(false);
-                    setConfirmNotice(null);
-                  }}
-                >
-                  {sendingNotice ? 'Sending…' : 'Send the notice'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ── Credential hand-off ──────────────────────────────────────────
-            A separate control from the notice above, and deliberately not a
-            mode of it. The notice above carries no secret; this one sends a
-            live password and a live authenticator key, once, on purpose.
-
-            It is placed directly beneath the notice because an operator reading
-            this panel will reasonably assume the two are the same thing with a
-            checkbox — they are not. The body text says plainly what leaves the
-            server, since the strip further up ("secrets stay on the server")
-            is true of the notice and false of this. */}
-        <div className="adm-notice adm-notice--warn">
-          <div className="adm-notice__text">
-            <span className="adm-notice__title">Email credentials (one-time)</span>
-            <p className="adm-notice__body">
-              Sends each administrator their own alias, password and authenticator key,
-              once. Unlike the notice above this does put live secrets in email.
-              Nothing is rotated — everyone keeps the password they have now.
-            </p>
-          </div>
-          <button
-            type="button"
-            className="adm-btn adm-btn--danger"
-            onClick={openHandoff}
-            disabled={adminsWithEmail === 0}
-            title={adminsWithEmail === 0 ? 'No administrator has an address configured in server/.env' : undefined}
-          >
-            Email credentials
-          </button>
-        </div>
-
-        {/* The report. Same shape as the notice's: the useful fact after a
-            partial send is *who* was not reached, plus the aliases that were
-            never attempted because nothing was typed for them. */}
-        {credentialHandoff && (
-          <div
-            className={`adm-notice__result${credentialHandoff.failed?.length ? ' adm-notice__result--partial' : ''}`}
-            role="status"
-          >
-            <p className="adm-notice__result-line">{credentialHandoff.message}</p>
-            {credentialHandoff.delivered?.length > 0 && (
-              <p className="adm-notice__result-line">
-                <strong>Reached:</strong> {credentialHandoff.delivered.map(a => a.alias).join(', ')}
-              </p>
-            )}
-            {credentialHandoff.failed?.length > 0 && (
-              <p className="adm-notice__result-line adm-notice__result-line--bad">
-                <strong>Not reached:</strong> {credentialHandoff.failed.map(a => a.alias).join(', ')}
-              </p>
-            )}
-            {credentialHandoff.missingPassword?.length > 0 && (
-              <p className="adm-notice__result-line adm-notice__result-line--warn">
-                <strong>No password entered:</strong> {credentialHandoff.missingPassword.join(', ')}
-              </p>
-            )}
-            {credentialHandoff.missingSecret?.length > 0 && (
-              <p className="adm-notice__result-line adm-notice__result-line--warn">
-                <strong>No authenticator key in .env:</strong> {credentialHandoff.missingSecret.join(', ')}
-              </p>
-            )}
-            {credentialHandoff.missingEmail?.length > 0 && (
-              <p className="adm-notice__result-line adm-notice__result-line--warn">
-                <strong>No address on file:</strong> {credentialHandoff.missingEmail.join(', ')}
-              </p>
-            )}
-            {credentialHandoff.unusedPasswords?.length > 0 && (
-              <p className="adm-notice__result-line adm-notice__result-line--warn">
-                <strong>Entered but not mailed (check for a typo):</strong> {credentialHandoff.unusedPasswords.join(', ')}
-              </p>
-            )}
-            <button type="button" className="adm-btn adm-btn--ghost" onClick={clearCredentialHandoff}>
-              Dismiss
-            </button>
-          </div>
-        )}
-
-        {handoffOpen && (
-          <div
-            className="adm-confirm"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Email administrator credentials"
-            onKeyDown={event => { if (event.key === 'Escape') closeHandoff(); }}
-          >
-            <div className="adm-confirm__box">
-              <h4 className="adm-confirm__title">Email real passwords</h4>
-              <div className="adm-handoff__warn" role="note">
-                This puts each administrator's password and authenticator key in their inbox,
-                where forwarding rules and shared mailboxes may keep a copy. Do it once, when
-                somebody needs it — not on a schedule.
-              </div>
-
-              <p className="adm-confirm__body">
-                Type the password each of these administrators <strong>already has</strong>.
-                The server stores a one-way hash, so it cannot look these up for you.
-              </p>
-
-              {/* One field per alias, driven by the server's own recipient list
-                  rather than the visible rows — the current search may have
-                  filtered an alias out, and that person would then be silently
-                  omitted from a send about their own credentials. */}
-              <div className="adm-handoff__rows">
-                {handoffRows.map(row => (
-                  <div className="adm-handoff__row" key={row.alias}>
-                    <label className="adm-handoff__label" htmlFor={`handoff-${row.alias}`}>
-                      <span className="adm-handoff__alias">{row.alias}</span>
-                      <span className="adm-handoff__email">{row.email}</span>
-                    </label>
-                    {row.hasTotpSecret ? (
-                      <input
-                        id={`handoff-${row.alias}`}
-                        type="password"
-                        className="adm-handoff__input"
-                        value={row.password}
-                        autoComplete="off"
-                        spellCheck="false"
-                        placeholder="Current password"
-                        onChange={event => setHandoffPasswords(current => ({
-                          ...current,
-                          [row.alias]: event.target.value,
-                        }))}
-                      />
-                    ) : (
-                      /* No key in .env, so the server would refuse to mail this
-                         alias a half-message. Said up front, rather than
-                         discovered in the report after the send. */
-                      <p className="adm-handoff__blocked">
-                        No authenticator key in <code>ADMIN_ACCOUNTS</code> — cannot be sent
-                      </p>
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              <label className="adm-confirm__body" htmlFor="handoff-description">
-                <span className="adm-handoff__label-text">Description included in the email</span>
-                <textarea
-                  id="handoff-description"
-                  className="adm-handoff__textarea"
-                  rows={2}
-                  maxLength={400}
-                  value={handoffDescription}
-                  onChange={event => setHandoffDescription(event.target.value)}
-                />
-              </label>
-
-              {handoffRows.length === 0 && (
-                <p className="adm-confirm__body adm-confirm__body--warn">
-                  {/* Two different causes, two different fixes. A failed fetch
-                      also renders an empty list, and telling the operator to go
-                      edit .env when the real problem is the request would send
-                      them to the wrong file. */}
-                  {handoffPreview
-                    ? <>No administrator has an address on file, so nothing will be sent. Add an{' '}
-                      <code>ADMIN_EMAILS</code> line to <code>server/.env</code> and restart the
-                      server.</>
-                    : <>The administrator list could not be loaded, so there is nobody to send to.
-                      The reason is in the error banner above.</>}
-                </p>
-              )}
-
-              <p className="adm-confirm__body">
-                {handoffReady.length === 0
-                  ? 'Enter at least one password to send anything.'
-                  : `Will email ${handoffReady.length} of ${handoffRows.length} administrator(s). Nobody's password is changed by this.`}
-              </p>
-
-              <div className="adm-confirm__actions">
-                <button
-                  type="button"
-                  className="adm-btn adm-btn--ghost"
-                  onClick={closeHandoff}
-                  disabled={handoffSending}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="adm-btn adm-btn--danger"
-                  disabled={handoffSending || handoffReady.length === 0 || handoffRows.length === 0}
-                  onClick={async () => {
-                    setHandoffSending(true);
-                    // Only the aliases that were filled in. A blank field is not
-                    // sent as an empty password, so the server can report it as
-                    // "not entered" rather than as a rejected send.
-                    const payload = Object.fromEntries(
-                      handoffRows
-                        .filter(row => row.ready)
-                        .map(row => [row.alias, row.password])
-                    );
-                    await handoffCredentials(payload, handoffDescription);
-                    setHandoffSending(false);
-                    setHandoffOpen(false);
-                    setHandoffPasswords({});
-                  }}
-                >
-                  {handoffSending ? 'Sending…' : `Email ${handoffReady.length} administrator(s)`}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Stat cards are the filter. Four tones: indigo everything, emerald
             enabled, amber administratively off, rose locked out. */}

@@ -12,6 +12,17 @@ import { PLAN_LABELS, planFromUser, daysLeftFrom } from '../utils/plan';
 import { planDisplayName } from '../subscription/catalogue';
 import { sanitizeNameInput, NAME_MAX, NAME_PATTERN_SOURCE, NAME_CHARS_HINT } from '../utils/nameValidation';
 import { pictureUrl } from '../utils/pictureUrl';
+// Destinations come from the one route table, so the billing card and the
+// pricing page can never nominate two different "where do plans live" answers.
+import { ROUTES, pricingPath, PRICING_ANCHORS } from '../utils/routes';
+// Same deadline-based countdown as LogIn.jsx — see the module for why an
+// accumulating `prev - 1` counter drifts from the server.
+import {
+  createDeadline,
+  secondsLeft,
+  ttlFromResponse,
+  formatCountdown,
+} from '../utils/otpCountdown';
 import './ProfilePage.css';
 
 // A single, readable date for the billing read-out. Invalid input renders as an
@@ -92,9 +103,23 @@ function ProfilePage() {
   const [bannerPicture, setBannerPicture] = useState(() => storedUser.bannerPicture || '');
   const [bannerPicturePreview, setBannerPicturePreview] = useState(() => storedUser.bannerPicture || '');
   const [resendCooldown, setResendCooldown] = useState(0);
-  const [resendTimer, setResendTimer] = useState(null);
-  const [otpTimeLeft, setOtpTimeLeft] = useState(300); // 5 minutes in seconds
-  const [otpExpiryTimer, setOtpExpiryTimer] = useState(null);
+  const [otpTimeLeft, setOtpTimeLeft] = useState(0);
+  // Deadlines and ticks for the two countdowns, as refs.
+//
+// REFS, NOT STATE, AND THAT IS THE BUG THIS FIXES. The profile-loading effect
+// below used to list `resendTimer` and `otpExpiryTimer` in its dependency array
+// while its cleanup cleared both of them. So starting the OTP countdown re-ran
+// that effect, whose cleanup then tore the countdown down again; and starting the
+// resend cooldown did the same from the other direction. The effect also re-ran
+// the entire /me fetch every time either countdown ticked to a new value.
+//
+// The symptom was a countdown that froze partway through — the number on screen
+// stuck with minutes remaining while the server had already expired the code, so
+// the user typed a code they had been told was still live and was rejected.
+const resendDeadlineRef = useRef(0);
+const resendTickRef = useRef(null);
+const otpDeadlineRef = useRef(0);
+const otpTickRef = useRef(null);
   // (password show/hide toggles live with the Change Password card now)
 
   // Recent security activity (lockouts, 2FA changes, password changes…)
@@ -162,7 +187,7 @@ function ProfilePage() {
   useEffect(() => {
     const token = getToken();
     if (!token) {
-      navigate('/login');
+      navigate(ROUTES.login);
       return;
     }
 
@@ -227,17 +252,24 @@ function ProfilePage() {
         }
       })();
     }
+    // No timer cleanup here, and no timer states in the dependency list. The
+    // timers are torn down by their own dedicated effect below. Clearing them
+    // from here meant every countdown tick re-ran this whole effect — refetching
+    // /me once a second — and its cleanup killed the countdown it had just been
+    // re-triggered by.
+    //
+    // applyFresh is a useCallback with an empty dependency list, so including it
+    // cannot cause a re-run; naming it silences the lint rule without changing
+    // the behaviour.
+  }, [navigate, applyFresh]);
 
-    // Cleanup timer on unmount
-    return () => {
-      if (resendTimer) {
-        clearInterval(resendTimer);
-      }
-      if (otpExpiryTimer) {
-        clearInterval(otpExpiryTimer);
-      }
-    };
-  }, [navigate, resendTimer, otpExpiryTimer]);
+  // Stop both countdowns when the page unmounts. This is the only place that
+  // clears them: the effect above is about loading the profile, and coupling it
+  // to the timers meant a timer change could take the loader down with it.
+  useEffect(() => () => {
+    if (resendTickRef.current) clearInterval(resendTickRef.current);
+    if (otpTickRef.current) clearInterval(otpTickRef.current);
+  }, []);
 
   // Live plan sync: admin changes, expiry, or another tab update this card
   // without reopening the profile.
@@ -331,34 +363,49 @@ function ProfilePage() {
     }
   }
 
-  const startOtpExpiryTimer = () => {
-    setOtpTimeLeft(300); // Reset to 5 minutes
-    
-    // Clear existing timer if any
-    if (otpExpiryTimer) {
-      clearInterval(otpExpiryTimer);
-    }
+  /**
+   * Start (or restart) a countdown against an absolute deadline.
+   *
+   * `seconds` is the window the server said it will enforce, so the number shown
+   * is the number it will honour rather than a second hardcoded copy.
+   */
+  const startCountdown = (deadlineRef, tickRef, seconds, onExpire) => {
+    const deadline = createDeadline(ttlFromResponse(seconds ?? { expiresInSeconds: seconds }));
+    deadlineRef.current = deadline;
 
-    // Start countdown
-    const timer = setInterval(() => {
-      setOtpTimeLeft(prev => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          setError('Verification code has expired. Please request a new one.');
-          return 0;
-        }
-        return prev - 1;
-      });
+    if (tickRef.current) clearInterval(tickRef.current);
+
+    const tick = setInterval(() => {
+      const left = secondsLeft(deadlineRef.current);
+      if (onExpire) onExpire(left);
+      if (left <= 0) {
+        clearInterval(tick);
+        tickRef.current = null;
+      }
     }, 1000);
 
-    setOtpExpiryTimer(timer);
+    tickRef.current = tick;
+    return secondsLeft(deadline);
   };
 
-  const formatTimeLeft = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
+  const startOtpExpiryTimer = (response) => startCountdown(
+    otpDeadlineRef,
+    otpTickRef,
+    ttlFromResponse(response),
+    (left) => {
+      setOtpTimeLeft(left);
+      if (left <= 0) setError('Verification code has expired. Please request a new one.');
+    },
+  );
+
+  const startResendCooldown = (seconds) => startCountdown(
+    resendDeadlineRef,
+    resendTickRef,
+    seconds,
+    (left) => setResendCooldown(left),
+  );
+
+  const formatTimeLeft = formatCountdown;
 
   const handleSetup2FA = async () => {
     setError('');
@@ -561,31 +608,11 @@ function ProfilePage() {
 
     // Start cooldown timer (60 seconds)
     startResendCooldown(60);
-    startOtpExpiryTimer(); // Start OTP expiry countdown
+    // The window comes from this response, so the countdown matches what the
+    // server will enforce.
+    startOtpExpiryTimer(data); // Start OTP expiry countdown
 
-    return true;
-  };
-
-  const startResendCooldown = (seconds) => {
-    setResendCooldown(seconds);
-    
-    // Clear existing timer if any
-    if (resendTimer) {
-      clearInterval(resendTimer);
-    }
-
-    // Start countdown
-    const timer = setInterval(() => {
-      setResendCooldown(prev => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    setResendTimer(timer);
+    return data;
   };
 
   const handleResendOtp = async () => {
@@ -595,10 +622,11 @@ function ProfilePage() {
     setOtpLoading(true);
 
     try {
-      await requestEmailOtp(pendingEmailChange);
+      const response = await requestEmailOtp(pendingEmailChange);
       setSuccess('Verification code sent again!');
       setTimeout(() => setSuccess(''), 3000);
-      startOtpExpiryTimer(); // Restart expiry timer with new OTP
+      // Restart from the window the response reported.
+      startOtpExpiryTimer(response); // Restart expiry timer with new OTP
     } catch (err) {
       setError(err.message || 'Failed to resend code. Please try again.');
     } finally {
@@ -692,7 +720,7 @@ function ProfilePage() {
     try {
       const token = getToken();
       if (!token) {
-        navigate('/login');
+        navigate(ROUTES.login);
         return;
       }
 
@@ -897,9 +925,15 @@ function ProfilePage() {
     setShowOtpModal(false);
     setOtp('');
     setPendingEmailChange('');
-    setOtpTimeLeft(300);
-    if (resendTimer) clearInterval(resendTimer);
-    if (otpExpiryTimer) clearInterval(otpExpiryTimer);
+    // Tear the countdowns down from their refs and zero the deadlines, so a tick
+    // that fires before the next render cannot resurrect a countdown for a modal
+    // the user has already closed.
+    otpDeadlineRef.current = 0;
+    resendDeadlineRef.current = 0;
+    setOtpTimeLeft(0);
+    setResendCooldown(0);
+    if (resendTickRef.current) clearInterval(resendTickRef.current);
+    if (otpTickRef.current) clearInterval(otpTickRef.current);
   };
 
   // Leaving the Personal Info card while editing discards the draft, so a
@@ -1409,7 +1443,7 @@ function ProfilePage() {
                   <button
                     type="button"
                     className="profile-chip-btn"
-                    onClick={() => navigate('/pricing')}
+                    onClick={() => navigate(pricingPath(PRICING_ANCHORS.plans))}
                   >
                     {/* Not "Change or cancel plan": there is no user-facing
                         cancel to go to. /pricing can change the plan, and the
@@ -1612,8 +1646,15 @@ function ProfilePage() {
                   setPendingEmailChange('');
                   setError('');
                   setSuccess('');
+                  // Both countdowns belong to the modal being closed, so both
+                  // stop — the OTP one included, which this button used to leave
+                  // running.
+                  resendDeadlineRef.current = 0;
+                  otpDeadlineRef.current = 0;
+                  setOtpTimeLeft(0);
                   setResendCooldown(0);
-                  if (resendTimer) clearInterval(resendTimer);
+                  if (resendTickRef.current) clearInterval(resendTickRef.current);
+                  if (otpTickRef.current) clearInterval(otpTickRef.current);
                 }}
                 disabled={otpLoading}
               >

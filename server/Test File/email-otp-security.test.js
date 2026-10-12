@@ -49,6 +49,15 @@ const PASSWORD = 'Secret123';
 // before looking anything up.
 const MFA_TOKEN = 'test-only-transaction-aaaaaaaaaaaaaaaaaaaaaaaa';
 
+// The window routes/auth.js enforces, read from source rather than restated.
+// A literal here would be a third copy that could drift from the other two.
+const OTP_TTL_MS = (() => {
+  const source = require('fs').readFileSync(require.resolve('../routes/auth'), 'utf8');
+  const declared = source.match(/const OTP_TTL_MS = (\d+) \* 60 \* 1000;/);
+  assert.ok(declared, 'OTP_TTL_MS must be declared in server/routes/auth.js');
+  return Number(declared[1]) * 60 * 1000;
+})();
+
 // The suite's HTTP server binds to loopback, so this is the address every
 // rate-limit and lockout bucket sees.
 const LOOPBACK = '127.0.0.1';
@@ -73,11 +82,188 @@ test('the full 000000-999999 space is reachable, including the upper bound', () 
 });
 
 test('codes are not predictable from the previous one', () => {
-  // 200 consecutive codes must not contain a visible stride or repeat. A
-  // timestamp- or counter-based generator fails this immediately.
-  const seen = new Set();
-  for (let i = 0; i < 200; i += 1) seen.add(otpChallenge.generateOtp());
-  assert.equal(seen.size, 200, 'generated codes repeated within 200 draws');
+  // A timestamp- or counter-based generator must fail this immediately. It is
+  // the one property here that sampling can actually establish.
+  //
+  // WHY IT IS A STRIDE CHECK AND NOT A UNIQUENESS CHECK
+  // ---------------------------------------------------
+  // This previously asserted that 200 consecutive draws were all DISTINCT, and
+  // that is simply not a property a correct generator has. Six-digit codes span
+  // 900,000 values, so by the birthday bound a collision somewhere in 200 draws
+  // has probability ≈ 2.2% — roughly one run in forty. The suite therefore failed
+  // intermittently, on correct code, and the failure read as
+  // "generated codes repeated within 200 draws", which sounds like a security
+  // defect and is in fact arithmetic.
+  //
+  // Uniqueness is not the security property either. An OTP repeating once in a
+  // few hundred draws is exactly what a CSPRNG looks like; what matters is that
+  // an attacker holding the previous code cannot derive the next one.
+  //
+  // So this asserts PREDICTABILITY instead: that consecutive codes do not sit a
+  // short, fixed distance apart. A counter, a timestamp, or `previous + k` all
+  // produce a near-constant stride and are caught at once, while genuine
+  // randomness spreads strides across the whole 900,000-wide space.
+  //
+  // Every threshold below is set from the measured distribution rather than
+  // chosen by feel, because an over-tight statistical assertion is the SAME bug
+  // wearing different clothes — it fails a correct implementation often enough
+  // to be indistinguishable from a real defect. The measured figures are in the
+  // comments at each check.
+  const DRAWS = 200;
+  const codes = [];
+  for (let i = 0; i < DRAWS; i += 1) codes.push(Number(otpChallenge.generateOtp()));
+
+  const strides = codes.slice(1).map((code, i) => code - codes[i]);
+  const SPAN = otpChallenge.OTP_MAX - otpChallenge.OTP_MIN;
+
+  // 1. The mean stride must be large.
+  //
+  //    For a counter, a timestamp, or `previous + k`, the stride is a small
+  //    constant and this mean sits near zero. For uniform random codes over a
+  //    900,000-wide space the expected mean absolute stride is SPAN/3 ≈ 300,000,
+  //    so 10,000 is roughly twenty standard deviations below the mean — it cannot
+  //    be reached by chance (the standard error of the mean over 199 pairs is
+  //    ~14,000).
+  //
+  //    AN INDIVIDUAL PAIR IS NOT A USEFUL ASSERTION HERE, and asserting on one is
+  //    the mistake this rewrite made first. A random pair lands within 1,000 of
+  //    its neighbour about 0.22% of the time, so across 199 pairs that is a ~36%
+  //    chance of a run failing on CORRECT code — simulated and measured at 7,174
+  //    failures in 20,000 runs. Averaging removes the problem entirely: the
+  //    assertion is on a statistic whose distribution is tight, not on 199
+  //    independent near-certain events.
+  const meanAbsStride = strides.reduce((sum, s) => sum + Math.abs(s), 0) / strides.length;
+  assert.ok(
+    meanAbsStride > 10_000,
+    `mean stride is only ${Math.round(meanAbsStride)} — consecutive codes move together, which is what a counter produces`,
+  );
+
+  // 2. The stride must not be constant. This is the direct statement of "not
+  //    derived from a counter", and it is the cheapest check a predictable
+  //    generator cannot pass.
+  const distinctStrides = new Set(strides).size;
+  assert.ok(
+    distinctStrides > DRAWS / 2,
+    `only ${distinctStrides} distinct strides across ${DRAWS - 1} pairs — the sequence looks generated, not random`,
+  );
+
+  // 3. No WINDOW of consecutive codes may sit inside a narrow band. This catches
+  //    a generator that advances slowly and smoothly (a low-resolution clock, an
+  //    incrementing counter), and is the one check here that still holds for a
+  //    generator whose stride merely alternates rather than repeating.
+  //
+  //    The window size is the whole design. For k uniform draws over a span L the
+  //    chance that all k land within a band of width w is k·(w/L)^(k-1), which
+  //    collapses as k grows. Three codes in a 5,000-wide band looks like a
+  //    reasonable tightening, but that is ~9e-5 per window and ~1.9% across 198
+  //    windows — still a failure every fifty runs, which is the bug this whole
+  //    test was rewritten to remove. (Measured: 378 failures in 20,000 simulated
+  //    runs, before being corrected to a 20-code window here. The final
+  //    assertions produce 0 failures in 50,000 simulated runs.)
+  //
+  //    Twenty codes inside 50,000 is the same qualitative check with a failure
+  //    probability of about 1e-22 — it cannot fire by accident, and a walking
+  //    generator trips it immediately.
+  const WINDOW = 20;
+  const NARROW_BAND = 50_000;
+  for (let i = WINDOW - 1; i < codes.length; i += 1) {
+    const slice = codes.slice(i - WINDOW + 1, i + 1);
+    const spread = Math.max(...slice) - Math.min(...slice);
+    assert.ok(
+      spread > NARROW_BAND,
+      `${WINDOW} consecutive codes all fall within ${spread} of each other — that is a walk, not randomness`,
+    );
+  }
+
+  // 4. Uniqueness as a BOUND, not as "all distinct". For 200 uniform draws from
+  //    900,000 values the expected number of collisions is 199/900000 ≈ 0.022, so
+  //    `size >= DRAWS - 2` cannot fail by chance (P of 3+ collisions ≈ 1.7e-8),
+  //    while a genuinely short period falls far below it.
+  const unique = new Set(codes).size;
+  assert.ok(
+    unique >= DRAWS - 2,
+    `only ${unique} distinct codes in ${DRAWS} draws — that is a short period, not a CSPRNG`,
+  );
+
+  // Sanity: the space really is the declared one, so the thresholds above are
+  // calibrated against what is actually being generated.
+  assert.ok(SPAN === 900_000, `unexpected code space: ${SPAN}`);
+});
+
+// The test above is statistical, and a statistical test has two ways to be
+// worthless: it never fails on correct code (the bug this file had), or it never
+// fires on broken code. The second is the more dangerous one, because a test that
+// has been loosened until it is safe will happily pass forever while the
+// generator underneath is replaced with something predictable.
+//
+// So the assertions are re-run here against deliberately broken generators. It
+// asserts the SHAPE rather than re-testing the module: what matters is that the
+// four checks are a usable trap, which is a property of the thresholds, not of
+// the code currently in otpChallenge.js.
+//
+// A check that cannot fail on any of these is not measuring predictability.
+test('the predictability checks would catch a predictable generator', () => {
+  const SPAN = otpChallenge.OTP_MAX - otpChallenge.OTP_MIN;
+  const MIN = otpChallenge.OTP_MIN;
+  const DRAWS = 200;
+
+  /** The same four assertions, applied to a supplied series. */
+  const verdict = (codes) => {
+    const strides = codes.slice(1).map((code, i) => code - codes[i]);
+    const mean = strides.reduce((sum, s) => sum + Math.abs(s), 0) / strides.length;
+    if (new Set(strides).size <= DRAWS / 2) return 'caught by distinct strides';
+    if (mean <= 10_000) return 'caught by mean stride';
+    if (new Set(codes).size < DRAWS - 2) return 'caught by uniqueness';
+    for (let i = 19; i < codes.length; i += 1) {
+      const slice = codes.slice(i - 19, i + 1);
+      if (Math.max(...slice) - Math.min(...slice) <= 50_000) return 'caught by 20-code window';
+    }
+    return 'PASSED';
+  };
+
+  const broken = {
+    // A plain counter. The archetypal failure: perfectly valid six digits,
+    // trivially predictable by anyone holding one code.
+    'incrementing counter': () => {
+      let n = 0;
+      return () => {
+        n += 1;
+        return MIN + n * 3;
+      };
+    },
+    // A clock read at low resolution. Every code advances by nearly the same
+    // amount, which is what makes it guessable from two samples.
+    'slowly advancing clock': () => {
+      let n = 0;
+      return () => {
+        n += 1;
+        return MIN + n;
+      };
+    },
+    // `previous + k`: not a counter, but a fixed relationship between codes.
+    'previous plus a constant': () => {
+      let previous = MIN + 5000;
+      return () => {
+        previous += 37;
+        return previous;
+      };
+    },
+  };
+
+  for (const [name, generator] of Object.entries(broken)) {
+    const results = new Set();
+    // Several trials, because a check might catch a generator only sometimes.
+    // Any single trial that PASSES is a hole in the trap.
+    for (let trial = 0; trial < 20; trial += 1) {
+      const codes = [];
+      for (let i = 0; i < DRAWS; i += 1) codes.push(generator());
+      results.add(verdict(codes));
+    }
+    assert.ok(
+      !results.has('PASSED'),
+      `the checks let a ${name} through — they are too loose to catch a predictable generator`,
+    );
+  }
 });
 
 test('the module refuses Math.random anywhere in its source', () => {
@@ -441,9 +627,6 @@ test('every sender in the module rejects an injected recipient', async () => {
       stubbedEmail.sendOtpEmail(bad, '123456', 'login'),
       stubbedEmail.sendStatusEmail(bad, 'lockout', {}),
       stubbedEmail.sendPasswordResetEmail(bad, { resetUrl: 'https://x.test/r?t=1', code: '123456' }),
-      stubbedEmail.sendCredentialUpdateEmail(bad, {}),
-      stubbedEmail.sendAdminCredentialUpdateEmail(bad, {}),
-      stubbedEmail.sendAdminCredentialsEmail(bad, { alias: 'a', password: 'p', totpSecret: 's' }),
     ]);
 
     for (const [index, sent] of results.entries()) {
@@ -453,10 +636,14 @@ test('every sender in the module rejects an injected recipient', async () => {
   });
 });
 
-test('an operator-supplied description is escaped, not interpolated raw', async () => {
+test('an interpolated value is escaped, never concatenated into the HTML body', async () => {
+  // The OTP is generated from crypto.randomInt and is always six digits, so this
+  // asserts a defensive property rather than a reachable exploit: escapeHtml() is
+  // what stands between any value interpolated into a template and the markup
+  // around it, and a future change to the generator must not silently remove it.
   await withStubbedTransport(async (stubbedEmail, attempted) => {
     const payload = '<img src=x onerror=alert(1)>';
-    await stubbedEmail.sendCredentialUpdateEmail('real.user@example.com', { description: payload });
+    await stubbedEmail.sendOtpEmail('real.user@example.com', payload, 'login');
 
     assert.equal(attempted.length, 1);
     const html = attempted[0].html;
@@ -535,6 +722,52 @@ test('the OTP is never written to a log line', async () => {
 });
 
 // ── 10. No disclosure ──────────────────────────────────────────────────────
+
+test('the enforced OTP window is what the server publishes and the client renders', async () => {
+  // One window, three places that must agree: the constant the server enforces,
+  // the `expiresInSeconds` it sends, and the client's fallback default. When
+  // these disagreed the countdown would show time remaining over a code the
+  // server had already expired — which is the exact symptom this pins down.
+  await withAuthRouter({ deliver: () => true }, async ({ call }) => {
+    const login = await call('/login', { email: EMAIL, password: PASSWORD });
+
+    assert.equal(
+      typeof login.body.expiresInSeconds,
+      'number',
+      '/login must publish the window it will enforce'
+    );
+    assert.ok(
+      login.body.expiresInSeconds > 0 && login.body.expiresInSeconds <= 300,
+      `the published window must be 300s or less, got ${login.body.expiresInSeconds}`
+    );
+    assert.equal(
+      login.body.expiresInSeconds * 1000,
+      OTP_TTL_MS,
+      'the published window must equal the enforced OTP_TTL_MS exactly'
+    );
+
+    // And the client's fallback agrees, so a response that predates the field
+    // still renders the right number.
+    const clientSource = require('fs').readFileSync(
+      require.resolve('../../my-react-app/src/utils/otpCountdown.js'), 'utf8'
+    );
+    assert.match(
+      clientSource,
+      new RegExp(`OTP_TTL_SECONDS = ${OTP_TTL_MS / 1000}\\b`),
+      'the client default must match the enforced server window'
+    );
+  });
+});
+
+test('a published window never leaks the code alongside it', async () => {
+  await withAuthRouter({ deliver: () => true }, async ({ call, sentCodes }) => {
+    const login = await call('/login', { email: EMAIL, password: PASSWORD });
+    const code = sentCodes[sentCodes.length - 1].otp;
+    // Adding expiresInSeconds must not have created a second place the code
+    // could leak from.
+    assert.ok(!JSON.stringify(login.body).includes(code));
+  });
+});
 
 test('no OTP endpoint returns the code in its response', async () => {
   await withAuthRouter({ deliver: () => true }, async ({ call, sentCodes, mfaTransaction, sessionsIssued }) => {
@@ -653,6 +886,16 @@ async function withAuthRouter({ deliver, findOne }, fn) {
   };
   sessionUtils.revokeAllUserSessions = async () => 0;
 
+  // utils/authFlow.js DESTRUCTURES issueUserSession at module load:
+  //
+  //     const { issueUserSession } = require('./sessions');
+  //
+  // so replacing the property on the sessions module afterwards has no effect on
+  // it — authFlow keeps calling the original, which means a real Session write
+  // and a database round trip in a suite with no database. The cache has to be
+  // dropped for it to re-bind to the stub below, or the "no session before MFA"
+  // assertion silently measures the wrong thing.
+  delete require.cache[require.resolve('../utils/authFlow')];
   delete require.cache[require.resolve('../routes/auth')];
   const authRouter = require('../routes/auth');
   const app = express();
@@ -694,6 +937,7 @@ async function withAuthRouter({ deliver, findOne }, fn) {
     sessionUtils.issueUserSession = originals.issueUserSession;
     sessionUtils.revokeAllUserSessions = originals.revokeAllUserSessions;
     process.env.NODE_ENV = originals.nodeEnv;
+    delete require.cache[require.resolve('../utils/authFlow')];
     delete require.cache[require.resolve('../routes/auth')];
   }
 }

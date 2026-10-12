@@ -262,14 +262,13 @@ router.post('/rewards/achievements/check', async (req, res) => {
     const stats = await collectStats(req.user._id, wallet);
     const owned = (await Nft.find({ owner: req.user._id }).select('kind').lean()).map((n) => n.kind);
     const eligible = eligibleAchievements(stats, owned);
-    const minted = [];
-    for (const achievement of eligible) {
+
+    // Mints run concurrently — different kinds are independent rows, and the
+    // (owner, kind) unique index is what makes a duplicate a duplicate.
+    const attempts = await Promise.all(eligible.map(async (achievement) => {
       try {
         const serial = (await Nft.countDocuments({ kind: achievement.kind })) + 1;
         const tokenId = `sw-${sha256Hex(`${achievement.kind}:${req.user._id}:${serial}`)}`;
-        const tx = await engine.anchor('nft:mint', wallet.address, {
-          public: { kind: achievement.kind, serial, to: wallet.address },
-        });
         const nft = await Nft.create({
           owner: req.user._id,
           ownerAddress: wallet.address,
@@ -279,17 +278,33 @@ router.post('/rewards/achievements/check', async (req, res) => {
           description: achievement.description,
           imageSeed: sha256Hex(tokenId).slice(0, 16),
           serial,
-          txHash: tx.txs[0] || '',
         });
-        minted.push(nft);
+        return { achievement, nft };
       } catch (err) {
         // Lost a mint race (E11000 on the (owner, kind) index) —
         // the NFT already exists. Skip instead of crashing the request.
-        if (err && err.code === 11000) continue;
+        if (err && err.code === 11000) return null;
         throw err;
       }
+    }));
+    const minted = attempts.filter(Boolean);
+
+    // Anchor every committed mint as ONE block and backfill the tx hashes in
+    // ONE bulk write. Appending one block per mint serialized ~25 network
+    // round-trips through the ledger queue when five checks raced, and a
+    // check that lost the race paid for chain txs describing NFTs that were
+    // never created. Anchoring after the create commits both problems.
+    if (minted.length) {
+      const chain = await engine.anchorMany(minted.map(({ achievement, nft }) => ({
+        type: 'nft:mint',
+        actor: wallet.address,
+        data: { kind: achievement.kind, serial: nft.serial, to: wallet.address },
+      })));
+      await Nft.bulkWrite(minted.map(({ nft }, i) => ({
+        updateOne: { filter: { _id: nft._id }, update: { $set: { txHash: chain.txs[i] || '' } } },
+      })));
     }
-    res.json({ minted, count: minted.length });
+    res.json({ minted: minted.map((m) => m.nft), count: minted.length });
   } catch (error) {
     console.error('[web3 POST /rewards/achievements/check]', error.message);
     res.status(500).json({ message: 'Could not check achievements.' });

@@ -22,7 +22,19 @@ const { guardRaisePriority, selfHealOpenPriority } = require('../utils/priorityG
 //   call sites used to mutate their own response object to `priority: 'Priority'`
 //   unconditionally, which showed "flagged" in the UI for a write the database
 //   never received.
-async function flagSevereAssessment(assessment, reasons, userEmail) {
+/**
+ * Raise an assessment to Priority and notify both audiences.
+ *
+ * NOTE the deliberate asymmetry in who is told and how: the MEMBER gets a
+ * notification about THEIR assessment (wording, a link to /history); the ADMIN
+ * gets the reason and a link to the review queue, and NO member identifier —
+ * the assessment row the link opens is where that lives, already authorised.
+ * See utils/memberPrivacy.js.
+ *
+ * @param {object} assessment
+ * @param {string[]} reasons
+ */
+async function flagSevereAssessment(assessment, reasons) {
   try {
     // Same rule as the admin endpoint. Severity detection re-runs whenever
     // results are saved, so without this a finished assessment could have its
@@ -30,14 +42,20 @@ async function flagSevereAssessment(assessment, reasons, userEmail) {
     // completed the day's plan, yet found "New Assessments Paused" again.
     const verdict = await guardRaisePriority(assessment.user, assessment._id);
     if (!verdict.ok) {
-      await AdminEvent.create({
+            await AdminEvent.create({
         type: 'severe-flag',
         title: 'Severe case detected (not flagged)',
-        detail: `${userEmail || 'A user'} — ${reasons.join('; ') || 'Severe case detected'}. ` +
+        // No member identifier. The assessment row the link opens already
+        // carries one and is authorised to; the bell's job is only to say that
+        // severity was detected and the guard declined. See
+        // utils/memberPrivacy.js for why this rule exists.
+        detail: `${reasons.join('; ') || 'Severe case detected'}. ` +
           `Not raised to Priority: ${verdict.message}`,
         user: assessment.user,
         assessmentId: assessment._id,
         linkUserId: assessment.user,
+        link: 'assessment-management',
+        linkLabel: 'Open Assessment Management',
       }).catch(() => {});
       return { flagged: false, reason: verdict.code };
     }
@@ -52,14 +70,20 @@ async function flagSevereAssessment(assessment, reasons, userEmail) {
       title: 'Health review flagged for your assessment',
       detail: `Our review flagged possible severe concerns (${label}). An administrator has been notified. If you feel unwell, please seek medical care promptly.`,
       assessmentId: assessment._id,
+      link: '/history',
+      linkLabel: 'View the flagged assessment',
     });
     await AdminEvent.create({
       type: 'severe-flag',
       title: 'Severe case flagged',
-      detail: `${userEmail || 'A user'} — ${label}`,
+      // The reasons are the work; the identity is on the flagged assessment the
+      // link opens. No email — see utils/memberPrivacy.js.
+      detail: label,
       user: assessment.user,
       assessmentId: assessment._id,
       linkUserId: assessment.user,
+      link: 'assessment-management',
+      linkLabel: 'Open Assessment Management',
     }).catch(() => {});
     return { flagged: true };
   } catch (err) {
@@ -211,7 +235,7 @@ router.post('/', protect, async (req, res) => {
     }
     let severityFlag = { flagged: false, reasons: [] };
     if (severity.flagged && can(req.user, 'priorityAssessment')) {
-      const outcome = await flagSevereAssessment(assessment, severity.reasons, req.user.email);
+      const outcome = await flagSevereAssessment(assessment, severity.reasons);
       if (outcome.flagged) {
         severityFlag = severity;
         // Reflect the flag in this response (the created doc predates the update)
@@ -510,7 +534,7 @@ router.patch('/:id/results', protect, async (req, res) => {
         console.log(`[assessment] AI second opinion unavailable, rules only: ${severity.aiError}`);
       }
       if (severity.flagged) {
-        const outcome = await flagSevereAssessment(assessment, severity.reasons, assessment.userEmail);
+        const outcome = await flagSevereAssessment(assessment, severity.reasons);
         severityFlag = outcome.flagged
           ? severity
           : { flagged: false, reasons: [], suppressed: outcome.reason };
@@ -601,10 +625,16 @@ router.patch('/:id/priority', protect, async (req, res) => {
         : 'Your priority review was released. You can start a new assessment at any time.';
       await UserNotification.create({
         user: existing.user,
-        type: nowRaised ? 'severe-flag' : 'resolved',
+        // 'resolved' is NOT a valid UserNotification.type (the enum is
+        // ['severe-flag', 'info']) — passing it made every release notice fail
+        // validation and vanish into the catch below. The release is an ordinary
+        // informational notice, so 'info' is both correct and legal.
+        type: nowRaised ? 'severe-flag' : 'info',
         title,
         detail,
         assessmentId: existing._id,
+        link: '/history',
+        linkLabel: nowRaised ? 'View the assessment' : 'View your history',
       }).catch((err) => {
         console.error('[assessment PATCH /:id/priority] notification failed:', err.message);
       });
@@ -615,6 +645,8 @@ router.patch('/:id/priority', protect, async (req, res) => {
         user: existing.user,
         assessmentId: existing._id,
         linkUserId: existing.user,
+        link: 'assessment-management',
+        linkLabel: 'Open Assessment Management',
       }).catch((err) => {
         console.error('[assessment PATCH /:id/priority] audit failed:', err.message);
       });

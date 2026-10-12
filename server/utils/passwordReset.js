@@ -417,6 +417,8 @@ async function applyNewPassword(user, newPassword, { method, req } = {}) {
       title: 'Password changed',
       detail: 'Your password was reset and every signed-in device was signed out. '
         + 'If this wasn\'t you, reset it again and contact support immediately.',
+      link: '/profile?section=security',
+      linkLabel: 'Review your account security',
     }).catch(() => {});
   } catch { /* best-effort */ }
 

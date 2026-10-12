@@ -176,7 +176,7 @@ function AdminTopbar({
           <button
             type="button"
             className={`admin-topbar__icon-btn${showNotifications ? ' is-open' : ''}`}
-            aria-label="Open notifications"
+            aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'}
             aria-expanded={showNotifications}
             onClick={onToggleNotifications}
           >

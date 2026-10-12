@@ -79,6 +79,19 @@ if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DEV_OTP_RESPONSE 
   throw new Error('ALLOW_DEV_OTP_RESPONSE must never be "true" in production.');
 }
 
+// The same safeguard for the SMS development transport, which prints message
+// bodies — and therefore live sign-in and recovery codes — to stdout. Without
+// this, a deployment that copied a development .env would print every account's
+// one-time codes into its logs.
+if (process.env.NODE_ENV === 'production') {
+  if (process.env.ALLOW_DEV_SMS_RESPONSE === 'true') {
+    throw new Error('ALLOW_DEV_SMS_RESPONSE must never be "true" in production.');
+  }
+  if (String(process.env.SMS_PROVIDER || '').trim().toLowerCase() === 'console') {
+    throw new Error('SMS_PROVIDER=console prints codes to the log and must never be used in production.');
+  }
+}
+
 // Password reset links are built from PUBLIC_WEB_URL, and that value decides
 // where a real user's reset actually goes. Unset in production, the link is
 // built for http://localhost:5173 and every reset email a real user receives is

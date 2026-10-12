@@ -38,8 +38,36 @@ const chatMessageSchema = new mongoose.Schema({
   // Display name of the author at the time of writing. Denormalised so a
   // renamed member (or a disabled admin) does not rewrite history.
   authorName: { type: String, default: '' },
-  body: { type: String, required: true, trim: true, maxlength: 2000 },
+
+  // ── Exactly one of these two, never both ────────────────────────────────
+  //
+  // `body` is the plaintext message. It is populated only on a thread that is
+  // not end-to-end encrypted, and it is the legacy format: every message ever
+  // written lives here.
+  //
+  // `cipher` is `e1.<iv>.<ciphertext>` — AES-256-GCM under the thread's
+  // content key, which was generated in a browser and never reached this
+  // server. The body of such a message is unknowable here, which is the entire
+  // point; see utils/chatEncryption.js.
+  //
+  // A thread's own state decides which one a write may carry (enforceMessagePayload
+  // below), so the collection never mixes two conventions inside one transcript.
+  body: { type: String, default: '', trim: true, maxlength: 2000 },
+  cipher: { type: String, default: '', maxlength: 8000 },
 }, { timestamps: true });
+
+/**
+ * A message with neither a body nor a ciphertext is an empty bubble that still
+ * bumps `messageCount`, floats the thread to the top of both queues and rings
+ * somebody's bell. Refused at the model rather than in each of the four call
+ * sites that write here, because this is the invariant, not a per-route rule.
+ */
+chatMessageSchema.pre('validate', function enforceMessagePayload(next) {
+  if (!this.cipher && !this.body) {
+    this.invalidate('body', 'A message needs either text or an encrypted body.');
+  }
+  next();
+});
 
 // The transcript: chronological within a thread.
 chatMessageSchema.index({ thread: 1, createdAt: 1 });

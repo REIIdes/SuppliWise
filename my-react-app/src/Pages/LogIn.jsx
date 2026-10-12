@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { NavLink, Link, useNavigate, useLocation } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import { BASE_URL, saveAssessment, getRecommendations, saveAssessmentResults, parseJSON, startSession, takeAuthNotice, getToken, redeemBackupCode, accountIdOf, getActiveAccountId, getStoredUser } from '../api';
@@ -7,6 +7,16 @@ import { beginAuthTransition, endAuthTransition } from '../auth/authState';
 // The client never names the account - the assertion does.
 import { isPasskeySupported, signInWithPasskey } from '../api';
 import { safeRedirectPath } from '../utils/safeUrl';
+// The OTP countdown is derived from an ABSOLUTE DEADLINE, not a counter that is
+// decremented once a second. See the module for the four failure modes of the
+// decrementing version — a throttled background tab, stacked intervals, and a
+// stale-closure clear all made the timer disagree with the server.
+import {
+  createDeadline,
+  secondsLeft,
+  ttlFromResponse,
+  formatCountdown,
+} from '../utils/otpCountdown';
 import './LogIn.css';
 import './ProfilePage.css'; // Import for OTP modal styles
 
@@ -62,16 +72,41 @@ function LogIn() {
   const [mfaTransaction, setMfaTransaction] = useState('');
   const [passkeyBusy, setPasskeyBusy] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
-  const [resendTimer, setResendTimer] = useState(null);
+  // Refs for the two countdowns' deadlines and ticks. Same reasoning as the OTP
+  // ones above: assignment must not trigger a render, and teardown must not read
+  // a value captured from an earlier render.
+  const resendDeadlineRef = useRef(0);
+  const resendTickRef = useRef(null);
   const [success, setSuccess] = useState('');
   const [otpTimeLeft, setOtpTimeLeft] = useState(300); // 5 minutes in seconds
-  const [otpExpiryTimer, setOtpExpiryTimer] = useState(null);
+  // The absolute instant the current code stops working, and the interval that
+  // repaints the countdown from it. Refs rather than state: neither value should
+  // cause a re-render when assigned, and clearing the interval must not depend on
+  // a value captured from a previous render.
+  const otpDeadlineRef = useRef(0);
+  const otpTickRef = useRef(null);
   const [requiresTwoFactor, setRequiresTwoFactor] = useState(false);
   // Whether the second-factor box is collecting a live authenticator code or a
   // printed recovery code. They are the same 11 characters with a hyphen in the
   // middle, typed by someone who may be locked out, so the field has to accept
   // letters and digits — not just the digits a TOTP is made of.
   const [useRecoveryCode, setUseRecoveryCode] = useState(false);
+
+  // The second-factor methods the SERVER says this transaction will accept,
+  // taken from the /login response. Display only: the server re-derives every
+  // one of these at verify time, so nothing here can grant an authority the
+  // backend has not already decided.
+  const [mfaMethods, setMfaMethods] = useState([]);
+  // Whether the box is currently collecting a texted code rather than the one
+  // the account's own factor produced.
+  const [useSms, setUseSms] = useState(false);
+  const [smsBusy, setSmsBusy] = useState(false);
+  const [smsDestination, setSmsDestination] = useState('');
+
+  // SMS is offered only when the server listed it. That is the "never the only
+  // way in" rule made visible: if a text does not arrive, the authenticator,
+  // emailed code or passkey the account already had is still one tap away.
+  const smsAvailable = mfaMethods.includes('sms-otp');
   
   // Whether to offer the passkey button at all. Resolved once, in the state
   // initialiser rather than an effect: it is a static property of the browser,
@@ -146,55 +181,73 @@ function LogIn() {
   };
 
   const startResendCooldown = (seconds) => {
-    setResendCooldown(seconds);
-    
-    // Clear existing timer if any
-    if (resendTimer) {
-      clearInterval(resendTimer);
-    }
+    // Absolute deadline, same reason as the OTP countdown: this one had the
+    // identical accumulating counter and the identical stale-closure clear.
+    const deadline = createDeadline(seconds);
+    resendDeadlineRef.current = deadline;
+    setResendCooldown(secondsLeft(deadline));
 
-    // Start countdown
-    const timer = setInterval(() => {
-      setResendCooldown(prev => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          return 0;
-        }
-        return prev - 1;
-      });
+    if (resendTickRef.current) clearInterval(resendTickRef.current);
+
+    const tick = setInterval(() => {
+      const left = secondsLeft(resendDeadlineRef.current);
+      setResendCooldown(left);
+      if (left <= 0) {
+        clearInterval(tick);
+        resendTickRef.current = null;
+      }
     }, 1000);
 
-    setResendTimer(timer);
+    resendTickRef.current = tick;
   };
 
-  const startOtpExpiryTimer = () => {
-    setOtpTimeLeft(300); // Reset to 5 minutes
-    
-    // Clear existing timer if any
-    if (otpExpiryTimer) {
-      clearInterval(otpExpiryTimer);
-    }
+  useEffect(() => () => {
+    if (resendTickRef.current) clearInterval(resendTickRef.current);
+  }, []);
 
-    // Start countdown
-    const timer = setInterval(() => {
-      setOtpTimeLeft(prev => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          setError('Verification code has expired. Please request a new one.');
-          return 0;
-        }
-        return prev - 1;
-      });
+  /**
+   * Start (or restart) the OTP countdown.
+   *
+   * `seconds` is the window the SERVER said it will enforce, so the number on
+   * screen is the number it will honour rather than a second hardcoded copy.
+   * A response that predates the field falls back to the shared default.
+   */
+  const startOtpExpiryTimer = (response) => {
+    // The deadline is the single source of truth. Every tick recomputes from it,
+    // so the displayed value cannot drift no matter how irregularly the interval
+    // below actually fires.
+    const deadline = createDeadline(ttlFromResponse(response));
+    otpDeadlineRef.current = deadline;
+    setOtpTimeLeft(secondsLeft(deadline));
+
+    // Stop the previous tick through the ref, never through captured state. The
+    // captured-state version read `otpExpiryTimer` from the render that called
+    // it, so two calls in one render cleared nothing and left two intervals
+    // running — a countdown that drained twice as fast.
+    if (otpTickRef.current) clearInterval(otpTickRef.current);
+
+    const tick = setInterval(() => {
+      const left = secondsLeft(otpDeadlineRef.current);
+      setOtpTimeLeft(left);
+      if (left <= 0) {
+        clearInterval(tick);
+        otpTickRef.current = null;
+        setError('Verification code has expired. Please request a new one.');
+      }
     }, 1000);
 
-    setOtpExpiryTimer(timer);
+    otpTickRef.current = tick;
   };
 
-  const formatTimeLeft = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
+  // Stop the countdown when the component unmounts. Previously the interval was
+  // cleared in handleCancelOtp and friends — every one of which is a path the
+  // component can leave by other routes too, so a sign-out mid-modal left the
+  // tick running against an unmounted component.
+  useEffect(() => () => {
+    if (otpTickRef.current) clearInterval(otpTickRef.current);
+  }, []);
+
+  const formatTimeLeft = formatCountdown;
 
   const handleResendOtp = async () => {
     if (resendCooldown > 0) return;
@@ -221,7 +274,8 @@ function LogIn() {
       }
 
       startResendCooldown(30);
-      startOtpExpiryTimer(); // Restart expiry timer with new OTP
+      // Restart the countdown from the window the server just enforced.
+      startOtpExpiryTimer(data); // Restart expiry timer with new OTP
       setSuccess('Verification code sent again!');
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
@@ -266,11 +320,16 @@ function LogIn() {
         setRequiresTwoFactor(true);
         setPendingUserId(data.userId);
         setMfaTransaction(data.mfaTransaction || '');
+        setMfaMethods(Array.isArray(data.mfaMethods) ? data.mfaMethods : []);
         setOtp('');
         // Never carry the choice across attempts: the next sign-in may be for
         // an account whose second factor is an emailed code, which has no
         // recovery codes to offer.
         setUseRecoveryCode(false);
+        // Same reasoning for the texted code — and for the messages from a
+        // previous attempt, which are about a different account.
+        setUseSms(false);
+        setSmsDestination('');
         setShowOtpModal(true);
         setLoading(false);
         return;
@@ -283,9 +342,14 @@ function LogIn() {
         setSuccess('');
         setPendingUserId(data.userId);
         setMfaTransaction(data.mfaTransaction || '');
+        setMfaMethods(Array.isArray(data.mfaMethods) ? data.mfaMethods : []);
+        setUseSms(false);
+        setSmsDestination('');
         setShowOtpModal(true);
         startResendCooldown(30);
-        startOtpExpiryTimer(); // Start OTP expiry countdown
+        // The window comes from the login response, so the countdown reflects
+        // what the server will actually enforce.
+        startOtpExpiryTimer(data); // Start OTP expiry countdown
         setLoading(false);
         return;
       }
@@ -312,6 +376,43 @@ function LogIn() {
       : otp.trim().length === 6
   );
 
+  /**
+   * Ask the server to text a code for THIS sign-in.
+   *
+   * Sent on demand, never automatically at /login. Two reasons, and both are
+   * about money and attention: a text costs money and interrupts someone, and
+   * most people who can reach this screen have a working authenticator and will
+   * never want one. The MFA transaction is sent because the server requires it —
+   * without proof that the password step happened, this would be an endpoint
+   * anyone could use to spend the deployment's SMS budget on anyone.
+   */
+  const handleSendSms = async () => {
+    setSmsBusy(true);
+    setError('');
+    setSuccess('');
+    try {
+      const res = await fetch(`${BASE_URL}/auth/send-login-sms`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: pendingUserId, mfaTransaction }),
+      });
+      const data = await parseJSON(res);
+      if (!res.ok) throw new Error(data.message || 'We could not send a text message.');
+      setUseSms(true);
+      setOtp('');
+      // Masked by the server — enough to confirm which number, not the number.
+      setSmsDestination(data.destination || '');
+      // Shares the emailed code's cooldown, so alternating between the two does
+      // not double the number of messages an account can trigger.
+      startResendCooldown(30);
+      startOtpExpiryTimer({ expiresInSeconds: data.expiresInSeconds });
+    } catch (err) {
+      setError(err.message || 'We could not send a text message. Use another way to sign in.');
+    } finally {
+      setSmsBusy(false);
+    }
+  };
+
   const handleOtpSubmit = async () => {
     if (!secondFactorComplete()) {
       setError(useRecoveryCode
@@ -330,7 +431,13 @@ function LogIn() {
         // unauthenticated — see redeemBackupCode in api.js.
         data = await redeemBackupCode(pendingUserId, otp.trim(), remember);
       } else {
-        const response = await fetch(`${BASE_URL}/auth/${requiresTwoFactor ? 'login-2fa' : 'verify-login-otp'}`, {
+        // Three mutually exclusive second factors behind one box. The endpoint is
+        // chosen from the mode, never from anything the server sent back, so a
+        // tampered response cannot redirect the submission.
+        const endpoint = useSms
+          ? 'verify-login-sms'
+          : (requiresTwoFactor ? 'login-2fa' : 'verify-login-otp');
+        const response = await fetch(`${BASE_URL}/auth/${endpoint}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -357,9 +464,16 @@ function LogIn() {
     } catch (err) {
       const message = useRecoveryCode
         ? (err.message || 'That recovery code is not valid. Each code works only once.')
-        : (err.message?.includes('Invalid verification code')
-          ? 'That code is no longer valid. Please use the newest verification code sent to your email.'
-          : err.message || 'Invalid verification code. Please try again.');
+        : useSms
+          // Do not tell a texted-code user to look at their email — the code
+          // they are expecting is not there. The server's own wording names the
+          // right channel; this only rewrites the emailed-code fallback text.
+          ? (err.message === 'Invalid verification code'
+            ? 'That text message code is not valid. Check the newest message, or use another way to sign in.'
+            : err.message || 'That code is not valid. Please try again.')
+          : (err.message?.includes('Invalid verification code')
+            ? 'That code is no longer valid. Please use the newest verification code sent to your email.'
+            : err.message || 'Invalid verification code. Please try again.');
       setError(message);
     } finally {
       setOtpLoading(false);
@@ -504,14 +618,23 @@ function LogIn() {
     // keeping, and holding it would invite a stale retry.
     setMfaTransaction('');
     setUseRecoveryCode(false);
+    // Cleared with the rest: the next sign-in may belong to a different account,
+    // and leaving the previous sign-in's mode set would submit its code to the
+    // wrong endpoint.
+    setUseSms(false);
+    setSmsDestination('');
+    setMfaMethods([]);
     setOtp('');
     setPendingUserId('');
     setError('');
     setSuccess('');
     setResendCooldown(0);
-    setOtpTimeLeft(300);
-    if (resendTimer) clearInterval(resendTimer);
-    if (otpExpiryTimer) clearInterval(otpExpiryTimer);
+    // Tear down the countdown from its ref, and clear the deadline so a stray
+    // tick cannot resurrect a countdown for a step the user has already left.
+    otpDeadlineRef.current = 0;
+    setOtpTimeLeft(0);
+    if (resendTickRef.current) clearInterval(resendTickRef.current);
+    if (otpTickRef.current) clearInterval(otpTickRef.current);
     setLoading(false);
   };
 
@@ -807,6 +930,45 @@ function LogIn() {
                     ? 'Use my authenticator instead'
                     : 'Lost your phone? Use a recovery code'}
                 </button>
+              </div>
+            )}
+
+            {/* Text a code instead. Offered only when the SERVER listed sms-otp
+                on this transaction, which it does only for an account with a
+                verified number that opted in — and never as the only method, so
+                the authenticator button above is always still there if the
+                message does not arrive. */}
+            {smsAvailable && (
+              <div className="profile-modal-resend">
+                {useSms ? (
+                  <button
+                    type="button"
+                    className="profile-modal-resend-btn"
+                    onClick={() => { setUseSms(false); setOtp(''); setError(''); setSuccess(''); }}
+                    disabled={otpLoading}
+                  >
+                    Use another method instead
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="profile-modal-resend-btn"
+                    onClick={handleSendSms}
+                    disabled={otpLoading || smsBusy || resendCooldown > 0}
+                  >
+                    {smsBusy
+                      ? 'Sending…'
+                      : resendCooldown > 0
+                        ? `Text me a code (${resendCooldown}s)`
+                        : 'Text me a code'}
+                  </button>
+                )}
+                {useSms && (
+                  <p className="profile-modal-hint" style={{ marginTop: '8px' }}>
+                    Enter the 6-digit code from the text message{smsDestination ? ` sent to ${smsDestination}` : ''}.
+                    It is weaker than your authenticator — a text can be redirected if your SIM is swapped.
+                  </p>
+                )}
               </div>
             )}
           </div>

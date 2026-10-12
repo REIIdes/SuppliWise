@@ -147,6 +147,8 @@ async function selfHealOpenPriority(userId) {
           user: doc.user,
           assessmentId: doc._id,
           linkUserId: doc.user,
+          link: 'assessment-management',
+          linkLabel: 'Open Assessment Management',
         }).catch(() => {});
       } else remaining.push(doc);
     } else {

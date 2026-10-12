@@ -425,6 +425,8 @@ router.post('/register/verify', protect, manageLimiter, requireStepUp, async (re
         type: 'info',
         title: 'A passkey was added to your account',
         detail: `A passkey named "${created.name}" (${created.deviceLabel || 'unknown device'}) can now sign in to your account. If this was not you, remove it and change your password immediately.`,
+        link: '/profile?section=security',
+        linkLabel: 'Review your passkeys',
       }).catch(() => {});
     } catch { /* best-effort */ }
 
@@ -546,6 +548,8 @@ router.delete('/:id', protect, manageLimiter, requireStepUp, async (req, res) =>
         type: 'info',
         title: 'A passkey was removed from your account',
         detail: `The passkey "${passkey.name}" (${passkey.deviceLabel || 'unknown device'}) can no longer sign in to your account. If this was not you, change your password immediately.`,
+        link: '/profile?section=security',
+        linkLabel: 'Review your passkeys',
       }).catch(() => {});
     } catch { /* best-effort */ }
 

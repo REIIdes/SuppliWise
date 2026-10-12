@@ -13,7 +13,10 @@
  *   2. it does not disable verification (a server presenting an UNKNOWN
  *      certificate authority is still refused — otherwise this would be
  *      `NODE_TLS_REJECT_UNAUTHORIZED=0` with better manners),
- *   3. it is a no-op when TLS is off, so a plain-HTTP run is untouched.
+ *   3. it is a no-op when TLS is off, so a plain-HTTP run is untouched, AND it
+ *      asks the server's own .env when the environment says nothing — because
+ *      that file is the only place TLS_ENABLED is recorded, and neither npm nor
+ *      a shell reads it.
  */
 const test = require('node:test');
 const assert = require('node:assert');
@@ -145,21 +148,73 @@ test('the wrapper adds trust, never a bypass', { skip: !hasCertificate && 'run `
 test('the wrapper is a no-op when TLS is off', async () => {
   // A plain-HTTP run must behave exactly as it did before this script existed:
   // nothing added to the environment, so nothing that can go wrong.
+  //
+  // TLS_ENABLED=false in the ENVIRONMENT, not merely unset. The wrapper reads
+  // the server's .env when the variable is absent, and on a machine where TLS is
+  // switched on that is the correct answer — but an operator who turns TLS off
+  // must be believed even while the file still says true, which is exactly what
+  // passing it here asserts. (`.env.example` ships TLS_ENABLED=false, so a fresh
+  // clone reaches the same place by a different route.)
   const { out } = await runThroughWrapper(
     `process.stdout.write(JSON.stringify({
        nodeOptions: process.env.NODE_OPTIONS ?? null,
        extraCa: process.env.NODE_EXTRA_CA_CERTS ?? null,
      }));`,
     {
-      // TLS_ENABLED unset entirely — the state a fresh clone is in. The undefined
-      // values are dropped from the child environment by Node's own semantics.
-      env: { TLS_ENABLED: undefined, NODE_OPTIONS: undefined, NODE_EXTRA_CA_CERTS: undefined },
+      env: { TLS_ENABLED: 'false', NODE_OPTIONS: undefined, NODE_EXTRA_CA_CERTS: undefined },
     },
   );
   const env = JSON.parse(out);
   assert.ok(!/use-system-ca/.test(env.nodeOptions || ''), 'should not add --use-system-ca with TLS off');
   assert.equal(env.extraCa, null, 'should not add NODE_EXTRA_CA_CERTS with TLS off');
 });
+
+test('with TLS_ENABLED unset, the wrapper believes the server .env', async () => {
+  // The bug this guards: TLS_ENABLED lives in server/.env, which neither npm
+  // nor a shell reads. The wrapper used to look only at the ambient environment,
+  // found nothing, skipped the certificate authority, and every probe died with
+  // "fetch failed" against a perfectly good certificate — with nothing in the
+  // error to point at the cause.
+  //
+  // Asserted against whatever the server's own .env says, so the test is true on
+  // a TLS-on machine and on a fresh clone alike.
+  const serverEnv = readServerEnv('TLS_ENABLED');
+  const { out } = await runThroughWrapper(
+    `process.stdout.write(JSON.stringify({
+       nodeOptions: process.env.NODE_OPTIONS ?? null,
+       extraCa: process.env.NODE_EXTRA_CA_CERTS ?? null,
+     }));`,
+    {
+      // Unset in the environment, which is the ordinary state of an `npm run`.
+      env: { TLS_ENABLED: undefined, NODE_OPTIONS: undefined, NODE_EXTRA_CA_CERTS: undefined },
+    },
+  );
+  const env = JSON.parse(out);
+  if (serverEnv.toLowerCase() === 'true') {
+    assert.ok(
+      /use-system-ca/.test(env.nodeOptions || '') || env.extraCa,
+      'the server .env enables TLS, so the certificate authority must be added',
+    );
+  } else {
+    assert.ok(
+      !/use-system-ca/.test(env.nodeOptions || '') && !env.extraCa,
+      'the server .env does not enable TLS, so the wrapper must stay out of the way',
+    );
+  }
+});
+
+/** Reads one key from server/.env, the same way the wrapper does. */
+function readServerEnv(key) {
+  try {
+    const line = fs.readFileSync(path.join(__dirname, '..', '.env'), 'utf8')
+      .split(/\r?\n/)
+      .find((l) => l.trim().startsWith(`${key}=`));
+    if (!line) return '';
+    return line.slice(line.indexOf('=') + 1).trim().replace(/^["']|["']$/g, '');
+  } catch {
+    return '';
+  }
+}
 
 test('the wrapper refuses a script that does not exist', async () => {
   // A typo in a probe name should be an immediate, named error rather than a

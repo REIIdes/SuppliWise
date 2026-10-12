@@ -23,6 +23,8 @@ import { useEffect, useRef, useState } from 'react';
 import {
   generateBackupCodes, invalidateBackupCodes,
   requestRecoveryEmail, verifyRecoveryEmail, removeRecoveryEmail,
+  requestRecoveryPhone, verifyRecoveryPhone, removeRecoveryPhone,
+  setRecoveryPhoneSecondFactor,
 } from '../../api';
 import './RecoveryPanel.css';
 
@@ -457,6 +459,236 @@ export function RecoveryEmailCard({ summary, onRequireStepUp, onChanged }) {
           <div className="psc-btn-row">
             <button type="button" className="psc-btn psc-btn--primary" onClick={start} disabled={busy || !email.trim()}>
               {busy ? 'Sending…' : 'Send confirmation code'}
+            </button>
+            {current && (
+              <button type="button" className="psc-btn psc-btn--ghost" onClick={close} disabled={busy}>
+                Cancel
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Recovery Phone — the same card as above for a phone number, with two things
+ * the email card does not have.
+ *
+ * WHY THE NUMBER IS PLACED LAST IN THIS PANEL
+ * -------------------------------------------
+ * It is the weakest of the three recovery routes, and the weakness is in the
+ * delivery rather than the code. An email, an authenticator seed and a passkey
+ * key cannot be taken by somebody who swaps a SIM; a text message can. The card
+ * says so plainly instead of letting "Verified" imply parity it does not have.
+ *
+ * WHY IT IS OFF BY DEFAULT AS A SECOND FACTOR
+ * -------------------------------------------
+ * Two separate choices, on purpose. Verifying a number means "use this if I lose
+ * access". Allowing it as a second factor means "accept this on every ordinary
+ * sign-in", which hands a SIM swap a way past an authenticator app. They are
+ * offered as separate switches so the second one is a deliberate act.
+ *
+ * WHY IT HIDES ITSELF WHEN THE SERVER CANNOT SEND
+ * ------------------------------------------------
+ * `available` comes from the server and is false until an SMS provider is
+ * configured. Showing a form in that state means someone types their number in
+ * good faith and watches it go nowhere, so the card says so instead. This is the
+ * "no broken buttons" rule the rest of this panel follows.
+ */
+export function RecoveryPhoneCard({ summary, onRequireStepUp, onChanged }) {
+  const [phone, setPhone] = useState('');
+  const [code, setCode] = useState('');
+  const [error, setError] = useState('');
+  const [done, setDone] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [changing, setChanging] = useState(false);
+
+  const current = summary?.recoveryPhone?.number || null;
+  const verified = summary?.recoveryPhone?.verified === true;
+  const available = summary?.recoveryPhone?.available === true;
+  const asSecondFactor = summary?.recoveryPhone?.asSecondFactor === true;
+
+  const run = async (fn) => {
+    setError(''); setDone(''); setBusy(true);
+    try { await fn(); } catch (err) { setError(err.message || 'Something went wrong.'); } finally { setBusy(false); }
+  };
+
+  const start = () => {
+    setError('');
+    setDone('');
+    onRequireStepUp({
+      reason: 'Adding a recovery phone changes how we can reach you, so we need to confirm it is you.',
+      action: async (stepUp) => run(async () => {
+        await requestRecoveryPhone(phone, stepUp);
+        setPending(true);
+      }),
+    });
+  };
+
+  const confirm = () => run(async () => {
+    await verifyRecoveryPhone(code);
+    setPending(false); setChanging(false); setCode(''); setPhone('');
+    setDone('Recovery phone verified.');
+    onChanged?.();
+  });
+
+  // Step-up is required here too, and for a sharper reason than the others: this
+  // switch is what decides whether a text message can stand in for the account's
+  // authenticator app. It is a security setting, not a preference.
+  const toggleSecondFactor = () => onRequireStepUp({
+    reason: asSecondFactor
+      ? 'Turning this off stops text messages counting as a second factor.'
+      : 'This lets a text message count as your second factor. It is weaker than an authenticator app: a text can be intercepted or redirected if your SIM is swapped.',
+    action: async (stepUp) => run(async () => {
+      await setRecoveryPhoneSecondFactor(!asSecondFactor, stepUp);
+      setDone(asSecondFactor
+        ? 'Your phone will no longer be offered as a second factor.'
+        : 'Your phone can now be used as an alternative second factor.');
+      onChanged?.();
+    }),
+  });
+
+  const remove = () => onRequireStepUp({
+    reason: 'Removing your recovery phone means we can no longer reach you there, so we need to confirm it is you.',
+    action: async (stepUp) => run(async () => {
+      await removeRecoveryPhone(stepUp);
+      setDone('Recovery phone removed.');
+      onChanged?.();
+    }),
+  });
+
+  const close = () => {
+    setChanging(false);
+    setPending(false);
+    setPhone('');
+    setCode('');
+    setError('');
+  };
+
+  return (
+    <section className="psc-card" aria-labelledby="psc-phone-title">
+      <header className="psc-card__head">
+        <h3 className="psc-card__title" id="psc-phone-title">
+          <span className="psc-card__icon psc-card__icon--devices" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M5 2h14a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" />
+              <path d="M11 18h2" />
+            </svg>
+          </span>
+          Recovery Phone
+        </h3>
+        {current && (
+          <span className={`psc-badge${verified ? ' psc-badge--on' : ''}`}>{verified ? 'Verified' : 'Unverified'}</span>
+        )}
+      </header>
+
+      <p className="psc-card__lede">
+        A number we can text a one-time code to if you lose access. Weaker than your
+        other recovery routes — a text message can be redirected if your SIM is swapped —
+        so it never replaces an authenticator app.
+      </p>
+
+      {error && <p className="psc-alert psc-alert--error" role="alert">{error}</p>}
+      {done && <p className="psc-alert psc-alert--ok" role="status">{done}</p>}
+
+      {/* No provider configured: say so rather than offering a form that cannot
+          work. A user who is told "not set up" can choose another route; a user
+          whose code silently never arrives cannot. */}
+      {!available && (
+        <p className="psc-note psc-note--warn">
+          Text messages are not set up on this server, so a recovery phone cannot be added
+          right now. Your other recovery routes still work.
+        </p>
+      )}
+
+      {/* The saved number, with the second-factor switch and Change / Remove. */}
+      {current && !pending && !changing && available && (
+        <div className="psc-panel">
+          <span className="psc-panel__label">Recovery number</span>
+          <span className="psc-panel__value">{current}</span>
+          {!verified && (
+            <p className="psc-note psc-note--warn">
+              This number has not been confirmed yet, so we cannot rely on it to reach you.
+            </p>
+          )}
+          {verified && (
+            <div className="psc-btn-row">
+              <button
+                type="button"
+                className={`psc-btn ${asSecondFactor ? 'psc-btn--danger-ghost' : 'psc-btn--ghost'}`}
+                onClick={toggleSecondFactor}
+                disabled={busy}
+              >
+                {asSecondFactor ? 'Stop using as a second factor' : 'Allow as a second factor'}
+              </button>
+            </div>
+          )}
+          <div className="psc-btn-row">
+            <button type="button" className="psc-btn psc-btn--ghost" onClick={() => { setChanging(true); setPhone(''); setError(''); }} disabled={busy}>
+              Change
+            </button>
+            <button type="button" className="psc-btn psc-btn--danger-ghost" onClick={remove} disabled={busy}>
+              Remove
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Awaiting the texted confirmation code. */}
+      {pending && (
+        <div className="psc-fieldset">
+          <p className="psc-rules">
+            We sent a 6-digit code to <strong>{phone}</strong>. It stays unverified until you enter it.
+          </p>
+          <label className="psc-label" htmlFor="psc-phone-code">Confirmation code</label>
+          <input
+            id="psc-phone-code"
+            className="psc-input psc-input--otp"
+            inputMode="numeric"
+            maxLength={6}
+            value={code}
+            onChange={(e) => { setCode(e.target.value.replace(/\D/g, '').slice(0, 6)); setError(''); }}
+            placeholder="000000"
+            autoComplete="one-time-code"
+          />
+          <div className="psc-btn-row">
+            <button type="button" className="psc-btn psc-btn--primary" onClick={confirm} disabled={busy || code.length !== 6}>
+              {busy ? 'Verifying…' : 'Verify and save'}
+            </button>
+            <button type="button" className="psc-btn psc-btn--ghost" onClick={close} disabled={busy}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* The entry form. Placeholder shows the international format explicitly,
+          because the server requires one and a bare national number is refused. */}
+      {available && !pending && (!current || changing) && (
+        <div className="psc-fieldset">
+          <label className="psc-label" htmlFor="psc-phone-input">
+            {current ? 'New recovery phone number' : 'Recovery phone number'}
+          </label>
+          <input
+            id="psc-phone-input"
+            className="psc-input"
+            type="tel"
+            autoComplete="tel"
+            inputMode="tel"
+            value={phone}
+            onChange={(e) => { setPhone(e.target.value); setError(''); }}
+            placeholder="+44 7700 900123"
+          />
+          <p className="psc-note">
+            Include your country code. We never guess it — a guessed one would send your
+            code to somebody else's phone.
+          </p>
+          <div className="psc-btn-row">
+            <button type="button" className="psc-btn psc-btn--primary" onClick={start} disabled={busy || !phone.trim()}>
+              {busy ? 'Sending…' : 'Text me a code'}
             </button>
             {current && (
               <button type="button" className="psc-btn psc-btn--ghost" onClick={close} disabled={busy}>

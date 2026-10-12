@@ -27,6 +27,11 @@ const AUTH_METHODS = Object.freeze({
   TOTP: 'totp',
   BACKUP_CODE: 'backup-code',
   EMAIL_OTP: 'email-otp',
+  // A code delivered over SMS. Recorded distinctly rather than folded into
+  // EMAIL_OTP: an account's own history has to be able to show that a session
+  // was opened with a text message, because that is a materially weaker proof
+  // than an emailed code and a reader of that history is entitled to know.
+  SMS_OTP: 'sms-otp',
   REMEMBER: 'remember',
 });
 

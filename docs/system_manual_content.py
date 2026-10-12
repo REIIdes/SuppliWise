@@ -341,7 +341,7 @@ BLOCKS = [
             ["Administrator", "Separate admin token space, `/admin`",
              "Review and decide purchase and cancellation requests; manage user accounts, "
              "subscription entitlements, admins and assessments; operate the support inbox; "
-             "read the live security monitor and the audit record; issue credential notices",
+             "read the live security monitor and the audit record",
              "`/admin/login` (alias + password + TOTP)"],
             ["Clinician (external)", "No account",
              "Read a time-boxed, revocable, read-only shared health profile link",
@@ -816,7 +816,7 @@ BLOCKS = [
             "|   |-- models/                    #   20 files -> 33 core + 25 provability collections",
             "|   |-- routes/                    #   22 groups + web3/ (9 files)",
             "|   |-- utils/                     #   62 modules, the service layer",
-            "|   |-- scripts/                   #   credential notice, hand-off, picture migration",
+            "|   |-- scripts/                   #   picture migration, account restore",
             "|   |-- Test File/                 #   63 *.test.js suites",
             "|   `-- .env.example               #   294-line commented configuration reference",
             "`-- my-react-app/                  # ---- FRONTEND ----",
@@ -1361,18 +1361,12 @@ BLOCKS = [
              "`device`, `cache`, `email`, `emailValidation`, `sanitize`, `nameValidation`, "
              "`transientError`, `bigDocuments`"],
             ["Admin", "`adminAccounts` (reads and writes the packed `ADMIN_ACCOUNTS` value), "
-             "`adminCredentialNotice`, `adminCredentialHandoff`, `overviewAnalytics`, "
+             "`overviewAnalytics`, "
              "`securityAudit`, `attack_probes`"],
         ],
     }),
-    ("note", {"kind": "warn",
-              "text": "**Known drift to disclose.** `server/package.json` declares "
-                      "`npm run send-admin-credentials` pointing at "
-                      "`scripts/send-admin-credentials.js`, which is not present in the "
-                      "repository, so that script name fails. The working equivalents are the "
-                      "`POST /api/admin/admins/credential-handoff` route and "
-                      "`utils/adminCredentialHandoff.js`, both of which exist and are tested. "
-                      "Disclosing this yourself is far stronger than being asked about it."}),
+
+    ("pagebreak",),
 
     ("pagebreak",),
     # =====================================================================
@@ -1910,10 +1904,9 @@ BLOCKS = [
         "rather than locking the user out permanently.",
         "Disabling 2FA clears the seed entirely and destroys all recovery codes.",
         "Removing the last strong method is refused with `409` — an account cannot be stranded.",
-        "An administrator whose stored credential was upgraded receives a **secret-free** "
-        "notice (`npm run notify-admins`). The one-time credential hand-off "
-        "(`npm run send-admin-credentials`) is kept as a **separate code path** precisely so the "
-        "recurring channel can never grow a password field.",
+        "No administrator password or authenticator seed is ever placed in a message. `ADMIN_EMAILS` "
+        "carries account-status and reset mail only; a lost administrator password is recovered "
+        "through the same reset-code flow as a user account.",
     ]),
     ("p", "**Password policy** is defined once in `utils/passwordRules.js` and served over the "
           "wire so the client checklist cannot drift: 10–128 characters with upper case, lower "
@@ -2407,10 +2400,6 @@ BLOCKS = [
             ["`npm run test:flows` (server)", "Live subscription flow checks"],
             ["`node test-web3-flows.js`", "End-to-end HTTP smoke across all 20 provability "
              "features"],
-            ["`npm run notify-admins`", "Sends the **secret-free** notice that stored "
-             "credentials changed. Safe to re-run"],
-            ["`npm run send-admin-credentials`", "The **one-time** hand-off carrying alias, "
-             "password and TOTP seed. Never scheduled. See the drift note in Section 6.4"],
             ["`node glitch-hunt.js`", "Adversarial probe suite against a running API"],
             ["`node test-ddos-resilience.js`", "Flood and DDoS resilience stress test "
              "(loopback only)"],
@@ -2418,12 +2407,10 @@ BLOCKS = [
             ["`docs/generate_system_manual.py`", "Regenerates this manual from the source tree"],
         ],
     }),
-    ("p", "Two design decisions here are worth defending: the recurring credential notice and "
-          "the one-time credential hand-off are **two separate code paths** rather than one "
-          "implementation with a flag, precisely so the recurring channel can never grow a "
-          "password field. And `adminAccounts.js` can rewrite a spent hand-off password in "
-          "`.env` while preserving the hash structure, so the file copy of a used credential "
-          "cannot resurrect it."),
+    ("p", "One design decision here is worth defending: there is no operator-run command that "
+          "emails a credential. `adminAccounts.js` can rewrite a password hash in `.env` while "
+          "preserving the hash structure, so the file copy of a rotated credential is always "
+          "consistent with the database — and it does so without ever needing the plaintext."),
 
     ("pagebreak",),
     # =====================================================================
@@ -2761,13 +2748,6 @@ BLOCKS = [
             ["GET", "`/api/admin/admins`", "P A", "List administrator accounts"],
             ["PATCH", "`/api/admin/admins/:id`", "P A", "Enable, disable or rename an administrator"],
             ["DELETE", "`/api/admin/admins/:id/lockout`", "P A", "Clear an administrator lockout"],
-            ["GET", "`/api/admin/admins/credential-notice/preview`", "P A", "Preview the "
-             "secret-free recurring notice"],
-            ["POST", "`/api/admin/admins/notify-credentials`", "P A", "Send the recurring notice"],
-            ["GET", "`/api/admin/admins/credential-handoff/preview`", "P A", "Preview the one-time "
-             "hand-off"],
-            ["POST", "`/api/admin/admins/credential-handoff`", "P A", "Send the one-time hand-off "
-             "(carries live secrets; has a cooldown)"],
             ["GET", "`/api/admin/users/:id/subscription`", "P A", "Read the subscription record"],
             ["POST", "`/api/admin/users/:id/subscription`", "P A", "Grant or set the paid layer"],
             ["PATCH", "`/api/admin/users/:id/subscription`", "P A", "Apply an override or restore "
@@ -3119,7 +3099,7 @@ BLOCKS = [
              "govern, guards, index, market, rewards, supply"],
             ["`server/utils/`", "62 service modules across password, session, MFA, abuse "
              "control, entitlement, domain, AI, infrastructure and admin concerns"],
-            ["`server/scripts/`", "`check-syntax.js`, `notify-admins.js`, "
+            ["`server/scripts/`", "`check-syntax.js`, "
              "restore-lost-account.js`, `migrate-pictures-to-disk.js`"],
             ["`server/tools/`", "`patch.js` — one-shot verified text replacement"],
             ["`server/Test File/`", "63 `*.test.js` suites plus 7 harness/helper files"],
@@ -3141,7 +3121,7 @@ BLOCKS = [
              "`securityReport`, `exportPDF`, `recommendationView`, `adminOverview`, "
              "`slotSchedule`, `timeSlots`, `planDay`, `scoreSync`, `plan`, `greeting`, "
              "`passwordPolicy`, `nameValidation`, `safeUrl`, `pictureUrl`, `dataUrl`, "
-             "`overlayRegistry`, `dashboardRefresh`, `chunkReload`, `credentialNotice`, "
+             "`overlayRegistry`, `dashboardRefresh`, `chunkReload`, `otpCountdown`, "
              "`securityFactor`, `securityEventLabels`, `supplementPrefill`, `dates`, "
              "`sourceAssert`"],
             ["`my-react-app/android/`", "Capacitor project with custom Java: `MainActivity.java` "

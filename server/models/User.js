@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const { hashPassword, verifyPassword, needsRehash } = require('../utils/password');
 const { NAME_PATTERN, NAME_MIN, NAME_MAX, NAME_CHARS_HINT } = require('../utils/nameValidation');
+const chatEncryptionKeySchema = require('./chatEncryptionKeySchema');
 
 // The browser filters these fields, but a client-side check is only a
 // suggestion — /api/auth/register and the profile update endpoint are
@@ -127,6 +128,56 @@ const userSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    // ── Recovery phone ───────────────────────────────────────────────────
+    // A phone number in E.164, used for one-time codes over SMS. It is the
+    // same KIND of thing as the recovery email above, with the same rules and
+    // the same reasons, so the two are kept deliberately parallel:
+    //
+    //   • It is NEVER a login identifier. It cannot sign anyone in on its own.
+    //     A recovery contact that grants access is a second password, and SMS
+    //     is a far softer target than a mailbox — SIM swap, port-out fraud and
+    //     carrier filtering all apply. Treating it as a weaker second factor is
+    //     the only honest description of what it is.
+    //   • It is INERT until `phoneNumberVerifiedAt` is set. A number typed into
+    //     a form and never proven cannot receive a credential, so it cannot be
+    //     used to take over an account.
+    //   • It is always a FALLBACK, never the only way in. See
+    //     utils/mfaTransaction.methodsFor() — a verified number ADDS an
+    //     alternative second factor to an account that already has one, and
+    //     cannot by itself make an account passable. That is what stops an SMS
+    //     that never arrives from locking anyone out.
+    //   • It is never a login identifier and never sufficient alone.
+    //
+    // Canonical form only. Written exclusively through utils/phoneNumber.js's
+    // `normalizePhone()`, so the database never holds two spellings of one
+    // number. Read paths re-validate before use regardless, because a row can
+    // always be edited outside the application.
+    phoneNumber: {
+      type: String,
+      default: '',
+      maxlength: 16, // '+' plus at most 15 digits
+    },
+    phoneNumberVerifiedAt: {
+      type: Date,
+      default: null,
+    },
+    // Whether a verified number may also stand in as a second factor at
+    // sign-in, as opposed to being a recovery route only.
+    //
+    // Opt-in and separate from having a verified number, because the two carry
+    // different risk. Recovery is something a person asks for when they have
+    // already lost access; second-factor use hands an attacker who has swapped
+    // a SIM a way straight past an authenticator app. Keeping them apart means
+    // a user can keep a recovery number without also handing it standing
+    // access, and can turn that standing access off without deleting it.
+    //
+    // Meaningless while `phoneNumberVerifiedAt` is null — an unverified number
+    // is ignored by every read path, so this cannot be used to enable a factor
+    // that has no working delivery.
+    phoneNumberAsSecondFactor: {
+      type: Boolean,
+      default: false,
+    },
     // WHICH second factor, once twoFactorEnabled is true.
     //   'authenticator' — TOTP app (Google Authenticator et al). Stronger.
     //   'email'          — a code mailed to the account address.
@@ -178,6 +229,12 @@ const userSchema = new mongoose.Schema(
       select: false,
       maxlength: 128,
     },
+    // ── End-to-end encryption identity ────────────────────────────────────
+    // The PUBLIC half only — this server never holds the private half, which
+    // is what makes the support-chat encryption end-to-end rather than
+    // encrypted-with-a-key-the-operator-can-open. See
+    // models/chatEncryptionKeySchema.js and utils/chatEncryption.js.
+    chatEncryptionKey: chatEncryptionKeySchema(),
     subscriptionActive: {
       type: Boolean,
       default: false,

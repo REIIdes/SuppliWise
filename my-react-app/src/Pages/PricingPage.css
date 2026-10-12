@@ -1803,6 +1803,20 @@ body.pricing-scroll-locked {
 
 .pricing-load-error .pricing-current__action { margin-left: auto; }
 
+/* ── The #plans deep-link target ──────────────────────────────────────────
+   The info column's "Change plan" link ends at /pricing#plans, and the id
+   lives on the grid (and its loading / error stand-ins — exactly one renders
+   at a time). It is NOT on the sticky `.pricing-bar`: a sticky element is
+   pinned in view wherever the reader already is, so scrolling it "into view"
+   is a no-op — the grid is the part that is only in view when the page is
+   near its top, which is what "Change plan" is asking for.
+   scroll-margin parks the first card just below the sticky navbar + dock
+   instead of behind them. */
+.pricing-grid,
+.pricing-load-error {
+  scroll-margin-top: calc(var(--p-nav-h) + 76px);
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    CANCEL SHEET
    ══════════════════════════════════════════════════════════════════════════

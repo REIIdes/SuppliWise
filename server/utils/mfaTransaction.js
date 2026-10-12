@@ -75,7 +75,7 @@ async function start({ user, methods = ['totp'], ip = '', userAgent = '', locati
   await MfaTransaction.create({
     tokenHash: hashToken(raw),
     user: uid,
-    methods: methods.filter((m) => m === 'totp' || m === 'email-otp' || m === 'backup-code' || m === 'passkey'),
+    methods: methods.filter((m) => m === 'totp' || m === 'email-otp' || m === 'backup-code' || m === 'passkey' || m === 'sms-otp'),
     attempts: 0,
     maxAttempts: MAX_ATTEMPTS,
     primaryMethod: String(primaryMethod || 'password').slice(0, 32),
@@ -181,7 +181,29 @@ async function spendById(id, { method = null } = {}) {
   return row ? { ok: true, user: row.user, transaction: row } : { ok: false, reason: 'exhausted' };
 }
 
-function methodsFor(user, { passkeys = 0, backupCodeCount = 0 } = {}) {
+/**
+ * Which methods a transaction will accept, given the account's configuration.
+ *
+ * Called at the password step, so the decision is made from server state and
+ * handed to the client as information — never as something the client chooses.
+ *
+ * `phoneSecondFactor` adds SMS as an ALTERNATIVE to a second factor the account
+ * already has. It is additive by construction, and the guard at the bottom of
+ * this function makes that a structural property rather than a convention every
+ * call site has to remember: `sms-otp` is appended only when another method is
+ * already present, so it can never be the last — or the only — entry.
+ *
+ * That is the entire safety argument for carrying a factor over SMS at all. A
+ * message that never arrives — carrier filtering, a roaming SIM, an exhausted
+ * provider balance, an outage — costs the user nothing but a wasted minute,
+ * because the authenticator, emailed code or passkey they already had is still
+ * on the list. It can never be the reason someone cannot sign in.
+ *
+ * The caller owns the honesty of `phoneSecondFactor`: it must require BOTH a
+ * verified number and the explicit opt-in. This function takes it on trust
+ * because it holds no user document to re-read.
+ */
+function methodsFor(user, { passkeys = 0, backupCodeCount = 0, phoneSecondFactor = false } = {}) {
   const methods = [];
   if (user && user.twoFactorEnabled === true) {
     const method = user.twoFactorMethod || 'authenticator';
@@ -195,6 +217,11 @@ function methodsFor(user, { passkeys = 0, backupCodeCount = 0 } = {}) {
   // A discoverable passkey satisfies the second factor on its own (UV is
   // required at verification), so it is offered alongside rather than instead.
   if (passkeys > 0) methods.push('passkey');
+  // SMS is an ALTERNATIVE to a second factor the account already has, never a
+  // replacement for one. See the note on the JSDoc above: the `methods.length
+  // > 0` guard is what makes "never the only way in" structural rather than a
+  // convention every call site has to remember.
+  if (phoneSecondFactor === true && methods.length > 0) methods.push('sms-otp');
   return methods.length ? methods : ['totp'];
 }
 

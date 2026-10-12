@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import { getHistory, deleteAssessment, checkFeature, getToken } from '../api';
@@ -379,12 +379,12 @@ function HistoryPage() {
     setShowAllSupplements(prev => ({ ...prev, [assessmentId]: !prev[assessmentId] }));
   };
 
-  const showToast = (msg) => {
+  const showToast = useCallback((msg) => {
     setToast(msg);
     setTimeout(() => setToast(''), 3000);
-  };
+  }, []);
 
-  const loadHistory = (targetPage = 1, { append = false, limit = null } = {}) => {
+  const loadHistory = useCallback((targetPage = 1, { append = false, limit = null } = {}) => {
     // Appending must not blank the list behind a full-page spinner.
     if (!append) setLoading(true);
     setError('');
@@ -431,7 +431,7 @@ function HistoryPage() {
         if (!append) setLoading(false);
         setLoadingMore(false);
       });
-  };
+  }, [livePlan, showToast]);
 
   // PREMIUM+ (`historyFull`) can page deeper; lower tiers get the paywall.
   const handleLoadMore = () => {
@@ -440,13 +440,19 @@ function HistoryPage() {
     loadHistory(page + 1, { append: true, limit: pageLimit || undefined });
   };
 
+  // `load` is read through a ref so the mount/plan-event effect depends only on
+  // what is MEANT to trigger a re-run, while always invoking the LATEST
+  // closure (fresh livePlan for the paywall fallback, fresh limits) — the same
+  // pattern AdminSupportChats uses for its queue reload.
+  const loadLatestRef = useRef(loadHistory);
+  useEffect(() => { loadLatestRef.current = loadHistory; }, [loadHistory]);
+
   useEffect(() => {
     const token = getToken();
     if (!token) { navigate('/login'); return; }
 
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial load from the server is an external-system sync
-    loadHistory(1, { limit: historyLimitForStoredPlan() });
-    const onPlan = () => loadHistory(1, { limit: historyLimitForStoredPlan() });
+    loadLatestRef.current(1, { limit: historyLimitForStoredPlan() });
+    const onPlan = () => loadLatestRef.current(1, { limit: historyLimitForStoredPlan() });
     window.addEventListener(SUBSCRIPTION_EVENT, onPlan);
     return () => window.removeEventListener(SUBSCRIPTION_EVENT, onPlan);
   }, [navigate]);

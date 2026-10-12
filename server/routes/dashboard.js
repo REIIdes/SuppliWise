@@ -339,6 +339,8 @@ const finalizeIntakeChange = async (req, assessmentId, planDay = {}) => {
         title: 'Priority review completed',
         detail: 'All of today\u2019s supplements were taken, so the priority review on your assessment is finished. You can start a new assessment any time.',
         assessmentId,
+        link: '/history',
+        linkLabel: 'View your history',
       }).catch(() => {});
       await AdminEvent.create({
         type: 'resolved',
@@ -347,6 +349,8 @@ const finalizeIntakeChange = async (req, assessmentId, planDay = {}) => {
         user: req.user._id,
         assessmentId,
         linkUserId: req.user._id,
+        link: 'assessment-management',
+        linkLabel: 'Open Assessment Management',
       }).catch(() => {});
     } catch (liftError) {
       console.error('[dashboard intake] priority auto-lift failed:', liftError.message);
@@ -374,6 +378,8 @@ const finalizeIntakeChange = async (req, assessmentId, planDay = {}) => {
         title: 'Priority review reinstated',
         detail: 'A supplement was marked not taken, so today\u2019s plan is incomplete again. The priority review is back in effect and new assessments are paused until it is finished.',
         assessmentId,
+        link: '/history',
+        linkLabel: 'View the assessment',
       }).catch(() => {});
       await AdminEvent.create({
         type: 'severe-flag',
@@ -382,6 +388,8 @@ const finalizeIntakeChange = async (req, assessmentId, planDay = {}) => {
         user: req.user._id,
         assessmentId,
         linkUserId: req.user._id,
+        link: 'assessment-management',
+        linkLabel: 'Open Assessment Management',
       }).catch(() => {});
     } catch (reflagError) {
       console.error('[dashboard intake] priority re-flag failed:', reflagError.message);

@@ -6,6 +6,7 @@
 
 const path = require('node:path');
 const http = require('node:http');
+const https = require('node:https');
 const { sanitizeTextField } = require('./sanitize');
 const { scrubKeys } = require('./sanitize');
 const { verifyTotpOnce } = require('./totp');
@@ -45,15 +46,31 @@ function traversalProbePaths(staticRoot) {
  * safe even when the server is vulnerable, so this probe uses node:http's raw
  * `path` option instead.
  */
+// The certificate material a node:https client needs to trust this API: the
+// served leaf (as a direct anchor), the configured CA when load() picked one
+// up, and the mkcert development root — which load() deliberately does not
+// read, but is what signs the certificate a local server actually serves.
+function selfCa() {
+  const tls = require('./tls');
+  const { cert, ca } = tls.load();
+  const root = tls.developmentCaFile();
+  return [cert, ca, root && require('node:fs').readFileSync(root)].filter(Boolean);
+}
+
 function requestRawPath(rawPath, {
   host = '127.0.0.1',
   port = process.env.PORT || 5000,
   timeoutMs = 3000,
 } = {}) {
   return new Promise((resolve, reject) => {
-    const request = http.request({
-      host,
+    // A TLS-served API speaks no plain HTTP: the probe must switch schemes
+    // and trust the served certificate — per-call, which fetch cannot do but
+    // https.request can (see utils/tls.developmentCaFile).
+    const secured = require('./tls').isEnabled();
+    const request = (secured ? https : http).request({
+      host: secured ? 'localhost' : host,
       port,
+      ...(secured ? { ca: selfCa() } : {}),
       method: 'GET',
       path: rawPath,
       headers: {
@@ -235,6 +252,47 @@ const probes = {
 const SELF_BASE = () => require('./tls').loopbackOrigin();
 
 async function selfFetch(path, options = {}, timeoutMs = 5000) {
+  if (require('./tls').isEnabled()) {
+    // fetch cannot be handed a per-call CA (see utils/tls.developmentCaFile),
+    // so against a TLS-served API every fetch-based self-probe died with
+    // "TypeError: fetch failed" — a warning naming neither TLS nor the
+    // certificate. https.request takes the served chain directly.
+    return new Promise((resolve, reject) => {
+      const u = new URL(SELF_BASE() + path);
+      const req = https.request({
+        hostname: u.hostname,
+        port: u.port || 443,
+        path: u.pathname + u.search,
+        method: options.method || 'GET',
+        headers: options.headers,
+        ca: selfCa(),
+        timeout: timeoutMs,
+      }, (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('error', reject);
+        res.on('end', () => {
+          let data = null;
+          try { data = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { /* ignore */ }
+          resolve({
+            status: res.statusCode,
+            headers: {
+              get: (k) => {
+                const v = res.headers[String(k).toLowerCase()];
+                if (v === undefined) return null;
+                return Array.isArray(v) ? v.join(', ') : String(v);
+              },
+            },
+            data,
+          });
+        });
+      });
+      req.on('timeout', () => req.destroy(new Error('Self-probe timed out.')));
+      req.on('error', reject);
+      if (options.body) req.write(options.body);
+      req.end();
+    });
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {

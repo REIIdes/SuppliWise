@@ -32,6 +32,10 @@ const {
   selfServeEnabled, normalizeCurrency, convertFromPhp,
 } = require('../utils/planCatalogue');
 const bus = require('../utils/subscriptionBus');
+// streamTokenAuth / sseWrite / SSE_HEARTBEAT_MS moved to utils/sse.js when the
+// support-chat streams joined — shared rather than duplicated, so both behave
+// identically through the dev proxy and any reverse proxy.
+const { streamTokenAuth, sseWrite, SSE_HEARTBEAT_MS } = require('../utils/sse');
 const requestRules = require('../utils/subscriptionRequests');
 const cancelRules = require('../utils/subscriptionCancels');
 // Owns "must this request carry a receipt?" — see the note on receiptRequired().
@@ -39,8 +43,6 @@ const receiptRules = require('../utils/paymentInstructions');
 const rateLimit = require('express-rate-limit');
 
 const router = express.Router();
-
-const SSE_HEARTBEAT_MS = 25_000;
 
 // Every field the subscription surface reads, so the purchase path, the read
 // path and the SSE snapshot can never disagree.
@@ -66,21 +68,6 @@ const purchaseLimiter = rateLimit({
   legacyHeaders: false,
   message: { message: 'Too many subscription attempts. Please wait a minute and try again.' },
 });
-
-// EventSource cannot set an Authorization header, so the SSE stream accepts
-// the access token as a query parameter. Scoped to THIS route only — every
-// other endpoint still requires the header, so the token never appears in
-// logs/URLs anywhere else.
-const streamTokenAuth = (req, res, next) => {
-  if (!req.headers.authorization && req.query.token) {
-    req.headers.authorization = `Bearer ${String(req.query.token)}`;
-  }
-  next();
-};
-
-function sseWrite(res, event, payload) {
-  res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
-}
 
 // @route  GET /api/subscription/plans
 // @desc   The purchasable plan catalogue: prices for both billing periods and the
@@ -362,6 +349,8 @@ router.post('/requests', requestLimiter, protect, async (req, res) => {
         : `New ${entry.label} request for ${months} month${months === 1 ? '' : 's'} (${priced.formattedAmount}). No receipt — the deployment has no payment destination, so the member is asking you to activate it directly.`,
       user: req.user._id,
       linkUserId: req.user._id,
+      link: 'subscriptions',
+      linkLabel: 'Review the upgrade request',
     }).catch((bellError) => {
       console.error('[subscription/request] admin bell', bellError.message);
     });
@@ -546,6 +535,8 @@ router.post('/downgrade', cancelLimiter, protect, async (req, res) => {
         + `(${gaveUp} given up)${reason ? `. Reason: ${reason}` : '.'}`,
       user: req.user._id,
       linkUserId: req.user._id,
+      link: 'subscriptions',
+      linkLabel: 'Open Subscription management',
     }).catch((bellError) => {
       console.error('[subscription/downgrade] audit event', bellError.message);
     });
@@ -660,6 +651,8 @@ router.post('/cancel-requests', cancelLimiter, protect, async (req, res) => {
         + (reason ? ` Reason given: ${reason}` : ''),
       user: req.user._id,
       linkUserId: req.user._id,
+      link: 'subscriptions',
+      linkLabel: 'Review the cancellation request',
     }).catch((bellError) => {
       console.error('[subscription/cancel-request] admin bell', bellError.message);
     });

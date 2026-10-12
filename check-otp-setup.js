@@ -109,7 +109,7 @@ if (allGood) {
   console.log('   2. Restart your frontend:');
   console.log('      cd my-react-app && npm run dev');
   console.log('   3. Clear browser cache (Ctrl+Shift+R)');
-  console.log('   4. Try logging in at http://localhost:5173/login');
+  console.log('   4. Try logging in at https://localhost:5173/login');
   console.log('   5. OTP modal should appear!');
 } else {
   console.log('❌ SOME CHECKS FAILED');

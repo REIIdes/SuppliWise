@@ -219,6 +219,8 @@ router.post('/verify-setup', protect, setupLimiter, requireStepUp, async (req, r
       type: 'info',
       title: 'Two-factor authentication enabled',
       detail: 'Your authenticator app is now required at sign-in. If this was not you, remove it and change your password immediately.',
+      link: '/profile?section=security',
+      linkLabel: 'Review your account security',
     }).catch(() => {});
 
     return res.json({
@@ -324,6 +326,8 @@ router.post('/disable', protect, setupLimiter, requireStepUp, async (req, res) =
       detail: method === 'email'
         ? 'Email sign-in codes were turned off. If this was not you, re-enable two-factor authentication and change your password immediately.'
         : 'Your authenticator app was turned off. If this was not you, re-enable it and change your password immediately.',
+      link: '/profile?section=security',
+      linkLabel: 'Review your account security',
     }).catch(() => {});
 
     return res.json({ message: 'Two-factor authentication has been disabled.', twoFactorEnabled: false });

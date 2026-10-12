@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ConfirmModal from '../ConfirmModal/ConfirmModal';
+import useSecureChat from '../../security/useSecureChat';
 import './AdminSupportChats.css';
 
 /**
@@ -91,6 +92,34 @@ function formatStamp(value) {
   });
 }
 
+/**
+ * Fill in the preview line for sealed rows in the queue.
+ *
+ * The queue is triaged by preview, so a sealed conversation cannot simply show
+ * nothing — but a preview the console could read would defeat the message it
+ * belongs to. The server therefore sends the excerpt SEALED with the row's own
+ * wrapped key, and this opens it in the browser. One await per row, no extra
+ * round trip, and the operator sees what they are triaging.
+ *
+ * A row that cannot be opened shows a neutral placeholder: the row still has a
+ * subject, a member, a time and a status, all of which are enough to decide
+ * whether to open it, and the transcript inside says why it is unreadable.
+ */
+const ENCRYPTED_PREVIEW = 'Encrypted message';
+
+async function withPreviews(rows, secure) {
+  return Promise.all((rows || []).map(async (row) => {
+    if (!Number(row.encryption?.version)) return row;
+    try {
+      const text = await secure.openPreview(row);
+      const preview = (text || '').replace(/\s+/g, ' ').trim();
+      return { ...row, lastMessagePreview: preview.length > 200 ? `${preview.slice(0, 199)}…` : preview };
+    } catch {
+      return { ...row, lastMessagePreview: ENCRYPTED_PREVIEW };
+    }
+  }));
+}
+
 /** "12 min ago" — how stale a queue entry is IS the triage signal. */
 function ago(value) {
   if (!value) return '';
@@ -164,7 +193,55 @@ function StatIcon({ name }) {
   );
 }
 
-export default function AdminSupportChats({ request }) {
+export default function AdminSupportChats({ request, focusThreadId = '' }) {
+  // ── End-to-end encryption ──────────────────────────────────────────────
+  // The operator's identity is per AdminAccount, not per member — see
+  // models/chatEncryptionKeySchema.js for why two identities beat one shared
+  // key here. `request` is the dashboard's own fetch helper, so these endpoints
+  // inherit the admin bearer token and the 401 → /admin/login redirect exactly
+  // like every other call in this file.
+  //
+  // The participant string MUST be `admin:<AdminAccount._id>` — the same value
+  // the server writes on a key share. useAuth() is the USER session and has no
+  // admin in it; reading `user._id` from it here produced either an empty
+  // identity (nothing ever published) or somebody else's id (shares addressed
+  // to the real AdminAccount could never be unlocked). The id comes from the
+  // `admin` object written at sign-in; sessions predating that fall back to
+  // GET /chats/encryption/me, which answers from the signed token.
+  const [adminAccountId, setAdminAccountId] = useState(() => {
+    try { return String(JSON.parse(localStorage.getItem('admin') || '{}').id || ''); } catch { return ''; }
+  });
+  useEffect(() => {
+    if (adminAccountId) return undefined;
+    let live = true;
+    request('/chats/encryption/me')
+      .then((data) => { if (live && data?.accountId) setAdminAccountId(String(data.accountId)); })
+      .catch(() => { /* stays unavailable; the reason line says so */ });
+    return () => { live = false; };
+  }, [adminAccountId, request]);
+
+  const secure = useSecureChat({
+    role: 'admin',
+    accountId: adminAccountId,
+    isAuthenticated: Boolean(adminAccountId),
+    endpoints: {
+      getKey: () => request('/chats/encryption/key'),
+      publishKey: (key) => request('/chats/encryption/key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(key),
+      }),
+      // The hook's bootstrap probe passes a null thread id; recipients are
+      // per-conversation here, so "nobody up front" is the honest answer
+      // rather than a GET /chats/null/recipients that can only fail.
+      listRecipients: (threadId) => (threadId ? request(`/chats/${threadId}/recipients`) : Promise.resolve({ recipients: [] })),
+    },
+  });
+  const [ticketCopied, setTicketCopied] = useState('');
+  const [secureNotice, setSecureNotice] = useState('');
+  const [sealing, setSealing] = useState(false);
+  const [recipients, setRecipients] = useState([]);
+
   const [status, setStatus] = useState('open');
   const [category, setCategory] = useState('all');
   const [search, setSearch] = useState('');
@@ -190,6 +267,11 @@ export default function AdminSupportChats({ request }) {
   // since been closed, must never paint over what the admin is reading now.
   const listToken = useRef(0);
   const threadToken = useRef(0);
+  // Thread ids with a background auto-seal already running. Without this, two
+  // opens of the same thread (a fast double click, a deep link re-run) can
+  // race two DIFFERENT fresh keys against POST /:id/secure; the server keeps
+  // the first and the second adoption would cache a key that opens nothing.
+  const sealInFlight = useRef(new Set());
 
   const showNotice = useCallback((message) => {
     setNotice(message);
@@ -216,7 +298,8 @@ export default function AdminSupportChats({ request }) {
       const data = await request(`/chats?${params.toString()}`);
       if (token !== listToken.current) return;
       setError('');
-      setRows(Array.isArray(data.threads) ? data.threads : []);
+      setRows(await withPreviews(Array.isArray(data.threads) ? data.threads : [], secure));
+
       setCounts(data.counts || { open: 0, pending: 0, resolved: 0, all: 0, unread: 0 });
       setLoaded(true);
     } catch (loadError) {
@@ -226,7 +309,7 @@ export default function AdminSupportChats({ request }) {
     } finally {
       if (token === listToken.current) setLoading(false);
     }
-  }, [request]);
+  }, [request, secure]);
 
   // `load` is read through a ref so the effect depends only on what is MEANT to
   // trigger a reload. Depending on `load` directly would re-run on every render
@@ -260,13 +343,110 @@ export default function AdminSupportChats({ request }) {
     setActiveId(id);
     setLoadingThread(true);
     setError('');
+    // Switching to a different conversation shows the loading placeholder at
+    // once instead of holding the previous transcript on screen for the whole
+    // fetch — the click must be visibly registered.
+    setActive((current) => (current && current.thread._id === id ? current : null));
     try {
       const data = await request(`/chats/${id}`);
       if (token !== threadToken.current) return;
-      setActive({ thread: data.thread, messages: Array.isArray(data.messages) ? data.messages : [] });
+      // Unlock the conversation's key, then open the transcript in one pass.
+      // Both are awaited BEFORE setActive so a sealed thread never renders with
+      // the envelope string in the message body — an operator looking at `e1.…`
+      // has no idea what they are reading.
+      await secure.attachThread(data.thread);
+      const rows = await secure.openRows(id, Array.isArray(data.messages) ? data.messages : []);
+      if (token !== threadToken.current) return;
+      setActive({ thread: data.thread, messages: rows });
+      // Who could this be re-sealed to, and who already has a share. The grant
+      // panel reads this, so it is loaded with the thread rather than on click:
+      // a button that fetches on click makes the operator wait for the panel it
+      // is about to open.
+      if (Number(data.thread.encryption?.version) > 0) {
+        try {
+          const list = await secure.loadRecipients(id);
+          setRecipients(Array.isArray(list) ? list : []);
+        } catch {
+          setRecipients([]);
+        }
+      } else {
+        setRecipients([]);
+      }
       // Opening clears the queue badge locally; the server already zeroed it.
       setRows((list) => list.map((t) => (t._id === id ? { ...t, unreadByAdmin: 0 } : t)));
       setCounts((c) => ({ ...c, unread: Math.max(0, c.unread - 1) }));
+
+      // AUTOMATIC ENCRYPTION — in the background, after the transcript is on
+      // screen, so opening a conversation never waits on the crypto. This is
+      // the admin twin of the member inbox's silent upgrade: every plaintext
+      // thread an operator opens is sealed the moment BOTH sides hold a
+      // published key. The member's key arrives with the thread
+      // (`data.recipients`, see GET /:id); without it a seal would lock the
+      // member out of their own conversation — data loss wearing an
+      // encryption badge — so its absence stops the seal, not the read.
+      // A failure here is deliberately silent: the conversation stays
+      // plaintext and the next open tries again.
+      const isPlaintext = !Number(data.thread?.encryption?.version);
+      const canEncrypt = secure.status === 'ready' && secure.identity?.publicKey;
+      const memberKey = isPlaintext && Array.isArray(data.recipients)
+        ? data.recipients.find((r) => String(r.participant || '').startsWith('user:') && r.publicKey)
+        : null;
+      if (canEncrypt && memberKey && !sealInFlight.current.has(id)) {
+        sealInFlight.current.add(id);
+        (async () => {
+          const session = await secure.beginThread();
+          if (!session) return;
+          const sealedMessages = [];
+          for (const message of (Array.isArray(data.messages) ? data.messages : [])) {
+            if (!message.body || message.cipher) continue;
+            try {
+              sealedMessages.push({ _id: message._id, cipher: await session.seal(message.body) });
+            } catch {
+              console.error('Failed to encrypt message:', message._id);
+            }
+          }
+          if (sealedMessages.length === 0) return;
+          // Every party who must be able to read this from now on: this
+          // operator, the member, and the other operators with published
+          // keys. The member share is non-negotiable — a sealed thread its
+          // author cannot open can never be answered.
+          const keyShares = await secure.buildShares(session, id);
+          if (!keyShares.some((share) => String(share.participant || '').startsWith('user:'))) {
+            keyShares.push({
+              participant: memberKey.participant,
+              wrapped: await session.shareWith(memberKey.publicKey),
+            });
+          }
+          const sealed = await request(`/chats/${id}/secure`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ messages: sealedMessages, keyShares }),
+          });
+          // Adopt only AFTER the server accepted the shares — a key the server
+          // never got would let replies seal into something nobody holds.
+          secure.adoptThread(id, session);
+          if (token !== threadToken.current) return;
+          const sealedById = new Map(sealedMessages.map((s) => [String(s._id), s.cipher]));
+          setActive((current) => (current && current.thread._id === id
+            ? {
+              thread: sealed.thread || current.thread,
+              messages: current.messages.map((m) => {
+                const cipher = sealedById.get(String(m._id));
+                return cipher ? { ...m, cipher, encrypted: true } : m;
+              }),
+            }
+            : current));
+          try {
+            const list = await secure.loadRecipients(id);
+            if (token === threadToken.current) setRecipients(Array.isArray(list) ? list : []);
+          } catch { /* the grant panel simply shows nobody */ }
+          showNotice(sealed.message || 'This conversation is now end-to-end encrypted.');
+        })().catch((sealError) => {
+          console.error('Automatic encryption failed:', sealError?.message || sealError);
+        }).finally(() => {
+          sealInFlight.current.delete(id);
+        });
+      }
     } catch (loadError) {
       if (token !== threadToken.current) return;
       setError(loadError.message);
@@ -274,7 +454,32 @@ export default function AdminSupportChats({ request }) {
     } finally {
       if (token === threadToken.current) setLoadingThread(false);
     }
-  }, [request]);
+  }, [request, secure, showNotice]);
+
+  // Deep link from the admin bell: a "New support conversation" event carries
+  // `chats?thread=<id>`, so the queue opens ON that conversation rather than
+  // on a list the administrator has to scan. Opening by id (not by row click)
+  // means it also works when the current status filter is hiding the thread —
+  // GET /chats/:id is not filtered.
+  //
+  // `openThread` is read through a ref, NOT listed as a dependency: its
+  // identity churns with every secure-state update, and depending on it
+  // re-ran this effect — a full refetch each time — on those changes.
+  // StrictMode's double-run stays harmless: openThread is keyed on a token,
+  // so the second response simply wins. The effect only re-runs when the id
+  // itself changes, so the 12 s queue poll cannot re-trigger it.
+  const openThreadRef = useRef(openThread);
+  useEffect(() => { openThreadRef.current = openThread; }, [openThread]);
+  useEffect(() => {
+    const wanted = String(focusThreadId || '').trim();
+    if (!wanted) return;
+    // The queue's default filter is "Waiting on us", which does not always
+    // contain a deep-linked thread. Switching to "All" is idempotent, so
+    // StrictMode's double-run is safe.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- deep link must show the thread, not a filtered queue
+    setStatus('all');
+    openThreadRef.current(wanted);
+  }, [focusThreadId]);
 
   // ── Transcript scroll ───────────────────────────────────────────────────
   // Scrolling the transcript element itself, not scrollIntoView: the panel is a
@@ -332,13 +537,29 @@ export default function AdminSupportChats({ request }) {
       return;
     }
     const id = active.thread._id;
+    const sealed = Number(active.thread.encryption?.version) > 0;
+
+    // A sealed thread is unsealed by openThread, but a reply must not assume
+    // the cache is warm — an operator who lands on a deep link and types
+    // straight away has the thread but may not have the key yet. Trying here
+    // costs one unwrap and turns a 400 into an explanation.
+    if (sealed && !secure.hasKey(id)) {
+      const readable = await secure.attachThread(active.thread);
+      if (!readable) {
+        setError('This conversation’s encryption key is not on this device. Ask a colleague with access to grant it, or use a recovery code.');
+        return;
+      }
+    }
+
     setSending(true);
     setError('');
     try {
       const data = await request(`/chats/${id}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ body: trimmed }),
+        body: JSON.stringify(sealed
+          ? { cipher: await secure.sealReply(id, trimmed) }
+          : { body: trimmed }),
       });
       setDraft('');
       // Append locally. A refetch here races the poll and can return before the
@@ -349,20 +570,30 @@ export default function AdminSupportChats({ request }) {
             ...current.thread,
             status: 'pending',
             lastMessageBy: 'admin',
-            lastMessagePreview: data.message_record?.body || trimmed,
+            lastMessagePreview: sealed ? '' : trimmed,
+            lastMessagePreviewCipher: sealed ? (data.message_record?.cipher || '') : '',
             lastMessageAt: data.message_record?.createdAt || new Date().toISOString(),
           },
-          messages: [...current.messages, data.message_record].filter(Boolean),
+          messages: [...current.messages, {
+            ...data.message_record,
+            body: trimmed,
+            encrypted: sealed,
+          }].filter(Boolean),
         }
         : current));
       showNotice(data.message || 'Reply sent.');
       loadRef.current(status, activeSearch, category);
     } catch (sendError) {
+      // The background auto-seal can upgrade this thread between the render
+      // and this send, and the server then refuses the plaintext reply.
+      // Refresh the thread so the next send sees the sealed state instead of
+      // failing twice in a row on the same stale flag.
+      if (sendError?.status === 400 && !sealed) openThreadRef.current?.(id);
       setError(sendError.message);
     } finally {
       setSending(false);
     }
-  }, [sending, trimmed, active, request, showNotice, status, activeSearch, category]);
+  }, [sending, trimmed, active, request, showNotice, status, activeSearch, category, secure]);
 
   // ── Resolve / reopen ────────────────────────────────────────────────────
   const applyState = useCallback(async (path, fallback) => {
@@ -407,6 +638,56 @@ export default function AdminSupportChats({ request }) {
       setBusy(false);
     }
   }, [confirmDelete, busy, request, showNotice, closeThread, activeId, status, activeSearch, category]);
+
+  // ── Granting access to a sealed conversation ───────────────────────────
+  //
+  // Turning a conversation into a sealed one is no longer an action here —
+  // openThread does it silently the moment both sides hold a key. What is
+  // left is the operational cost of end-to-end encryption: an operator who
+  // registered a key AFTER a conversation was sealed cannot read it, and only
+  // somebody who already can re-seal it to them.
+
+  /**
+   * Grant a conversation to whoever does not already have it.
+   *
+   * The caller already holds the content key — that is the only way they could
+   * be reading the thread — so this re-seals to each missing recipient and
+   * posts the new shares. A colleague who has never seen this conversation can
+   * open it a second later, which is the whole reason the button exists.
+   */
+  const grantAccess = useCallback(async () => {
+    if (!active || sealing) return;
+    const id = active.thread._id;
+    setSealing(true);
+    setError('');
+    try {
+      const missing = (recipients || []).filter((r) => !r.hasShare && r.publicKey);
+      if (missing.length === 0) {
+        setSecureNotice('Everyone with a published key already has access to this conversation.');
+        return;
+      }
+      // Sealing to an EXISTING key rather than a fresh one: the whole point is
+      // that everybody ends up able to read the same conversation, and a new key
+      // would make the granted copies unreadable by everybody else.
+      const shares = await secure.rewrapTo(id, missing);
+      if (shares.length === 0) {
+        setError('This conversation’s key is not on this device, so access cannot be granted from here.');
+        return;
+      }
+      const data = await request(`/chats/${id}/keys`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shares }),
+      });
+      const next = await secure.loadRecipients(id);
+      setRecipients(Array.isArray(next) ? next : []);
+      showNotice(data.message || 'Access granted.');
+    } catch (grantError) {
+      setError(grantError.message || 'Could not grant access.');
+    } finally {
+      setSealing(false);
+    }
+  }, [active, sealing, secure, recipients, request, showNotice]);
 
   // ── Keyboard triage ─────────────────────────────────────────────────────
   // Working a queue is walking a list. Up/Down move the selection, Escape goes
@@ -453,8 +734,8 @@ export default function AdminSupportChats({ request }) {
 
   const activeStatus = active ? (STATUS[active.thread.status] || STATUS.open) : null;
   const isResolved = active?.thread?.status === 'resolved';
+  const sealedThread = Number(active?.thread?.encryption?.version) > 0;
   const user = active?.thread?.user || null;
-  const banned = Boolean(user?.accountStatus && user.accountStatus !== 'active');
   const unread = counts.unread || 0;
 
   const emptyMessage = activeSearch
@@ -462,6 +743,22 @@ export default function AdminSupportChats({ request }) {
     : status === 'all'
       ? 'No support conversations yet.'
       : `No conversations ${(FILTERS.find((f) => f.id === status)?.label || '').toLowerCase()}.`;
+
+  const copyTicketId = useCallback(async (ticketId) => {
+    if (!ticketId) return;
+    try {
+      await navigator.clipboard.writeText(ticketId);
+      setTicketCopied(ticketId);
+      window.setTimeout(() => setTicketCopied(''), 2000);
+    } catch {
+      setSecureNotice('Could not copy — note the reference down instead.');
+      window.setTimeout(() => setSecureNotice(''), 4000);
+    }
+  }, []);
+
+  // The grant panel. Shown on a sealed thread, so the operator can see at a
+  // glance who can read it and hand it to a colleague in one click.
+  const grantable = (recipients || []).filter((r) => !r.hasShare && r.publicKey);
 
   return (
     <div className="asc">
@@ -553,6 +850,25 @@ export default function AdminSupportChats({ request }) {
       )}
 
       {error && <p className="asc-error" role="alert">{error}</p>}
+      {secure.reason && <p className="asc-warn" role="status">{secure.reason}</p>}
+      {/* needs-key with no saved recovery copy is otherwise a dead end: the
+          browser can neither read the old key nor explain a way forward. The
+          reset starts a fresh identity so NEW conversations work here, while
+          the transcript itself keeps saying why the old ones cannot. */}
+      {secure.status === 'needs-key' && !secure.recoveryAvailable?.hasRecovery && (
+        <p className="asc-warn" role="status">
+          This browser cannot unlock your existing key and no recovery copy was
+          ever saved for it. Older conversations will stay sealed here —{' '}
+          <button
+            type="button"
+            className="asc-grant"
+            onClick={() => { secure.resetIdentity(); }}
+          >
+            Start with a new encryption key
+          </button>
+        </p>
+      )}
+      {secureNotice && <p className="asc-notice" role="status">{secureNotice}</p>}
       {notice && <p className="asc-notice" role="status">{notice}</p>}
 
       {/* ── Two panes ───────────────────────────────────────────────────── */}
@@ -610,12 +926,21 @@ export default function AdminSupportChats({ request }) {
                           <strong>{memberName(row.user)}</strong>
                           <em>{row.user?.email || '—'}</em>
                         </span>
+                        {row.ticketId && <span className="asc-thread__ticket">{row.ticketId}</span>}
                         {hasUnread && (
                           <span className="asc-dot" aria-label="Unread messages">{row.unreadByAdmin}</span>
                         )}
                       </span>
                       <span className="asc-thread__subject">{row.subject}</span>
-                      <span className="asc-thread__preview">{row.lastMessagePreview || '—'}</span>
+                      <span className="asc-thread__preview">
+                        {Number(row.encryption?.version) > 0 && (
+                          <svg className="asc-thread__lock" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <rect x="4.5" y="10.5" width="15" height="10" rx="2.6" />
+                            <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+                          </svg>
+                        )}
+                        {row.lastMessagePreview || '—'}
+                      </span>
                       <span className="asc-thread__foot">
                         <span className={`asc-status asc-status--${copy.tone}`}>
                           <i className="asc-status__dot" aria-hidden="true" />
@@ -675,6 +1000,13 @@ export default function AdminSupportChats({ request }) {
                   Back to the queue
                 </button>
 
+                {/* Deliberately minimal: the header states only the subject, the
+                    status and the ticket reference. Category, assignee and
+                    timestamps live on the queue row and the transcript; the
+                    header is for orientation, not for re-reading the metadata.
+                    Encryption needs no button here — opening a thread seals it
+                    automatically — so it shows as a label, and the grant stays
+                    because it is an action with no second home. */}
                 <div className="asc-view__title">
                   <h3 className="asc-view__subject">{active.thread.subject}</h3>
                   <div className="asc-view__tags">
@@ -682,43 +1014,58 @@ export default function AdminSupportChats({ request }) {
                       <i className="asc-status__dot" aria-hidden="true" />
                       {activeStatus.label}
                     </span>
-                    <span className="asc-chip">{active.thread.categoryLabel || active.thread.category}</span>
-                    {active.thread.assignedTo && (
-                      <span className="asc-chip asc-chip--assignee">Assigned to {active.thread.assignedTo}</span>
+                    {active.thread.ticketId && (
+                      <button
+                        type="button"
+                        className={`asc-ticket${ticketCopied === active.thread.ticketId ? ' asc-ticket--copied' : ''}`}
+                        onClick={() => copyTicketId(active.thread.ticketId)}
+                        title={`Copy reference ${active.thread.ticketId} — click to copy`}
+                        aria-label={`Copy support ticket ID ${active.thread.ticketId}`}
+                      >
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <rect x="9" y="9" width="11" height="11" rx="2" />
+                          <path d="M15 5.5A1.5 1.5 0 0 0 13.5 4h-8A1.5 1.5 0 0 0 4 5.5v8A1.5 1.5 0 0 0 5.5 15" />
+                        </svg>
+                        {ticketCopied === active.thread.ticketId ? 'Copied!' : active.thread.ticketId}
+                      </button>
                     )}
-                    {banned && <span className="asc-flag">{String(user.accountStatus).toUpperCase()}</span>}
+                    {sealedThread && (
+                      <span
+                        className="asc-e2e"
+                        role="img"
+                        aria-label="End-to-end active"
+                        title="End-to-end encrypted — the message bodies travel as ciphertext and only this conversation's key, held by this device and the member, opens them."
+                      >
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M12 3l7.5 3v5.5c0 4.6-3.1 8.4-7.5 9.5-4.4-1.1-7.5-4.9-7.5-9.5V6z" />
+                          <path d="M9 12l2.2 2.2L15.5 10" />
+                        </svg>
+                        E2E Active
+                      </span>
+                    )}
+                    {sealedThread && grantable.length > 0 && (
+                      <button
+                        type="button"
+                        className="asc-grant"
+                        onClick={grantAccess}
+                        disabled={sealing}
+                      >
+                        {sealing
+                          ? 'Sharing…'
+                          : `Grant access to ${grantable.length} colleague${grantable.length === 1 ? '' : 's'}`}
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                <div className="asc-view__member">
-                  <span className="asc-avatar asc-avatar--lg" style={avatarStyle(user)} aria-hidden="true">
-                    {initials(user)}
-                  </span>
-                  <span className="asc-view__memberText">
-                    <strong>{memberName(user)}</strong>
-                    <em>{user?.email || '—'}</em>
-                  </span>
-                  <button
-                    type="button"
-                    className={`asc-stateBtn asc-stateBtn--${isResolved ? 'reopen' : 'resolve'}`}
-                    onClick={() => applyState(isResolved ? 'reopen' : 'resolve', isResolved ? 'Conversation reopened.' : 'Conversation resolved.')}
-                    disabled={busy}
-                  >
-                    {busy ? 'Working…' : isResolved ? 'Reopen chat' : 'Mark resolved'}
-                  </button>
-                </div>
-
-                <div className="asc-view__meta">
-                  <span>Opened {formatStamp(active.thread.createdAt)}</span>
-                  {active.thread.messageCount > 0 && (
-                    <span>{active.thread.messageCount} message{active.thread.messageCount === 1 ? '' : 's'}</span>
-                  )}
-                  {active.thread.resolved?.at && (
-                    <span className="asc-view__metaOk">
-                      Resolved {formatStamp(active.thread.resolved.at)} by {active.thread.resolved.by || '—'}
-                    </span>
-                  )}
-                </div>
+                <button
+                  type="button"
+                  className={`asc-stateBtn asc-stateBtn--${isResolved ? 'reopen' : 'resolve'}`}
+                  onClick={() => applyState(isResolved ? 'reopen' : 'resolve', isResolved ? 'Conversation reopened.' : 'Conversation resolved.')}
+                  disabled={busy}
+                >
+                  {busy ? 'Working…' : isResolved ? 'Reopen chat' : 'Mark resolved'}
+                </button>
               </header>
 
               <div className="asc-transcript">
@@ -736,6 +1083,12 @@ export default function AdminSupportChats({ request }) {
                     <p className="asc-empty">No messages yet.</p>
                   ) : active.messages.map((m) => {
                     const mine = m.author === 'admin';
+                    // A sealed message that will not open means this browser is
+                    // not a recipient. Saying so, in the body slot, is the only
+                    // way an operator can tell that from "the site is broken" —
+                    // and it is the difference between a 30-second fix (grant
+                    // access) and a support ticket about a broken console.
+                    const lockedUp = m.encrypted && (m.body === null || m.body === undefined);
                     return (
                       <div key={m._id} className={`asc-msg${mine ? ' asc-msg--mine' : ' asc-msg--theirs'}`}>
                         <div className="asc-msg__head">
@@ -744,7 +1097,11 @@ export default function AdminSupportChats({ request }) {
                           </span>
                           <span className="asc-msg__time">{formatStamp(m.createdAt)}</span>
                         </div>
-                        <div className="asc-msg__body">{m.body}</div>
+                        <div className="asc-msg__body">
+                          {lockedUp
+                            ? <span className="asc-msglock">Encrypted — this device does not hold the key</span>
+                            : m.body}
+                        </div>
                       </div>
                     );
                   })}

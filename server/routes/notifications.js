@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const { protect } = require('../middleware/auth');
 const UserNotification = require('../models/UserNotification');
 const Assessment = require('../models/Assessment');
+const { memberLinkFor, withLinks } = require('../utils/notificationLinks');
 
 const router = express.Router();
 router.use(protect);
@@ -48,6 +49,8 @@ router.get('/', async (req, res) => {
             title: 'Health review flagged for your assessment',
             detail: `Our review flagged possible severe concerns (${((a.flagReasons || []).join('; ') || 'Priority review')}). An administrator has been notified. If you feel unwell, please seek medical care promptly.`,
             assessmentId: a._id,
+            link: '/history',
+            linkLabel: 'View the flagged assessment',
           })),
           { ordered: false }
         );
@@ -56,14 +59,21 @@ router.get('/', async (req, res) => {
       console.error('[notifications backfill]', backfillError.message);
     }
 
-    const [items, unreadCount] = await Promise.all([
+    const [rows, unreadCount] = await Promise.all([
       UserNotification.find({ user: req.user._id, dismissed: false })
         .sort({ createdAt: -1 })
         .limit(limit)
         .lean(),
       UserNotification.countDocuments({ user: req.user._id, read: false, dismissed: false }),
     ]);
-    res.json({ notifications: items, unreadCount });
+    // Fill in a destination for rows written before `link` existed, so no
+    // consumer ever has to guess one — that guessing is what sent a support
+    // reply to the assessment history. Derived per read, never written back:
+    // see utils/notificationLinks.js.
+    res.json({
+      notifications: withLinks(rows, memberLinkFor),
+      unreadCount,
+    });
   } catch (error) {
     console.error('[notifications GET]', error.message);
     res.status(500).json({ message: 'Could not load notifications.' });

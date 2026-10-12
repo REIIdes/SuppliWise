@@ -75,6 +75,10 @@ const { isValidEmail } = require('./emailValidation');
 const { verifyTotpOnce } = require('./totp');
 const { readSecret, SECRET_FIELDS } = require('./totpSecret');
 const { accountKey, lockRemainingMs, recordAccountFailure, clearOffenses, lockMeta } = require('./lockout');
+// SMS delivery and the code primitives, shared with every other code path so
+// this flow cannot end up with a weaker policy than the emailed one.
+const sms = require('./sms');
+const otpChallenge = require('./otpChallenge');
 
 const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v));
 const normalizeEmail = (v) => str(v).trim().toLowerCase();
@@ -503,6 +507,195 @@ function maskTail(address) {
   return `${head}${'•'.repeat(Math.max(1, name.length - 2))}@${domain}`;
 }
 
+/**
+ * RECOVERY PHONE
+ * --------------
+ * A code texted to the account's verified number, for the person who has lost
+ * their authenticator, their passkey and their recovery codes.
+ *
+ * IT IS THE WEAKEST FACTOR IN THIS FILE, AND THE REASON IS THE DELIVERY
+ * MECHANISM, NOT THE CODE. The code is generated and stored exactly like every
+ * other one here — CSPRNG, HMAC digest at rest, five attempts, single use, one
+ * status for every failure. All of that holds. What does not hold is the last
+ * hop: an SMS is a text message relayed through a carrier, on a SIM that can be
+ * swapped at a shop counter, readable by anyone standing near the handset, and
+ * silently dropped by carrier filtering without either end noticing. None of
+ * that is true of an email, a TOTP seed or a passkey key.
+ *
+ * So it is placed BELOW every other method in the UI, it is never the only way
+ * into an account, and `phoneNumberAsSecondFactor` keeps ordinary sign-in use
+ * behind its own explicit opt-in. See models/User.js and utils/sms.js.
+ *
+ * TWO ROUTES, BECAUSE SENDING AND VERIFYING MUST NOT SHARE A TIMER
+ * ---------------------------------------------------------------
+ * `requestPhoneCode` is unauthenticated and answers generically; `withPhoneCode`
+ * is the credential check. Splitting them is what lets the first say the same
+ * thing for every address in the world while the second stays strict.
+ *
+ * THE COST CONTROL
+ * ----------------
+ * Sending is money. `requestPhoneCode` is reachable by anyone who knows an
+ * email address, so three brakes stand on it: it sends only to an account that
+ * has already proven a number, a per-account cooldown stops a single account
+ * being texted repeatedly, and the route carries the same per-IP factor limiter
+ * as the other recovery proofs. Without the cooldown, "enter my email address"
+ * in a loop would be an unmetered way to spend the deployment's SMS balance.
+ */
+
+// The recovery-phone codes, in the same shape and with the same guarantees as
+// every other emailed code in this application — see utils/otpChallenge.js.
+// Namespaced under `pwreset_sms_` so a code issued here can never be presented
+// to a sign-in or a recovery-email route: the key is mixed into the HMAC, so the
+// same six digits under a different purpose produce an unrelated digest.
+const phoneCodeStore = new Map();
+
+// Long enough for a text to actually arrive, short enough that a number on a
+// lost handset is not a standing key. Matches the emailed codes exactly.
+const PHONE_CODE_TTL_MS = 5 * 60 * 1000;
+
+// One message per account per minute. Every other phone code is replaced by the
+// next request, so a resend never leaves two live codes behind.
+const PHONE_CODE_COOLDOWN_MS = 60 * 1000;
+const phoneCodeCooldowns = new Map(); // userId -> lastSentAt
+
+const sweepPhoneCodeStore = otpChallenge.createSweeper(phoneCodeStore);
+
+const GENERIC_PHONE_MESSAGE =
+  'If that account has a verified phone number, we have sent a code to it.';
+
+/**
+ * Text a recovery code to a verified number.
+ *
+ * GENERIC BY CONSTRUCTION. The answer is identical for every address — one that
+ * does not exist, one with no phone, one whose phone was never verified, and one
+ * that genuinely had a message sent. That covers more ground than `/request`
+ * has to, because here the outcome genuinely varies by account and a differing
+ * answer would answer "does this address have a verified phone number", which
+ * is an enumeration oracle in its own right.
+ */
+async function requestPhoneCode({ email, req } = {}) {
+  const user = await loadAccount(email, '_id email phoneNumber phoneNumberVerifiedAt accountStatus');
+
+  const eligible = isActive(user) && sms.isEligible(user);
+  if (!eligible) {
+    equalizeMiss();
+    return { status: 200, message: GENERIC_PHONE_MESSAGE, sent: false };
+  }
+
+  const key = String(user._id);
+  const lastSent = phoneCodeCooldowns.get(key);
+  if (lastSent && Date.now() - lastSent < PHONE_CODE_COOLDOWN_MS) {
+    // Also generic. The user is told to wait, which is true whether or not a
+    // message went out, and which reveals nothing about the account.
+    return {
+      status: 200,
+      message: `If that account has a verified phone number, we have sent a code to it. You can request another in ${Math.ceil((PHONE_CODE_COOLDOWN_MS - (Date.now() - lastSent)) / 1000)} seconds.`,
+      sent: false,
+      retryAfterSeconds: Math.ceil((PHONE_CODE_COOLDOWN_MS - (Date.now() - lastSent)) / 1000),
+    };
+  }
+
+  const code = otpChallenge.generateOtp();
+  const delivered = await sms.sendSms({
+    to: user.phoneNumber,
+    body: sms.recoveryBody(code),
+    purpose: 'password-reset',
+  });
+  if (!delivered.ok) {
+    // Nothing is stored, so an undelivered code can never be presented. The
+    // caller still gets the generic message: a delivery failure is our problem
+    // and must not become a way to test which accounts are real.
+    console.error(`[password-reset/phone] delivery failed for ${key.slice(0, 8)}…: ${delivered.reason}`);
+    return { status: 200, message: GENERIC_PHONE_MESSAGE, sent: false };
+  }
+
+  phoneCodeStore.set(`pwreset_sms_${key}`, otpChallenge.buildEntry({
+    otp: code,
+    context: `pwreset_sms_${key}`,
+    ttlMs: PHONE_CODE_TTL_MS,
+    maxAttempts: otpChallenge.MAX_ATTEMPTS,
+  }));
+  phoneCodeCooldowns.set(key, Date.now());
+  // Both maps are swept on write. This map is written by an UNAUTHENTICATED
+  // route, so without a sweep every abandoned request — or a script walking
+  // addresses — leaves an entry behind for the life of the process.
+  sweepPhoneCodeStore();
+  for (const [id, at] of phoneCodeCooldowns) {
+    if (!at || Date.now() - at > PHONE_CODE_COOLDOWN_MS * 2) phoneCodeCooldowns.delete(id);
+  }
+
+  SecurityEvent.write({
+    user: user._id,
+    type: 'password-reset-requested',
+    reason: 'Code sent to the verified recovery phone',
+    meta: { factor: 'sms-otp', outcome: 'sent' },
+    ip: normalizeIp(req?.ip),
+    userAgent: req?.get?.('user-agent'),
+  }).catch(() => {});
+
+  return { status: 200, message: GENERIC_PHONE_MESSAGE, sent: true };
+}
+
+/**
+ * Redeem a texted recovery code for a reset grant.
+ *
+ * Ends at `mintResetGrant`, exactly like every other method here, so
+ * `/reset-password?token=…` remains the only place a password can change.
+ */
+async function withPhoneCode({ email, code, req } = {}) {
+  const submitted = str(code).trim();
+  if (!/^\d{6,8}$/.test(submitted)) {
+    // Refused on shape, before any lookup. Reveals nothing: no account was
+    // read, so there is nothing here to learn.
+    return { status: 400, message: 'Enter the 6-digit code we texted you.' };
+  }
+
+  const user = await loadAccount(email, '_id email phoneNumber phoneNumberVerifiedAt accountStatus');
+  if (!user) {
+    equalizeMiss();
+    return { status: 401, message: REFUSAL };
+  }
+
+  const lockKey = accountKey('pwreset-factor', user._id);
+  if (lockRemainingMs(lockKey) > 0) {
+    return { status: 429, message: 'Too many attempts. Please wait a few minutes and try again.' };
+  }
+
+  // Eligibility is checked BEFORE the code is consulted, so an account that has
+  // no working number cannot be distinguished from one whose code was wrong.
+  if (!isActive(user) || !sms.isEligible(user)) {
+    equalizeMiss();
+    return { status: 401, message: REFUSAL };
+  }
+
+  const key = String(user._id);
+  const verdict = otpChallenge.consume(phoneCodeStore, `pwreset_sms_${key}`, submitted);
+  if (!verdict.ok) {
+    noteFailure(user, req, verdict.ok ? 'mismatch' : (verdict.outcome || 'unknown'), 'sms-otp');
+    if (verdict.outcome === 'locked') {
+      return { status: 429, message: 'Too many incorrect codes. Request a new one and try again.' };
+    }
+    return { status: 401, message: REFUSAL };
+  }
+
+  clearOffenses(lockKey);
+  phoneCodeStore.delete(`pwreset_sms_${key}`);
+
+  // Re-read as a full document: applyNewPassword needs the pre-save hook.
+  const grant = await mintResetGrant(await User.findById(user._id), { method: 'sms-otp', req });
+  if (!grant.ok) {
+    return { status: 503, message: 'We could not start your recovery. Please try again in a moment.' };
+  }
+
+  return {
+    status: 200,
+    message: 'Code accepted. Choose a new password to finish.',
+    success: true,
+    resetToken: grant.token,
+    expiresAt: grant.expiresAt,
+  };
+}
+
 module.exports = {
   REFUSAL,
   RESET_FLOW,
@@ -511,4 +704,7 @@ module.exports = {
   passkeyOptions,
   withPasskey,
   withRecoveryEmail,
+  requestPhoneCode,
+  withPhoneCode,
+  GENERIC_PHONE_MESSAGE,
 };

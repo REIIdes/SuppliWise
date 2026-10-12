@@ -1,0 +1,341 @@
+/* Notification detail window — the surface a bell row opens.
+   Deliberately NOT styled off ConfirmModal: that one is a centred warning with
+   a big icon and two buttons, this one is a readable document with three
+   actions. Sharing the class names would mean one of them is always wrong.
+
+   The colour comes from notifications/notificationAccents.css, which the two
+   bells also read — so the window always wears the same family as the row that
+   opened it. Only layout lives here. */
+
+.ndm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Above the bell panels (200) and the confirm dialogs (2000) would fight it;
+     2100 keeps this the topmost layer without a stacking-context hunt. */
+  z-index: 2100;
+  padding: 20px;
+  animation: ndm-fade 0.16s ease-out;
+}
+
+@keyframes ndm-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.ndm {
+  /* Neutrals, referenced by the shared row styles as --nd-*. Declared here
+     because this window is a `.nd-root` of its own and must not depend on a
+     parent setting them. */
+  --nd-ink: #0f172a;
+  --nd-muted: #475569;
+  --nd-faint: #94a3b8;
+
+  background: #fff;
+  border-radius: 20px;
+  box-shadow: 0 30px 80px -12px rgba(15, 23, 42, 0.38);
+  width: min(540px, 100%);
+  max-height: min(85vh, 660px);
+  /* The message can be long (a support transcript preview), so the card scrolls
+     rather than growing past the viewport. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  animation: ndm-rise 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes ndm-rise {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ── Header: the coloured band ────────────────────────────────────────────
+   A gradient in the family's own hues rather than a flat tint. This is the one
+   place in the window where colour is allowed to be fully saturated, because
+   nothing here has to be read — the label below it is plain text. */
+.ndm__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px;
+  background: linear-gradient(
+    135deg,
+    var(--nk-bg, #f1f5f9) 0%,
+    color-mix(in srgb, var(--nk-bg, #f1f5f9) 55%, #fff) 100%
+  );
+  border-bottom: 1px solid color-mix(in srgb, var(--nk-ink, #64748b) 12%, transparent);
+  border-radius: 20px 20px 0 0;
+}
+
+.ndm__glyph {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: var(--nk-ink, #64748b);
+  color: #fff;
+  box-shadow: 0 8px 18px -6px color-mix(in srgb, var(--nk-ink, #64748b) 75%, transparent);
+}
+
+.ndm__glyph svg {
+  width: 23px;
+  height: 23px;
+}
+
+.ndm__headtext {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+.ndm__kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--nk-text, #475569);
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 999px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+/* Unread marks itself twice: a brighter label and a live dot, so the state
+   survives both a glance and a greyscale print. */
+.ndm__kind--unread {
+  color: #fff;
+  background: var(--nk-ink, #2563eb);
+}
+
+.ndm__kind--unread::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.28);
+}
+
+.ndm__when {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--nk-text, #64748b);
+  opacity: 0.85;
+  padding-left: 2px;
+}
+
+.ndm__close {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--nk-text, #64748b);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.ndm__close:hover {
+  background: #fff;
+  color: var(--nd-ink, #0f172a);
+}
+
+.ndm__title {
+  margin: 18px 22px 0;
+  font-size: 20px;
+  line-height: 1.3;
+  font-weight: 750;
+  letter-spacing: -0.015em;
+  color: var(--nd-ink, #0f172a);
+  overflow-wrap: anywhere;
+}
+
+.ndm__body {
+  margin: 10px 22px 0;
+  font-size: 14.5px;
+  line-height: 1.62;
+  color: var(--nd-muted, #334155);
+  /* Notifications embed ids and URLs; without this one long token widens the
+     card and pushes the buttons off screen. */
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.ndm__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin: 16px 22px 0;
+  font-size: 12px;
+  color: var(--nd-faint, #94a3b8);
+}
+
+.ndm__ago {
+  color: var(--nd-faint, #94a3b8);
+}
+
+.ndm__error {
+  margin: 14px 22px 0;
+  font-size: 13px;
+  color: #b91c1c;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 9px;
+  padding: 9px 11px;
+}
+
+/* ── Actions ──────────────────────────────────────────────────────────────
+   The primary button wears the family colour, so "where this goes" is legible
+   from the button alone. Read and delete stay neutral: they are housekeeping,
+   and giving them colour would make them compete with the one action that
+   actually moves you somewhere. */
+.ndm__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  border-top: 1px solid #eef2f6;
+  margin-top: 18px;
+  padding: 16px 22px 18px;
+}
+
+.ndm__actions-row {
+  display: flex;
+  gap: 9px;
+}
+
+.ndm__actions-row .ndm__btn {
+  flex: 1 1 0;
+}
+
+.ndm__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 11px 16px;
+  border-radius: 11px;
+  border: 1px solid #dde3ea;
+  background: #fff;
+  color: #334155;
+  font: 600 14px/1.2 inherit;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+}
+
+.ndm__btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.ndm__btn:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #c6cfd9;
+}
+
+.ndm__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ndm__btn--primary {
+  width: 100%;
+  background: var(--nk-ink, #2563eb);
+  border-color: var(--nk-ink, #2563eb);
+  color: #fff;
+  font-weight: 700;
+  box-shadow: 0 10px 22px -8px color-mix(in srgb, var(--nk-ink, #2563eb) 80%, transparent);
+}
+
+.ndm__btn--primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--nk-ink, #2563eb) 88%, #000);
+  border-color: color-mix(in srgb, var(--nk-ink, #2563eb) 88%, #000);
+  color: #fff;
+  box-shadow: 0 14px 26px -8px color-mix(in srgb, var(--nk-ink, #2563eb) 90%, transparent);
+  transform: translateY(-1px);
+}
+
+.ndm__btn--danger {
+  color: #dc2626;
+  border-color: #fecaca;
+}
+
+.ndm__btn--danger:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #b91c1c;
+}
+
+.ndm__btn:focus-visible,
+.ndm__close:focus-visible {
+  outline: 2px solid var(--nk-ink, #2563eb);
+  outline-offset: 2px;
+}
+
+@media (max-width: 480px) {
+  .ndm-overlay {
+    padding: 12px;
+    /* A bottom sheet rather than a floating card: on a phone a centred dialog
+       with a three-button footer leaves almost nothing for the message. */
+    align-items: flex-end;
+  }
+
+  .ndm {
+    width: 100%;
+    max-height: 88vh;
+    border-radius: 20px;
+  }
+
+  .ndm__head {
+    border-radius: 20px 20px 0 0;
+    padding: 14px 16px;
+  }
+
+  .ndm__title {
+    margin: 16px 18px 0;
+    font-size: 18.5px;
+  }
+
+  .ndm__body {
+    margin: 9px 18px 0;
+  }
+
+  .ndm__meta,
+  .ndm__error {
+    margin-left: 18px;
+    margin-right: 18px;
+  }
+
+  .ndm__actions {
+    padding: 14px 18px 18px;
+  }
+
+  .ndm__actions-row {
+    flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ndm-overlay,
+  .ndm {
+    animation: none;
+  }
+
+  .ndm__btn--primary:hover:not(:disabled) {
+    transform: none;
+  }
+}

@@ -651,7 +651,7 @@ async function main() {
   const mints = await Promise.all(Array.from({ length: 5 }, () =>
     call('POST', '/web3/rewards/achievements/check', { token: HN.token, body: {} })));
   check('5 concurrent mint checks all succeed (no E11000 → 500)', mints.every((r) => r.status === 200),
-    JSON.stringify(mints.map((r) => r.status)));
+    JSON.stringify(mints.map((r) => `${r.status}${r.data?.message ? ` ${r.data.message}` : ''}`)));
   const nfts = await call('GET', '/web3/rewards/nfts', { token: HN.token });
   const kinds = (nfts.data.nfts || []).map((n) => n.kind);
   check('minted NFT kinds unique (soulbound, once per milestone)', new Set(kinds).size === kinds.length,
