@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import { registerUser, saveAssessment, getRecommendations, saveAssessmentResults, getCaptcha, startSession } from '../api';
@@ -55,6 +55,12 @@ function SignIn() {
   const [captchaLoading, setCaptchaLoading] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Server question format: "12 − 5 = ?" with +, − or ×
+  const captchaParts = useMemo(() => {
+    const m = captcha && /^(\d+)\s*([+−×])\s*(\d+)\s*=\s*\?$/.exec(captcha.question);
+    return m ? { left: m[1], op: m[2], right: m[3] } : null;
+  }, [captcha]);
 
   const fromAssessment = location.state?.fromAssessment;
 
@@ -473,9 +479,27 @@ function SignIn() {
           <div className={`auth-field ${fieldErrors.captcha ? 'field-has-error' : ''}`}>
             <label>Security Check</label>
             <div className="captcha-row">
-              <div className="captcha-question" aria-live="polite">
-                {captchaLoading ? 'Loading…' : (captcha ? captcha.question : 'Unavailable')}
-              </div>
+              {captchaParts ? (
+                <span className="captcha-challenge" aria-live="polite">
+                  <span className="captcha-num">{captchaParts.left}</span>
+                  <span className="captcha-op">{captchaParts.op}</span>
+                  <span className="captcha-num">{captchaParts.right}</span>
+                  <span className="captcha-eq">=</span>
+                </span>
+              ) : (
+                <span className="captcha-challenge captcha-challenge-raw" aria-live="polite">
+                  {captchaLoading ? 'Loading…' : (captcha ? captcha.question : 'Unavailable')}
+                </span>
+              )}
+              <input
+                type="text"
+                inputMode="numeric"
+                value={captchaAnswer}
+                onChange={(e) => { setCaptchaAnswer(e.target.value.replace(/[^0-9-]/g, '').slice(0, 6)); if (fieldErrors.captcha) validateField('captcha', e.target.value); }}
+                placeholder={captchaLoading ? '…' : "?"}
+                aria-label="Math challenge answer"
+                className="captcha-input"
+              />
               <button
                 type="button"
                 className="captcha-refresh"
@@ -484,21 +508,12 @@ function SignIn() {
                 aria-label="Get a new math challenge"
                 title="New challenge"
               >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <polyline points="1 4 1 10 7 10" />
                   <polyline points="23 20 23 14 17 14" />
                   <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M23 14l-4.64 4.36A9 9 0 0 1 3.51 15" />
                 </svg>
               </button>
-              <input
-                type="text"
-                inputMode="numeric"
-                value={captchaAnswer}
-                onChange={(e) => { setCaptchaAnswer(e.target.value.replace(/[^0-9-]/g, '').slice(0, 6)); if (fieldErrors.captcha) validateField('captcha', e.target.value); }}
-                placeholder="Answer"
-                aria-label="Math challenge answer"
-                className="captcha-input"
-              />
             </div>
             {fieldErrors.captcha && <span className="auth-field-error">{fieldErrors.captcha}</span>}
           </div>
