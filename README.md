@@ -51,7 +51,7 @@ A full-stack MERN web app with **PWA + Android APK support** that delivers **AI-
 - 📋 **20 personalized supplement recommendations** — prioritized by clinical relevance with confidence scores
 - 🔬 **Evidence-backed** — every recommendation cites real peer-reviewed studies with journal names, authors, and PMIDs
 - 📄 **Export to PDF** — fully formatted clinical report, plus a dedicated security report from the admin console
-- 💬 **Two chat surfaces** — a stateless AI assistant, and a real stored conversation with the support team
+- 💬 **Two chat surfaces** — an AI assistant with stored per-account conversations, and a real stored conversation with the support team
 - 📲 **Multi-account, per-tab sessions** — sign into several accounts at once and switch between tabs without signing out
 
 ---
@@ -81,6 +81,7 @@ A full-stack MERN web app with **PWA + Android APK support** that delivers **AI-
 ### 📊 Dashboard & Tracking
 
 - **Personalized Dashboard** — today's supplements, wellness score, and quick stats
+- **New Assessment choice** — the dashboard's New Assessment card asks whether to *Update current assessment* (previous answers pre-filled; streak, adherence and intake history carry over) or *Start a new assessment* (fresh plan, tracking restarts)
 - **Add Supplements to Plan** — dynamically add recommended supplements to your daily plan
 - **Track Daily Intake** — mark supplements as taken/undo with real-time progress tracking
 - **Smart Streak System** — earn streaks by completing 100% of supplements each day
@@ -135,11 +136,11 @@ A full-stack MERN web app with **PWA + Android APK support** that delivers **AI-
 ### 💬 AI Chat Assistant
 
 - Floating **Ask AI** bubble available on all user pages (hidden on auth pages, `/support`, and the whole admin area)
-- **Auto-scroll to top** on open, plus a **scroll-to-bottom button** while reading history
+- **Reopens at the newest message**, plus a **scroll-to-bottom button** while reading history
 - **Typo handling** — detects health/supplement misspellings and gently corrects them
 - **Scoped to health, nutrition, and SuppliWise topics** — politely declines off-topic requests
 - **Safety guardrails** server-side (`chatSafety.js`) keep answers inside the health domain
-- Multi-turn conversation with history context, quick prompt buttons, and a local fallback when AI is unavailable
+- Multi-turn conversation with history context, **stored conversations per account** (history menu plus a **+** button to start a new one), quick prompt buttons, and a local fallback when AI is unavailable
 - **Ultimate tier entitlement** — gated server-side, not just hidden in the UI
 
 ### 🕐 Assessment History
@@ -149,6 +150,9 @@ A full-stack MERN web app with **PWA + Android APK support** that delivers **AI-
 - **Tap for Details** works from history — cached per assessment (no repeat API calls)
 - View, download PDF, or delete — all from the history card
 - Page depth scales with plan (Free 5 / Deluxe 10 / Premium+ 20 per page)
+- **Update Health Assessment** — re-take the assessment from the history page: the expanded **Active** card pre-fills the form with your previous answers, and the new assessment is linked to the one it updated ("Updated from your previous assessment" on its card)
+- Intake records, streaks, and adherence metrics carry over to the new assessment — tracking continues instead of restarting at zero
+- In update mode the new AI plan is generated **before** anything is saved, so a failed AI call leaves your last assessment, recommendations, and intake history untouched
 
 ---
 
@@ -254,7 +258,7 @@ Full feature→code mapping and proof: [`BLOCKCHAIN_FEATURES.md`](BLOCKCHAIN_FEA
 
 Two deliberately separate chat surfaces, because they answer very different questions:
 
-- **AI Chat Assistant** — a stateless assistant that can only reason over documentation.
+- **AI Chat Assistant** — scoped to health, wellness, and SuppliWise topics; conversations are stored per account and reopen from the history menu
 - **Support** (`/support`) — a **stored conversation with a person**. Requires a session (a guest has no account for an admin to reply to). Threads carry status (`waiting on us` / `waiting on member` / `resolved`), a category (payment, billing, account, technical, other), and a resolved-threads-are-read-only rule.
 
 ### Member side
@@ -577,6 +581,7 @@ MongoDB with Mongoose. No migrations needed — `aiResults` is a `Mixed` (schema
 | `usernotifications`, `adminevents` | The two notification streams |
 | `subscriptionrequests`, `subscriptioncancelrequests` | The two admin review queues |
 | `chatthreads`, `chatmessages` | Stored support conversations |
+| `aichatthreads` | Stored AI-assistant conversations (embedded messages, denormalised `lastText`/`messageCount` tail for the list query) |
 | `adminaccounts` | Admin identity projection |
 | `Web3.js` | All Web3 schemas + `DEFAULT_PARAMS` (DAO-governed economics), wallets, blocks, listings, orders, rewards, proposals, knowledge, trials, feeds |
 

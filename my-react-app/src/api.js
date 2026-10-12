@@ -57,19 +57,6 @@ const loadWebAuthn = async () => {
 // Resolve the backend URL: explicit env override wins; otherwise derive it
 // from the page host so phones/tablets on the LAN (e.g. 192.168.x.x) reach
 // the backend instead of a dead localhost:5000 ("Failed to fetch").
-//
-// THE SCHEME FOLLOWS THE PAGE. This is not a preference, it is a requirement:
-// a browser blocks an https page from requesting an http API as MIXED CONTENT,
-// and it does so before the request is sent — so every call fails at once, with
-// no error naming the cause. So the API URL inherits whatever the page is
-// using, on every host including localhost.
-//
-// Concretely that means the localhost branch is no longer a hardcoded
-// `http://localhost:5000`. It was the one host where the scheme was pinned, and
-// pinning it is what made `vite dev` over https unable to reach its own API:
-// the page asked for http from an https document and was refused. Deriving it
-// from `window.location.protocol` means a dev server with a certificate and one
-// without both work, with no configuration and nothing to remember.
 const getBaseUrl = () => {
   // `import.meta.env` only exists under Vite. Under `node --test` it is
   // undefined, and an unguarded read here made utils/pictureUrl.test.js throw
@@ -79,26 +66,12 @@ const getBaseUrl = () => {
   if (override) return override;
   if (typeof window !== 'undefined') {
     const { hostname, protocol } = window.location;
-    // The native shell (Capacitor) serves the app from its own local origin —
-    // `capacitor://localhost` or `https://localhost` — and `localhost` there is
-    // the PHONE, not the machine running the API. Deriving `…:5000` from it
-    // produced a URL that cannot resolve on any real device, which is why the
-    // APK has always needed VITE_API_URL (or a configured `server.host`).
-    // Detecting it explicitly means the requirement is stated rather than
-    // accidental: build the app with VITE_API_URL set to the backend's real
-    // address.
-    const isNativeShell = typeof window.Capacitor !== 'undefined'
-      && window.Capacitor?.isNativePlatform?.() === true;
-    if (hostname && !isNativeShell) {
-      // `https:` maps to https and everything else to http, which is what keeps
-      // an http dev server and an https one both working with no configuration.
+    if (hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
       const scheme = protocol === 'https:' ? 'https:' : 'http:';
       return `${scheme}//${hostname}:5000/api`;
     }
   }
-  // No window at all (`node --test`, a server-side render). There is no page to
-  // inherit a scheme from; https matches the default the dev servers now use.
-  return 'https://localhost:5000/api';
+  return 'http://localhost:5000/api';
 };
 const BASE_URL = getBaseUrl();
 
@@ -1030,7 +1003,8 @@ export const getRecommendations = async (assessmentData) => {
     throw new Error('Your session has expired. Please sign in again.');
   }
   
-  // AI generation can take minutes — budget 150s (server caps at 180s)
+  // AI generation can take minutes — budget 240s so the browser does not abort
+  // before the server's own 180s generation budget (plus one retry) is done.
   const res = await apiFetch('/recommend', {
     method: 'POST',
     headers: {
@@ -1038,7 +1012,7 @@ export const getRecommendations = async (assessmentData) => {
       ...authHeader(),
     },
     body: JSON.stringify(assessmentData),
-  }, 150000);
+  }, 240000);
   const data = await parseJSON(res);
   if (!res.ok) throwFriendly(res.status, data);
   return data;
@@ -1071,12 +1045,37 @@ export const getHistory = async (page = 1, limit = 10, fields = '') => {
   };
 };
 
+// Get the current (active) assessment — the newest one still in
+// force, form fields only (aiResults projected out server-side).
+// Powers the Update Health Assessment choice on the dashboard.
+export const getActiveAssessment = async () => {
+  const res = await apiFetch('/assessment/active', {
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throwFriendly(res.status, data);
+  return data;
+};
+
 // Save AI results to an assessment record
 export const saveAssessmentResults = async (assessmentId, results) => {
   const res = await apiFetch(`/assessment/${assessmentId}/results`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
     body: JSON.stringify(results),
+  }, 60000);
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// Move an assessment's intake/metrics history onto a newer (replacement)
+// assessment so an Update Health Assessment carries progress forward
+export const migrateAssessmentHistory = async (targetAssessmentId, sourceAssessmentId) => {
+  const res = await apiFetch(`/assessment/${targetAssessmentId}/migrate-history`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify({ fromAssessment: sourceAssessmentId }),
   }, 60000);
   const data = await parseJSON(res);
   if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
@@ -1094,12 +1093,15 @@ export const deleteAssessment = async (assessmentId) => {
   return data;
 };
 
-// Send a chat message to the AI assistant (ULTIMATE only — 403 carries requiresPlan)
-export const sendChatMessage = async (message, history = []) => {
+// Send a chat message to the AI assistant (ULTIMATE only — 403 carries requiresPlan).
+// threadOptions: { threadId } appends to a stored conversation, or
+// { newThread: true } seeds a new one. With neither, the call stays
+// stateless and the client-supplied history is the only context.
+export const sendChatMessage = async (message, history = [], threadOptions = {}) => {
   const res = await apiFetch('/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
-    body: JSON.stringify({ message, history }),
+    body: JSON.stringify({ message, history, ...threadOptions }),
   }, 45000);
   const data = await parseJSON(res);
   if (!res.ok) {
@@ -1116,6 +1118,60 @@ export const sendChatMessage = async (message, history = []) => {
     if (Number.isFinite(retryAfter) && retryAfter > 0) err.retryAfterSeconds = retryAfter;
     throw err;
   }
+  return data;
+};
+
+// Stored AI conversations (ULTIMATE only). The list reads only the
+// denormalised tail fields, so the history menu never downloads
+// transcripts to show a conversation's last line.
+export const listChatThreads = async () => {
+  const res = await apiFetch('/chat/threads', { headers: { ...authHeader() } });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+export const getChatThread = async (threadId) => {
+  const res = await apiFetch(`/chat/threads/${encodeURIComponent(threadId)}`, { headers: { ...authHeader() } });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+export const deleteChatThread = async (threadId) => {
+  const res = await apiFetch(`/chat/threads/${encodeURIComponent(threadId)}`, {
+    method: 'DELETE',
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+export const togglePinChatThread = async (threadId) => {
+  const res = await apiFetch(`/chat/threads/${encodeURIComponent(threadId)}/pin`, {
+    method: 'PATCH',
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+export const listArchivedThreads = async () => {
+  const res = await apiFetch('/chat/threads/archived', { headers: { ...authHeader() } });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+export const toggleArchiveChatThread = async (threadId) => {
+  const res = await apiFetch(`/chat/threads/${encodeURIComponent(threadId)}/archive`, {
+    method: 'PATCH',
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
   return data;
 };
 

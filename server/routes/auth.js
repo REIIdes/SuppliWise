@@ -879,7 +879,7 @@ router.post('/login', async (req, res) => {
         BackupCode.countDocuments({ user: user._id, usedAt: null }),
       ]);
     }
-    const mfaMethods = mfaTransaction.methodsFor(
+    const accountMethods = mfaTransaction.methodsFor(
       { twoFactorEnabled: user.twoFactorEnabled, twoFactorMethod },
       {
         passkeys: passkeyCount,
@@ -891,6 +891,19 @@ router.post('/login', async (req, res) => {
         phoneSecondFactor: sms.eligibleForSecondFactor(user),
       },
     );
+    // The transaction must list the factor THIS sign-in will finish
+    // with — not the account's configured factors. methodsFor()
+    // describes what an account HAS and defaults to 'totp' when no
+    // second factor is configured, but every sign-in that does not
+    // end in Google Authenticator is completed by the emailed code.
+    // Minting the account default here made each code-only sign-in
+    // fail /verify-login-otp with "That sign-in attempt has expired.
+    // Please sign in again." no matter how fast the code was typed:
+    // both resolution paths filter on the method — peek/spend with
+    // method 'email-otp' on the token path, and findOne with
+    // methods: 'email-otp' on the legacy userId path — and a
+    // ['totp'] transaction matches neither.
+    const mfaMethods = usesAuthenticator ? accountMethods : ['email-otp'];
     const mfaToken = await mfaTransaction.start({
       user: user._id,
       methods: mfaMethods,

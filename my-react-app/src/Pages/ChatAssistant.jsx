@@ -1,11 +1,20 @@
 ﻿import { memo, useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { sendChatMessage } from '../api';
+import {
+  sendChatMessage,
+  listChatThreads,
+  getChatThread,
+  deleteChatThread,
+  togglePinChatThread,
+  listArchivedThreads,
+  toggleArchiveChatThread,
+} from '../api';
 import useAuth from '../hooks/useAuth';
 import { PLAN_LABELS } from '../utils/plan';
 import { subscribeOverlays } from '../utils/overlayRegistry';
 import { useSubscription } from '../hooks/useSubscription';
 import UpgradeModal from '../Components/UpgradeModal/UpgradeModal';
+import ConfirmModal from '../Components/ConfirmModal/ConfirmModal';
 import './ChatAssistant.css';
 
 // ── Markdown renderer (no external deps) ──────────────────────────────────
@@ -145,6 +154,22 @@ const WELCOME_MESSAGE = {
   text: "Hi! I'm **SuppliWise AI** — your health and wellness assistant.\n\nI can help with:\n- Your supplement recommendations and results\n- Supplements, nutrition, vitamins, and wellness questions\n- How to use any feature on SuppliWise\n- Symptoms, diet, sleep, and lifestyle advice\n\nWhat would you like to know?",
 };
 
+// Compact relative stamp for the history menu: "just now",
+// "5m ago", "2h ago", "3d ago", then a plain date.
+const formatThreadTime = (value) => {
+  const when = new Date(value);
+  if (Number.isNaN(when.getTime())) return '';
+  const seconds = Math.max(0, (Date.now() - when.getTime()) / 1000);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return when.toLocaleDateString();
+};
+
 // ── Quick prompts ──────────────────────────────────────────────────────────
 const QUICK_PROMPTS = [
   'How do I start an assessment?',
@@ -154,6 +179,82 @@ const QUICK_PROMPTS = [
   'How do I view my history?',
   'What does High priority mean?',
 ];
+
+// ── ThreadItem — reusable row for active and archived lists ───────────────
+function ThreadItem({ t, activeThreadId, menuOpenFor, setMenuOpenFor, onOpen, onPin, onArchive, onDelete, isArchived = false }) {
+  const isActive = String(t._id) === String(activeThreadId);
+  const menuOpen = menuOpenFor === t._id;
+  return (
+    <div
+      role="menuitem"
+      className={`chat-thread-item${isActive ? ' active' : ''}${isArchived ? ' is-archived' : ''}`}
+      onClick={() => onOpen(t)}
+    >
+      <div className="chat-thread-item-main">
+        <div className="chat-thread-item-title">
+          {t.pinned && (
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 5, verticalAlign: 'middle', color: '#7c7ce8' }} aria-hidden="true">
+              <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
+            </svg>
+          )}
+          {t.title || 'New conversation'}
+        </div>
+        <div className="chat-thread-item-meta">
+          {formatThreadTime(t.updatedAt)}
+          {t.lastText ? ` · ${t.lastText}` : ''}
+        </div>
+      </div>
+
+      {/* Three-dots menu */}
+      <div className="chat-thread-dots-wrap">
+        <button
+          type="button"
+          className="chat-thread-dots-btn"
+          aria-label="More options"
+          title="More options"
+          onClick={(e) => { e.stopPropagation(); setMenuOpenFor(menuOpen ? null : t._id); }}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <circle cx="5"  cy="12" r="1.8" />
+            <circle cx="12" cy="12" r="1.8" />
+            <circle cx="19" cy="12" r="1.8" />
+          </svg>
+        </button>
+
+        {menuOpen && (
+          <div className="chat-thread-dropdown" onClick={(e) => e.stopPropagation()}>
+            {!isArchived && (
+              <button className="chat-dd-item" onClick={() => { onPin(t._id); setMenuOpenFor(null); }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill={t.pinned ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
+                </svg>
+                {t.pinned ? 'Unpin' : 'Pin chat'}
+              </button>
+            )}
+            <button className="chat-dd-item" onClick={() => onArchive(t)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="21 8 21 21 3 21 3 8" />
+                <rect x="1" y="3" width="22" height="5" />
+                <line x1="10" y1="12" x2="14" y2="12" />
+              </svg>
+              {isArchived ? 'Unarchive' : 'Archive'}
+            </button>
+            <div className="chat-dd-separator" />
+            <button className="chat-dd-item chat-dd-item--danger" onClick={() => { onDelete(t); setMenuOpenFor(null); }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                <line x1="10" y1="11" x2="10" y2="17" />
+                <line x1="14" y1="11" x2="14" y2="17" />
+              </svg>
+              Delete
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ── Main component ─────────────────────────────────────────────────────────
 export default function ChatAssistant() {
@@ -168,8 +269,29 @@ export default function ChatAssistant() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [showQuickPrompts, setShowQuickPrompts] = useState(true);
   const [connectionState, setConnectionState] = useState('online');
   const [upgradeInfo, setUpgradeInfo] = useState(null);
+  // Stored conversations: the server keeps the transcripts,
+  // the panel only tracks which one is open and the list the
+  // history menu shows.
+  const [activeThreadId, setActiveThreadId] = useState(null);
+  const [threads, setThreads] = useState([]);
+  const [threadsOpen, setThreadsOpen] = useState(false);
+  const [threadsLoading, setThreadsLoading] = useState(false);
+  // The conversation a delete press is waiting on: the
+  // menu's trash button only arms this; the modal's
+  // confirm button performs the removal.
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  // Archived conversations list + loading state
+  const [archivedThreads, setArchivedThreads] = useState([]);
+  const [archiveLoading, setArchiveLoading] = useState(false);
+  // 'conversations' = main history panel, 'archive' = separate archive screen
+  const [historyView, setHistoryView] = useState('conversations');
+  // Top-level chat view: 'chat' | 'archive' | 'archive-reading'
+  const [chatView, setChatView] = useState('chat');
+  // Three-dots dropdown — which thread's menu is open
+  const [menuOpenFor, setMenuOpenFor] = useState(null);
   // Reactive plan object { active, plan, rank } — subscribing re-renders this
   // component the instant the subscription changes, so the gates below always
   // read fresh state. (Destructuring `plan` here would give the tier string,
@@ -191,6 +313,11 @@ export default function ChatAssistant() {
   const conversationVersionRef = useRef(0);
   const followBottomRef = useRef(true);
   const previousOpenRef = useRef(false);
+  const threadMenuRef = useRef(null);
+  const threadsButtonRef = useRef(null);
+  // Snapshot of the conversation that was active before entering archive-reading.
+  // Restored when the user presses the back button, so the ongoing chat is never lost.
+  const preArchiveSnapshot = useRef(null);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -210,6 +337,20 @@ export default function ChatAssistant() {
     setConnectionState('online');
     setUpgradeInfo(null);
     setOpen(false);
+    // A stored conversation belongs to the account that wrote
+    // it. Switching accounts starts from scratch; the history
+    // list itself is fetched per account, on demand.
+    setActiveThreadId(null);
+    setThreads([]);
+    setThreadsOpen(false);
+    setThreadsLoading(false);
+    setDeleteTarget(null);
+    setArchivedThreads([]);
+    setHistoryView('conversations');
+    setArchiveLoading(false);
+    setMenuOpenFor(null);
+    setChatView('chat');
+    preArchiveSnapshot.current = null;
   }, [userId]);
 
   // Follow new content only while the reader is already at the bottom. If a
@@ -227,9 +368,12 @@ export default function ChatAssistant() {
     previousOpenRef.current = true;
     const timer = setTimeout(() => {
       if (reopened) {
-        el.scrollTop = 0;
+        // A stored conversation reopens at the newest
+        // exchange — where the reader left off — instead
+        // of the top of the transcript.
+        el.scrollTop = el.scrollHeight;
         followBottomRef.current = true;
-        setShowScrollButton(el.scrollHeight > el.clientHeight);
+        setShowScrollButton(false);
       } else if (shouldFollow) {
         el.scrollTop = el.scrollHeight;
         setShowScrollButton(false);
@@ -257,6 +401,33 @@ export default function ChatAssistant() {
     return () => container.removeEventListener('scroll', handleScroll);
   }, [open]);
 
+  // The messages box can change size without any scroll event firing —
+  // collapsing the quick-prompt chips grows it, and a grown box can turn
+  // a scrollable transcript into one that fits, leaving scrollTop
+  // already sitting at the bottom. No scroll event fires in that case,
+  // so the "jump to newest" button used to stay visible pointing at a
+  // bottom the reader was already looking at, and clicking it scrolled
+  // nowhere. Re-running the same at-bottom check on every box resize
+  // keeps the button honest. ResizeObserver fires on box size, not
+  // content size, so incoming messages — which only grow the content —
+  // never reach this; the follow effect above owns those.
+  useEffect(() => {
+    if (!open) return;
+    const container = messagesContainerRef.current;
+    if (!container || typeof ResizeObserver === 'undefined') return;
+
+    const check = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
+      followBottomRef.current = isAtBottom;
+      setShowScrollButton(!isAtBottom && scrollHeight > clientHeight);
+    };
+
+    const observer = new ResizeObserver(check);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [open]);
+
   // Close chat when clicking outside
   useEffect(() => {
     if (!open) return;
@@ -267,19 +438,215 @@ export default function ChatAssistant() {
       // not count as "outside" — the button's own handler decides show vs hide.
       if (chatWindowRef.current?.contains(target)) return;
       if (edgeRef.current?.contains(target)) return;
+      // Root-level modals (the delete confirmation, the upgrade
+      // prompt) render outside the window, so their presses would
+      // otherwise read as "outside" and close the panel the modal
+      // belongs to. While one is up, it owns every press.
+      if (deleteTarget || upgradeInfo) return;
       setOpen(false);
     };
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [open]);
+  }, [open, deleteTarget, upgradeInfo]);
+
+  // Close the history menu when a press lands outside it (and
+  // outside its toggle, whose own handler decides show vs hide).
+  // Skip when the delete-confirm modal is open — the modal is outside
+  // the menu ref, so every click inside it would otherwise close the panel.
+  useEffect(() => {
+    if (!threadsOpen) return;
+    const handleMenuClickOutside = (event) => {
+      if (deleteTarget) return;
+      if (threadMenuRef.current?.contains(event.target)) return;
+      if (threadsButtonRef.current?.contains(event.target)) return;
+      setThreadsOpen(false);
+    };
+    document.addEventListener('mousedown', handleMenuClickOutside);
+    return () => document.removeEventListener('mousedown', handleMenuClickOutside);
+  }, [threadsOpen, deleteTarget]);
+
+  // Close the three-dots dropdown when clicking outside it
+  useEffect(() => {
+    if (!menuOpenFor) return;
+    const close = (e) => {
+      if (!e.target.closest('.chat-thread-dots-btn') && !e.target.closest('.chat-thread-dropdown')) {
+        setMenuOpenFor(null);
+      }
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [menuOpenFor]);
 
   const scrollToBottom = () => {
-    if (messagesContainerRef.current) {
-      messagesContainerRef.current.scrollTo({
-        top: messagesContainerRef.current.scrollHeight,
-        behavior: 'smooth'
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    // Already looking at the newest message? Clear the button
+    // instead of scrolling to the position we are already at.
+    const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
+    if (isAtBottom) {
+      setShowScrollButton(false);
+      return;
+    }
+    el.scrollTo({
+      top: el.scrollHeight,
+      behavior: 'smooth'
+    });
+  };
+
+  // ── Stored conversations ──────────────────────────────────────
+  // Threads are account-scoped on the server; every list, load
+  // and delete goes through the session, so an in-flight
+  // request from a previous account is discarded by the
+  // version guard — the same trick the message sends use.
+  const refreshThreads = async () => {
+    const version = conversationVersionRef.current;
+    setThreadsLoading(true);
+    try {
+      const data = await listChatThreads();
+      if (version !== conversationVersionRef.current) return;
+      setThreads(Array.isArray(data?.threads) ? data.threads.slice(0, 7) : []);
+    } catch (err) {
+      // History is a convenience: a failed load must never
+      // break the chat itself, so the menu just stays empty.
+      if (version !== conversationVersionRef.current) return;
+      setThreads([]);
+    } finally {
+      if (version === conversationVersionRef.current) setThreadsLoading(false);
+    }
+  };
+
+  const startNewConversation = () => {
+    setActiveThreadId(null);
+    setMessages([WELCOME_MESSAGE]);
+    setThreadsOpen(false);
+    setChatView('chat');
+    followBottomRef.current = true;
+  };
+
+  const openThread = async (thread) => {
+    setThreadsOpen(false);
+    if (String(thread?._id) === String(activeThreadId)) return;
+    const version = conversationVersionRef.current;
+    // The typing indicator doubles as the load state: the old
+    // transcript stays visible beneath it until the stored one
+    // lands, and stays put if the load fails.
+    setLoading(true);
+    try {
+      const data = await getChatThread(thread._id);
+      if (version !== conversationVersionRef.current) return;
+      setActiveThreadId(data?._id ?? null);
+      setMessages((Array.isArray(data?.messages) ? data.messages : [])
+        .map((m) => ({ role: m.role, text: m.text })));
+      followBottomRef.current = true;
+    } catch (err) {
+      if (version !== conversationVersionRef.current) return;
+      console.error('[chat] thread load failed:', err.message);
+    } finally {
+      if (version === conversationVersionRef.current) setLoading(false);
+    }
+  };
+
+  const deleteThread = async (threadId) => {
+    const version = conversationVersionRef.current;
+    try {
+      await deleteChatThread(threadId);
+      if (version !== conversationVersionRef.current) return;
+      // Remove from whichever list holds it
+      setThreads((prev) => prev.filter((t) => String(t._id) !== String(threadId)));
+      setArchivedThreads((prev) => prev.filter((t) => String(t._id) !== String(threadId)));
+      // Deleting the conversation being viewed returns the
+      // panel to a fresh conversation instead of an empty
+      // transcript. If we were reading an archived convo,
+      // go back to the archive list.
+      if (String(activeThreadId) === String(threadId)) {
+        if (chatView === 'archive-reading') {
+          setMessages([WELCOME_MESSAGE]);
+          setActiveThreadId(null);
+          setChatView('archive');
+        } else {
+          startNewConversation();
+        }
+      }
+    } catch (err) {
+      if (version !== conversationVersionRef.current) return;
+      console.error('[chat] thread delete failed:', err.message);
+    }
+  };
+
+  const togglePinThread = async (threadId) => {
+    const version = conversationVersionRef.current;
+    try {
+      const data = await togglePinChatThread(threadId);
+      if (version !== conversationVersionRef.current) return;
+      // Update the thread's pinned status in the local list
+      setThreads((prev) => {
+        const updated = prev.map((t) =>
+          String(t._id) === String(threadId) ? { ...t, pinned: data.pinned } : t
+        );
+        // Re-sort: pinned first, then by updatedAt
+        return updated.sort((a, b) => {
+          if (a.pinned === b.pinned) {
+            return new Date(b.updatedAt) - new Date(a.updatedAt);
+          }
+          return b.pinned ? 1 : -1;
+        });
       });
+    } catch (err) {
+      if (version !== conversationVersionRef.current) return;
+      console.error('[chat] thread pin failed:', err.message);
+    }
+  };
+
+  // The modal's confirm button performs the
+  // removal the trash icon only armed.
+  const confirmDeleteThread = async () => {
+    const target = deleteTarget;
+    setDeleteTarget(null);
+    if (target) await deleteThread(target._id);
+  };
+
+  const archiveThread = async (thread) => {
+    const version = conversationVersionRef.current;
+    setMenuOpenFor(null);
+    try {
+      const data = await toggleArchiveChatThread(thread._id);
+      if (version !== conversationVersionRef.current) return;
+      if (data.archived) {
+        // Move from active list to archived list
+        setThreads((prev) => prev.filter((t) => String(t._id) !== String(thread._id)));
+        setArchivedThreads((prev) => [{ ...thread, archived: true, pinned: false }, ...prev]);
+        // If we archived the open conversation, start fresh
+        if (String(activeThreadId) === String(thread._id)) startNewConversation();
+      } else {
+        // Unarchive: move back to active list, re-sort, cap at 7
+        setArchivedThreads((prev) => prev.filter((t) => String(t._id) !== String(thread._id)));
+        setThreads((prev) =>
+          [...prev, { ...thread, archived: false }].sort((a, b) => {
+            if (a.pinned === b.pinned) return new Date(b.updatedAt) - new Date(a.updatedAt);
+            return b.pinned ? 1 : -1;
+          }).slice(0, 7)
+        );
+      }
+    } catch (err) {
+      if (version !== conversationVersionRef.current) return;
+      console.error('[chat] thread archive failed:', err.message);
+    }
+  };
+
+  const loadArchived = async () => {
+    if (archiveLoading) return;
+    const version = conversationVersionRef.current;
+    setArchiveLoading(true);
+    try {
+      const data = await listArchivedThreads();
+      if (version !== conversationVersionRef.current) return;
+      setArchivedThreads(Array.isArray(data?.threads) ? data.threads : []);
+    } catch (err) {
+      if (version !== conversationVersionRef.current) return;
+      setArchivedThreads([]);
+    } finally {
+      if (version === conversationVersionRef.current) setArchiveLoading(false);
     }
   };
 
@@ -320,13 +687,23 @@ export default function ChatAssistant() {
     setConnectionState('connecting');
 
     // Only successful conversation turns are sent back to the model. Error
-    // bubbles are UI state, not assistant advice, and must not poison context.
+    // bubbles are UI state, not assistant advice, and must not poison
+    // context. The welcome message is the conversation seed, not a
+    // turn — and a stored transcript has no welcome at all, so the
+    // filter matches the welcome text instead of assuming it sits
+    // at index 0.
     const history = messagesRef.current
-      .filter((message, index) => index > 0 && message.kind !== 'error')
+      .filter((message) => message.text !== WELCOME_MESSAGE.text && message.kind !== 'error')
       .slice(-8);
 
     try {
-      const data = await sendChatMessage(q, history);
+      // A stored conversation appends to the server-side
+      // transcript; a fresh one asks the server to seed a
+      // thread from this turn.
+      const threadPayload = activeThreadId
+        ? { threadId: activeThreadId }
+        : { newThread: true };
+      const data = await sendChatMessage(q, history, threadPayload);
       if (version !== conversationVersionRef.current) return;
       const reply = typeof data?.reply === 'string' ? data.reply.trim() : '';
       if (!reply) throw new Error("I couldn't find an answer. Try rephrasing your question.");
@@ -336,6 +713,13 @@ export default function ChatAssistant() {
         text: reply,
         ...(data.source === 'fallback' ? { kind: 'error' } : {}),
       }]);
+      // Adopt the stored conversation so every later turn
+      // appends to it. When the server could not persist
+      // (no threadId), the conversation simply stays in
+      // memory, exactly like before.
+      if (data?.threadId && String(data.threadId) !== String(activeThreadId)) {
+        setActiveThreadId(data.threadId);
+      }
     } catch (err) {
       if (version !== conversationVersionRef.current) return;
       setConnectionState(err.status === 429 ? 'busy' : 'offline');
@@ -476,8 +860,151 @@ export default function ChatAssistant() {
                 </div>
               </div>
             </div>
+            {/* Conversation controls — same gate as the
+                transcript itself: signed in AND entitled. */}
+            {isLoggedIn && livePlan.canAccess('chat') && (
+            <div className="chat-header-actions">
+              <button
+                type="button"
+                className="chat-header-icon-btn"
+                onClick={startNewConversation}
+                aria-label="Start a new conversation"
+                title="Start a new conversation"
+              >
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                ref={threadsButtonRef}
+                className={`chat-header-icon-btn${threadsOpen ? ' active' : ''}`}
+                onClick={() => {
+                  setThreadsOpen((v) => !v);
+                  if (!threadsOpen) refreshThreads();
+                }}
+                aria-label="Chat history"
+                aria-expanded={threadsOpen}
+                title="Chat history"
+              >
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9" />
+                  <polyline points="12 7 12 12 15.5 13.5" />
+                </svg>
+              </button>
+            </div>
+            )}
             <button className="chat-close" onClick={() => setOpen(false)} aria-label="Close">✕</button>
           </div>
+
+          {/* History panel — two views: 'conversations' and 'archive' */}
+          {threadsOpen && isLoggedIn && livePlan.canAccess('chat') && (
+            <div className="chat-thread-menu" ref={threadMenuRef} role="menu" aria-label="Past conversations">
+
+              {/* ── VIEW: Conversations ── */}
+              {historyView === 'conversations' && (<>
+                <div className="chat-thread-menu-head">Conversations</div>
+                {threadsLoading ? (
+                  <div className="chat-thread-empty">Loading…</div>
+                ) : threads.length === 0 ? (
+                  <div className="chat-thread-empty">No past conversations yet</div>
+                ) : (
+                  <div className="chat-thread-list">
+                    {threads.map((t) => (
+                      <ThreadItem
+                        key={t._id}
+                        t={t}
+                        activeThreadId={activeThreadId}
+                        menuOpenFor={menuOpenFor}
+                        setMenuOpenFor={setMenuOpenFor}
+                        onOpen={(thread) => { setChatView('chat'); openThread(thread); }}
+                        onPin={togglePinThread}
+                        onArchive={archiveThread}
+                        onDelete={setDeleteTarget}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {/* Footer button — opens the full-window Archive view */}
+                <button
+                  type="button"
+                  className="chat-archive-nav-btn"
+                  onClick={() => {
+                    setChatView('archive');
+                    setThreadsOpen(false);
+                    if (archivedThreads.length === 0) loadArchived();
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <polyline points="21 8 21 21 3 21 3 8" />
+                    <rect x="1" y="3" width="22" height="5" />
+                    <line x1="10" y1="12" x2="14" y2="12" />
+                  </svg>
+                  Archived chats
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: 'auto' }} aria-hidden="true">
+                    <polyline points="9 6 15 12 9 18" />
+                  </svg>
+                </button>
+              </>)}
+
+              {/* ── VIEW: Archive ── */}
+              {historyView === 'archive' && (<>
+                <div className="chat-archive-view-header">
+                  <button
+                    type="button"
+                    className="chat-archive-back-btn"
+                    onClick={() => setHistoryView('conversations')}
+                    aria-label="Back to conversations"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <polyline points="15 6 9 12 15 18" />
+                    </svg>
+                  </button>
+                  <span className="chat-archive-view-title">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <polyline points="21 8 21 21 3 21 3 8" />
+                      <rect x="1" y="3" width="22" height="5" />
+                      <line x1="10" y1="12" x2="14" y2="12" />
+                    </svg>
+                    Archived Chats
+                  </span>
+                </div>
+
+                {archiveLoading ? (
+                  <div className="chat-thread-empty">Loading…</div>
+                ) : archivedThreads.length === 0 ? (
+                  <div className="chat-archive-empty">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <polyline points="21 8 21 21 3 21 3 8" />
+                      <rect x="1" y="3" width="22" height="5" />
+                      <line x1="10" y1="12" x2="14" y2="12" />
+                    </svg>
+                    <p>No archived conversations</p>
+                  </div>
+                ) : (
+                  <div className="chat-thread-list">
+                    {archivedThreads.map((t) => (
+                      <ThreadItem
+                        key={t._id}
+                        t={t}
+                        activeThreadId={activeThreadId}
+                        menuOpenFor={menuOpenFor}
+                        setMenuOpenFor={setMenuOpenFor}
+                        onOpen={openThread}
+                        onPin={() => {}}
+                        onArchive={archiveThread}
+                        onDelete={setDeleteTarget}
+                        isArchived
+                      />
+                    ))}
+                  </div>
+                )}
+              </>)}
+
+            </div>
+          )}
 
           {!isLoggedIn ? (
             // Auth Required Screen
@@ -557,8 +1084,103 @@ export default function ChatAssistant() {
               </div>
             </div>
           ) : (
-            // Normal Chat Interface
+            // Normal Chat Interface — or Archive full-window view
             <>
+              {chatView === 'archive' ? (
+                /* ── Full-window Archive View ── */
+                <div className="chat-archive-fullview">
+                  <div className="chat-archive-fullview-header">
+                    <button
+                      type="button"
+                      className="chat-archive-back-btn"
+                      onClick={() => setChatView('chat')}
+                      aria-label="Back to chat"
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <polyline points="15 6 9 12 15 18" />
+                      </svg>
+                    </button>
+                    <span className="chat-archive-fullview-title">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <polyline points="21 8 21 21 3 21 3 8" />
+                        <rect x="1" y="3" width="22" height="5" />
+                        <line x1="10" y1="12" x2="14" y2="12" />
+                      </svg>
+                      Archived Chats
+                    </span>
+                  </div>
+
+                  {archiveLoading ? (
+                    <div className="chat-thread-empty" style={{ paddingTop: 40 }}>Loading…</div>
+                  ) : archivedThreads.length === 0 ? (
+                    <div className="chat-archive-fullview-empty">
+                      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <polyline points="21 8 21 21 3 21 3 8" />
+                        <rect x="1" y="3" width="22" height="5" />
+                        <line x1="10" y1="12" x2="14" y2="12" />
+                      </svg>
+                      <p>No archived chats yet</p>
+                      <span>Archived conversations will appear here</span>
+                    </div>
+                  ) : (
+                    <div className="chat-archive-fullview-list">
+                      {archivedThreads.map((t) => (
+                        <ThreadItem
+                          key={t._id}
+                          t={t}
+                          activeThreadId={activeThreadId}
+                          menuOpenFor={menuOpenFor}
+                          setMenuOpenFor={setMenuOpenFor}
+                          onOpen={(thread) => {
+                            // Save the current conversation so back can restore it
+                            preArchiveSnapshot.current = {
+                              threadId: activeThreadId,
+                              messages: messagesRef.current,
+                            };
+                            setChatView('archive-reading');
+                            openThread(thread);
+                          }}
+                          onPin={() => {}}
+                          onArchive={archiveThread}
+                          onDelete={setDeleteTarget}
+                          isArchived
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+              <>
+              {chatView === 'archive-reading' && (
+                <div className="chat-archive-reading-banner">
+                  <button
+                    type="button"
+                    className="chat-archive-reading-back"
+                    onClick={() => {
+                      // Restore the conversation that was active before archive-reading
+                      const snap = preArchiveSnapshot.current;
+                      if (snap) {
+                        setActiveThreadId(snap.threadId);
+                        setMessages(snap.messages);
+                        preArchiveSnapshot.current = null;
+                        followBottomRef.current = true;
+                      }
+                      setChatView('archive');
+                    }}
+                    aria-label="Back to archived chats"
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <polyline points="15 6 9 12 15 18" />
+                    </svg>
+                  </button>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <polyline points="21 8 21 21 3 21 3 8" />
+                    <rect x="1" y="3" width="22" height="5" />
+                    <line x1="10" y1="12" x2="14" y2="12" />
+                  </svg>
+                  Archived Chat
+                </div>
+              )}
               <div className="chat-disclaimer-banner">
                 ⚕️ Educational only — not medical advice. Consult a healthcare provider.
               </div>
@@ -604,20 +1226,34 @@ export default function ChatAssistant() {
                 )}
               </div>
 
-              <div className="chat-quick-prompts-wrap">
-                <div className="chat-quick-prompts">
-                  {QUICK_PROMPTS.map(p => (
-                    <button
-                      key={p}
-                      className="quick-prompt"
-                      onClick={() => send(p)}
-                      disabled={loading}
-                    >
-                      {p}
-                    </button>
-                  ))}
+              {showQuickPrompts && (
+                <div className="chat-quick-prompts-wrap">
+                  <div className="chat-quick-prompts">
+                    {QUICK_PROMPTS.map(p => (
+                      <button
+                        key={p}
+                        className="quick-prompt"
+                        onClick={() => send(p)}
+                        disabled={loading}
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
+              <button
+                type="button"
+                className="chat-quick-prompts-toggle"
+                onClick={() => setShowQuickPrompts(v => !v)}
+                aria-expanded={showQuickPrompts}
+                aria-label={showQuickPrompts ? 'Hide quick questions' : 'Show quick questions'}
+                title={showQuickPrompts ? 'Hide quick questions' : 'Show quick questions'}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: showQuickPrompts ? 'rotate(180deg)' : undefined, transition: 'transform 0.15s' }}>
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
 
               <div className="chat-input-row">
                 <input
@@ -649,6 +1285,8 @@ export default function ChatAssistant() {
                 </button>
               </div>
             </>
+            )}
+            </>
           )}
         </div>
       )}
@@ -659,6 +1297,17 @@ export default function ChatAssistant() {
           currentPlan={upgradeInfo.currentPlan}
           onClose={() => setUpgradeInfo(null)}
           onViewPlans={() => { setUpgradeInfo(null); navigate('/pricing'); }}
+        />
+      )}
+      {deleteTarget && (
+        <ConfirmModal
+          type="danger"
+          title="Delete this conversation?"
+          message={`"${deleteTarget.title || 'New conversation'}" and its entire transcript will be permanently removed. This cannot be undone.`}
+          confirmText="Yes, delete"
+          cancelText="Keep conversation"
+          onConfirm={confirmDeleteThread}
+          onCancel={() => setDeleteTarget(null)}
         />
       )}
     </>
