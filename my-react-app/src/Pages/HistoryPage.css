@@ -1423,3 +1423,65 @@
     animation: none;
   }
 }
+
+/* Update Assessment Button */
+.history-update-assessment-container {
+  margin-top: 40px;
+  padding: 32px 24px;
+  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+  border-radius: 12px;
+  text-align: center;
+  border: 1px solid #bbf7d0;
+}
+
+.history-update-assessment-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 28px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, #16a34a, #15803d);
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(22, 163, 74, 0.2);
+}
+
+.history-update-assessment-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #15803d, #166534);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(22, 163, 74, 0.3);
+}
+
+.history-update-assessment-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.history-update-assessment-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background: #9ca3af;
+}
+
+.history-update-assessment-btn svg {
+  animation: rotate 2s linear infinite;
+}
+
+.history-update-assessment-btn:disabled svg {
+  animation: none;
+}
+
+@keyframes rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.history-update-assessment-note {
+  margin-top: 12px;
+  font-size: 14px;
+  color: #166534;
+  font-weight: 500;
+}

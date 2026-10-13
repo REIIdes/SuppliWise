@@ -14,6 +14,7 @@ import { pictureUrl } from '../utils/pictureUrl';
 import { securityFactor } from '../utils/securityFactor';
 import { formatShortDate, formatDateTime, isRealDate } from '../utils/dates';
 import { downloadSecurityReport } from '../utils/securityReport';
+import { formatPhoneNumber, formatEmail } from '../utils/formatContactInfo';
 import './AdminDashboard.css';
 import AssessmentManagement from './AssessmentManagement';
 import SecurityStatus from '../Components/SecurityStatus/SecurityStatus';
@@ -2604,7 +2605,7 @@ function Overview({ overview, onNavigate, monitor, onOpenSecurity }) {
                             </span>
                             <span className="ov-user__text">
                               <span className="ov-user-name">{name}</span>
-                              <small className="ov-user-email">{user.email || '—'}</small>
+                              <small className="ov-user-email">{formatEmail(user.email) || '—'}</small>
                             </span>
                           </span>
                         </td>
@@ -3204,7 +3205,7 @@ function Users({ users, setUsers, usersFetchedAt, search, setSearch, loadUsers, 
                 {/* Name + email + joined */}
                 <span className="user-row__info">
                   <span className="user-row__name">{fullName}</span>
-                  <span className="user-row__sub">{user.email}</span>
+                  <span className="user-row__sub">{formatEmail(user.email)}</span>
                 </span>
 
                 {/* Plan + joined + last seen. The collapsed row used to show
@@ -3256,8 +3257,14 @@ function Users({ users, setUsers, usersFetchedAt, search, setSearch, loadUsers, 
                   <div className="user-details__grid">
                     <div className="user-detail-item">
                       <strong>Email</strong>
-                      <span>{user.email}</span>
+                      <span>{formatEmail(user.email)}</span>
                     </div>
+                    {user.phoneNumber && (
+                      <div className="user-detail-item">
+                        <strong>Phone Number</strong>
+                        <span>{formatPhoneNumber(user.phoneNumber)}</span>
+                      </div>
+                    )}
                     <div className="user-detail-item">
                       <strong>Last Login</strong>
                       <span>{user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : 'Never'}</span>

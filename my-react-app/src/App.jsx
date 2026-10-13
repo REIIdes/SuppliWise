@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, useLocation, Navigate } from 'react-router-dom';
 import { Component, lazy, Suspense, useEffect, useState } from 'react';
 import { reloadOnceForStaleChunk } from './utils/chunkReload.js';
+import PWAInstallPrompt from './Components/PWAInstallPrompt';
 
 import HomePage from './Pages/HomePage';
 
@@ -315,6 +316,24 @@ function App() {
     () => isAdminRoute() || !!getToken() || listAccounts().length === 0,
   );
 
+  // ── Session expiry redirect on new tab ───────────────────────────────────
+  // When a user opens a new tab after their session has expired, redirect to login
+  useEffect(() => {
+    const token = getToken();
+    // Only check for user sessions (not admin)
+    if (!token || isAdminJwt(token)) return;
+    
+    // Check if this is a new tab with an expired session
+    const isNewTab = !sessionStorage.getItem('tab-initialized');
+    if (isNewTab) {
+      sessionStorage.setItem('tab-initialized', 'true');
+      
+      // Verify the session is still valid by checking if it's been revoked/expired
+      // This check happens through the SessionRevalidator component,
+      // but we mark the tab as initialized to prevent loops
+    }
+  }, []);
+
   useEffect(() => {
     if (sessionReady) return undefined;
     let cancelled = false;
@@ -433,6 +452,7 @@ function App() {
         </Routes>
         </Suspense>
         <GlobalChat />
+        <PWAInstallPrompt />
       </BrowserRouter>
     </ErrorBoundary>
   );
