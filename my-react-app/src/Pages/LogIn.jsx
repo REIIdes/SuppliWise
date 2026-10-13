@@ -542,6 +542,7 @@ function LogIn() {
     // Store this account under its OWN session keys and make it active —
     // any account already signed in on this browser stays signed in.
     const switchedFrom = startSession(data.token, {
+      _id: data._id || data.userId || data.id, // ADD USER ID - CRITICAL FOR E2E ENCRYPTION
       firstName: data.firstName, 
       lastName: data.lastName, 
       name: data.name, 
