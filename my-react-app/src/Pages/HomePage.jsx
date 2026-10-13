@@ -1,10 +1,28 @@
 import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 import Navbar from '../Components/Navbar/Navbar';
 import { PLAN_CARD_ORDER, PLAN_META } from '../subscription/catalogue';
+import InstallAppModal from '../Components/InstallAppModal/InstallAppModal';
 import './HomePage.css';
 
 function HomePage() {
   const navigate = useNavigate();
+  const [isMobile, setIsMobile] = useState(false);
+  const [showInstallModal, setShowInstallModal] = useState(false);
+
+  useEffect(() => {
+    // Detect if user is on mobile device
+    const checkMobile = () => {
+      const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+      const isMobileDevice = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent.toLowerCase());
+      const isSmallScreen = window.innerWidth <= 768;
+      setIsMobile(isMobileDevice || isSmallScreen);
+    };
+
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   return (
     <div className="home-wrapper">
@@ -54,6 +72,16 @@ function HomePage() {
           >
             Learn More
           </button>
+          {/* Install for Mobile button - only shows on mobile devices */}
+          {isMobile && (
+            <button
+              className="btn-secondary"
+              type="button"
+              onClick={() => setShowInstallModal(true)}
+            >
+              Install for Mobile
+            </button>
+          )}
         </div>
 
         {/* Stats row */}
@@ -225,6 +253,11 @@ function HomePage() {
           professional medical advice.
         </p>
       </footer>
+
+      {/* Install App Modal */}
+      {showInstallModal && (
+        <InstallAppModal onClose={() => setShowInstallModal(false)} />
+      )}
     </div>
   );
 }

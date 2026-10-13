@@ -1,9 +1,4 @@
-/* Member notification bell — the navbar flyout.
-   Everything about a ROW (tile, accent rail, unread wash, read pill) comes from
-   notifications/notificationAccents.css, which the admin console also reads, so
-   the two cannot drift. This file owns only the SHELL: the bell, the anchored
-   panel, and its header. */
-
+/* User notification bell + dropdown (used in Navbar) */
 .user-notif {
   position: relative;
   display: flex;
@@ -15,85 +10,77 @@
   background: transparent;
   border: none;
   cursor: pointer;
-  color: #334155;
-  width: 38px;
-  height: 38px;
+  color: #374151;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.2s, color 0.2s, transform 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: background 0.2s, transform 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* White color on Plans page to match other navbar icons */
+.user-notif__bell--plans {
+  color: #cbd5e1;
 }
 
 .user-notif__bell:hover {
-  background: #ecfdf5;
-  color: #059669;
+  background: #f0fdf4;
+  color: #16a34a;
 }
 
-/* A soft ring while the panel is open, so the bell and the panel read as one
-   control rather than two unrelated things that happen to be near each other. */
-.user-notif__bell[aria-expanded='true'] {
-  background: #ecfdf5;
-  color: #059669;
-  box-shadow: 0 0 0 4px #d1fae5;
+/* Plans page hover - keep white background subtle */
+.user-notif__bell--plans:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #cbd5e1;
 }
 
-/* Press. Safe to transform: the panel is a SIBLING of this button, not a
+/* Press. The bell is the one control in the bar that gave no click feedback.
+   Safe to transform: the panel below is a SIBLING of this button, not a
    descendant, so the button cannot become the containing block for the
-   position:fixed panel the layout effect anchors to the viewport. */
+   `position: fixed` panel that is JS-anchored to the viewport. */
 .user-notif__bell:active {
   transform: scale(0.88);
 }
 
-.user-notif__bell:focus-visible {
-  outline: 2px solid #10b981;
-  outline-offset: 2px;
-}
-
 .user-notif__badge {
   position: absolute;
-  top: 1px;
+  top: 2px;
   right: 0;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  background: linear-gradient(135deg, #f43f5e, #e11d48);
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  background: #dc2626;
   color: #fff;
   font-size: 10.5px;
-  font-weight: 800;
-  line-height: 18px;
+  font-weight: 700;
+  line-height: 17px;
   text-align: center;
   border-radius: 999px;
   border: 2px solid #fff;
-  box-shadow: 0 2px 6px -1px rgba(225, 29, 72, 0.55);
-  /* The badge animating in once is the only movement in the header, so it
-     catches the eye without becoming something that repeats every poll. */
-  animation: user-notif-badge-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-@keyframes user-notif-badge-in {
-  from { opacity: 0; transform: scale(0.5); }
-  to   { opacity: 1; transform: scale(1); }
-}
-
-/* Fixed (not absolute) + JS-anchored to the bell: stays pinned under the bell
-   while the page scrolls. The layout effect sets left/top/width/arrow before
-   paint; the values below are the pre-JS fallback. Overflow stays visible so the
-   arrow (which lives outside the box) is not clipped — the list clips its own
-   scroll content instead. */
+/* Fixed (not absolute) + JS-anchored to the bell: stays pinned under the
+   bell while the page scrolls. Layout effect sets left/top/width/arrow
+   before paint; the values below are the pre-JS fallback. Overflow must be
+   visible so the bell arrow (outside the box) isn't clipped — the list
+   clips its own scroll content instead. */
 .user-notif__panel {
   position: fixed;
   top: 74px;
   right: 16px;
   left: auto;
-  width: min(380px, calc(100vw - 32px));
-  max-height: min(480px, calc(100vh - 100px));
+  width: min(360px, calc(100vw - 32px));
+  /* Never taller than the viewport minus the bell area, so the list can
+     always scroll and the rounded bottom edge stays on screen. */
+  max-height: min(420px, calc(100vh - 100px));
   display: flex;
   flex-direction: column;
   background: #fff;
   border: 1px solid #e5e7eb;
-  border-radius: 18px;
-  box-shadow: 0 24px 60px -12px rgba(15, 23, 42, 0.28), 0 0 0 1px rgba(15, 23, 42, 0.02);
+  border-radius: 16px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.16);
   z-index: 200;
   overflow: visible;
   animation: user-notif-pop 0.18s ease;
@@ -102,9 +89,9 @@
   overflow-wrap: break-word;
 }
 
-/* Arrow pointing up at the bell; --arrow-x (bell centre, set in JS) keeps it
-   aimed at the button no matter where the panel lands. Two stacked triangles:
-   outer = border colour, inner = white fill 1px lower. */
+/* Arrow pointing up at the bell; --arrow-x (bell centre, set in JS) keeps
+   it aimed at the button no matter where the panel lands. Two stacked
+   triangles: outer = border colour, inner = white fill 1px lower. */
 .user-notif__panel::before,
 .user-notif__panel::after {
   content: '';
@@ -129,82 +116,48 @@
 }
 
 @keyframes user-notif-pop {
-  from { opacity: 0; transform: translateY(-8px) scale(0.97); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
-/* Item entrance: a light stagger so the list reads as it arrives. */
+/* Item entrance: light stagger so the list reads as it arrives. */
 @keyframes user-notif-item-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
-/* ── Header ───────────────────────────────────────────────────────────────
-   A tinted band rather than bare text on white. It carries the count — which
-   used to live only in the bell's badge, and so was unreadable the moment the
-   panel covered it — and it is the one place in the panel allowed to be
-   colourful at rest. */
 .user-notif__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 6px 10px;
-  padding: 13px 15px;
-  border-bottom: 1px solid #eef2f6;
-  background: linear-gradient(135deg, #f0fdf4, #ecfeff 55%, #eef2ff);
+  padding: 13px 16px;
+  border-bottom: 1px solid #f0f0f0;
   font-size: 15px;
   color: #111827;
 }
 
+/* The title gives up width first (ellipsis) so the two action labels keep
+   their full text instead of overlapping each other. */
 .user-notif__heading {
-  display: flex;
-  align-items: center;
-  gap: 7px;
   min-width: 0;
   flex: 1 1 auto;
-}
-
-.user-notif__heading strong {
-  font-size: 14.5px;
-  font-weight: 800;
-  letter-spacing: -0.01em;
-  color: #0f172a;
   white-space: nowrap;
-}
-
-/* The count, in words as well as digits — "3 unread" is unambiguous where "3"
-   beside a bell is not. */
-.user-notif__count {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  font-weight: 700;
-  color: #047857;
-  background: #d1fae5;
-  border-radius: 999px;
-  padding: 3px 9px;
-  white-space: nowrap;
-}
-
-.user-notif__count::before {
-  content: '';
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #10b981;
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
-}
-
-.user-notif__count--clear {
-  color: #475569;
-  background: #f1f5f9;
-}
-
-.user-notif__count--clear::before {
-  background: #94a3b8;
-  box-shadow: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .user-notif__actions {
@@ -220,15 +173,14 @@
 .user-notif__action {
   background: none;
   border: none;
-  color: #047857;
-  font-size: 12.5px;
+  color: #16a34a;
+  font-size: 13px;
   font-weight: 700;
   line-height: 1.3;
   cursor: pointer;
-  padding: 5px 8px;
-  border-radius: 7px;
+  padding: 4px 6px;
+  border-radius: 6px;
   white-space: nowrap;
-  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .user-notif__action--danger {
@@ -236,7 +188,7 @@
 }
 
 .user-notif__action:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.85);
+  background: #f0fdf4;
 }
 
 .user-notif__action--danger:hover:not(:disabled) {
@@ -244,28 +196,24 @@
   color: #b91c1c;
 }
 
-.user-notif__action:focus-visible {
-  outline: 2px solid #10b981;
-  outline-offset: 1px;
-}
-
 .user-notif__action:disabled {
-  opacity: 0.55;
+  opacity: 0.6;
   cursor: default;
 }
 
-/* ── List ─────────────────────────────────────────────────────────────────
-   flex:1 + min-height:0 are what let max-height on the panel actually cap this
-   scroll area — without min-height:0 the flex item refuses to shrink below its
-   content and spills past the panel's rounded bottom edge. */
 .user-notif__list {
+  /* flex:1 + min-height:0 are what let max-height on the panel actually cap
+     this scroll area — without min-height:0 the flex item refuses to shrink
+     below its content and spills past the panel's rounded bottom edge. */
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 7px;
+  padding: 6px;
   overscroll-behavior: contain;
-  border-radius: 0 0 17px 17px;
+  /* Panel is overflow:visible now (for the arrow) — clip the rounded bottom
+     corners here so scrolled items never square off the panel's edge. */
+  border-radius: 0 0 15px 15px;
   scrollbar-width: thin;
   scrollbar-color: #cbd5e1 transparent;
 }
@@ -291,71 +239,127 @@
   margin: 0;
 }
 
-/* The footer hint. The panel opens on hover, and a hover-opened surface with no
-   explanation of what pressing a row does reads as a dead list. One line, quiet,
-   and only while there is something unread to look at. */
-.user-notif__hint {
-  flex: 0 0 auto;
-  margin: 0;
-  padding: 8px 14px 10px;
-  border-top: 1px solid #f1f5f9;
-  background: #fcfdfe;
-  border-radius: 0 0 17px 17px;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: #94a3b8;
-  text-align: center;
-  letter-spacing: 0.01em;
-}
-
-/* Loading is a skeleton rather than the word "Loading…": a list of grey bars
-   matches the shape of what is arriving, so the panel does not jump when it
-   lands. */
-.user-notif__skeleton {
+.user-notif__item {
+  position: relative;
   display: flex;
-  gap: 10px;
-  padding: 10px 11px;
   align-items: flex-start;
+  gap: 10px;
+  padding: 11px 8px 11px 12px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+  animation: user-notif-item-in 0.28s ease both;
+  /* Belt-and-braces with .user-notif__body's min-width:0 — a single very long
+     word must wrap, not push the delete button off the row. */
+  overflow-wrap: anywhere;
 }
 
-.user-notif__skel-tile {
-  flex: 0 0 34px;
-  width: 34px;
-  height: 34px;
-  border-radius: 11px;
-  background: #f1f5f9;
+.user-notif__item:nth-child(1) { animation-delay: 0.04s; }
+.user-notif__item:nth-child(2) { animation-delay: 0.08s; }
+.user-notif__item:nth-child(3) { animation-delay: 0.12s; }
+.user-notif__item:nth-child(4) { animation-delay: 0.16s; }
+.user-notif__item:nth-child(5) { animation-delay: 0.2s; }
+.user-notif__item:nth-child(6) { animation-delay: 0.24s; }
+.user-notif__item:nth-child(n + 7) { animation-delay: 0.28s; }
+
+.user-notif__item:hover {
+  background: #f6faf7;
 }
 
-.user-notif__skel-lines {
-  flex: 1 1 auto;
+.user-notif__item--unread {
+  background: #f0fdf4;
+}
+
+.user-notif__item--unread:hover {
+  background: #e6f7eb;
+}
+
+.user-notif__flag {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #fef2f2;
+  color: #dc2626;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+}
+
+.user-notif__body {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding-top: 2px;
+  gap: 2px;
+  min-width: 0;
 }
 
-.user-notif__skel-line {
-  height: 10px;
-  border-radius: 999px;
-  background: #eef2f6;
+.user-notif__title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #111827;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
-.user-notif__skel-line--title { width: 62%; background: #e2e8f0; }
-.user-notif__skel-line--short { width: 38%; }
-
-.user-notif__skeleton,
-.user-notif__skel-tile,
-.user-notif__skel-line {
-  animation: user-notif-pulse 1.4s ease-in-out infinite;
+.user-notif__detail {
+  font-size: 12.5px;
+  color: #4b5563;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-@keyframes user-notif-pulse {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: 0.5; }
+.user-notif__time {
+  font-size: 11.5px;
+  color: #9ca3af;
+  line-height: 1.3;
 }
 
-/* Mobile compact — JS inline styles (left/top/width) normally win; these are the
-   no-JS fallback only. */
+.user-notif__dot {
+  flex-shrink: 0;
+  width: 9px;
+  height: 9px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: #22c55e;
+}
+
+/* Fixed square hit area + top alignment: the × used to shift sideways as the
+   title wrapped, which made it look like it was sitting on top of the text. */
+.user-notif__delete {
+  flex: 0 0 24px;
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  background: none;
+  border: none;
+  color: #c4c9d1;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  border-radius: 6px;
+}
+
+.user-notif__delete:hover:not(:disabled) {
+  color: #dc2626;
+  background: #fef2f2;
+}
+
+.user-notif__delete:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* Mobile compact — JS inline styles (left/top/width) normally win; this is
+   the no-JS fallback only. */
 @media (max-width: 480px) {
   .user-notif__panel {
     position: fixed;
@@ -366,21 +370,18 @@
   }
 }
 
-/* Reduced motion: show everything instantly. Colour and shadow are feedback,
-   not movement, so the family tint stays. */
+/* Reduced motion: show everything instantly, no entrance animation. */
 @media (prefers-reduced-motion: reduce) {
   .user-notif__panel,
-  .user-notif__badge,
-  .user-notif__skeleton,
-  .user-notif__skel-tile,
-  .user-notif__skel-line {
+  .user-notif__item {
     animation: none;
   }
-
+  /* The bell's press and hover tint are movement/colour feedback, not content:
+     the tint stays (it is the only signal that the control is live) but the
+     scale does not. */
   .user-notif__bell {
-    transition: background 0.2s, color 0.2s;
+    transition: background 0.2s;
   }
-
   .user-notif__bell:active {
     transform: none;
   }

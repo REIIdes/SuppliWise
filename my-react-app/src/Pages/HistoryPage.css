@@ -752,6 +752,18 @@
   text-overflow: ellipsis;
 }
 
+.history-updated-from {
+  font-size: 12.5px;
+  color: #0891b2;
+  font-weight: 600;
+  margin-top: 4px;
+  padding: 4px 10px;
+  background: linear-gradient(135deg, #ecfeff 0%, #cffafe 100%);
+  border-radius: 6px;
+  border: 1px solid #a5f3fc;
+  width: fit-content;
+}
+
 .history-tags {
   display: flex;
   gap: 6px;
@@ -779,6 +791,7 @@
 /* ═══ Action buttons ═══ */
 .btn-view-answers,
 .btn-view-results,
+.btn-update-assessment,
 .btn-download-pdf,
 .btn-delete {
   display: flex;
@@ -810,6 +823,17 @@
   color: #4f46e5;
   background: linear-gradient(180deg, #ffffff, #eef2ff);
 }
+.btn-update-assessment {
+  border: 1.5px solid #a5f3fc;
+  color: #0891b2;
+  background: linear-gradient(180deg, #ffffff, #cffafe);
+}
+.btn-update-assessment:hover {
+  background: linear-gradient(180deg, #cffafe, #a5f3fc);
+  border-color: #06b6d4;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 18px rgba(8, 145, 178, 0.28);
+}
 .btn-download-pdf:hover {
   background: linear-gradient(180deg, #eef2ff, #e0e7ff);
   border-color: #818cf8;
@@ -829,14 +853,61 @@
 }
 .btn-view-answers:active,
 .btn-view-results:active,
+.btn-update-assessment:active,
 .btn-download-pdf:active,
 .btn-delete:active { transform: scale(0.92); }
 .btn-view-answers:focus-visible,
 .btn-view-results:focus-visible,
+.btn-update-assessment:focus-visible,
 .btn-download-pdf:focus-visible,
 .btn-delete:focus-visible {
   outline: 3px solid rgba(16, 185, 129, 0.4);
   outline-offset: 2px;
+}
+
+/* ═══ Update Assessment Section (expanded card bottom) ═══ */
+.history-update-section {
+  padding: 20px 24px;
+  background: #ffffff;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.btn-update-assessment-full {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #ffffff;
+  background: #10b981;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.18s ease;
+}
+
+.btn-update-assessment-full:hover {
+  background: #059669;
+  transform: translateY(-1px);
+}
+
+.btn-update-assessment-full:active {
+  transform: translateY(0);
+  background: #047857;
+}
+
+.btn-update-assessment-full:focus-visible {
+  outline: 2px solid rgba(16, 185, 129, 0.5);
+  outline-offset: 2px;
+}
+
+.btn-update-assessment-full svg {
+  width: 16px;
+  height: 16px;
 }
 
 /* ═══ Tags ═══ */
@@ -1379,10 +1450,12 @@
 
   .btn-view-answers,
   .btn-view-results,
+  .btn-update-assessment,
   .btn-download-pdf,
   .btn-delete { width: 32px; height: 32px; }
   .btn-view-answers svg,
   .btn-view-results svg,
+  .btn-update-assessment svg,
   .btn-download-pdf svg { width: 16px; height: 16px; }
 
   .history-grid { grid-template-columns: 1fr; gap: 10px; padding: 12px; }
@@ -1415,6 +1488,7 @@
   .active-info-banner,
   .btn-view-answers,
   .btn-view-results,
+  .btn-update-assessment,
   .btn-download-pdf,
   .btn-delete,
   .history-toggle-caret,
@@ -1422,4 +1496,66 @@
     transition: none;
     animation: none;
   }
+}
+
+/* Update Assessment Button */
+.history-update-assessment-container {
+  margin-top: 40px;
+  padding: 32px 24px;
+  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+  border-radius: 12px;
+  text-align: center;
+  border: 1px solid #bbf7d0;
+}
+
+.history-update-assessment-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 28px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, #16a34a, #15803d);
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(22, 163, 74, 0.2);
+}
+
+.history-update-assessment-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #15803d, #166534);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(22, 163, 74, 0.3);
+}
+
+.history-update-assessment-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.history-update-assessment-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background: #9ca3af;
+}
+
+.history-update-assessment-btn svg {
+  animation: rotate 2s linear infinite;
+}
+
+.history-update-assessment-btn:disabled svg {
+  animation: none;
+}
+
+@keyframes rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.history-update-assessment-note {
+  margin-top: 12px;
+  font-size: 14px;
+  color: #166534;
+  font-weight: 500;
 }

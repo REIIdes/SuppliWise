@@ -8,7 +8,6 @@ const { completeWithFallback } = require('../utils/aiRouter');
 const {
   ChatInputError,
   normalizeChatRequest,
-  normalizeThreadRequest,
   normalizeHistory,
   buildRecommendationContext,
   MAX_REPLY_LENGTH,
@@ -161,7 +160,8 @@ router.post('/', protect, requireFeature('chat'), chatLimiter, async (req, res) 
     // versions accepted non-array context/history values and then either made
     // a wasted AI request or masked a TypeError as HTTP 200.
     const { message: q, history } = normalizeChatRequest(req.body);
-    const { threadId, newThread } = normalizeThreadRequest(req.body);
+    const threadId = req.body.threadId || null;
+    const newThread = req.body.newThread === true;
     const t = q.toLowerCase();
 
     // Continue a stored conversation? Load it before any provider
@@ -264,7 +264,7 @@ router.post('/', protect, requireFeature('chat'), chatLimiter, async (req, res) 
         messages,
         maxTokens: 700,
         temperature: 0.7,
-        timeoutMs: 15000,
+        timeoutMs: 45000, // 45 seconds for longer conversations
         // Preserved from the hand-written body this route used to send. It is an
         // OpenRouter-GATEWAY field, so it is scoped by provider key rather than
         // applied to every OpenAI-shaped wire — Anthropic rejects it as unknown,
@@ -321,10 +321,12 @@ router.post('/', protect, requireFeature('chat'), chatLimiter, async (req, res) 
         thread.messageCount = thread.messages.length;
         await thread.save();
         persistedThreadId = thread._id;
+      }
 
-        // ── Auto-archive oldest threads beyond the 7-conversation limit ──
-        // Only runs after a new thread is created (not on existing thread updates).
-        // Pinned conversations are never auto-archived.
+      // ── Auto-archive oldest threads beyond the 7-conversation limit ──
+      // Runs on every chat turn to keep recent list at 7 or fewer.
+      // Pinned conversations are never auto-archived.
+      if (persistedThreadId) {
         try {
           const ACTIVE_LIMIT = 7;
           const activeCount = await AiChatThread.countDocuments({
@@ -338,16 +340,21 @@ router.post('/', protect, requireFeature('chat'), chatLimiter, async (req, res) 
               user: req.user._id,
               archived: { $ne: true },
               pinned: { $ne: true },
-              _id: { $ne: persistedThreadId }, // never archive the one just created
+              _id: { $ne: persistedThreadId }, // never archive the active conversation
             })
               .sort({ updatedAt: 1 }) // oldest first
               .limit(excess)
               .select('_id');
             if (toArchive.length > 0) {
+              const threadIds = toArchive.map((t) => t._id);
+              console.log(`[chat] auto-archiving ${toArchive.length} conversation(s):`, threadIds);
+              // Use $set with timestamps: false to preserve updatedAt
               await AiChatThread.updateMany(
-                { _id: { $in: toArchive.map((t) => t._id) } },
-                { $set: { archived: true, pinned: false } }
+                { _id: { $in: threadIds } },
+                { $set: { archived: true, pinned: false } },
+                { timestamps: false } // Don't update updatedAt timestamp
               );
+              console.log(`[chat] auto-archived ${toArchive.length} conversation(s) successfully`);
             }
           }
         } catch (autoArchiveErr) {

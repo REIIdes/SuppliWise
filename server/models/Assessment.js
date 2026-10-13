@@ -59,6 +59,12 @@ const assessmentSchema = new mongoose.Schema(
     // User info snapshot (for easy identification in DB)
     userEmail: { type: String },
     userName: { type: String },
+    // Track if this assessment was updated from a previous one
+    updatedFrom: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Assessment',
+      default: null,
+    },
   },
   { timestamps: true }
 );

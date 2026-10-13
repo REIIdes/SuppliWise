@@ -71,7 +71,7 @@ const AI_PROVIDERS = [
     label: 'OpenRouter (DeepSeek V4 Flash)',
     envKey: 'OPENROUTER_API_KEY',
     modelEnv: 'OPENROUTER_MODEL',
-    defaultModel: 'deepseek/deepseek-v4-flash-0731',
+    defaultModel: 'deepseek/deepseek-v4-flash',
     url: 'https://openrouter.ai/api/v1/models',
     chatUrl: 'https://openrouter.ai/api/v1/chat/completions',
     chatCompatible: true,

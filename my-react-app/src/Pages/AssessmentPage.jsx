@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
-import { saveAssessment, getRecommendations, saveAssessmentResults, getPriorityStatus, getCurrentSupplements, getToken, getStoredUser } from '../api';
+import { saveAssessment, getRecommendations, saveAssessmentResults, getPriorityStatus, getCurrentSupplements, getToken, getStoredUser, migrateAssessmentHistory } from '../api';
 import { prefillSupplements } from '../utils/supplementPrefill.js';
 import { isDeadHour, countdownTo, DEAD_HOURS } from '../utils/slotSchedule.js';
 import useNow from '../hooks/useNow';
 import { useSubscription, SUBSCRIPTION_EVENT } from '../hooks/useSubscription';
 import './AssessmentPage.css';
+import './HistoryPage.css'; // Import modal styles
+
 
 const TOTAL_STEPS = 4;
 const SESSION_KEY = 'pending_assessment';
@@ -1133,11 +1135,31 @@ const WATER_OPTIONS = [
 ];
 
 function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current: {} } }) {
+  // Calculate BMI from Step 1 data
+  const calculateBMI = () => {
+    const weight = parseFloat(data.weight);
+    const height = parseFloat(data.height);
+    if (weight > 0 && height > 0) {
+      return weight / ((height / 100) ** 2);
+    }
+    return null;
+  };
+
+  const bmi = calculateBMI();
+  const showObesity = bmi !== null && bmi >= 25;
+
   // ── Medical conditions ──
   const conditionGroups = [
     {
       group: 'Cardiovascular & Metabolic',
-      items: ['Hypertension (High Blood Pressure)', 'High Cholesterol', 'Diabetes', 'Heart / Cardiovascular Disease', 'Obesity'],
+      items: [
+        'Hypertension (High Blood Pressure)',
+        'High Cholesterol',
+        'Diabetes',
+        'Heart / Cardiovascular Disease',
+        // Only show Obesity when BMI >= 25
+        ...(showObesity ? ['Obesity'] : []),
+      ],
     },
     {
       group: 'Bone & Joint',
@@ -1211,6 +1233,25 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.gender]);
+
+  // If BMI drops below 25, remove Obesity from selected conditions and its symptoms
+  useEffect(() => {
+    if (!showObesity && (data.medicalConditions || []).includes('Obesity')) {
+      const updatedConditions = data.medicalConditions.filter(c => c !== 'Obesity');
+      onChange('medicalConditions', updatedConditions);
+      
+      // Also remove Obesity symptoms and their severities
+      const updatedSymptoms = (data.symptoms || []).filter(s => !s.startsWith('Obesity::'));
+      const updatedSeverity = Object.fromEntries(
+        Object.entries(data.symptomSeverity || {}).filter(([key]) => !key.startsWith('Obesity::'))
+      );
+      const updatedNoSymptoms = (data.noSymptomsForConditions || []).filter(x => x !== 'Obesity');
+      onChange('symptoms', updatedSymptoms);
+      onChange('symptomSeverity', updatedSeverity);
+      onChange('noSymptomsForConditions', updatedNoSymptoms);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showObesity]);
 
   // ── Symptoms ──
   const selectedSymptoms = data.symptoms || [];
@@ -2087,14 +2128,26 @@ function AssessmentPage() {
   const routeState = location.state || {};
   const routeAssessment = routeState.assessment || null;
   const routeReadOnly = !!routeState.readOnly;
+  // Update mode: pre-fill form with existing assessment data
+  const isUpdateMode = !!routeState.updateMode;
+  const updateAssessmentId = routeState.assessmentId || null;
+  const updateAssessmentData = routeState.assessmentData || null;
+  
   const [step, setStep] = useState(1);
   const [errors, setErrors] = useState({});
   const [submitError, setSubmitError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [showUpdateConfirmation, setShowUpdateConfirmation] = useState(false);
   const cardTopRef = useRef(null);
   const symptomRowRefs = useRef({});
 
   const [formData, setFormData] = useState(() => {
+    // Update mode: load existing assessment data
+    if (isUpdateMode && updateAssessmentData) {
+      const reconstructed = reconstructSymptomKeys(updateAssessmentData);
+      return { ...EMPTY_FORM, ...reconstructed };
+    }
+    
     if (routeAssessment) {
       const reconstructed = reconstructSymptomKeys(routeAssessment);
       return { ...EMPTY_FORM, ...reconstructed };
@@ -2419,6 +2472,12 @@ function AssessmentPage() {
   const handleSubmit = async () => {
     setSubmitError('');
 
+    // In update mode, show confirmation dialog first
+    if (isUpdateMode && !showUpdateConfirmation) {
+      setShowUpdateConfirmation(true);
+      return;
+    }
+
     // Belt and braces behind the disabled button: a disabled control can still
     // be activated programmatically, and the clock is re-read here rather than
     // trusting whatever the render saw. Cheap, and it closes the gap where the
@@ -2478,13 +2537,33 @@ function AssessmentPage() {
       }
     });
 
-    const payload = { ...formData, weight: normalizedWeight, symptoms: uniqueSymptoms, symptomSeverity: strippedSeverity };
+    const payload = { 
+      ...formData, 
+      weight: normalizedWeight, 
+      symptoms: uniqueSymptoms, 
+      symptomSeverity: strippedSeverity,
+      // Add updatedFrom field in update mode
+      ...(isUpdateMode && updateAssessmentId ? { updatedFrom: updateAssessmentId } : {})
+    };
 
     setSubmitting(true);
     try {
       let assessmentId = null;
       let garbageFields = [];
       let lastSeverityFlag = { flagged: false, reasons: [] };
+      
+      // In update mode: get AI recommendations BEFORE saving
+      // This ensures a timeout/failure leaves the old plan untouched
+      let recommendations = null;
+      if (isUpdateMode) {
+        try {
+          recommendations = await getRecommendations(payload);
+        } catch (aiErr) {
+          console.error('AI recommendation error in update mode:', aiErr.message);
+          throw new Error('Failed to generate new recommendations. Your existing assessment remains unchanged.');
+        }
+      }
+      
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
           const saveResult = await saveAssessment(payload);
@@ -2501,11 +2580,25 @@ function AssessmentPage() {
         }
       }
 
-      const recommendations = await getRecommendations(payload);
+      // Get recommendations if not already fetched (non-update mode)
+      if (!recommendations) {
+        recommendations = await getRecommendations(payload);
+      }
 
       if (assessmentId) {
         try {
           await saveAssessmentResults(assessmentId, recommendations);
+          
+          // In update mode: migrate history after successful AI save
+          if (isUpdateMode && updateAssessmentId) {
+            try {
+              await migrateAssessmentHistory(updateAssessmentId, assessmentId);
+              console.log('Successfully migrated history from', updateAssessmentId, 'to', assessmentId);
+            } catch (migrateErr) {
+              console.error('History migration error:', migrateErr.message);
+              // Don't fail the whole operation if migration fails
+            }
+          }
         } catch (aiSaveErr) {
           console.error('AI results save error:', aiSaveErr.message);
         }
@@ -2535,6 +2628,37 @@ function AssessmentPage() {
   return (
     <div className="assessment-wrapper">
       <Navbar />
+      
+      {/* Update Confirmation Dialog */}
+      {showUpdateConfirmation && (
+        <div className="modal-overlay" onClick={() => setShowUpdateConfirmation(false)}>
+          <div className="modal-box update-confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="update-modal-title" onClick={e => e.stopPropagation()}>
+            <div className="modal-icon update-icon" aria-hidden="true">✏️</div>
+            <h3 className="modal-title" id="update-modal-title">Update Your Health Assessment?</h3>
+            <p className="modal-body">
+              Your updated health information will be used to generate new supplement recommendations. 
+              Your existing supplement intake history and dashboard progress will be preserved.
+            </p>
+            <div className="modal-actions">
+              <button 
+                type="button" 
+                className="modal-btn-cancel" 
+                onClick={() => setShowUpdateConfirmation(false)}
+              >
+                Cancel
+              </button>
+              <button 
+                type="button" 
+                className="modal-btn-confirm" 
+                onClick={() => { setShowUpdateConfirmation(false); handleSubmit(); }}
+              >
+                Update Assessment
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
       {priorityGate.blocked && priorityEntitled && !isReadOnly ? (
         <div className="assessment-container">
           <div className="priority-gate" role="alert">
@@ -2568,7 +2692,7 @@ function AssessmentPage() {
             <h2 className="assessment-title">
               {isReadOnly && routeAssessment && routeAssessment.createdAt
                 ? new Date(routeAssessment.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                : (isReadOnly ? 'Health Assessment History' : 'Health Assessment')}
+                : (isReadOnly ? 'Health Assessment History' : (isUpdateMode ? 'Update Health Assessment' : 'Health Assessment'))}
             </h2>
             <div className="progress-bar-track">
               <div className="progress-bar-fill" style={{ width: `${progress}%` }} />
@@ -2585,7 +2709,9 @@ function AssessmentPage() {
                 <div className="ai-spinner-ring" />
                 <span className="ai-spinner-icon">🧬</span>
               </div>
-              <h3 className="ai-loading-title">Analyzing Your Health Profile</h3>
+              <h3 className="ai-loading-title">
+                {isUpdateMode ? 'Updating Previous Health Assessment' : 'Analyzing Your Health Profile'}
+              </h3>
               <p className="ai-loading-sub">Our AI is building your personalized supplement plan...</p>
               <div className="ai-loading-steps">
                 <AILoadingStep icon="🔍" label="Reading your symptoms & goals" delay={0} />
@@ -2593,7 +2719,7 @@ function AssessmentPage() {
                 <AILoadingStep icon="⚗️" label="Checking interactions & dosages" delay={1200} />
                 <AILoadingStep icon="📋" label="Generating your wellness plan" delay={1800} />
               </div>
-              <p className="ai-loading-note">This usually takes 10–20 seconds</p>
+              <p className="ai-loading-note">This usually takes 2–3 minutes</p>
             </div>
           </div>
         )}
@@ -2642,7 +2768,7 @@ function AssessmentPage() {
                   </div>
                 ) : (
                   <button className="btn-next" onClick={handleSubmit} disabled={submitting}>
-                    Get Recommendations →
+                    {isUpdateMode ? 'Submit Updated Assessment →' : 'Get Recommendations →'}
                   </button>
                 )
               )

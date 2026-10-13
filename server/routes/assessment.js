@@ -11,7 +11,7 @@ const { historyLimitFor, tierOf, can, PLAN_LABELS, resolveSubscription } = requi
 // Severity is reached through the flagging layer, which runs the rule engine
 // (utils/severity.js) as its authoritative floor and can only escalate on top.
 const { analyzePriorityFlagging } = require('../utils/priorityFlagging');
-const { expiryDateFromNow, expiryFromCreatedAt, notExpiredFilter } = require('../utils/assessments');
+const { expiryDateFromNow, expiryFromCreatedAt } = require('../utils/assessments');
 const { guardRaisePriority, selfHealOpenPriority } = require('../utils/priorityGate');
 
 // Flag an assessment as Priority + notify the user and admins (best-effort,
@@ -22,19 +22,7 @@ const { guardRaisePriority, selfHealOpenPriority } = require('../utils/priorityG
 //   call sites used to mutate their own response object to `priority: 'Priority'`
 //   unconditionally, which showed "flagged" in the UI for a write the database
 //   never received.
-/**
- * Raise an assessment to Priority and notify both audiences.
- *
- * NOTE the deliberate asymmetry in who is told and how: the MEMBER gets a
- * notification about THEIR assessment (wording, a link to /history); the ADMIN
- * gets the reason and a link to the review queue, and NO member identifier —
- * the assessment row the link opens is where that lives, already authorised.
- * See utils/memberPrivacy.js.
- *
- * @param {object} assessment
- * @param {string[]} reasons
- */
-async function flagSevereAssessment(assessment, reasons) {
+async function flagSevereAssessment(assessment, reasons, userEmail) {
   try {
     // Same rule as the admin endpoint. Severity detection re-runs whenever
     // results are saved, so without this a finished assessment could have its
@@ -42,20 +30,14 @@ async function flagSevereAssessment(assessment, reasons) {
     // completed the day's plan, yet found "New Assessments Paused" again.
     const verdict = await guardRaisePriority(assessment.user, assessment._id);
     if (!verdict.ok) {
-            await AdminEvent.create({
+      await AdminEvent.create({
         type: 'severe-flag',
         title: 'Severe case detected (not flagged)',
-        // No member identifier. The assessment row the link opens already
-        // carries one and is authorised to; the bell's job is only to say that
-        // severity was detected and the guard declined. See
-        // utils/memberPrivacy.js for why this rule exists.
-        detail: `${reasons.join('; ') || 'Severe case detected'}. ` +
+        detail: `${userEmail || 'A user'} — ${reasons.join('; ') || 'Severe case detected'}. ` +
           `Not raised to Priority: ${verdict.message}`,
         user: assessment.user,
         assessmentId: assessment._id,
         linkUserId: assessment.user,
-        link: 'assessment-management',
-        linkLabel: 'Open Assessment Management',
       }).catch(() => {});
       return { flagged: false, reason: verdict.code };
     }
@@ -70,20 +52,14 @@ async function flagSevereAssessment(assessment, reasons) {
       title: 'Health review flagged for your assessment',
       detail: `Our review flagged possible severe concerns (${label}). An administrator has been notified. If you feel unwell, please seek medical care promptly.`,
       assessmentId: assessment._id,
-      link: '/history',
-      linkLabel: 'View the flagged assessment',
     });
     await AdminEvent.create({
       type: 'severe-flag',
       title: 'Severe case flagged',
-      // The reasons are the work; the identity is on the flagged assessment the
-      // link opens. No email — see utils/memberPrivacy.js.
-      detail: label,
+      detail: `${userEmail || 'A user'} — ${label}`,
       user: assessment.user,
       assessmentId: assessment._id,
       linkUserId: assessment.user,
-      link: 'assessment-management',
-      linkLabel: 'Open Assessment Management',
     }).catch(() => {});
     return { flagged: true };
   } catch (err) {
@@ -211,6 +187,8 @@ router.post('/', protect, async (req, res) => {
       fitnessFocus: req.body.fitnessFocus,
       proteinIntake: req.body.proteinIntake,
       recreationalDrugTypes: recreationalDrugTypes || '',
+      // Track if this assessment updates a previous one
+      ...(req.body.updatedFrom ? { updatedFrom: req.body.updatedFrom } : {}),
       // 5 calendar years from creation — same helper the rest of the retention
       // logic uses, so the stored date and the "Expires …" badge always match.
       expiresAt: expiryDateFromNow(),
@@ -235,7 +213,7 @@ router.post('/', protect, async (req, res) => {
     }
     let severityFlag = { flagged: false, reasons: [] };
     if (severity.flagged && can(req.user, 'priorityAssessment')) {
-      const outcome = await flagSevereAssessment(assessment, severity.reasons);
+      const outcome = await flagSevereAssessment(assessment, severity.reasons, req.user.email);
       if (outcome.flagged) {
         severityFlag = severity;
         // Reflect the flag in this response (the created doc predates the update)
@@ -436,30 +414,6 @@ router.get('/history', protect, async (req, res) => {
   }
 });
 
-// @route   GET /api/assessment/active
-// @desc    The user's current assessment — the newest one still in
-//          force, the same query the dashboard runs. The ~500 KB
-//          aiResults blob is projected out on purpose: the Update
-//          Health Assessment flow pre-fills the form from the
-//          assessment's own fields, and the replacement assessment
-//          generates fresh results, so shipping the old ones would
-//          only cost bandwidth.
-// @access  Private
-router.get('/active', protect, async (req, res) => {
-  try {
-    const assessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
-      .sort({ createdAt: -1 })
-      .select('-aiResults');
-    if (!assessment) {
-      return res.status(404).json({ message: 'No active assessment.' });
-    }
-    res.json(assessment);
-  } catch (error) {
-    console.error('[assessment GET /active]', error.message);
-    res.status(500).json({ message: 'Could not load the active assessment.' });
-  }
-});
-
 // @route   GET /api/assessment/me
 // @desc    Get the current user's latest assessment
 // @access  Private
@@ -558,7 +512,7 @@ router.patch('/:id/results', protect, async (req, res) => {
         console.log(`[assessment] AI second opinion unavailable, rules only: ${severity.aiError}`);
       }
       if (severity.flagged) {
-        const outcome = await flagSevereAssessment(assessment, severity.reasons);
+        const outcome = await flagSevereAssessment(assessment, severity.reasons, assessment.userEmail);
         severityFlag = outcome.flagged
           ? severity
           : { flagged: false, reasons: [], suppressed: outcome.reason };
@@ -649,16 +603,10 @@ router.patch('/:id/priority', protect, async (req, res) => {
         : 'Your priority review was released. You can start a new assessment at any time.';
       await UserNotification.create({
         user: existing.user,
-        // 'resolved' is NOT a valid UserNotification.type (the enum is
-        // ['severe-flag', 'info']) — passing it made every release notice fail
-        // validation and vanish into the catch below. The release is an ordinary
-        // informational notice, so 'info' is both correct and legal.
-        type: nowRaised ? 'severe-flag' : 'info',
+        type: nowRaised ? 'severe-flag' : 'resolved',
         title,
         detail,
         assessmentId: existing._id,
-        link: '/history',
-        linkLabel: nowRaised ? 'View the assessment' : 'View your history',
       }).catch((err) => {
         console.error('[assessment PATCH /:id/priority] notification failed:', err.message);
       });
@@ -669,8 +617,6 @@ router.patch('/:id/priority', protect, async (req, res) => {
         user: existing.user,
         assessmentId: existing._id,
         linkUserId: existing.user,
-        link: 'assessment-management',
-        linkLabel: 'Open Assessment Management',
       }).catch((err) => {
         console.error('[assessment PATCH /:id/priority] audit failed:', err.message);
       });
@@ -729,6 +675,82 @@ router.delete('/:id', protect, async (req, res) => {
   } catch (error) {
     console.error('[assessment DELETE /:id]', error.message);
     res.status(500).json({ message: 'Could not delete the assessment. Please try again.' });
+  }
+});
+
+// @route   POST /api/assessment/:id/migrate-history
+// @desc    Migrate intake history and metrics from an old assessment to a new one
+// @access  Private
+router.post('/:id/migrate-history', protect, async (req, res) => {
+  try {
+    const { newAssessmentId } = req.body;
+
+    if (!newAssessmentId) {
+      return res.status(400).json({ message: 'newAssessmentId is required.' });
+    }
+
+    // Validate ObjectIds
+    if (!mongoose.isValidObjectId(req.params.id) || !mongoose.isValidObjectId(newAssessmentId)) {
+      return res.status(400).json({ message: 'Invalid assessment ID.' });
+    }
+
+    // Verify both assessments exist and belong to the user
+    const oldAssessment = await Assessment.findOne({ _id: req.params.id, user: req.user._id });
+    const newAssessment = await Assessment.findOne({ _id: newAssessmentId, user: req.user._id });
+
+    if (!oldAssessment) {
+      return res.status(404).json({ message: 'Source assessment not found.' });
+    }
+    if (!newAssessment) {
+      return res.status(404).json({ message: 'Target assessment not found.' });
+    }
+
+    // Import IntakeRecord model
+    const IntakeRecord = require('../models/IntakeRecord');
+
+    // Move all IntakeRecords from old assessment to new assessment
+    const updateResult = await IntakeRecord.updateMany(
+      { user: req.user._id, assessment: oldAssessment._id },
+      { $set: { assessment: newAssessment._id } }
+    );
+
+    // Copy adherence metrics from old assessment's dashboard metrics to new one
+    let copiedMetrics = false;
+    try {
+      const oldMetrics = await DashboardMetrics.findOne({ 
+        user: req.user._id, 
+        assessment: oldAssessment._id 
+      });
+
+      if (oldMetrics) {
+        await DashboardMetrics.findOneAndUpdate(
+          { user: req.user._id, assessment: newAssessment._id },
+          {
+            $set: {
+              streak: oldMetrics.streak || 0,
+              overallAdherence: oldMetrics.overallAdherence || 0,
+              lastStreakUpdate: oldMetrics.lastStreakUpdate || new Date(),
+            }
+          },
+          { upsert: true, new: true }
+        );
+        copiedMetrics = true;
+      }
+    } catch (metricsError) {
+      console.error('[migrate-history] Failed to copy metrics:', metricsError.message);
+      // Don't fail the whole operation if metrics copy fails
+    }
+
+    console.log(`[migrate-history] Migrated ${updateResult.modifiedCount} intake records from ${oldAssessment._id} to ${newAssessment._id}`);
+
+    res.json({
+      message: 'History migrated successfully.',
+      recordsMigrated: updateResult.modifiedCount,
+      metricsCopied: copiedMetrics,
+    });
+  } catch (error) {
+    console.error('[migrate-history] Error:', error);
+    res.status(500).json({ message: 'Failed to migrate history.', error: error.message });
   }
 });
 

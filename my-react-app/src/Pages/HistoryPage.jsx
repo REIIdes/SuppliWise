@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import { getHistory, deleteAssessment, checkFeature, getToken } from '../api';
@@ -379,12 +379,12 @@ function HistoryPage() {
     setShowAllSupplements(prev => ({ ...prev, [assessmentId]: !prev[assessmentId] }));
   };
 
-  const showToast = useCallback((msg) => {
+  const showToast = (msg) => {
     setToast(msg);
     setTimeout(() => setToast(''), 3000);
-  }, []);
+  };
 
-  const loadHistory = useCallback((targetPage = 1, { append = false, limit = null } = {}) => {
+  const loadHistory = (targetPage = 1, { append = false, limit = null } = {}) => {
     // Appending must not blank the list behind a full-page spinner.
     if (!append) setLoading(true);
     setError('');
@@ -431,7 +431,7 @@ function HistoryPage() {
         if (!append) setLoading(false);
         setLoadingMore(false);
       });
-  }, [livePlan, showToast]);
+  };
 
   // PREMIUM+ (`historyFull`) can page deeper; lower tiers get the paywall.
   const handleLoadMore = () => {
@@ -440,19 +440,13 @@ function HistoryPage() {
     loadHistory(page + 1, { append: true, limit: pageLimit || undefined });
   };
 
-  // `load` is read through a ref so the mount/plan-event effect depends only on
-  // what is MEANT to trigger a re-run, while always invoking the LATEST
-  // closure (fresh livePlan for the paywall fallback, fresh limits) — the same
-  // pattern AdminSupportChats uses for its queue reload.
-  const loadLatestRef = useRef(loadHistory);
-  useEffect(() => { loadLatestRef.current = loadHistory; }, [loadHistory]);
-
   useEffect(() => {
     const token = getToken();
     if (!token) { navigate('/login'); return; }
 
-    loadLatestRef.current(1, { limit: historyLimitForStoredPlan() });
-    const onPlan = () => loadLatestRef.current(1, { limit: historyLimitForStoredPlan() });
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial load from the server is an external-system sync
+    loadHistory(1, { limit: historyLimitForStoredPlan() });
+    const onPlan = () => loadHistory(1, { limit: historyLimitForStoredPlan() });
     window.addEventListener(SUBSCRIPTION_EVENT, onPlan);
     return () => window.removeEventListener(SUBSCRIPTION_EVENT, onPlan);
   }, [navigate]);
@@ -533,6 +527,8 @@ function HistoryPage() {
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return history.filter(item => {
+      // Filter out failed AI runs (assessments with no aiResults)
+      if (!item.aiResults) return false;
       if (statusFilter === 'active' && item._id !== activeId) return false;
       if (statusFilter === 'expired' && !expiredOf(item)) return false;
       if (!needle) return true;
@@ -580,8 +576,8 @@ function HistoryPage() {
             <span className="history-eyebrow">Your health timeline</span>
             <h2>Assessment History</h2>
             <p className="history-subtitle">
-              Every assessment you have completed, kept for 5 years. Open one to review your
-              answers, results and full plan.
+              Every assessment you have completed, kept for 5 years.<br />
+              Open one to review your answers, results and full plan.
             </p>
           </div>
         </div>
@@ -596,12 +592,17 @@ function HistoryPage() {
               </svg>
             </span>
             <span className="active-info-text">
-              <strong>Your latest assessment is active.</strong> It powers your Dashboard,
-              Track Intake and Insights. Complete a new assessment to update it.
+              <strong>Your latest health assessment is active.</strong> It powers your Dashboard, Track Intake, and Insights.
             </span>
             <button
               className="active-info-action"
-              onClick={() => { if (!deadHours) navigate('/assessment'); }}
+              onClick={() => { 
+                if (!deadHours) {
+                  // Clear any existing draft to start fresh
+                  sessionStorage.removeItem('pending_assessment');
+                  navigate('/assessment');
+                }
+              }}
               // Assessments are closed between midnight and 4:00 AM, and this
               // button leads straight to the form. Disabling it here keeps the
               // rule consistent with the dashboard card and the form itself,
@@ -720,7 +721,11 @@ function HistoryPage() {
               You haven't completed any assessments yet. Complete your first health assessment
               to start building your assessment history.
             </p>
-            <button className="btn-primary btn-primary-lg" onClick={() => navigate('/assessment')}>
+            <button className="btn-primary btn-primary-lg" onClick={() => {
+              // Clear any existing draft to start fresh
+              sessionStorage.removeItem('pending_assessment');
+              navigate('/assessment');
+            }}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <line x1="12" y1="5" x2="12" y2="19"/>
                 <line x1="5" y1="12" x2="19" y2="12"/>
@@ -826,6 +831,18 @@ function HistoryPage() {
                     <span className="history-date">{fmt(item.createdAt)}</span>
                     <span className="history-ago">{agoOf(item.createdAt)}</span>
                   </div>
+                  {/* Show if this assessment was updated from a previous one */}
+                  {item.updatedFrom && (() => {
+                    const sourceAssessment = history.find(h => h._id === item.updatedFrom);
+                    if (sourceAssessment) {
+                      return (
+                        <div className="history-updated-from">
+                          Updated from your previous assessment ({fmt(sourceAssessment.createdAt)})
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
                   <div className="history-card-title">{cardTitle(item)}</div>
                   <div className="history-tags">
                     {item.priority === 'Priority' && (
@@ -1296,6 +1313,27 @@ function HistoryPage() {
                           </div>
                         </div>
                       )}
+                    </div>
+                  )}
+
+                  {/* Update Assessment Button (bottom of expanded card) */}
+                  {isActive && item.aiResults && (
+                    <div className="history-update-section">
+                      <button
+                        className="btn-update-assessment-full"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate('/assessment', { state: { updateMode: true, assessmentId: item._id, assessmentData: item } });
+                        }}
+                        title="Update Health Assessment"
+                        aria-label="Update this health assessment with new information"
+                      >
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 4 0 0 0 .83-.497z"/>
+                          <path d="m15 5 4 4"/>
+                        </svg>
+                        <span>Update Health Assessment</span>
+                      </button>
                     </div>
                   )}
                 </div>
