@@ -375,6 +375,12 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
   const [supportActive, setSupportActive] = useState(false);
   const [activeId, setActiveId] = useState(null);
   const [active, setActive] = useState(null);   // { thread, messages[] }
+  const [adminProfiles, setAdminProfiles] = useState({}); // { authorName: profilePicture }
+  const [brokenPictures, setBrokenPictures] = useState(new Set());
+  const markPictureBroken = useCallback((id) => {
+    setBrokenPictures((prev) => new Set(prev).add(id));
+  }, []);
+  
   const [loaded, setLoaded] = useState(false);
   // `loaded` already distinguishes "has never finished a load" from "refreshing",
   // and the first load does not set state synchronously — so a second
@@ -521,6 +527,8 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
       if (token !== threadToken.current) return;
       setActive({ thread: data.thread, messages: rows });
       if (typeof data.supportActive === 'boolean') setSupportActive(data.supportActive);
+      if (data.adminProfiles) setAdminProfiles(data.adminProfiles);
+      
       // Opening it marks it read server-side, so the local badge is cleared
       // rather than waiting for the next poll to agree. The decrement is driven
       // by what the thread ACTUALLY had (read from the ref, not from inside a
@@ -1454,13 +1462,29 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
                               );
                             })()
                           ) : (
-                            <span
-                              className="sci-msg__avatar"
-                              style={{ backgroundImage: avatarGradient({ firstName: SUPPORT_AUTHOR_LABEL }) }}
-                              aria-hidden="true"
-                            >
-                              {getInitials({ firstName: 'Support' })}
-                            </span>
+                            // Admin message - show profile picture or initials
+                            (() => {
+                              const adminProfilePic = adminProfiles[m.authorName] || '';
+                              const avatarSrc = pictureUrl(adminProfilePic);
+                              const showPicture = Boolean(avatarSrc) && !brokenPictures.has(`admin-${m.authorName}`);
+                              
+                              return showPicture ? (
+                                <img
+                                  className="sci-msg__avatar sci-msg__avatar--image"
+                                  src={avatarSrc}
+                                  alt=""
+                                  onError={() => markPictureBroken(`admin-${m.authorName}`)}
+                                />
+                              ) : (
+                                <span
+                                  className="sci-msg__avatar"
+                                  style={{ backgroundImage: avatarGradient({ firstName: m.authorName || 'Admin' }) }}
+                                  aria-hidden="true"
+                                >
+                                  {getInitials({ firstName: m.authorName || 'Support' })}
+                                </span>
+                              );
+                            })()
                           )}
                           <div className="sci-msg__col">
                             {showMeta && (
