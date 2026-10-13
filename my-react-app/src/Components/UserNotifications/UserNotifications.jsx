@@ -198,11 +198,15 @@ export default function UserNotifications() {
       }
     }
     setOpen(false);
-    // Deep link: security notices open Profile → Account Security so users
-    // land where they can act (password/2FA); flagged assessments open History.
-    if (isSecurityNotification(item)) {
+    
+    // Use the link field if available (support notifications have this)
+    if (item.link) {
+      navigate(item.link);
+    } else if (isSecurityNotification(item)) {
+      // Deep link: security notices open Profile → Account Security
       navigate('/profile?section=security');
     } else {
+      // Default: flagged assessments and others open History
       navigate('/history');
     }
   };
@@ -320,37 +324,49 @@ export default function UserNotifications() {
             {!loading && items.length === 0 && (
               <p className="user-notif__empty">You're all caught up. 🎉</p>
             )}
-            {items.map(item => (
-              <div
-                key={item._id}
-                className={`user-notif__item${item.read ? '' : ' user-notif__item--unread'}`}
-                onClick={() => handleItemClick(item)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleItemClick(item);
-                }}
-              >
-                {item.type === 'severe-flag' && (
-                  <span className="user-notif__flag" title="Flagged for review">⚑</span>
-                )}
-                <div className="user-notif__body">
-                  <span className="user-notif__title">{item.title}</span>
-                  {item.detail && <span className="user-notif__detail">{item.detail}</span>}
-                  <span className="user-notif__time">{timeAgo(item.createdAt)}</span>
-                </div>
-                {!item.read && <span className="user-notif__dot" aria-hidden="true" />}
-                <button
-                  type="button"
-                  className="user-notif__delete"
-                  aria-label="Delete notification"
-                  disabled={actionId === item._id}
-                  onClick={(e) => handleDelete(e, item)}
+            {items.map(item => {
+              // Check if this is a support notification
+              const isSupportNotif = item.title?.includes('Support replied') || item.link?.startsWith('/support');
+              
+              return (
+                <div
+                  key={item._id}
+                  className={`user-notif__item${item.read ? '' : ' user-notif__item--unread'}`}
+                  onClick={() => handleItemClick(item)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleItemClick(item);
+                  }}
                 >
-                  ×
-                </button>
-              </div>
-            ))}
+                  {item.type === 'severe-flag' && (
+                    <span className="user-notif__flag" title="Flagged for review">⚑</span>
+                  )}
+                  {isSupportNotif && (
+                    <span className="user-notif__support-icon" title="Support message">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                      </svg>
+                    </span>
+                  )}
+                  <div className="user-notif__body">
+                    <span className="user-notif__title">{item.title}</span>
+                    {item.detail && <span className="user-notif__detail">{item.detail}</span>}
+                    <span className="user-notif__time">{timeAgo(item.createdAt)}</span>
+                  </div>
+                  {!item.read && <span className="user-notif__dot" aria-hidden="true" />}
+                  <button
+                    type="button"
+                    className="user-notif__delete"
+                    aria-label="Delete notification"
+                    disabled={actionId === item._id}
+                    onClick={(e) => handleDelete(e, item)}
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

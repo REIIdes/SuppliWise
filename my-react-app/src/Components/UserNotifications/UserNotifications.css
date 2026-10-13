@@ -287,6 +287,18 @@
   font-size: 15px;
 }
 
+.user-notif__support-icon {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #eff6ff;
+  color: #2563eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .user-notif__body {
   flex: 1;
   display: flex;
