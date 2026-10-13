@@ -170,20 +170,19 @@ function touchKey(Model, accountId) {
  *     rather than a deny-list so a field added to the schema later cannot leak
  *     by omission.
  */
-async function listOperatorPublicKeys({ excludeAlias = '' } = {}) {
+async function listOperatorPublicKeys({ excludeAdminId = '' } = {}) {
   const admins = await AdminAccount.find({
     enabled: true,
     'chatEncryptionKey.publicKey': { $nin: ['', null] },
-    ...(excludeAlias ? { alias: { $ne: excludeAlias } } : {}),
+    ...(excludeAdminId ? { _id: { $ne: excludeAdminId } } : {}),
   })
-    .select('_id alias chatEncryptionKey.publicKey')
-    .sort({ alias: 1 })
+    .select('_id chatEncryptionKey.publicKey')
+    .sort({ _id: 1 })
     .lean();
 
   return (admins || [])
     .map((admin) => ({
       participant: participantForAdmin(admin._id),
-      alias: admin.alias,
       publicKey: admin.chatEncryptionKey?.publicKey || '',
     }))
     .filter((entry) => entry.publicKey);

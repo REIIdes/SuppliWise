@@ -2261,6 +2261,14 @@ export const saveMySecureRecovery = async (wrapped, hint) => {
   return data; // { key }
 };
 
+/** Retrieve the recovery-wrapped identity key for a user-entered recovery code. */
+export const getMySecureRecovery = async () => {
+  const res = await apiFetch('/support-chat/encryption/recovery', { headers: { ...authHeader() } });
+  const data = await parseJSON(res);
+  if (!res.ok) throwFriendly(res.status, data);
+  return data;
+};
+
 /**
  * The operator public keys a member needs before opening a sealed conversation.
  * `canEncrypt` is false when nobody at support has registered a key yet, which

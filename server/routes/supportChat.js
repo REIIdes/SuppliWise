@@ -8,7 +8,6 @@ const {
   ChatInputError,
   ChatStateError,
   MAX_MESSAGES_PER_THREAD,
-  normalizeSubject,
   normalizeCategory,
   assertThreadWritable,
   statusAfterMessage,
@@ -23,6 +22,8 @@ const {
   encryptionView,
   isEncrypted,
   isCipher,
+  claimThreadForSealing,
+  releaseThreadSealingClaim,
 } = require('../utils/chatEncryption');
 const {
   KeyInputError,
@@ -198,8 +199,9 @@ const toMessageView = (message) => ({
   _id: message._id,
   thread: message.thread,
   author: message.author,
-  // Pass through the actual author name for both users and admins
-  authorName: message.authorName || '',
+  authorName: message.author === 'admin'
+    ? SUPPORT_AUTHOR_LABEL
+    : (message.authorName || ''),
   // Exactly one of these two is populated. Both travel because the client has
   // to render a transcript that mixes a legacy plaintext thread with a newly
   // encrypted one, and deciding which by guessing would be guesswork.
@@ -511,7 +513,7 @@ router.get('/encryption/operators', async (req, res) => {
     // The list is the single thing that decides whether a NEW conversation can
     // be encrypted at all: with no operator key, a member could seal the
     // message to nobody and support would never read it. The client checks this
-    // and falls back to ordinary text, with an explanation, rather than
+    // and pauses sending with an explanation rather than storing plaintext or
     // producing an unreadable ticket.
     return res.json({ operators, canEncrypt: operators.length > 0 });
   } catch (error) {
@@ -521,18 +523,22 @@ router.get('/encryption/operators', async (req, res) => {
 });
 
 // @route   POST /api/support-chat
-// @desc    Start a new conversation. The first message is the body — sent as
-//          plain text, or as `cipher` plus a `subject` and one wrapped key per
-//          party when the member's browser can end-to-end encrypt it.
+// @desc    Start a new conversation. The first message must be encrypted in the
+//          member's browser and wrapped for the member and at least one admin.
 // @access  Private
 router.post('/', async (req, res) => {
   if (!requireUserAccount(req, res)) return;
   try {
-    // A brand-new thread has no state to read yet, so the shares decide which
-    // send is legal: a ciphertext means "sealed", plaintext means "plain". That
-    // is the client's one decision, taken at the moment it knows whether it CAN
-    // encrypt — see `canSealNew` in my-react-app/src/security/useSecureChat.js.
-    const payload = readMessagePayload(req.body || {}, { encryption: { version: 0 } }, { creating: true });
+    // A new thread must never be created in plaintext. Encryption is performed
+    // in the member's browser; the server only validates envelope shape.
+    const payload = readMessagePayload(
+      req.body || {},
+      { encryption: { version: 0 } },
+      { creating: true, requireEncryption: true }
+    );
+    if (payload.mode !== 'encrypted') {
+      throw new ChatInputError('Secure messaging is not ready. Please retry after encryption setup completes.');
+    }
     const category = normalizeCategory(req.body?.category);
 
     // The subject is a typed title, NOT part of the sealed message — see the
@@ -540,9 +546,7 @@ router.post('/', async (req, res) => {
     // An encrypted send therefore cannot fall back to an excerpt of the body
     // (the server has no body), so the client is required to send one. It always
     // can: it derives a default from the first line before encrypting.
-    const subject = payload.mode === 'encrypted'
-      ? requireEncryptedSubject(req.body?.subject)
-      : normalizeSubject(req.body?.subject, payload.body);
+    const subject = requireEncryptedSubject(req.body?.subject);
 
     // A member may only ever address a share to themselves or to an operator.
     // The server cannot check that a wrapped blob really was sealed to the
@@ -550,19 +554,20 @@ router.post('/', async (req, res) => {
     // that is checkable is the one that matters: which addresses are allowed to
     // appear in the list at all.
     const selfParticipant = memberParticipant(req);
-    const keyShares = payload.mode === 'encrypted'
-      ? normalizeKeyShares(req.body?.keyShares, {
-        isAllowed: (participant) => participant === selfParticipant || participant.startsWith('admin:'),
-      })
-      : [];
+    const keyShares = normalizeKeyShares(req.body?.keyShares, {
+      isAllowed: (participant) => participant === selfParticipant || participant.startsWith('admin:'),
+    });
 
     // A sealed ticket must be readable by somebody OTHER than its author. The
     // client only seals when an operator key exists (`canSealNew`), but a
     // directory that went stale mid-session must not be able to open a
     // conversation only the member can read — that is data loss wearing an
     // encryption badge, and the server is the last party that can tell.
-    if (payload.mode === 'encrypted' && !keyShares.some((share) => share.participant.startsWith('admin:'))) {
-      throw new ChatInputError('Support cannot receive encrypted messages yet. Send it as normal text.');
+    if (!keyShares.some((share) => share.participant === selfParticipant)) {
+      throw new ChatInputError('This conversation needs an encryption key for your account.');
+    }
+    if (!keyShares.some((share) => share.participant.startsWith('admin:'))) {
+      throw new ChatInputError('Suppliwise Support has not published an encryption key yet. Your message was not sent.');
     }
 
     const thread = await createThread({
@@ -576,13 +581,9 @@ router.post('/', async (req, res) => {
       // The opening message is by definition unread on our side.
       unreadByAdmin: 1,
       unreadByUser: 0,
-      ...(payload.mode === 'encrypted'
-        ? {
-          encryption: { version: ENCRYPTION_VERSION, keyShares },
-          lastMessagePreview: '',
-          lastMessagePreviewCipher: payload.cipher,
-        }
-        : { lastMessagePreview: buildPreview(payload.body) }),
+      encryption: { version: ENCRYPTION_VERSION, keyShares },
+      lastMessagePreview: '',
+      lastMessagePreviewCipher: payload.cipher,
     });
 
     await ChatMessage.create({
@@ -590,7 +591,7 @@ router.post('/', async (req, res) => {
       user: req.user._id,
       author: 'user',
       authorName: `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || req.user.email || 'Member',
-      body: payload.body,
+      body: '',
       cipher: payload.cipher,
     });
 
@@ -696,23 +697,6 @@ router.get('/:id', async (req, res) => {
     // see announceAdmins for the refetch loop this avoids.
     announceAdmins(req, { kind: 'read', thread: thread._id, by: 'user' }, req.user._id);
 
-    // Fetch admin profiles who have replied in this thread for avatar display
-    const AdminAccount = require('../models/AdminAccount');
-    const adminNames = [...new Set(
-      messages
-        .filter(m => m.author === 'admin' && m.authorName)
-        .map(m => m.authorName)
-    )];
-    const adminProfiles = {};
-    if (adminNames.length > 0) {
-      const admins = await AdminAccount.find({ alias: { $in: adminNames } })
-        .select('alias profilePicture')
-        .lean();
-      admins.forEach(admin => {
-        adminProfiles[admin.alias] = admin.profilePicture || '';
-      });
-    }
-
     return res.json({
       thread: toThreadView({ ...thread, unreadByUser: 0 }, memberParticipant(req)),
       messages: (messages || []).map(toMessageView),
@@ -721,8 +705,6 @@ router.get('/:id', async (req, res) => {
       // Fresh presence for the thread header, so a deep-linked open does not
       // wait for the next list poll to answer "is support here?".
       supportActive: isSupportActive(),
-      // Admin profiles for avatar display
-      adminProfiles,
     });
   } catch (error) {
     console.error('[support-chat GET /:id]', error.message);
@@ -742,6 +724,9 @@ router.post('/:id/messages', async (req, res) => {
     }
     const thread = await ChatThread.findOne({ _id: req.params.id, user: req.user._id });
     if (!thread) return res.status(404).json({ message: 'Conversation not found.' });
+    if (!isEncrypted(thread)) {
+      return res.status(409).json({ message: 'This older conversation is being secured. Reopen it after encryption completes to reply.' });
+    }
 
     // Before the message-count check, so a resolved thread reports "resolved"
     // rather than a limit the member cannot do anything about either.
@@ -794,6 +779,7 @@ router.post('/:id/messages', async (req, res) => {
 // promise and the server can be sure of one thing only: that afterwards, it
 // does not hold the words.
 router.post('/:id/secure', async (req, res) => {
+  let sealingClaim = '';
   if (!requireUserAccount(req, res)) return;
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -820,6 +806,22 @@ router.post('/:id/secure', async (req, res) => {
     const keyShares = normalizeKeyShares(req.body?.keyShares, {
       isAllowed: (participant) => participant === selfParticipant || participant.startsWith('admin:'),
     });
+    if (!keyShares.some((share) => share.participant === selfParticipant)
+      || !keyShares.some((share) => share.participant.startsWith('admin:'))) {
+      throw new ChatInputError('This conversation needs a key for you and Suppliwise Support.');
+    }
+
+    sealingClaim = await claimThreadForSealing(ChatThread, thread._id);
+    if (!sealingClaim) {
+      const current = await ChatThread.findOne({ _id: thread._id, user: req.user._id }).lean();
+      if (isEncrypted(current)) {
+        return res.json({
+          message: 'This conversation is already encrypted.',
+          thread: toThreadView(current, selfParticipant),
+        });
+      }
+      return res.status(409).json({ message: 'Encryption is already being set up. Please retry shortly.' });
+    }
 
     await ChatMessage.bulkWrite(
       sealed.map(({ _id, cipher }) => ({
@@ -833,16 +835,22 @@ router.post('/:id/secure', async (req, res) => {
     // operator sees — showing the entire conversation in the clear.
     const newest = messages[messages.length - 1];
     const previewCipher = sealed.find((entry) => String(entry._id) === String(newest?._id))?.cipher || '';
-    await ChatThread.updateOne(
-      { _id: thread._id },
+    const sealedThread = await ChatThread.updateOne(
+      { _id: thread._id, 'encryption.sealingId': sealingClaim },
       {
         $set: {
-          encryption: { version: ENCRYPTION_VERSION, keyShares },
+          'encryption.version': ENCRYPTION_VERSION,
+          'encryption.keyShares': keyShares,
           lastMessagePreview: '',
           lastMessagePreviewCipher: previewCipher,
         },
+        $unset: { 'encryption.sealingId': 1, 'encryption.sealingAt': 1 },
       }
     );
+    if (!sealedThread.modifiedCount) {
+      throw new ChatInputError('Encryption could not be completed. Please reopen the conversation and try again.');
+    }
+    sealingClaim = '';
 
     const updated = await ChatThread.findById(thread._id).lean();
     // The console's queue badge and open transcript repaint at once — a thread
@@ -853,6 +861,7 @@ router.post('/:id/secure', async (req, res) => {
       thread: toThreadView(updated, selfParticipant),
     });
   } catch (error) {
+    await releaseThreadSealingClaim(ChatThread, req.params.id, sealingClaim);
     if (error instanceof ChatInputError) return res.status(400).json({ message: error.message });
     console.error('[support-chat POST /:id/secure]', error.message);
     return res.status(500).json({ message: 'Could not encrypt this conversation.' });

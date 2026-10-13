@@ -36,6 +36,7 @@ import {
   rememberThreadKey,
   wrapIdentityForRecovery,
   unwrapIdentityForRecovery,
+  verifyIdentityKeyPair,
 } from './secureChat.js';
 
 // ── The browser globals this module expects ─────────────────────────────────
@@ -255,6 +256,9 @@ describe('recovery codes', () => {
 
     const opened = await unwrapIdentityForRecovery(wrapped, PARTICIPANT, code);
     assert.ok(opened, 'the saved code must restore the private key');
+    assert.equal(await verifyIdentityKeyPair(opened, identity.publicKey), true);
+    const otherIdentity = await generateIdentity();
+    assert.equal(await verifyIdentityKeyPair(opened, otherIdentity.publicKey), false);
 
     // And the restored key actually works: it can open a share made to the
     // original identity, which is the only thing that makes recovery real.

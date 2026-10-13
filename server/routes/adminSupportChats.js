@@ -28,6 +28,8 @@ const {
   encryptionView,
   isEncrypted,
   isCipher,
+  claimThreadForSealing,
+  releaseThreadSealingClaim,
 } = require('../utils/chatEncryption');
 const {
   KeyInputError,
@@ -457,7 +459,7 @@ router.get('/:id', async (req, res) => {
           };
         }
         // Get other admin public keys
-        adminKeys = await listOperatorPublicKeys({ excludeAlias: req.user.alias });
+        adminKeys = await listOperatorPublicKeys({ excludeAdminId: req.user._id });
       } catch (keyError) {
         console.error('[admin/chats GET /:id keys]', keyError.message);
         memberKey = null;
@@ -499,6 +501,9 @@ router.post('/:id/messages', async (req, res) => {
     }
     const thread = await ChatThread.findById(req.params.id);
     if (!thread) return res.status(404).json({ message: 'Conversation not found.' });
+    if (!isEncrypted(thread)) {
+      return res.status(409).json({ message: 'This older conversation is being secured. Reopen it after encryption completes to reply.' });
+    }
 
     // Same gate the member route uses, from the same shared function. An admin
     // is not exempt: "resolved" has to mean the thread is closed, or it means
@@ -818,6 +823,7 @@ router.post('/:id/keys', async (req, res) => {
 // is: the plaintext was already in this browser, and after this call the server
 // does not have it.
 router.post('/:id/secure', async (req, res) => {
+  let sealingClaim = '';
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
       return res.status(400).json({ message: 'Invalid conversation.' });
@@ -853,6 +859,25 @@ router.post('/:id/secure', async (req, res) => {
     const shares = normalizeKeyShares(req.body?.keyShares, {
       isAllowed: (participant) => participant.startsWith('admin:') || participant === memberParticipant,
     });
+    const adminParticipant = participantFor(req);
+    if (!shares.some((share) => share.participant === adminParticipant)
+      || !shares.some((share) => share.participant === memberParticipant)) {
+      throw new ChatInputError('This conversation needs a key for you and the member.');
+    }
+
+    sealingClaim = await claimThreadForSealing(ChatThread, thread._id);
+    if (!sealingClaim) {
+      const current = await ChatThread.findById(thread._id)
+        .populate('user', THREAD_USER_FIELDS)
+        .lean();
+      if (isEncrypted(current)) {
+        return res.json({
+          message: 'This conversation is already encrypted.',
+          thread: toThreadView(current, adminParticipant),
+        });
+      }
+      return res.status(409).json({ message: 'Encryption is already being set up. Please retry shortly.' });
+    }
 
     await ChatMessage.bulkWrite(
       sealed.map(({ _id, cipher }) => ({
@@ -865,16 +890,22 @@ router.post('/:id/secure', async (req, res) => {
     // in plaintext would defeat the whole thing on the first screen it appears.
     const newest = messages[messages.length - 1];
     const previewCipher = sealed.find((entry) => String(entry._id) === String(newest?._id))?.cipher || '';
-    await ChatThread.updateOne(
-      { _id: thread._id },
+    const sealedThread = await ChatThread.updateOne(
+      { _id: thread._id, 'encryption.sealingId': sealingClaim },
       {
         $set: {
-          encryption: { version: ENCRYPTION_VERSION, keyShares: shares },
+          'encryption.version': ENCRYPTION_VERSION,
+          'encryption.keyShares': shares,
           lastMessagePreview: '',
           lastMessagePreviewCipher: previewCipher,
         },
+        $unset: { 'encryption.sealingId': 1, 'encryption.sealingAt': 1 },
       }
     );
+    if (!sealedThread.modifiedCount) {
+      throw new ChatInputError('Encryption could not be completed. Please reopen the conversation and try again.');
+    }
+    sealingClaim = '';
 
     // The member's inbox reads the row's encryption badge and its previews
     // from the thread summary, which just changed under them.
@@ -889,6 +920,7 @@ router.post('/:id/secure', async (req, res) => {
       thread: toThreadView(updated, participantFor(req)),
     });
   } catch (error) {
+    await releaseThreadSealingClaim(ChatThread, req.params.id, sealingClaim);
     if (error instanceof ChatInputError) return res.status(400).json({ message: error.message });
     console.error('[admin/chats POST /:id/secure]', error.message);
     return res.status(500).json({ message: 'Could not encrypt this conversation.' });

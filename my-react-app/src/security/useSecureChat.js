@@ -5,6 +5,7 @@ import {
   ensureThreadKey,
   forgetLocalIdentity,
   forgetThreadKeys,
+  generateRecoveryCode,
   generateIdentity,
   loadLocalIdentity,
   openText,
@@ -12,7 +13,10 @@ import {
   saveLocalIdentity,
   secureChatAvailable,
   sealText,
+  unwrapIdentityForRecovery,
+  verifyIdentityKeyPair,
   wrapKeyFor,
+  wrapIdentityForRecovery,
 } from './secureChat';
 
 /**
@@ -41,10 +45,8 @@ import {
  *
  * ── Why a failure to publish is not a failure to encrypt ───────────────────
  * The identity is local; publishing it is what makes THIS browser a valid
- * recipient. A member on a flaky connection who has just typed a question must
- * not lose it because one request failed, so a publish failure yields
- * `ready-unpublished` and the message goes out as ordinary text with a reason
- * attached. It never blocks the send.
+ * recipient. A failed publish yields `ready-unpublished`; sending pauses with a
+ * clear reason instead of falling back to plaintext.
  *
  * ── Why a new browser never overwrites a registered key ────────────────────
  * Overwriting would break the OTHER browser's ability to open new
@@ -78,7 +80,7 @@ const isWellFormedIdentity = (identity) => Boolean(
   && PUBLIC_KEY_SHAPE.test(String(identity.publicKey || ''))
 );
 
-// How long to leave a failed publish alone before trying again, quietly.
+// How long to wait before retrying key publication or checking for a support key.
 const PUBLISH_RETRY_MS = 30000;
 
 export default function useSecureChat({ role, accountId, isAuthenticated = true, endpoints = {} }) {
@@ -155,6 +157,27 @@ export default function useSecureChat({ role, accountId, isAuthenticated = true,
     // this one. Without this, signing out and back in as somebody else can leave
     // the second member looking at the first member's keys.
     const stillCurrent = () => runRef.current === run;
+    const scheduleRecipientCheck = () => {
+      if (retryTimer.current) window.clearTimeout(retryTimer.current);
+      retryTimer.current = window.setTimeout(async () => {
+        if (!stillCurrent()) return;
+        try {
+          const recipients = toRecipientList(await endpointsRef.current.listRecipients(null));
+          if (!stillCurrent()) return;
+          setRecipientCount(recipients.length);
+          setReason(recipients.length === 0
+            ? 'Your encryption key is ready, but Suppliwise Support has not published an encryption key yet. New conversations are paused until a support key is available.'
+            : '');
+          if (recipients.length === 0) scheduleRecipientCheck();
+        } catch (error) {
+          if (!stillCurrent()) return;
+          console.error('Could not load support encryption keys:', error?.message || error);
+          setRecipientCount(null);
+          setReason('Could not verify Suppliwise Support’s encryption keys. New conversations are paused until secure messaging can be checked.');
+          scheduleRecipientCheck();
+        }
+      }, PUBLISH_RETRY_MS);
+    };
 
     // A quiet retry keeps the current banner in place rather than flashing the
     // whole panel through 'booting' every 30 seconds; success clears it below.
@@ -167,7 +190,7 @@ export default function useSecureChat({ role, accountId, isAuthenticated = true,
 
     if (!supported) {
       setStatus('unavailable');
-      setReason('This browser or connection cannot do end-to-end encryption, so messages are sent as ordinary text.');
+      setReason('This browser or connection cannot do end-to-end encryption. Secure support messages are paused.');
       return;
     }
     if (!isAuthenticated || !participant) {
@@ -217,7 +240,7 @@ export default function useSecureChat({ role, accountId, isAuthenticated = true,
       }
 
       if (!stillCurrent()) return;
-      setIdentity(local);
+      setIdentity({ keyId: local.keyId, publicKey: local.publicKey });
 
       let published = null;
       let publishError = null;
@@ -253,8 +276,8 @@ export default function useSecureChat({ role, accountId, isAuthenticated = true,
         if (stillCurrent()) {
           setStatus('ready-unpublished');
           setReason(role === 'admin'
-            ? 'Your encryption key could not be shared with the server yet, so this conversation is sent as ordinary text.'
-            : 'Your encryption key could not be shared with the support team yet, so this conversation is sent as ordinary text.');
+            ? 'Your encryption key could not be shared with the server yet. Secure support messages are paused.'
+            : 'Your encryption key could not be shared with the support team yet. Secure support messages are paused.');
           if (retryTimer.current) window.clearTimeout(retryTimer.current);
           retryTimer.current = window.setTimeout(() => { bootstrapRef.current?.(true); }, PUBLISH_RETRY_MS);
         }
@@ -264,20 +287,30 @@ export default function useSecureChat({ role, accountId, isAuthenticated = true,
       if (!stillCurrent()) return;
       const publicKey = published?.key?.publicKey || local.publicKey;
       setIdentity({ keyId: local.keyId, publicKey });
+      setRecoveryAvailable(published?.key || null);
       setReplacedKeyId(published?.replacedKeyId || '');
       setStatus('ready');
       setReason('');
 
-      // Who can a NEW conversation be sealed to? Checked here, once, because it
-      // is the one question that decides whether encrypting is even the right
-      // choice. A member with no operator key published gets plaintext and a
-      // reason; anything else gets sealed.
-      if (eps.listRecipients) {
+      // Without a published operator key, new messages must be paused, not sent
+      // in plaintext or sealed to nobody.
+      if (eps.listRecipients && role !== 'admin') {
         try {
           const recipients = toRecipientList(await eps.listRecipients(null));
-          if (stillCurrent()) setRecipientCount(recipients.length);
-        } catch {
-          if (stillCurrent()) setRecipientCount(0);
+          if (stillCurrent()) {
+            setRecipientCount(recipients.length);
+            setReason(recipients.length === 0
+              ? 'Your encryption key is ready, but Suppliwise Support has not published an encryption key yet. New conversations are paused until a support key is available.'
+              : '');
+            if (recipients.length === 0) scheduleRecipientCheck();
+          }
+        } catch (error) {
+          if (stillCurrent()) {
+            console.error('Could not load support encryption keys:', error?.message || error);
+            setRecipientCount(null);
+            setReason('Could not verify Suppliwise Support’s encryption keys. New conversations are paused until secure messaging can be checked.');
+            scheduleRecipientCheck();
+          }
         }
       }
     } catch (error) {
@@ -314,6 +347,16 @@ export default function useSecureChat({ role, accountId, isAuthenticated = true,
   const attachThread = unlock;
 
   const hasKey = useCallback((threadId) => Boolean(recallThreadKey(threadId)), []);
+
+  const acceptsSealing = useCallback((thread, shares) => {
+    if (!participant || Number(thread?.encryption?.version) < 1) return false;
+    const ownShares = new Set(
+      (Array.isArray(shares) ? shares : [])
+        .filter((share) => share?.participant === participant)
+        .map((share) => share.wrapped)
+    );
+    return Array.isArray(thread.keyShares) && thread.keyShares.some((wrapped) => ownShares.has(wrapped));
+  }, [participant]);
 
   /** One message body, decrypted. null means "this browser cannot open it". */
   const openBody = useCallback((threadId, cipher) => (
@@ -374,8 +417,7 @@ export default function useSecureChat({ role, accountId, isAuthenticated = true,
   /**
    * Start sealing a NEW conversation.
    *
-   * @returns {Promise<Sealing|null>} null when this browser cannot seal, so the
-   *   caller falls back to ordinary text rather than failing the send.
+   * @returns {Promise<Sealing|null>} null when this browser cannot safely seal.
    */
   const beginThread = useCallback(async () => {
     if (status !== 'ready' || !identity?.publicKey) return null;
@@ -437,6 +479,68 @@ export default function useSecureChat({ role, accountId, isAuthenticated = true,
     setStatus('unavailable');
   }, [participant]);
 
+  const createRecoveryCode = useCallback(async () => {
+    if (!participant || !identity?.keyId || status !== 'ready') {
+      throw new Error('Your encryption key is not ready for recovery setup.');
+    }
+    const local = await loadLocalIdentity(participant);
+    if (!local?.privateKey || local.keyId !== identity.keyId) {
+      throw new Error('This device no longer has the private encryption key needed to set up recovery.');
+    }
+    const code = generateRecoveryCode();
+    const { wrapped, hint } = await wrapIdentityForRecovery(local.privateKey, participant, code);
+    const saveRecovery = endpointsRef.current.saveRecovery;
+    if (!saveRecovery) throw new Error('Recovery setup is not available for this account.');
+    const result = await saveRecovery(wrapped, hint);
+    setRecoveryAvailable((previous) => result?.key || { ...previous, hasRecovery: true, recoveryHint: hint });
+    return code;
+  }, [participant, identity, status]);
+
+  const restoreIdentity = useCallback(async (code) => {
+    if (!participant) throw new Error('Sign in before restoring your encryption key.');
+    const getRecovery = endpointsRef.current.getRecovery;
+    if (!getRecovery) throw new Error('Key recovery is not available for this account.');
+    const recovery = await getRecovery();
+    if (!recovery?.hasRecovery || !recovery.recoveryWrapped || !recovery.publicKey) {
+      throw new Error('No saved recovery key was found for this account.');
+    }
+    const registered = recoveryAvailable || (await endpointsRef.current.getKey?.())?.key;
+    if (!registered?.keyId || registered.publicKey !== recovery.publicKey) {
+      throw new Error('The saved recovery key does not match this account’s current encryption key.');
+    }
+    const privateKey = await unwrapIdentityForRecovery(recovery.recoveryWrapped, participant, code);
+    if (!await verifyIdentityKeyPair(privateKey, recovery.publicKey)) {
+      throw new Error('That recovery code did not restore the encryption key registered to this account.');
+    }
+    const restored = {
+      keyId: registered.keyId,
+      publicKey: recovery.publicKey,
+      privateKey,
+    };
+    const published = await endpointsRef.current.publishKey({
+      keyId: restored.keyId,
+      publicKey: restored.publicKey,
+    });
+    forgetThreadKeys();
+    await saveLocalIdentity(participant, restored);
+    setIdentity({ keyId: restored.keyId, publicKey: restored.publicKey });
+    setRecoveryAvailable(published?.key || registered);
+    setReplacedKeyId('');
+    setStatus('ready');
+    setReason('');
+    if (endpointsRef.current.listRecipients) {
+      try {
+        const recipients = toRecipientList(await endpointsRef.current.listRecipients(null));
+        setRecipientCount(recipients.length);
+      } catch (error) {
+        console.error('Could not load support encryption keys after recovery:', error?.message || error);
+        setRecipientCount(null);
+        setReason('Your encryption key was restored, but Suppliwise Support’s encryption keys could not be checked. New conversations are paused until secure messaging can be checked.');
+      }
+    }
+    return true;
+  }, [participant, recoveryAvailable]);
+
   /**
    * Escape hatch for `needs-key` on a browser that cannot produce the recovery
    * code: drop the unusable local state, generate a fresh identity, and publish
@@ -466,15 +570,16 @@ export default function useSecureChat({ role, accountId, isAuthenticated = true,
     recipientCount,
     // Sealing a NEW conversation needs a published identity AND somebody on the
     // other end to seal to. With no operator key published, sealing would
-    // produce a ticket nobody can read — so this stays false and the member's
-    // message goes out as ordinary text, with the reason saying why.
-    canSealNew: status === 'ready' && Boolean(identity?.publicKey) && recipientCount !== 0,
+    // produce a ticket nobody can read — so the send stays paused until a
+    // recipient has a published key.
+    canSealNew: status === 'ready' && Boolean(identity?.publicKey) && recipientCount > 0,
     // Sealing an EXISTING conversation, which an operator can do without any
     // up-front recipient list — the member is a recipient by definition.
     canSealExisting: status === 'ready' && Boolean(identity?.publicKey),
     attachThread,
     unlock,
     hasKey,
+    acceptsSealing,
     openBody,
     openRows,
     openPreview,
@@ -486,6 +591,8 @@ export default function useSecureChat({ role, accountId, isAuthenticated = true,
     loadRecipients,
     forgetIdentity,
     resetIdentity,
+    createRecoveryCode,
+    restoreIdentity,
   }), [
     status,
     identity,
@@ -497,6 +604,7 @@ export default function useSecureChat({ role, accountId, isAuthenticated = true,
     attachThread,
     unlock,
     hasKey,
+    acceptsSealing,
     openBody,
     openRows,
     openPreview,
@@ -508,6 +616,8 @@ export default function useSecureChat({ role, accountId, isAuthenticated = true,
     loadRecipients,
     forgetIdentity,
     resetIdentity,
+    createRecoveryCode,
+    restoreIdentity,
   ]);
 }
 
@@ -522,4 +632,3 @@ function toRecipientList(payload) {
   if (Array.isArray(payload?.operators)) return payload.operators;
   return [];
 }
-

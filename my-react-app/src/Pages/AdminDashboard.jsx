@@ -22,6 +22,7 @@ import AdminTopbar from '../Components/AdminTopbar/AdminTopbar';
 import AdminSubscriptionPanel from '../Components/AdminSubscriptionPanel/AdminSubscriptionPanel';
 import AdminSubscriptionRequests from '../Components/AdminSubscriptionRequests/AdminSubscriptionRequests';
 import AdminSupportChats from '../Components/AdminSupportChats/AdminSupportChats';
+import useSecureChat from '../security/useSecureChat';
 import NotificationDetailModal from '../Components/NotificationDetailModal/NotificationDetailModal';
 import NotificationGlyph from '../notifications/NotificationGlyph';
 import { resolveAdminTarget, visualKind } from '../notifications/notificationTargets';
@@ -581,6 +582,40 @@ function AdminDashboard() {
     if (!response.ok) { const error = new Error(data?.message || 'Unable to load admin data.'); error.status = response.status; throw error; }
     return data;
   }, [navigate]);
+
+  const [adminAccountId, setAdminAccountId] = useState(() => {
+    try { return String(JSON.parse(localStorage.getItem('admin') || '{}').id || ''); } catch { return ''; }
+  });
+
+  useEffect(() => {
+    if (adminAccountId || !localStorage.getItem('adminToken')) return undefined;
+    let live = true;
+    request('/chats/encryption/me')
+      .then((data) => { if (live && data?.accountId) setAdminAccountId(String(data.accountId)); })
+      .catch(() => { /* the admin session handler owns authentication errors */ });
+    return () => { live = false; };
+  }, [adminAccountId, request]);
+
+  const adminSecureChat = useSecureChat({
+    role: 'admin',
+    accountId: adminAccountId,
+    isAuthenticated: Boolean(adminAccountId && localStorage.getItem('adminToken')),
+    endpoints: {
+      getKey: () => request('/chats/encryption/key'),
+      publishKey: (key) => request('/chats/encryption/key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(key),
+      }),
+      saveRecovery: (recoveryWrapped, hint) => request('/chats/encryption/recovery', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recoveryWrapped, hint }),
+      }),
+      getRecovery: () => request('/chats/encryption/recovery'),
+      listRecipients: (threadId) => (threadId ? request(`/chats/${threadId}/recipients`) : Promise.resolve({ recipients: [] })),
+    },
+  });
 
   // ── Live security monitor (shared) ────────────────────────────────────
   // Owned here, not inside either surface, because the Overview "Threat
@@ -1720,7 +1755,7 @@ function AdminDashboard() {
           {tab === 'users'                  && <div className="admin-tab-panel"><Users users={users} setUsers={setUsers} usersFetchedAt={usersFetchedAt} search={search} setSearch={value => { searchRef.current = value; setSearch(value); }} loadUsers={loadUsers} request={request} onSubscriptionChanged={applySubscriptionUpdate} updateAccount={updateAccount} deleteAccount={deleteAccount} deletingUserId={deletingUserId} unlockUser={unlockUser} expandedUser={expandedUser} setExpandedUser={setExpandedUser} /></div>}
           {tab === 'admins'                 && <div className="admin-tab-panel"><Admins admins={admins} adminsFetchedAt={adminsFetchedAt} search={adminSearch} setSearch={value => { adminSearchRef.current = value; setAdminSearch(value); }} loadAdmins={loadAdmins} toggleAdmin={toggleAdmin} unlockAdmin={unlockAdmin} currentAdmin={profile} expandedAdmin={expandedAdmin} setExpandedAdmin={setExpandedAdmin} /></div>}
           {tab === 'subscriptions'          && <div className="admin-tab-panel"><AdminSubscriptionRequests request={request} /></div>}
-          {tab === 'chats'                   && <div className="admin-tab-panel"><AdminSupportChats request={request} focusThreadId={focusThreadId} adminProfile={appearance} /></div>}
+          {tab === 'chats'                   && <div className="admin-tab-panel"><AdminSupportChats request={request} secure={adminSecureChat} adminAccountId={adminAccountId} focusThreadId={focusThreadId} adminProfile={appearance} /></div>}
           {tab === 'assessment-management'  && <div className="admin-tab-panel"><AssessmentManagement users={allUsers} /></div>}
           {tab === 'ai'                     && <div className="admin-tab-panel"><AiPanel ai={ai} onCheckNow={checkAiNow} checking={checkingAi} reload={aiReload} /></div>}
           {tab === 'security'               && <div className="admin-tab-panel"><SecurityStatus monitor={monitor} onDownloadReport={() => downloadReportRef.current()} detection={ai?.detection} focusMonitorKey={focusMonitorKey} /></div>}

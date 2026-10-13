@@ -7,6 +7,7 @@ import {
   getMySecureKey,
   publishMySecureKey,
   saveMySecureRecovery,
+  getMySecureRecovery,
   getSupportOperatorKeys,
   secureMySupportThread,
   shareMySupportThreadWithOperators,
@@ -14,6 +15,7 @@ import {
 } from '../../api';
 import { pictureUrl } from '../../utils/pictureUrl';
 import useSecureChat from '../../security/useSecureChat';
+import ChatKeyRecovery from '../../security/ChatKeyRecovery';
 import useAuth from '../../hooks/useAuth';
 import useChatStream from '../../hooks/useChatStream';
 import './SupportInbox.css';
@@ -360,6 +362,7 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
       getKey: getMySecureKey,
       publishKey: publishMySecureKey,
       saveRecovery: saveMySecureRecovery,
+      getRecovery: getMySecureRecovery,
       listRecipients: getSupportOperatorKeys,
     },
   });
@@ -372,7 +375,6 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
   const [supportActive, setSupportActive] = useState(false);
   const [activeId, setActiveId] = useState(null);
   const [active, setActive] = useState(null);   // { thread, messages[] }
-  const [adminProfiles, setAdminProfiles] = useState({}); // { authorName: profilePicture }
   const [loaded, setLoaded] = useState(false);
   // `loaded` already distinguishes "has never finished a load" from "refreshing",
   // and the first load does not set state synchronously — so a second
@@ -411,6 +413,8 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
   // POST /:id/secure; the server keeps the first, and adopting the second
   // would cache a key that opens nothing.
   const sealInFlight = useRef(new Set());
+  const readyOpenedThread = useRef('');
+  const restoredThreadKey = useRef('');
   // A mirror of `threads` that callbacks with a stable identity can read.
   // Needed because `openThread` must not depend on `threads` (that would give
   // it a new identity on every poll and re-run the effect that depends on it),
@@ -494,6 +498,7 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
 
   // ── One thread ──────────────────────────────────────────────────────────
   const openThread = useCallback(async (id) => {
+    if (secure.status === 'ready') readyOpenedThread.current = String(id);
     const token = ++threadToken.current;
     setActiveId(id);
     setLoadingThread(true);
@@ -516,8 +521,6 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
       if (token !== threadToken.current) return;
       setActive({ thread: data.thread, messages: rows });
       if (typeof data.supportActive === 'boolean') setSupportActive(data.supportActive);
-      if (data.adminProfiles) setAdminProfiles(data.adminProfiles);
-      
       // Opening it marks it read server-side, so the local badge is cleared
       // rather than waiting for the next poll to agree. The decrement is driven
       // by what the thread ACTUALLY had (read from the ref, not from inside a
@@ -558,6 +561,10 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
           noteOwnWrite(id);
           const sealData = await secureMySupportThread(id, { messages: sealedMessages, keyShares: shares });
           if (!sealData?.thread) return;
+          if (!secure.acceptsSealing(sealData.thread, shares)) {
+            window.setTimeout(() => openThreadRef.current?.(id), 250);
+            return;
+          }
           // Adopt only AFTER the server accepted the shares — a key the server
           // never got would let replies seal into something nobody holds.
           secure.adoptThread(id, sealingSession);
@@ -578,6 +585,11 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
           showNotice('This conversation is now end-to-end encrypted for your privacy.');
         })().catch((sealError) => {
           console.error('Automatic encryption failed:', sealError?.message || sealError);
+          if (sealError?.status === 409) {
+            window.setTimeout(() => openThreadRef.current?.(id), 250);
+          } else {
+            showNotice('This conversation could not be encrypted yet. Reopen it to retry.');
+          }
         }).finally(() => {
           sealInFlight.current.delete(id);
         });
@@ -608,10 +620,12 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
           console.error('Automatic key grant failed:', grantError?.message || grantError);
         });
       }
+      return rows.every((message) => !message.cipher || message.body != null);
     } catch (loadError) {
       if (token !== threadToken.current) return;
       setError(loadError.message);
       setActive(null);
+      return false;
     } finally {
       if (token === threadToken.current) setLoadingThread(false);
     }
@@ -629,7 +643,27 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
   // stuttery. StrictMode's double-run stays harmless: openThread is keyed on a
   // token, so the second response simply wins.
   const openThreadRef = useRef(openThread);
+  // Keep async stream/deep-link callbacks pointed at the latest secure state.
+  // eslint-disable-next-line react-hooks/immutability -- intentional latest-callback ref
   useEffect(() => { openThreadRef.current = openThread; }, [openThread]);
+  const deferredSealAttempt = useRef('');
+  useEffect(() => {
+    const id = String(active?.thread?._id || '');
+    if (!id || secure.status !== 'ready' || Number(active?.thread?.encryption?.version) > 0) return;
+    if (readyOpenedThread.current === id) return;
+    if (deferredSealAttempt.current === id) return;
+    deferredSealAttempt.current = id;
+    openThread(id);
+  }, [active?.thread?._id, active?.thread?.encryption?.version, secure.status, openThread]);
+  useEffect(() => {
+    const id = String(active?.thread?._id || '');
+    const hasLockedMessage = active?.messages?.some((message) => message.cipher && message.body == null);
+    if (!id || !hasLockedMessage || secure.status !== 'ready' || !secure.identity?.keyId) return;
+    const key = `${id}:${secure.identity.keyId}`;
+    if (restoredThreadKey.current === key) return;
+    restoredThreadKey.current = key;
+    openThread(id);
+  }, [active, secure.status, secure.identity?.keyId, openThread]);
   useEffect(() => {
     const wanted = String(focusThreadId || '').trim();
     if (!wanted) return;
@@ -699,8 +733,11 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
     // transcript loads, each one a decrypt pass, from anything either side
     // ever looked at. Messages and state transitions are the news worth
     // repainting a live conversation for.
-    const opensTranscript = kind === 'message' || kind === 'resolved' || kind === 'reopened';
-    if (threadId && ownWrite.current.thread === threadId && Date.now() - ownWrite.current.at < 5000) return;
+    const opensTranscript = kind === 'message' || kind === 'resolved' || kind === 'reopened' || kind === 'shared';
+    if (event?.by !== 'admin'
+      && threadId
+      && ownWrite.current.thread === threadId
+      && Date.now() - ownWrite.current.at < 5000) return;
     scheduleRefresh(threadId, opensTranscript);
   }, [scheduleRefresh]);
 
@@ -738,6 +775,14 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
       setError(`Messages are limited to ${MAX_MESSAGE} characters.`);
       return;
     }
+    if (secure.status === 'booting' || (secure.status === 'ready' && secure.recipientCount === null)) {
+      setError('Preparing secure messaging. Please try again in a moment.');
+      return;
+    }
+    if (!secure.canSealNew) {
+      setError(secure.reason || 'Secure messaging is not ready. Your message was not sent.');
+      return;
+    }
     // The subject is sent outside the seal on purpose. It is the title the
     // support queue is triaged by, and an operator who cannot read it cannot
     // decide whether to open the thread. See the header of
@@ -747,30 +792,24 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
     setSending(true);
     setError('');
     try {
-      // Automatic end-to-end encryption: `canSealNew` is the checked answer —
-    // identity published AND at least one operator key to seal to. Sealing
-    // without an operator on the other end would open a ticket support can
-    // never read, so the message falls back to plaintext rather than blocking
-    // the send.
-    let sealingSession = null;
-    if (secure.canSealNew) {
-      try {
-        sealingSession = await secure.beginThread();
-      } catch {
-        sealingSession = null;
+      const sealingSession = await secure.beginThread();
+      if (!sealingSession) throw new Error('Secure messaging is not ready. Your message was not sent.');
+      const keyShares = await secure.buildShares(sealingSession);
+      if (!keyShares.some((share) => String(share.participant || '').startsWith('admin:'))
+        || !keyShares.some((share) => share.participant === `user:${user?._id}`)) {
+        throw new Error('A secure key could not be prepared for this conversation. Your message was not sent.');
       }
-    }
-    // beginThread returns null when there are no operator keys to seal to —
-    // fall back to plaintext rather than storing a message nobody can read.
-    const canSeal = sealingSession != null;
-    const payload = canSeal
-      ? { subject: subjectLine, category, cipher: await sealingSession.seal(trimmed), keyShares: await secure.buildShares(sealingSession) }
-      : { subject: subjectLine, category, body: trimmed };
+      const payload = {
+        subject: subjectLine,
+        category,
+        cipher: await sealingSession.seal(trimmed),
+        keyShares,
+      };
 
-    const data = await startSupportThread(payload);
+      const data = await startSupportThread(payload);
     // Adopt the fresh key under the server-assigned thread id so the immediately-
     // following openThread reads a real transcript instead of ciphertext.
-    if (canSeal && data.thread?._id) secure.adoptThread(data.thread._id, sealingSession);
+      if (data.thread?._id) secure.adoptThread(data.thread._id, sealingSession);
 
 
       setDraft('');
@@ -780,11 +819,7 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
       // slice the member was looking at — otherwise the thread they just sent
       // is not in the list they are looking at, which reads as a failed send.
       setFilter('all');
-      if (canSeal) {
-        showNotice('Your message was sent end-to-end encrypted. Only you and Suppliwise support can read it.');
-      } else {
-        showNotice(data.message || 'Your message was sent.');
-      }
+      showNotice('Your message was sent end-to-end encrypted. Only you and Suppliwise Support can read it.');
       await loadList();
       // Open it straight away: after pressing Send, landing on an empty list
       // makes it look as though the message did not register.
@@ -794,7 +829,7 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
     } finally {
       setSending(false);
     }
-  }, [sending, trimmed, subject, category, showNotice, loadList, openThread, secure]);
+  }, [sending, trimmed, subject, category, showNotice, loadList, openThread, secure, user?._id]);
 
   const sendReply = useCallback(async (event) => {
     event?.preventDefault?.();
@@ -812,6 +847,11 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
     // it) or be refused by the server — and "browser can encrypt" was never the
     // question. Threads upgrade themselves in the background on open.
     const sealed = Number(active.thread.encryption?.version) > 0;
+    if (!sealed) {
+      openThreadRef.current?.(id);
+      setError('This conversation is being secured. Your reply was not sent.');
+      return;
+    }
 
     // A sealed conversation reads its key from the tab's cache. It is unlocked
     // by openThread, so a member who just arrived through a deep link has it,
@@ -889,6 +929,9 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
   // who cannot reply is owed the explanation, not a silent failure.
   const activeResolved = active?.thread?.status === 'resolved';
   const activeSealed = Number(active?.thread?.encryption?.version) > 0;
+  const activeHasLockedMessages = Boolean(active?.messages?.some((message) => message.cipher && message.body == null));
+  const activeCanReply = activeSealed && secure.status === 'ready'
+    && secure.hasKey(active?.thread?._id) && !activeHasLockedMessages;
   const remaining = MAX_MESSAGE - draft.length;
   const canSend = trimmed.length > 0 && trimmed.length <= MAX_MESSAGE && !sending;
 
@@ -1012,11 +1055,12 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
       </header>
 
       {secure.reason && (
-        <p className={`sci-alert${secure.status === 'ready' ? ' sci-alert--ok' : ' sci-alert--warn'}`} role="status">
+        <p className={`sci-alert${secure.status === 'ready' && secure.recipientCount !== 0 ? ' sci-alert--ok' : ' sci-alert--warn'}`} role="status">
           <IconShield className="sci-alert__icon" />
           <span>{secure.reason}</span>
         </p>
       )}
+      <ChatKeyRecovery secure={secure} />
       {/* needs-key with no saved recovery copy is otherwise a dead end. The
           reset starts a fresh identity so NEW conversations work in this
           browser; older ones stay sealed, which is what end-to-end means. */}
@@ -1127,7 +1171,7 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
             >
               Cancel
             </button>
-            <button type="submit" className="sci-btn sci-btn--primary" disabled={!canSend}>
+            <button type="submit" className="sci-btn sci-btn--primary" disabled={!canSend || !secure.canSealNew}>
               {sending ? <><span className="sci-spinner" aria-hidden="true" />Sending…</> : <><IconSend />Send message</>}
             </button>
           </div>
@@ -1410,29 +1454,13 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
                               );
                             })()
                           ) : (
-                            // Admin message - show profile picture or initials
-                            (() => {
-                              const adminProfilePic = adminProfiles[m.authorName] || '';
-                              const avatarSrc = pictureUrl(adminProfilePic);
-                              const showPicture = Boolean(avatarSrc) && !brokenPictures.has(`admin-${m.authorName}`);
-                              
-                              return showPicture ? (
-                                <img
-                                  className="sci-msg__avatar sci-msg__avatar--image"
-                                  src={avatarSrc}
-                                  alt=""
-                                  onError={() => markPictureBroken(`admin-${m.authorName}`)}
-                                />
-                              ) : (
-                                <span
-                                  className="sci-msg__avatar"
-                                  style={{ backgroundImage: avatarGradient({ firstName: m.authorName || 'Admin' }) }}
-                                  aria-hidden="true"
-                                >
-                                  {getInitials({ firstName: m.authorName || 'Support' })}
-                                </span>
-                              );
-                            })()
+                            <span
+                              className="sci-msg__avatar"
+                              style={{ backgroundImage: avatarGradient({ firstName: SUPPORT_AUTHOR_LABEL }) }}
+                              aria-hidden="true"
+                            >
+                              {getInitials({ firstName: 'Support' })}
+                            </span>
                           )}
                           <div className="sci-msg__col">
                             {showMeta && (
@@ -1483,33 +1511,47 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
                     </button>
                   </div>
                 ) : (
-                  <form className="sci-reply" onSubmit={sendReply}>
-                    <div className="sci-reply__box">
-                      <textarea
-                        ref={replyRef}
-                        rows={1}
-                        maxLength={MAX_MESSAGE}
-                        value={draft}
-                        onChange={(e) => setDraft(e.target.value)}
-                        onKeyDown={(e) => {
-                          // Enter sends; Shift+Enter is a newline. The converse (the
-                          // default) makes every multi-line question a three-tap affair.
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            sendReply(e);
-                          }
-                        }}
-                        placeholder="Write a reply…"
-                        aria-label="Reply to this conversation"
-                      />
-                    </div>
-                    <div className="sci-reply__foot">
-                      <span className="sci-reply__hint">Enter to send · Shift+Enter for a new line</span>
-                      <button type="submit" className="sci-btn sci-btn--primary" disabled={!canSend}>
-                        {sending ? <><span className="sci-spinner" aria-hidden="true" />Sending…</> : <><IconSend />Send reply</>}
-                      </button>
-                    </div>
-                  </form>
+                  <>
+                    <ChatKeyRecovery
+                      secure={secure}
+                      locked={activeHasLockedMessages && secure.status === 'ready'}
+                      onRestored={() => openThreadRef.current?.(active.thread._id)}
+                    />
+                    <form className="sci-reply" onSubmit={sendReply}>
+                      {!activeCanReply && (
+                        <p className="sci-reply__hint" role="status">
+                          {activeSealed
+                            ? 'Restore or unlock your encryption key to reply securely.'
+                            : 'This conversation is being secured. Replies are paused until encryption is complete.'}
+                        </p>
+                      )}
+                      <div className="sci-reply__box">
+                        <textarea
+                          ref={replyRef}
+                          rows={1}
+                          maxLength={MAX_MESSAGE}
+                          value={draft}
+                          onChange={(e) => setDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            // Enter sends; Shift+Enter is a newline. The converse (the
+                            // default) makes every multi-line question a three-tap affair.
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              sendReply(e);
+                            }
+                          }}
+                          placeholder="Write a reply…"
+                          aria-label="Reply to this conversation"
+                        />
+                      </div>
+                      <div className="sci-reply__foot">
+                        <span className="sci-reply__hint">Enter to send · Shift+Enter for a new line</span>
+                        <button type="submit" className="sci-btn sci-btn--primary" disabled={!canSend || !activeCanReply}>
+                          {sending ? <><span className="sci-spinner" aria-hidden="true" />Sending…</> : <><IconSend />Send reply</>}
+                        </button>
+                      </div>
+                    </form>
+                  </>
                 )}
               </div>
             </>

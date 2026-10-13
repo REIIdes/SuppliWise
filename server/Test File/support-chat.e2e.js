@@ -246,6 +246,12 @@ async function makeAdminToken() {
       (m) => m.author !== 'admin' || m.authorName === SUPPORT_LABEL
     )
   );
+  check('the member transcript does not expose operator profiles', !('adminProfiles' in r.data));
+  r = await call(alice.token, '/support-chat/encryption/operators');
+  check(
+    'the member encryption directory contains keys but no operator aliases',
+    (r.data.operators || []).every((operator) => !('alias' in operator))
+  );
   // The list endpoint is the other half of the payload — redacting only the
   // transcript would still hand over the identity through the queue.
   r = await call(alice.token, '/support-chat');

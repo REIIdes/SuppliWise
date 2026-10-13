@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ConfirmModal from '../ConfirmModal/ConfirmModal';
-import useSecureChat from '../../security/useSecureChat';
+import ChatKeyRecovery from '../../security/ChatKeyRecovery';
 import useChatStream from '../../hooks/useChatStream';
 import { pictureUrl } from '../../utils/pictureUrl';
 import './AdminSupportChats.css';
@@ -195,7 +195,7 @@ function StatIcon({ name }) {
   );
 }
 
-export default function AdminSupportChats({ request, focusThreadId = '', adminProfile = {} }) {
+export default function AdminSupportChats({ request, secure, adminAccountId, focusThreadId = '', adminProfile = {} }) {
 
   // Track broken profile pictures
   const [brokenPictures, setBrokenPictures] = useState(new Set());
@@ -203,49 +203,6 @@ export default function AdminSupportChats({ request, focusThreadId = '', adminPr
     setBrokenPictures((prev) => new Set(prev).add(id));
   }, []);
   
-  // ── End-to-end encryption ──────────────────────────────────────────────
-  // The operator's identity is per AdminAccount, not per member — see
-  // models/chatEncryptionKeySchema.js for why two identities beat one shared
-  // key here. `request` is the dashboard's own fetch helper, so these endpoints
-  // inherit the admin bearer token and the 401 → /admin/login redirect exactly
-  // like every other call in this file.
-  //
-  // The participant string MUST be `admin:<AdminAccount._id>` — the same value
-  // the server writes on a key share. useAuth() is the USER session and has no
-  // admin in it; reading `user._id` from it here produced either an empty
-  // identity (nothing ever published) or somebody else's id (shares addressed
-  // to the real AdminAccount could never be unlocked). The id comes from the
-  // `admin` object written at sign-in; sessions predating that fall back to
-  // GET /chats/encryption/me, which answers from the signed token.
-  const [adminAccountId, setAdminAccountId] = useState(() => {
-    try { return String(JSON.parse(localStorage.getItem('admin') || '{}').id || ''); } catch { return ''; }
-  });
-  useEffect(() => {
-    if (adminAccountId) return undefined;
-    let live = true;
-    request('/chats/encryption/me')
-      .then((data) => { if (live && data?.accountId) setAdminAccountId(String(data.accountId)); })
-      .catch(() => { /* stays unavailable; the reason line says so */ });
-    return () => { live = false; };
-  }, [adminAccountId, request]);
-
-  const secure = useSecureChat({
-    role: 'admin',
-    accountId: adminAccountId,
-    isAuthenticated: Boolean(adminAccountId),
-    endpoints: {
-      getKey: () => request('/chats/encryption/key'),
-      publishKey: (key) => request('/chats/encryption/key', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(key),
-      }),
-      // The hook's bootstrap probe passes a null thread id; recipients are
-      // per-conversation here, so "nobody up front" is the honest answer
-      // rather than a GET /chats/null/recipients that can only fail.
-      listRecipients: (threadId) => (threadId ? request(`/chats/${threadId}/recipients`) : Promise.resolve({ recipients: [] })),
-    },
-  });
   const [ticketCopied, setTicketCopied] = useState('');
   const [secureNotice, setSecureNotice] = useState('');
   const [sealing, setSealing] = useState(false);
@@ -281,6 +238,7 @@ export default function AdminSupportChats({ request, focusThreadId = '', adminPr
   // race two DIFFERENT fresh keys against POST /:id/secure; the server keeps
   // the first and the second adoption would cache a key that opens nothing.
   const sealInFlight = useRef(new Set());
+  const readyOpenedThread = useRef('');
 
   // This console's OWN writes come back on the stream too: events are addressed
   // to the Chat channels, and the server cannot tell which operator's browser
@@ -358,6 +316,7 @@ export default function AdminSupportChats({ request, focusThreadId = '', adminPr
 
   // ── Open one conversation ───────────────────────────────────────────────
   const openThread = useCallback(async (id) => {
+    if (secure.status === 'ready') readyOpenedThread.current = String(id);
     const token = ++threadToken.current;
     setActiveId(id);
     setLoadingThread(true);
@@ -385,7 +344,31 @@ export default function AdminSupportChats({ request, focusThreadId = '', adminPr
       if (Number(data.thread.encryption?.version) > 0) {
         try {
           const list = await secure.loadRecipients(id);
-          setRecipients(Array.isArray(list) ? list : []);
+          const available = Array.isArray(list) ? list : [];
+          setRecipients(available);
+          const missingRecipients = secure.hasKey(id)
+            ? available.filter((recipient) => !recipient.hasShare && recipient.publicKey)
+            : [];
+          if (missingRecipients.length > 0) {
+            (async () => {
+              const shares = await secure.rewrapTo(id, missingRecipients);
+              if (shares.length === 0) return;
+              noteOwnWrite(id);
+              await request(`/chats/${id}/keys`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ shares }),
+              });
+              setRecipients((current) => current.map((recipient) => (
+                missingRecipients.some((missing) => missing.participant === recipient.participant)
+                  ? { ...recipient, hasShare: true }
+                  : recipient
+              )));
+            })().catch((grantError) => {
+              console.error('Automatic conversation key sharing failed:', grantError?.message || grantError);
+              setError('Could not automatically share this conversation key with every eligible recipient. Use Grant access to retry.');
+            });
+          }
         } catch {
           setRecipients([]);
         }
@@ -447,6 +430,10 @@ export default function AdminSupportChats({ request, focusThreadId = '', adminPr
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ messages: sealedMessages, keyShares }),
           });
+          if (!secure.acceptsSealing(sealed.thread, keyShares)) {
+            window.setTimeout(() => openThreadRef.current?.(id), 250);
+            return;
+          }
           // Adopt only AFTER the server accepted the shares — a key the server
           // never got would let replies seal into something nobody holds.
           secure.adoptThread(id, session);
@@ -468,14 +455,21 @@ export default function AdminSupportChats({ request, focusThreadId = '', adminPr
           showNotice(sealed.message || 'This conversation is now end-to-end encrypted.');
         })().catch((sealError) => {
           console.error('Automatic encryption failed:', sealError?.message || sealError);
+          if (sealError?.status === 409) {
+            window.setTimeout(() => openThreadRef.current?.(id), 250);
+          } else {
+            setError('This conversation could not be encrypted yet. Reopen it to retry.');
+          }
         }).finally(() => {
           sealInFlight.current.delete(id);
         });
       }
+      return rows.every((message) => !message.cipher || message.body != null);
     } catch (loadError) {
       if (token !== threadToken.current) return;
       setError(loadError.message);
       setActive(null);
+      return false;
     } finally {
       if (token === threadToken.current) setLoadingThread(false);
     }
@@ -494,7 +488,28 @@ export default function AdminSupportChats({ request, focusThreadId = '', adminPr
   // so the second response simply wins. The effect only re-runs when the id
   // itself changes, so the 12 s queue poll cannot re-trigger it.
   const openThreadRef = useRef(openThread);
+  // Keep async stream/deep-link callbacks pointed at the latest secure state.
+  // eslint-disable-next-line react-hooks/immutability -- intentional latest-callback ref
   useEffect(() => { openThreadRef.current = openThread; }, [openThread]);
+  const restoredThreadKey = useRef('');
+  const deferredSealAttempt = useRef('');
+  useEffect(() => {
+    const id = String(active?.thread?._id || '');
+    if (!id || secure.status !== 'ready' || Number(active?.thread?.encryption?.version) > 0) return;
+    if (readyOpenedThread.current === id) return;
+    if (deferredSealAttempt.current === id) return;
+    deferredSealAttempt.current = id;
+    openThread(id);
+  }, [active?.thread?._id, active?.thread?.encryption?.version, secure.status, openThread]);
+  useEffect(() => {
+    const id = String(active?.thread?._id || '');
+    const hasLockedMessage = active?.messages?.some((message) => message.cipher && message.body == null);
+    if (!id || !hasLockedMessage || secure.status !== 'ready' || !secure.identity?.keyId) return;
+    const key = `${id}:${secure.identity.keyId}`;
+    if (restoredThreadKey.current === key) return;
+    restoredThreadKey.current = key;
+    openThread(id);
+  }, [active, secure.status, secure.identity?.keyId, openThread]);
   useEffect(() => {
     const wanted = String(focusThreadId || '').trim();
     if (!wanted) return;
@@ -613,7 +628,7 @@ export default function AdminSupportChats({ request, focusThreadId = '', adminPr
     // read to the member — whose client would refresh, announce, and so on.
     // Messages and state transitions are the news worth repainting a live
     // conversation for.
-    const opensTranscript = kind === 'message' || kind === 'resolved' || kind === 'reopened';
+    const opensTranscript = kind === 'message' || kind === 'resolved' || kind === 'reopened' || kind === 'shared';
     scheduleRefresh(threadId, opensTranscript);
   }, [scheduleRefresh, reloadQueue, closeThread, showNotice]);
 
@@ -632,6 +647,10 @@ export default function AdminSupportChats({ request, focusThreadId = '', adminPr
   // ── Reply ───────────────────────────────────────────────────────────────
   const trimmed = draft.trim();
   const canSend = trimmed.length > 0 && trimmed.length <= MAX_MESSAGE && !sending;
+  const activeSealed = Number(active?.thread?.encryption?.version) > 0;
+  const activeHasLockedMessages = Boolean(active?.messages?.some((message) => message.cipher && message.body == null));
+  const activeCanReply = activeSealed && secure.status === 'ready'
+    && secure.hasKey(active?.thread?._id) && !activeHasLockedMessages;
   const remaining = MAX_MESSAGE - draft.length;
 
   const sendReply = useCallback(async (event) => {
@@ -644,6 +663,11 @@ export default function AdminSupportChats({ request, focusThreadId = '', adminPr
     }
     const id = active.thread._id;
     const sealed = Number(active.thread.encryption?.version) > 0;
+    if (!sealed) {
+      openThreadRef.current?.(id);
+      setError('This conversation is being secured. Your reply was not sent.');
+      return;
+    }
 
     // A sealed thread is unsealed by openThread, but a reply must not assume
     // the cache is warm — an operator who lands on a deep link and types
@@ -968,6 +992,7 @@ export default function AdminSupportChats({ request, focusThreadId = '', adminPr
 
       {error && <p className="asc-error" role="alert">{error}</p>}
       {secure.reason && <p className="asc-warn" role="status">{secure.reason}</p>}
+      <ChatKeyRecovery secure={secure} />
       {/* needs-key with no saved recovery copy is otherwise a dead end: the
           browser can neither read the old key nor explain a way forward. The
           reset starts a fresh identity so NEW conversations work here, while
@@ -1183,7 +1208,7 @@ export default function AdminSupportChats({ request, focusThreadId = '', adminPr
                       >
                         {sealing
                           ? 'Sharing…'
-                          : `Grant access to ${grantable.length} colleague${grantable.length === 1 ? '' : 's'}`}
+                                          : `Grant access to ${grantable.length} recipient${grantable.length === 1 ? '' : 's'}`}
                       </button>
                     )}
                   </div>
@@ -1337,46 +1362,60 @@ export default function AdminSupportChats({ request, focusThreadId = '', adminPr
                   </div>
                 </div>
               ) : (
-                <form className="asc-reply" onSubmit={sendReply}>
-                  <textarea
-                    rows={3}
-                    maxLength={MAX_MESSAGE}
-                    value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        sendReply(e);
-                      }
-                    }}
-                    placeholder={`Reply to ${memberName(user)}…`}
-                    aria-label="Reply to this conversation"
+                <>
+                  <ChatKeyRecovery
+                    secure={secure}
+                    locked={activeHasLockedMessages && secure.status === 'ready'}
+                    onRestored={() => openThreadRef.current?.(active.thread._id)}
                   />
-                  <div className="asc-reply__foot">
-                    <div className="asc-reply__left">
-                      <span className="asc-reply__hint">
-                        <kbd>Enter</kbd> to send · <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line
-                      </span>
-                      {remaining < 200 && <span className="asc-reply__count">{remaining} left</span>}
-                    </div>
-                    <div className="asc-reply__actions">
-                      <button
-                        type="button"
-                        className="asc-btn asc-btn--danger"
-                        onClick={() => setConfirmDelete(active.thread)}
-                        disabled={busy}
-                      >
-                        Delete
-                      </button>
-                      <button type="submit" className="asc-btn asc-btn--primary" disabled={!canSend}>
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                          <path d="M22 2 11 13" /><path d="M22 2l-7 20-4-9-9-4 20-7z" />
-                        </svg>
-                        {sending ? 'Sending…' : 'Send reply'}
-                      </button>
+                  <form className="asc-reply" onSubmit={sendReply}>
+                    {!activeCanReply && (
+                      <p className="asc-reply__hint" role="status">
+                        {activeSealed
+                          ? 'Restore or unlock your encryption key to reply securely.'
+                          : 'This conversation is being secured. Replies are paused until encryption is complete.'}
+                      </p>
+                    )}
+                    <textarea
+                      rows={3}
+                      maxLength={MAX_MESSAGE}
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          sendReply(e);
+                        }
+                      }}
+                      placeholder={`Reply to ${memberName(user)}…`}
+                      aria-label="Reply to this conversation"
+                    />
+                    <div className="asc-reply__foot">
+                      <div className="asc-reply__left">
+                        <span className="asc-reply__hint">
+                          <kbd>Enter</kbd> to send · <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line
+                        </span>
+                        {remaining < 200 && <span className="asc-reply__count">{remaining} left</span>}
+                      </div>
+                      <div className="asc-reply__actions">
+                        <button
+                          type="button"
+                          className="asc-btn asc-btn--danger"
+                          onClick={() => setConfirmDelete(active.thread)}
+                          disabled={busy}
+                        >
+                          Delete
+                        </button>
+                        <button type="submit" className="asc-btn asc-btn--primary" disabled={!canSend || !activeCanReply}>
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M22 2 11 13" /><path d="M22 2l-7 20-4-9-9-4 20-7z" />
+                          </svg>
+                          {sending ? 'Sending…' : 'Send reply'}
+                        </button>
                     </div>
                   </div>
-                </form>
+                  </form>
+                </>
               )}
             </>
           )}

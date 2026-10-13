@@ -52,6 +52,7 @@
  * is for.
  */
 
+const crypto = require('crypto');
 const { ChatInputError, normalizeBody } = require('./supportChat');
 
 /** The only version this build writes. */
@@ -76,6 +77,7 @@ const PARTICIPANT_PATTERN = /^(user|admin):[a-f0-9]{24}$/;
 // A thread has one member and a handful of operators. Twelve is generous and
 // bounded, so "wrap this for everyone" can never become an unbounded write.
 const MAX_KEY_SHARES = 12;
+const SEALING_LEASE_MS = 5 * 60 * 1000;
 
 // A public key is the 64-byte x‖y of a P-256 point, base64url.
 const PUBLIC_KEY_PATTERN = /^[A-Za-z0-9_-]{80,90}$/;
@@ -137,11 +139,12 @@ function isEncrypted(thread) {
  * is no thread yet. For a new conversation the shares decide: a send carrying a
  * valid ciphertext starts a sealed conversation, one without it starts a plain
  * one. That is the client's decision, taken once, at the moment it knows whether
- * it can encrypt at all — see `canSealNew` in useSecureChat.js.
+ * it can encrypt at all — see `canSealNew` in useSecureChat.js. Support chat
+ * routes pass `requireEncryption` so there is no plaintext fallback.
  *
  * @param {object} payload
  * @param {object} thread    the target thread, or a stub for one being created
- * @param {{ creating?: boolean }} [options]
+ * @param {{ creating?: boolean, requireEncryption?: boolean }} [options]
  * @returns {{ mode: 'plain'|'encrypted', body: string, cipher: string }}
  * @throws {ChatInputError} 400
  */
@@ -151,6 +154,9 @@ function readMessagePayload({ body, cipher }, thread, options = {}) {
 
   if (hasCipher && !isCipher(cipher)) {
     throw new ChatInputError('That message could not be encrypted properly.');
+  }
+  if (options.requireEncryption && !hasCipher) {
+    throw new ChatInputError('Secure messaging is not ready. Please retry after encryption setup completes.');
   }
 
   // An EXISTING encrypted thread. The state is already decided and this is the
@@ -257,6 +263,54 @@ function encryptionView(thread) {
   };
 }
 
+/**
+ * Claim a legacy thread before replacing its messages with ciphertext.
+ *
+ * Two browsers can open the same plaintext thread at once. Without a server
+ * claim, each can encrypt with a different key and the last write leaves one
+ * or both participants unable to read the transcript.
+ */
+async function claimThreadForSealing(ChatThread, threadId) {
+  const claimId = crypto.randomBytes(24).toString('base64url');
+  const staleBefore = new Date(Date.now() - SEALING_LEASE_MS);
+  const claimed = await ChatThread.findOneAndUpdate(
+    {
+      _id: threadId,
+      $and: [
+        {
+          $or: [
+            { 'encryption.version': { $exists: false } },
+            { 'encryption.version': { $lt: ENCRYPTION_VERSION } },
+          ],
+        },
+        {
+          $or: [
+            { 'encryption.sealingAt': { $exists: false } },
+            { 'encryption.sealingAt': null },
+            { 'encryption.sealingAt': { $lt: staleBefore } },
+          ],
+        },
+      ],
+    },
+    {
+      $set: {
+        'encryption.sealingId': claimId,
+        'encryption.sealingAt': new Date(),
+      },
+    },
+    { new: true, projection: { _id: 1 } }
+  ).lean();
+  return claimed ? claimId : '';
+}
+
+async function releaseThreadSealingClaim(ChatThread, threadId, claimId) {
+  if (!claimId) return;
+  await ChatThread.updateOne(
+    { _id: threadId, 'encryption.sealingId': claimId },
+    { $unset: { 'encryption.sealingId': 1, 'encryption.sealingAt': 1 } }
+  );
+}
+
 module.exports = {
   ENCRYPTION_VERSION,
   CIPHER_MAX_LENGTH,
@@ -272,4 +326,6 @@ module.exports = {
   normalizeKeyShares,
   sharesForParticipant,
   encryptionView,
+  claimThreadForSealing,
+  releaseThreadSealingClaim,
 };

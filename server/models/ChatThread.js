@@ -124,6 +124,8 @@ const chatThreadSchema = new mongoose.Schema({
   encryption: {
     version: { type: Number, default: 0, min: 0, max: ENCRYPTION_VERSION },
     keyShares: { type: [chatKeyShareSchema], default: [] },
+    sealingId: { type: String, default: '', maxlength: 64, select: false },
+    sealingAt: { type: Date, default: null, select: false },
   },
 }, { timestamps: true });
 

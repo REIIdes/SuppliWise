@@ -29,6 +29,8 @@ const {
   normalizeKeyShares,
   sharesForParticipant,
   encryptionView,
+  claimThreadForSealing,
+  releaseThreadSealingClaim,
 } = require('../utils/chatEncryption');
 const { ChatInputError } = require('../utils/supportChat');
 
@@ -172,6 +174,23 @@ test('a NEW conversation decides for itself, because there is no state to inheri
   assert.throws(() => readMessagePayload({ cipher: 'nope' }, stub, creating), ChatInputError);
 });
 
+test('support routes can require encryption and reject plaintext creates', () => {
+  const stub = { encryption: { version: 0 } };
+  const cipher = 'e1.' + 'A'.repeat(16) + '.' + 'A'.repeat(64);
+  assert.throws(
+    () => readMessagePayload({ body: 'not encrypted' }, stub, { creating: true, requireEncryption: true }),
+    ChatInputError
+  );
+  assert.throws(
+    () => readMessagePayload({ body: 'not encrypted' }, stub, { requireEncryption: true }),
+    ChatInputError
+  );
+  assert.deepEqual(
+    readMessagePayload({ cipher }, stub, { creating: true, requireEncryption: true }),
+    { mode: 'encrypted', body: '', cipher }
+  );
+});
+
 test('an encrypted thread STILL refuses plaintext when `creating` is set', () => {
   // The two flags must not compose into an escape hatch. `creating` describes
   // the thread being created, not one that is already sealed.
@@ -280,4 +299,28 @@ test('version 0 is the honest "not encrypted"', () => {
   assert.equal(isEncrypted({}), false);
   assert.equal(isEncrypted(null), false);
   assert.equal(isEncrypted(undefined), false);
+});
+
+test('only one concurrent request can claim a plaintext thread for sealing', async () => {
+  let activeClaim = '';
+  const fakeThreadModel = {
+    findOneAndUpdate(_filter, update) {
+      if (activeClaim) return { lean: async () => null };
+      activeClaim = update.$set['encryption.sealingId'];
+      return { lean: async () => ({ _id: 'thread-1' }) };
+    },
+    async updateOne(filter) {
+      if (filter['encryption.sealingId'] === activeClaim) activeClaim = '';
+      return { modifiedCount: 1 };
+    },
+  };
+
+  const claims = await Promise.all([
+    claimThreadForSealing(fakeThreadModel, 'thread-1'),
+    claimThreadForSealing(fakeThreadModel, 'thread-1'),
+  ]);
+  assert.equal(claims.filter(Boolean).length, 1);
+  await releaseThreadSealingClaim(fakeThreadModel, 'thread-1', claims.find(Boolean));
+  assert.equal(activeClaim, '');
+  assert.ok(await claimThreadForSealing(fakeThreadModel, 'thread-1'));
 });

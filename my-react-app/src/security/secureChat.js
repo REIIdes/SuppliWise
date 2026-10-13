@@ -485,6 +485,27 @@ export async function unwrapKeyFor(wrapped, privateKey) {
   }
 }
 
+/** Confirm that a restored private identity key matches its registered public key. */
+export async function verifyIdentityKeyPair(privateKey, publicKey) {
+  if (!privateKey || !publicKey) return false;
+  try {
+    const probeKey = await generateThreadKey();
+    const wrapped = await wrapKeyFor(probeKey, publicKey);
+    const opened = await unwrapKeyFor(wrapped, privateKey);
+    if (!opened) return false;
+    const [expected, actual] = await Promise.all([
+      subtle().exportKey('raw', probeKey),
+      subtle().exportKey('raw', opened),
+    ]);
+    const expectedBytes = new Uint8Array(expected);
+    const actualBytes = new Uint8Array(actual);
+    return expectedBytes.length === actualBytes.length
+      && expectedBytes.every((byte, index) => byte === actualBytes[index]);
+  } catch {
+    return false;
+  }
+}
+
 // ── The read/write surface ───────────────────────────────────────────────────
 
 /**

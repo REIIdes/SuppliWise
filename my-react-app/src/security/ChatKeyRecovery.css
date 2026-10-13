@@ -1,0 +1,94 @@
+.chat-key-recovery {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  margin: 12px 0;
+  padding: 16px;
+  border: 1px solid #d8e2ee;
+  border-radius: 12px;
+  background: #f7faff;
+  color: #26384c;
+}
+
+.chat-key-recovery h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.chat-key-recovery p {
+  margin: 5px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.chat-key-recovery__form,
+.chat-key-recovery__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-key-recovery__form {
+  flex-basis: 100%;
+}
+
+.chat-key-recovery__form label {
+  flex-basis: 100%;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.chat-key-recovery input,
+.chat-key-recovery button {
+  min-height: 38px;
+  border: 1px solid #b9c9dc;
+  border-radius: 7px;
+  font: inherit;
+}
+
+.chat-key-recovery input {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 8px 10px;
+  background: #fff;
+}
+
+.chat-key-recovery button {
+  padding: 8px 12px;
+  background: #fff;
+  color: #214e82;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chat-key-recovery button:disabled {
+  cursor: wait;
+  opacity: .65;
+}
+
+.chat-key-recovery__code {
+  flex-basis: 100%;
+  overflow-wrap: anywhere;
+  padding: 12px;
+  border: 1px dashed #91a9c5;
+  border-radius: 7px;
+  background: #fff;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
+.chat-key-recovery__error {
+  flex-basis: 100%;
+  color: #a52828;
+}
+
+.chat-key-recovery__notice {
+  flex-basis: 100%;
+  color: #24653f;
+}
