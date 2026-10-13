@@ -512,15 +512,15 @@ const otpTickRef = useRef(null);
     const file = e.target.files[0];
     if (!file) return;
 
-    // Validate file type
+    // Validate file type - supports all image types including GIF
     if (!file.type.startsWith('image/')) {
       setError('Please select an image file.');
       return;
     }
 
-    // Validate file size (max 2MB)
-    if (file.size > 2 * 1024 * 1024) {
-      setError('Image size must be less than 2MB.');
+    // Validate file size (max 10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      setError('Image size must be less than 10MB.');
       return;
     }
 
@@ -551,15 +551,15 @@ const otpTickRef = useRef(null);
     const file = e.target.files[0];
     if (!file) return;
 
-    // Validate file type
+    // Validate file type - supports all image types including GIF
     if (!file.type.startsWith('image/')) {
       setError('Please select an image file.');
       return;
     }
 
-    // Validate file size (max 3MB for banner)
-    if (file.size > 3 * 1024 * 1024) {
-      setError('Banner image size must be less than 3MB.');
+    // Validate file size (max 10MB for banner)
+    if (file.size > 10 * 1024 * 1024) {
+      setError('Banner image size must be less than 10MB.');
       return;
     }
 

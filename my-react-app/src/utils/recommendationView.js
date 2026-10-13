@@ -171,13 +171,27 @@ export function nameKey(value) {
   let text = String(value).replace(/<[^>]*>/g, ' ');
   // "Vitamin D3 - 2000 IU" is a schedule entry, not a name.
   text = text.split(/\s+[-–—]\s+/)[0];
-  return text
+  
+  const words = text
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
     .split(' ')
-    .filter((word) => word.length > 1 && !GENERIC_WORDS.has(word) && !isMeasure(word))
-    .join(' ')
-    .trim();
+    .filter((word) => {
+      // Keep single-letter vitamin identifiers (a, b, c, d, e, k)
+      if (word.length === 1 && /[abcdek]/.test(word)) return true;
+      // Filter out short words, generic terms, and measurements
+      return word.length > 1 && !GENERIC_WORDS.has(word) && !isMeasure(word);
+    });
+  
+  // Special case: if "complex" appears with a vitamin letter, keep it
+  const result = words.join(' ').trim();
+  
+  // Handle "b complex", "vitamin b complex", etc - restore "complex" for B vitamins
+  if (/\bb\b/.test(result) || text.toLowerCase().includes('b-complex')) {
+    return result || 'b complex';
+  }
+  
+  return result;
 }
 
 /**

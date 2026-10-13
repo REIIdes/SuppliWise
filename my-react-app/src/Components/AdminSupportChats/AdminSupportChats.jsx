@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ConfirmModal from '../ConfirmModal/ConfirmModal';
 import useSecureChat from '../../security/useSecureChat';
 import useChatStream from '../../hooks/useChatStream';
+import { pictureUrl } from '../../utils/pictureUrl';
 import './AdminSupportChats.css';
 
 /**
@@ -194,7 +195,14 @@ function StatIcon({ name }) {
   );
 }
 
-export default function AdminSupportChats({ request, focusThreadId = '' }) {
+export default function AdminSupportChats({ request, focusThreadId = '', adminProfile = {} }) {
+
+  // Track broken profile pictures
+  const [brokenPictures, setBrokenPictures] = useState(new Set());
+  const markPictureBroken = useCallback((id) => {
+    setBrokenPictures((prev) => new Set(prev).add(id));
+  }, []);
+  
   // ── End-to-end encryption ──────────────────────────────────────────────
   // The operator's identity is per AdminAccount, not per member — see
   // models/chatEncryptionKeySchema.js for why two identities beat one shared
@@ -361,6 +369,7 @@ export default function AdminSupportChats({ request, focusThreadId = '' }) {
     try {
       const data = await request(`/chats/${id}`);
       if (token !== threadToken.current) return;
+      
       // Unlock the conversation's key, then open the transcript in one pass.
       // Both are awaited BEFORE setActive so a sealed thread never renders with
       // the envelope string in the message body — an operator looking at `e1.…`
@@ -1027,9 +1036,23 @@ export default function AdminSupportChats({ request, focusThreadId = '' }) {
                       aria-current={isActive ? 'true' : undefined}
                     >
                       <span className="asc-thread__top">
-                        <span className="asc-avatar" style={avatarStyle(row.user)} aria-hidden="true">
-                          {initials(row.user)}
-                        </span>
+                        {(() => {
+                          const userId = row.user?._id || `user-${row._id}`;
+                          const avatarSrc = pictureUrl(row.user?.profilePicture);
+                          const showPicture = Boolean(avatarSrc) && !brokenPictures.has(userId);
+                          return showPicture ? (
+                            <img
+                              className="asc-avatar asc-avatar--image"
+                              src={avatarSrc}
+                              alt=""
+                              onError={() => markPictureBroken(userId)}
+                            />
+                          ) : (
+                            <span className="asc-avatar" style={avatarStyle(row.user)} aria-hidden="true">
+                              {initials(row.user)}
+                            </span>
+                          );
+                        })()}
                         <span className="asc-thread__who">
                           <strong>{memberName(row.user)}</strong>
                           <em>{row.user?.email || '—'}</em>
@@ -1191,24 +1214,78 @@ export default function AdminSupportChats({ request, focusThreadId = '' }) {
                     <p className="asc-empty">No messages yet.</p>
                   ) : active.messages.map((m) => {
                     const mine = m.author === 'admin';
-                    // A sealed message that will not open means this browser is
-                    // not a recipient. Saying so, in the body slot, is the only
-                    // way an operator can tell that from "the site is broken" —
-                    // and it is the difference between a 30-second fix (grant
-                    // access) and a support ticket about a broken console.
                     const lockedUp = m.encrypted && (m.body === null || m.body === undefined);
+                    
+                    // Render avatar for admin or user
+                    const renderMessageAvatar = () => {
+                      if (mine) {
+                        // Admin avatar
+                        const avatarSrc = pictureUrl(adminProfile.profilePicture);
+                        const showPicture = Boolean(avatarSrc) && !brokenPictures.has('admin');
+                        
+                        return showPicture ? (
+                          <img
+                            className="asc-avatar asc-avatar--image"
+                            src={avatarSrc}
+                            alt=""
+                            onError={() => {
+                              markPictureBroken('admin');
+                            }}
+                          />
+                        ) : (
+                          <span className="asc-avatar" style={avatarStyle({ firstName: 'Admin' })} aria-hidden="true">
+                            {initials({ firstName: 'Admin' })}
+                          </span>
+                        );
+                      } else {
+                        // User avatar
+                        const userId = user?._id || 'user';
+                        const avatarSrc = pictureUrl(user?.profilePicture);
+                        const showPicture = Boolean(avatarSrc) && !brokenPictures.has(userId);
+                        
+                        // Debug logging
+                        if (!showPicture && user?.profilePicture) {
+                          console.log('User avatar not showing:', {
+                            profilePicture: user?.profilePicture,
+                            avatarSrc,
+                            userId,
+                            brokenPictures: Array.from(brokenPictures),
+                          });
+                        }
+                        
+                        return showPicture ? (
+                          <img
+                            className="asc-avatar asc-avatar--image"
+                            src={avatarSrc}
+                            alt=""
+                            onError={() => {
+                              console.log('Image load error for user:', userId, avatarSrc);
+                              markPictureBroken(userId);
+                            }}
+                          />
+                        ) : (
+                          <span className="asc-avatar" style={avatarStyle(user)} aria-hidden="true">
+                            {initials(user)}
+                          </span>
+                        );
+                      }
+                    };
+                    
                     return (
                       <div key={m._id} className={`asc-msg${mine ? ' asc-msg--mine' : ' asc-msg--theirs'}`}>
-                        <div className="asc-msg__head">
-                          <span className="asc-msg__who">
-                            {mine ? (m.authorName || 'You') : memberName(user)}
-                          </span>
-                          <span className="asc-msg__time">{formatStamp(m.createdAt)}</span>
-                        </div>
-                        <div className="asc-msg__body">
-                          {lockedUp
-                            ? <span className="asc-msglock">Encrypted — this device does not hold the key</span>
-                            : m.body}
+                        {renderMessageAvatar()}
+                        <div className="asc-msg__content">
+                          <div className="asc-msg__head">
+                            <span className="asc-msg__who">
+                              {mine ? (m.authorName || 'You') : memberName(user)}
+                            </span>
+                            <span className="asc-msg__time">{formatStamp(m.createdAt)}</span>
+                          </div>
+                          <div className="asc-msg__body">
+                            {lockedUp
+                              ? <span className="asc-msglock">Encrypted — this device does not hold the key</span>
+                              : m.body}
+                          </div>
                         </div>
                       </div>
                     );

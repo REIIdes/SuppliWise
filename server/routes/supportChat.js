@@ -198,11 +198,8 @@ const toMessageView = (message) => ({
   _id: message._id,
   thread: message.thread,
   author: message.author,
-  // A member's own name is theirs to see, so it passes through untouched. An
-  // admin's reply is attributed to the label above regardless of what the
-  // document says — including for messages written before this existed, which is
-  // why the substitution is here and not in the write path.
-  authorName: message.author === 'admin' ? SUPPORT_AUTHOR_LABEL : message.authorName,
+  // Pass through the actual author name for both users and admins
+  authorName: message.authorName || '',
   // Exactly one of these two is populated. Both travel because the client has
   // to render a transcript that mixes a legacy plaintext thread with a newly
   // encrypted one, and deciding which by guessing would be guesswork.
@@ -699,6 +696,23 @@ router.get('/:id', async (req, res) => {
     // see announceAdmins for the refetch loop this avoids.
     announceAdmins(req, { kind: 'read', thread: thread._id, by: 'user' }, req.user._id);
 
+    // Fetch admin profiles who have replied in this thread for avatar display
+    const AdminAccount = require('../models/AdminAccount');
+    const adminNames = [...new Set(
+      messages
+        .filter(m => m.author === 'admin' && m.authorName)
+        .map(m => m.authorName)
+    )];
+    const adminProfiles = {};
+    if (adminNames.length > 0) {
+      const admins = await AdminAccount.find({ alias: { $in: adminNames } })
+        .select('alias profilePicture')
+        .lean();
+      admins.forEach(admin => {
+        adminProfiles[admin.alias] = admin.profilePicture || '';
+      });
+    }
+
     return res.json({
       thread: toThreadView({ ...thread, unreadByUser: 0 }, memberParticipant(req)),
       messages: (messages || []).map(toMessageView),
@@ -707,6 +721,8 @@ router.get('/:id', async (req, res) => {
       // Fresh presence for the thread header, so a deep-linked open does not
       // wait for the next list poll to answer "is support here?".
       supportActive: isSupportActive(),
+      // Admin profiles for avatar display
+      adminProfiles,
     });
   } catch (error) {
     console.error('[support-chat GET /:id]', error.message);

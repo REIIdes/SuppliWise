@@ -66,8 +66,8 @@ const EXT_BY_MIME = {
  * encoded size is separately bounded so a hostile body cannot make us
  * allocate an unbounded string before we get to check anything.
  */
-const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
-const MAX_BANNER_BYTES = 3 * 1024 * 1024;
+const MAX_AVATAR_BYTES = 10 * 1024 * 1024;
+const MAX_BANNER_BYTES = 10 * 1024 * 1024;
 
 /** Hard ceiling on an accepted base64 payload, before decoding. */
 const MAX_ENCODED_CHARS = 12 * 1024 * 1024;
@@ -186,8 +186,8 @@ function storePicture({ ownerId, kind, value, maxBytes }) {
   if (parsed.buffer.length > cap) {
     const err = new Error(
       kind === 'banner'
-        ? 'Banner image is too large (max 3 MB).'
-        : 'Profile picture is too large (max 2 MB).'
+        ? 'Banner image is too large (max 10 MB).'
+        : 'Profile picture is too large (max 10 MB).'
     );
     err.statusCode = 413;
     throw err;

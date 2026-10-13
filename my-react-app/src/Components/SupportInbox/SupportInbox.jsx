@@ -12,10 +12,40 @@ import {
   shareMySupportThreadWithOperators,
   getToken,
 } from '../../api';
+import { pictureUrl } from '../../utils/pictureUrl';
 import useSecureChat from '../../security/useSecureChat';
 import useAuth from '../../hooks/useAuth';
 import useChatStream from '../../hooks/useChatStream';
 import './SupportInbox.css';
+
+/** Avatar gradient colors */
+const AVATAR_GRADIENTS = [
+  'linear-gradient(135deg, #0ea5e9 0%, #06b6d4 100%)',
+  'linear-gradient(135deg, #8b5cf6 0%, #a855f7 100%)',
+  'linear-gradient(135deg, #ec4899 0%, #f43f5e 100%)',
+  'linear-gradient(135deg, #f97316 0%, #f59e0b 100%)',
+];
+
+function avatarGradient(user) {
+  const seed = String(user?._id || user?.email || user?.firstName || 'x');
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) hash = (hash * 31 + seed.charCodeAt(i)) % 100000;
+  return AVATAR_GRADIENTS[hash % AVATAR_GRADIENTS.length];
+}
+
+function getInitials(user) {
+  const first = String(user?.firstName || '').trim();
+  const last = String(user?.lastName || '').trim();
+  
+  if (first && last) return `${first[0]}${last[0]}`.toUpperCase();
+  if (first) return first[0].toUpperCase();
+  if (last) return last[0].toUpperCase();
+  
+  const email = String(user?.email || '').trim();
+  if (email) return email[0].toUpperCase();
+  
+  return '?';
+}
 
 /**
  * SUPPORT INBOX — the member's side of the conversation with the admin team.
@@ -310,6 +340,12 @@ function dayLabel(value) {
 
 export default function SupportInbox({ initialCategory = 'other', startComposing = false, focusThreadId = '' }) {
   const { user } = useAuth();
+  
+  // Track broken profile pictures
+  const [brokenPictures, setBrokenPictures] = useState(new Set());
+  const markPictureBroken = useCallback((id) => {
+    setBrokenPictures((prev) => new Set(prev).add(id));
+  }, []);
 
   // ── End-to-end encryption ──────────────────────────────────────────────
   //
@@ -336,6 +372,7 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
   const [supportActive, setSupportActive] = useState(false);
   const [activeId, setActiveId] = useState(null);
   const [active, setActive] = useState(null);   // { thread, messages[] }
+  const [adminProfiles, setAdminProfiles] = useState({}); // { authorName: profilePicture }
   const [loaded, setLoaded] = useState(false);
   // `loaded` already distinguishes "has never finished a load" from "refreshing",
   // and the first load does not set state synchronously — so a second
@@ -479,6 +516,8 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
       if (token !== threadToken.current) return;
       setActive({ thread: data.thread, messages: rows });
       if (typeof data.supportActive === 'boolean') setSupportActive(data.supportActive);
+      if (data.adminProfiles) setAdminProfiles(data.adminProfiles);
+      
       // Opening it marks it read server-side, so the local badge is cleared
       // rather than waiting for the next poll to agree. The decrement is driven
       // by what the thread ACTUALLY had (read from the ref, not from inside a
@@ -1349,15 +1388,56 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
                           </div>
                         )}
                         <div className={`sci-msg sci-msg--${mine ? 'mine' : 'theirs'}`}>
-                          {!mine && (
-                            <span className="sci-msg__avatar" aria-hidden="true">
-                              <IconHeadset />
-                            </span>
+                          {mine ? (
+                            (() => {
+                              const avatarSrc = pictureUrl(user?.profilePicture);
+                              const showPicture = Boolean(avatarSrc) && !brokenPictures.has(user?._id);
+                              return showPicture ? (
+                                <img
+                                  className="sci-msg__avatar sci-msg__avatar--image"
+                                  src={avatarSrc}
+                                  alt=""
+                                  onError={() => user?._id && markPictureBroken(user._id)}
+                                />
+                              ) : (
+                                <span
+                                  className="sci-msg__avatar"
+                                  style={{ backgroundImage: avatarGradient(user) }}
+                                  aria-hidden="true"
+                                >
+                                  {getInitials(user)}
+                                </span>
+                              );
+                            })()
+                          ) : (
+                            // Admin message - show profile picture or initials
+                            (() => {
+                              const adminProfilePic = adminProfiles[m.authorName] || '';
+                              const avatarSrc = pictureUrl(adminProfilePic);
+                              const showPicture = Boolean(avatarSrc) && !brokenPictures.has(`admin-${m.authorName}`);
+                              
+                              return showPicture ? (
+                                <img
+                                  className="sci-msg__avatar sci-msg__avatar--image"
+                                  src={avatarSrc}
+                                  alt=""
+                                  onError={() => markPictureBroken(`admin-${m.authorName}`)}
+                                />
+                              ) : (
+                                <span
+                                  className="sci-msg__avatar"
+                                  style={{ backgroundImage: avatarGradient({ firstName: m.authorName || 'Admin' }) }}
+                                  aria-hidden="true"
+                                >
+                                  {getInitials({ firstName: m.authorName || 'Support' })}
+                                </span>
+                              );
+                            })()
                           )}
                           <div className="sci-msg__col">
                             {showMeta && (
                               <div className="sci-msg__head">
-                                <span className="sci-msg__who">{mine ? 'You' : SUPPORT_AUTHOR_LABEL}</span>
+                                <span className="sci-msg__who">{mine ? 'You' : (m.authorName || SUPPORT_AUTHOR_LABEL)}</span>
                                 <span className="sci-msg__time">{formatStamp(m.createdAt)}</span>
                               </div>
                             )}

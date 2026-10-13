@@ -419,7 +419,7 @@ app.use('/api/admin', lockoutCheck, adminLimiter);
 // the heap — N allowed requests × 10 MB each can still exhaust memory while
 // every limiter happily answers 200.
 const JSON_LIMIT_BYTES = 1 * 1024 * 1024;           // every text payload
-const JSON_UPLOAD_LIMIT_BYTES = 10 * 1024 * 1024;   // base64 pictures only
+const JSON_UPLOAD_LIMIT_BYTES = 15 * 1024 * 1024;   // base64 pictures only (accounts for base64 encoding overhead)
 // Reserve BEFORE parsing, using the largest parser limit anywhere as the
 // worst case for a chunked body (which declares no length).
 app.use(bodyBudget(JSON_UPLOAD_LIMIT_BYTES));

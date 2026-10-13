@@ -292,10 +292,9 @@ const TAB_ICONS = {
 };
 
 /* ── Settings → Edit profile: picture picking ─────────────────────────── */
-// Same limits the server enforces (2 MB picture / 3 MB background), checked
-// before the file is ever read so a bad pick fails with a readable message.
-const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
-const BANNER_MAX_BYTES = 3 * 1024 * 1024;
+// File size limits for profile pictures - support GIFs and larger images
+const AVATAR_MAX_BYTES = 10 * 1024 * 1024;
+const BANNER_MAX_BYTES = 10 * 1024 * 1024;
 
 function readImageFile(file, maxBytes, tooBigMessage) {
   return new Promise((resolve, reject) => {
@@ -1720,7 +1719,7 @@ function AdminDashboard() {
           {tab === 'users'                  && <div className="admin-tab-panel"><Users users={users} setUsers={setUsers} usersFetchedAt={usersFetchedAt} search={search} setSearch={value => { searchRef.current = value; setSearch(value); }} loadUsers={loadUsers} request={request} onSubscriptionChanged={applySubscriptionUpdate} updateAccount={updateAccount} deleteAccount={deleteAccount} deletingUserId={deletingUserId} unlockUser={unlockUser} expandedUser={expandedUser} setExpandedUser={setExpandedUser} /></div>}
           {tab === 'admins'                 && <div className="admin-tab-panel"><Admins admins={admins} adminsFetchedAt={adminsFetchedAt} search={adminSearch} setSearch={value => { adminSearchRef.current = value; setAdminSearch(value); }} loadAdmins={loadAdmins} toggleAdmin={toggleAdmin} unlockAdmin={unlockAdmin} currentAdmin={profile} expandedAdmin={expandedAdmin} setExpandedAdmin={setExpandedAdmin} /></div>}
           {tab === 'subscriptions'          && <div className="admin-tab-panel"><AdminSubscriptionRequests request={request} /></div>}
-          {tab === 'chats'                   && <div className="admin-tab-panel"><AdminSupportChats request={request} focusThreadId={focusThreadId} /></div>}
+          {tab === 'chats'                   && <div className="admin-tab-panel"><AdminSupportChats request={request} focusThreadId={focusThreadId} adminProfile={appearance} /></div>}
           {tab === 'assessment-management'  && <div className="admin-tab-panel"><AssessmentManagement users={allUsers} /></div>}
           {tab === 'ai'                     && <div className="admin-tab-panel"><AiPanel ai={ai} onCheckNow={checkAiNow} checking={checkingAi} reload={aiReload} /></div>}
           {tab === 'security'               && <div className="admin-tab-panel"><SecurityStatus monitor={monitor} onDownloadReport={() => downloadReportRef.current()} detection={ai?.detection} focusMonitorKey={focusMonitorKey} /></div>}
@@ -4666,7 +4665,7 @@ function ProfilePanel({ profile, appearance, onSaveAppearance, editOpen, onToggl
               </div>
               <div className="pf-look__info">
                 <strong>Profile picture</strong>
-                <span className="admin-muted">Shown in the topbar and on this card · JPG or PNG · max 2 MB</span>
+                <span className="admin-muted">Shown in the topbar and on this card · JPG, PNG or GIF · max 10 MB</span>
                 <div className="pf-look__actions">
                   <button type="button" className="admin-secondary" onClick={() => avatarInputRef.current?.click()}>
                     Change picture
@@ -4684,7 +4683,7 @@ function ProfilePanel({ profile, appearance, onSaveAppearance, editOpen, onToggl
                   accept="image/*"
                   tabIndex={-1}
                   aria-hidden="true"
-                  onChange={(event) => handlePicturePick(event, 'profilePicture', AVATAR_MAX_BYTES, 'Profile picture must be less than 2MB.')}
+                  onChange={(event) => handlePicturePick(event, 'profilePicture', AVATAR_MAX_BYTES, 'Profile picture must be less than 10MB.')}
                 />
               </div>
             </div>
@@ -4699,7 +4698,7 @@ function ProfilePanel({ profile, appearance, onSaveAppearance, editOpen, onToggl
               </div>
               <div className="pf-look__info">
                 <strong>Background picture</strong>
-                <span className="admin-muted">Banner behind the account card · JPG or PNG · max 3 MB</span>
+                <span className="admin-muted">Banner behind the account card · JPG, PNG or GIF · max 10 MB</span>
                 <div className="pf-look__actions">
                   <button type="button" className="admin-secondary" onClick={() => bannerInputRef.current?.click()}>
                     Change background
@@ -4717,7 +4716,7 @@ function ProfilePanel({ profile, appearance, onSaveAppearance, editOpen, onToggl
                   accept="image/*"
                   tabIndex={-1}
                   aria-hidden="true"
-                  onChange={(event) => handlePicturePick(event, 'bannerPicture', BANNER_MAX_BYTES, 'Background picture must be less than 3MB.')}
+                  onChange={(event) => handlePicturePick(event, 'bannerPicture', BANNER_MAX_BYTES, 'Background picture must be less than 10MB.')}
                 />
               </div>
             </div>

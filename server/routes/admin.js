@@ -2653,8 +2653,8 @@ router.get('/profile/pictures', async (req, res) => {
 // stored — see utils/pictures.js. This document used to carry the base64
 // itself, which made it multi-megabyte and forced every read of it (the
 // console's appearance fetch, among others) to pay a ~30 s Atlas transfer.
-const MAX_ADMIN_AVATAR_BYTES = 2 * 1024 * 1024; // 2 MB
-const MAX_ADMIN_BANNER_BYTES = 3 * 1024 * 1024; // 3 MB
+const MAX_ADMIN_AVATAR_BYTES = 10 * 1024 * 1024; // 10 MB
+const MAX_ADMIN_BANNER_BYTES = 10 * 1024 * 1024; // 10 MB
 
 router.patch('/profile', async (req, res) => {
   try {

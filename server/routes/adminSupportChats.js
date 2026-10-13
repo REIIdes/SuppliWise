@@ -145,7 +145,7 @@ const router = express.Router();
 router.use('/stream', streamTokenAuth);
 router.use(protect, adminOnly);
 
-const THREAD_USER_FIELDS = 'firstName lastName email accountStatus subscriptionPlan';
+const THREAD_USER_FIELDS = 'firstName lastName email accountStatus subscriptionPlan profilePicture';
 
 // Escapes a user-supplied search term before it becomes a RegExp. Without this
 // a query of "(" is a syntax error that 500s, and a term of "a{1,1000}" is a
@@ -211,6 +211,7 @@ const toThreadView = (thread, participant = '') => ({
       email: thread.user.email,
       accountStatus: thread.user.accountStatus,
       subscriptionPlan: thread.user.subscriptionPlan,
+      profilePicture: thread.user.profilePicture,
     }
     : null,
 });
