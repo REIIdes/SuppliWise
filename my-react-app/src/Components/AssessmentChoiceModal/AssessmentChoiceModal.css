@@ -21,8 +21,8 @@
 }
 
 .choice-modal-option-update {
-  border-color: #a7f3d0;
-  background: #f0fdf9;
+  border-color: var(--sw-line-strong, #cbe7da);
+  background: var(--sw-surface-sunk, #f4fbf7);
 }
 
 .choice-modal-option:hover {

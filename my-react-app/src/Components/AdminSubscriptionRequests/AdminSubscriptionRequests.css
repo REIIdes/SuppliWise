@@ -71,7 +71,7 @@
   padding: 5px;
   border: 1px solid var(--asr-line);
   border-radius: 14px;
-  background: #eef2f0;
+  background: var(--sw-surface-sunk, #f4fbf7);
   align-self: flex-start;
   max-width: 100%;
   flex-wrap: wrap;

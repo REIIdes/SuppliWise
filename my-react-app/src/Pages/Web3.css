@@ -517,7 +517,7 @@
   position: relative;
   margin-bottom: 18px;
   padding: 22px;
-  border: 1px solid var(--w3-line);
+  border: 1px solid var(--sw-line, #e2f1ea);
   border-radius: 22px;
   background: #fff;
   box-shadow: var(--w3-shadow-md);
@@ -948,9 +948,9 @@
 }
 
 .w3-btn.ghost {
-  border-color: #cfe0d8;
+  border: 1.5px solid var(--sw-line-strong, #cbe7da);
   background: #fff;
-  color: var(--w3-ink-2);
+  color: var(--sw-emerald-deep, #059669);
   box-shadow: var(--w3-shadow-sm);
 }
 
@@ -992,7 +992,7 @@
 .w3-textarea {
   width: 100%;
   padding: 10px 13px;
-  border: 1px solid #cbe0d5;
+  border: 1px solid var(--sw-line-strong, #cbe7da);
   border-radius: 12px;
   font-size: 14px;
   color: var(--w3-ink);
@@ -1066,7 +1066,7 @@
   align-items: center;
   gap: 2px;
   padding: 3px;
-  border: 1px solid #cbe0d5;
+  border: 1px solid var(--sw-line-strong, #cbe7da);
   border-radius: 12px;
   background: #fff;
   box-shadow: var(--w3-shadow-xs);
@@ -1129,7 +1129,7 @@
   white-space: nowrap;
 }
 
-.w3-badge.green  { background: #d9fbe9; border-color: #a7f3c8; color: #047857; }
+.w3-badge.green  { background: var(--sw-surface-sunk, #f4fbf7); border-color: var(--sw-line-strong, #cbe7da); color: #047857; }
 .w3-badge.amber  { background: #fef3c7; border-color: #fcd77f; color: #9a4f08; }
 .w3-badge.red    { background: #ffe4e9; border-color: #fda4af; color: #be123c; }
 .w3-badge.blue   { background: #e0e7ff; border-color: #c3cbff; color: #3730a3; }
@@ -1200,8 +1200,8 @@
 }
 
 .w3-alert.ok {
-  border-color: #86efac;
-  background: linear-gradient(120deg, #ecfdf5 0%, #f0fdfa 60%, #f5fee7 100%);
+  border-color: rgba(16, 185, 129, 0.45);
+  background: linear-gradient(120deg, var(--sw-surface-sunk, #f4fbf7) 0%, #f0fdfa 60%, #f5fee7 100%);
   color: #047857;
 }
 
@@ -1271,7 +1271,7 @@
 /* Confirmed state: the chip turns emerald so the result of the click is
    visible at a glance instead of only in the tooltip. */
 .w3-hash.copied {
-  border-color: #86efac;
+  border-color: rgba(16, 185, 129, 0.45);
   background: linear-gradient(140deg, #ecfdf5, #d1fae5);
   color: #047857;
 }
@@ -1410,7 +1410,7 @@
   position: relative;
   margin-left: 8px;
   padding: 0 0 22px 28px;
-  border-left: 2px solid #c9ecdc;
+  border-left: 2px solid var(--sw-line-strong, #cbe7da);
 }
 
 .w3-timeline-item:last-child {
@@ -1676,7 +1676,7 @@
   justify-content: center;
   width: 46px;
   height: 46px;
-  border: 1px solid #a7f3c8;
+  border: 1px solid var(--sw-line-strong, #cbe7da);
   border-radius: 15px;
   font-size: 22px;
   background: linear-gradient(150deg, #ffffff, #ecfdf5);
@@ -1816,7 +1816,7 @@
 }
 
 .w3-vote-legend .quorum.met {
-  background: #d9fbe9;
+  background: var(--sw-surface-sunk, #f4fbf7);
   color: #047857;
 }
 
@@ -1878,8 +1878,8 @@
 }
 
 .w3-verify-badge.good {
-  border: 2px solid #86efac;
-  background: linear-gradient(135deg, #dcfce7, #a7f3d0);
+  border: 2px solid rgba(16, 185, 129, 0.45);
+  background: linear-gradient(135deg, var(--sw-surface-sunk, #f4fbf7), rgba(16, 185, 129, 0.28));
   color: #166534;
   box-shadow: 0 14px 30px -18px rgba(22, 101, 52, 0.9);
 }

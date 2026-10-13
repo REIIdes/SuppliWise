@@ -37,7 +37,7 @@
     radial-gradient(900px 420px at 8% -6%, rgba(16, 185, 129, 0.14), transparent 60%),
     radial-gradient(820px 400px at 96% 2%, rgba(99, 102, 241, 0.13), transparent 62%),
     radial-gradient(700px 500px at 50% 118%, rgba(14, 165, 233, 0.11), transparent 65%),
-    linear-gradient(180deg, #f6fdfa 0%, #eef7f3 100%);
+    var(--sw-mesh, linear-gradient(168deg, #eefcf5, #ecf4ff 52%, #f5f0ff));
   /* Painted on the viewport, and the viewport no longer scrolls, so scrolling
      __main can never expose a seam or restart the pattern. */
   background-attachment: fixed;

@@ -175,11 +175,11 @@
 /* Unread rows carry the family wash at rest, so an unread support reply is
    visibly different from an unread security notice before you read either. */
 .nd-row--unread {
-  background: color-mix(in srgb, var(--nk-bg, #f0fdf4) 70%, transparent);
+  background: color-mix(in srgb, var(--nk-bg, #e7f8ef) 70%, transparent);
 }
 
 .nd-row--unread:hover {
-  background: var(--nk-bg, #f0fdf4);
+  background: var(--nk-bg, #e7f8ef);
 }
 
 .nd-row:focus-visible {

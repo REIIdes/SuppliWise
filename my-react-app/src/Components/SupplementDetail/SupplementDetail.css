@@ -209,8 +209,8 @@
 
 .swdetail__benefit {
   padding: 12px 14px;
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border: 1px solid var(--sw-line, #e2f1ea);
   border-radius: var(--sw-radius-md, 14px);
 }
 

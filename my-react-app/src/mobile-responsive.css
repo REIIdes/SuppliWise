@@ -15,7 +15,7 @@
   .results-wrapper,
   .home-wrapper,
   .page-wrapper {
-    background: #d1f4e0 !important;
+    background: var(--sw-mesh, linear-gradient(168deg, #e9fcf3 0%, #e9f3ff 48%, #f3edff 100%)) !important;
   }
 
   /* Auth pages (Sign In / Sign Up): keep a vibrant gradient instead of
@@ -36,14 +36,14 @@
   .home-wrapper .how-card,
   .home-wrapper .how-card-featured {
     background: white !important;
-    border: 2px solid #86efac !important;
+    border: 1px solid var(--sw-line-strong, #cbe7da) !important;
     box-shadow: 0 4px 12px rgba(16, 185, 129, 0.15) !important;
   }
 
   /* Keep featured card with green background tint */
   .home-wrapper .how-card-featured {
-    background: #f0fdf4 !important;
-    border: 2px solid #22c55e !important;
+    background: linear-gradient(180deg, rgba(16, 185, 129, 0.08), rgba(34, 211, 238, 0.04)) !important;
+    border: 1px solid rgba(16, 185, 129, 0.5) !important;
     box-shadow: 0 4px 16px rgba(34, 197, 94, 0.25) !important;
   }
 
@@ -310,7 +310,7 @@
   width: 40px;
   height: 40px;
   border: 3px solid #d1f4e0;
-  border-top-color: #22c55e;
+  border-top-color: #10b981;
   border-radius: 50%;
   animation: spin-simple 0.8s linear infinite;
   flex-shrink: 0;
@@ -530,7 +530,7 @@
     font-weight: 700 !important;
     color: #059669 !important;
     padding-bottom: 8px !important;
-    border-bottom: 1px solid #f0fdf4 !important;
+    border-bottom: 1px solid var(--sw-sunk, #e7f8ef) !important;
     width: 100% !important;
   }
 
@@ -542,8 +542,8 @@
   }
 
   .schedule-pill {
-    background: #f0fdf4 !important;
-    border: 1.5px solid #86efac !important;
+    background: rgba(16, 185, 129, 0.07) !important;
+    border: 1.5px solid var(--sw-line-strong, #cbe7da) !important;
     border-radius: 10px !important;
     padding: 12px 14px !important;
     font-size: 14px !important;
@@ -1071,8 +1071,8 @@
   /* Selected state */
   .diet-option:has(input:checked),
   .radio-option:has(input:checked) {
-    background: #f0fdf4 !important;
-    border-color: #22c55e !important;
+    background: rgba(16, 185, 129, 0.10) !important;
+    border-color: var(--sw-emerald, #10b981) !important;
   }
 
   /* ═══ HEALTH GOALS CHECKBOXES ═══ */
@@ -1337,7 +1337,7 @@
     gap: 6px !important;
     height: 44px !important;
     box-sizing: border-box !important;
-    background: #22c55e !important;
+    background: linear-gradient(135deg, #10b981, #0d9488) !important;
     color: white !important;
     border: none !important;
     margin-left: 4px !important;

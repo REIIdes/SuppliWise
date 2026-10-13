@@ -128,13 +128,13 @@
 }
 
 .clo-btn--cancel {
-  background: #f8fafc;
-  color: #475569;
-  border: 2px solid #e2e8f0;
+  background: #fff;
+  color: var(--sw-emerald-deep, #059669);
+  border: 1.5px solid var(--sw-line-strong, #cbe7da);
 }
 .clo-btn--cancel:hover {
-  background: #f1f5f9;
-  border-color: #cbd5e1;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border-color: var(--sw-emerald, #10b981);
   transform: translateY(-2px);
 }
 .clo-btn--cancel:active {

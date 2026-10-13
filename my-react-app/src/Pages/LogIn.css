@@ -285,13 +285,13 @@
   /* Outlined, not filled: a second solid green button on the same screen reads
      as two equally primary actions, which they are not. */
   background: transparent;
-  color: #15803d;
-  border: 1.5px solid #86efac;
+  color: #065f46;
+  border: 1.5px solid rgba(16, 185, 129, 0.5);
 }
 
 .auth-btn--passkey:hover:not(:disabled) {
-  background: #f0fdf4;
-  border-color: #22c55e;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border-color: var(--sw-emerald, #10b981);
 }
 
 .auth-passkey__hint {
@@ -520,7 +520,7 @@
   left: 0;
   right: 0;
   height: 6px;
-  background: linear-gradient(90deg, #34d399, #22d3ee, #818cf8, #fbbf24, #34d399);
+  background: linear-gradient(90deg, #34d399, #22d3ee, #818cf8, #e879f9, #fbbf24, #34d399);
   background-size: 300% 100%;
   animation: auth-ribbon 9s linear infinite;
 }
@@ -550,7 +550,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #34d399 0%, #06b6d4 52%, #3b82f6 100%);
+  background: linear-gradient(135deg, #34d399 0%, #06b6d4 45%, #6366f1 80%, #a855f7 100%);
   box-shadow:
     0 16px 32px -12px rgba(16, 185, 129, 0.55),
     0 0 0 9px rgba(52, 211, 153, 0.14);
@@ -561,7 +561,7 @@
   font-weight: 800;
   letter-spacing: -0.02em;
   margin: 0 0 8px;
-  background: linear-gradient(92deg, #047857 0%, #0d9488 45%, #2563eb 100%);
+  background: linear-gradient(92deg, #047857 0%, #0d9488 38%, #2563eb 72%, #7c3aed 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -722,8 +722,8 @@
   transition: border-color 0.2s ease, background-color 0.2s ease;
 }
 .auth-remember:hover {
-  border-color: #a7f3d0;
-  background: #f0fdf4;
+  border-color: var(--sw-emerald, #10b981);
+  background: var(--sw-surface-sunk, #f4fbf7);
 }
 .auth-remember input[type="checkbox"] {
   width: 17px;
@@ -733,7 +733,7 @@
 
 /* ── Primary CTA: vibrant pill with gradient shift on hover ───────── */
 .auth-btn {
-  background: linear-gradient(135deg, #10b981 0%, #059669 55%, #0d9488 100%) !important;
+  background: linear-gradient(135deg, #10b981 0%, #0d9488 45%, #6366f1 100%) !important;
   background-size: 160% 160% !important;
   border-radius: 999px !important;
   padding: 15px !important;

@@ -28,8 +28,8 @@
 
 /* ── Summary card ───────────────────────────────────────────────── */
 .ard-summary {
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border: 1px solid var(--sw-line, #e2f1ea);
   border-left: 4px solid #18342a;
   border-radius: 8px;
   padding: 16px 18px;
@@ -82,8 +82,8 @@
 /* ── Single recommendation card ─────────────────────────────────── */
 .ard-card {
   background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
+  border: 1px solid var(--sw-line, #e2f1ea);
+  border-radius: 16px;
   overflow: hidden;
   transition: box-shadow 0.15s;
 }
@@ -228,8 +228,8 @@
 
 /* Summary card — mint glow panel */
 .ard-summary {
-  background: linear-gradient(180deg, #ffffff, #f0fdf4);
-  border: 1px solid #a7f3d0;
+  background: linear-gradient(180deg, #ffffff, var(--sw-surface-sunk, #f4fbf7));
+  border: 1px solid var(--sw-line, #e2f1ea);
   border-left: 5px solid #10b981;
   border-radius: 16px;
   box-shadow: 0 6px 20px rgba(16, 185, 129, 0.10);
@@ -266,7 +266,7 @@
 /* Recommendation cards — lift, glow, staggered entrance */
 .ard-rec-list { gap: 16px; }
 .ard-card {
-  border: 1px solid #a7f3d0;
+  border: 1px solid var(--sw-line, #e2f1ea);
   border-radius: 16px;
   box-shadow: 0 4px 16px rgba(6, 95, 70, 0.08);
   transition: transform 0.18s ease, box-shadow 0.2s ease;
@@ -328,7 +328,7 @@
   box-shadow: inset 0 1px 3px rgba(6, 95, 70, 0.15);
 }
 .ard-confidence__fill {
-  background: linear-gradient(90deg, #34d399, #059669 60%, #0d9488);
+  background: linear-gradient(90deg, var(--sw-emerald, #10b981), var(--sw-emerald-deep, #059669) 60%, var(--sw-teal, #0d9488));
   box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
   transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
 }

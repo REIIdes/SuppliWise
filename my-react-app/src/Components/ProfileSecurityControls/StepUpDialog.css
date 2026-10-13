@@ -22,6 +22,7 @@
   padding: 26px 24px 22px;
   text-align: center;
   background: #fff;
+  border: 1px solid var(--sw-line, #e2f1ea);
   border-radius: 18px;
   box-shadow: 0 24px 60px -20px rgba(15, 23, 42, 0.45);
 }
@@ -42,7 +43,13 @@
   margin: 0 0 6px;
   font-size: 19px;
   font-weight: 800;
-  color: #0f172a;
+  color: var(--sw-emerald-deep, #059669);
+  background: var(--sw-grad-spectrum, linear-gradient(92deg, #059669, #06b6d4 45%, #6366f1));
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .psud__title { color: transparent; }
 }
 
 .psud__lede {

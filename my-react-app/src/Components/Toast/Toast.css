@@ -10,10 +10,11 @@
   top: 80px;
   right: 24px;
   background: white;
-  border-radius: 12px;
+  border: 1px solid var(--sw-line, #e2f1ea);
+  border-radius: 16px;
   padding: 14px 18px;
   max-width: 380px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--sw-shadow-lg, 0 22px 46px -20px rgba(9, 78, 58, 0.34));
   display: flex;
   align-items: center;
   gap: 12px;
@@ -43,12 +44,12 @@
 }
 
 .toast-success {
-  border-left: 4px solid #10b981;
+  border-left: 4px solid var(--sw-emerald, #10b981);
 }
 
 .toast-success .toast-icon {
   background: #d1fae5;
-  color: #10b981;
+  color: var(--sw-emerald, #10b981);
 }
 
 .toast-info {

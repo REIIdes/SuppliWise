@@ -15,8 +15,8 @@
   font-size: 12.5px;
   line-height: 1.55;
   color: #475569;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border: 1px solid var(--sw-line, #e2f1ea);
   margin: 0 0 14px;
 }
 
@@ -43,8 +43,8 @@
   flex-wrap: wrap;
   padding: 14px 16px;
   border-radius: 14px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border: 1px solid var(--sw-line, #e2f1ea);
 }
 
 .psc-device__main {
@@ -77,8 +77,8 @@
 }
 
 .psc-chip--current {
-  color: #047857;
-  background: #d1fae5;
+  color: var(--sw-emerald-deep, #059669);
+  background: var(--sw-surface-sunk, #f4fbf7);
 }
 
 .psc-device__meta,
@@ -113,7 +113,7 @@
   height: 9px;
   margin-top: 6px;
   border-radius: 50%;
-  background: #10b981;
+  background: var(--sw-emerald, #10b981);
   box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
 }
 
@@ -124,7 +124,7 @@
 }
 
 .psc-event--notable .psc-event__dot {
-  background: #4f46e5;
+  background: var(--sw-indigo, #6366f1);
   box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.16);
 }
 

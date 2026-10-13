@@ -12,9 +12,9 @@
   flex-direction: column;
   gap: 12px;
   padding: 16px;
-  border: 1px solid #dbe6dd;
+  border: 1px solid var(--sw-line, #e2f1ea);
   border-radius: 12px;
-  background: #f8fbf9;
+  background: var(--sw-surface-sunk, #f4fbf7);
   text-align: left;
 }
 
@@ -41,8 +41,8 @@
 
 .asp__notice {
   color: #047857;
-  background: #ecfdf5;
-  border: 1px solid #a7f3d0;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border: 1px solid var(--sw-line-strong, #cbe7da);
 }
 
 .asp-label {
@@ -75,7 +75,13 @@
   font-size: 22px;
   font-weight: 800;
   letter-spacing: -0.02em;
-  color: #14301f;
+  color: var(--sw-emerald-deep, #059669);
+  background: var(--sw-grad-spectrum, linear-gradient(92deg, #059669, #06b6d4 45%, #6366f1));
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .asp-effective__plan { color: transparent; }
 }
 
 /* "Was PREMIUM · CANCELLED" — the record of what an account used to hold. */
@@ -145,7 +151,7 @@
   display: block;
   height: 100%;
   border-radius: 999px;
-  background: linear-gradient(90deg, #34d399, #0d9488);
+  background: linear-gradient(90deg, var(--sw-emerald, #10b981), var(--sw-teal, #0d9488));
   transition: width 0.3s ease;
 }
 
@@ -162,12 +168,12 @@
   white-space: nowrap;
 }
 
-.asp-chip--paid { color: #047857; background: #ecfdf5; border-color: #a7f3d0; }
+.asp-chip--paid { color: #047857; background: var(--sw-surface-sunk, #f4fbf7); border-color: var(--sw-line-strong, #cbe7da); }
 .asp-chip--admin { color: #b45309; background: #fffbeb; border-color: #fde68a; }
 .asp-chip--team { color: #4338ca; background: #eef2ff; border-color: #c7d2fe; }
 .asp-chip--free { color: #6b7c6b; background: #f1f5f2; border-color: #dbe6dd; }
 .asp-chip--permanent { color: #4338ca; background: #eef2ff; border-color: #c7d2fe; }
-.asp-chip--active { color: #166534; background: #f0fdf4; border-color: #bbf7d0; }
+.asp-chip--active { color: #166534; background: var(--sw-surface-sunk, #f4fbf7); border-color: var(--sw-line-strong, #cbe7da); }
 .asp-chip--muted { color: #7a8a7a; background: #f1f5f2; border-color: #dbe6dd; }
 
 /* ── The two layers ─────────────────────────────────────────────────── */
@@ -187,7 +193,7 @@
 
 /* The layer currently deciding access is accented; the one underneath is
    deliberately recessive so "which one is in force" is obvious at a glance. */
-.asp-layer--live { border-left-color: #10b981; }
+.asp-layer--live { border-left-color: var(--sw-emerald, #10b981); }
 .asp-layer--muted { border-left-color: #cbd5c1; background: #fbfdfb; }
 
 .asp-layer--muted .asp-layer__plan,
@@ -366,7 +372,7 @@
 }
 
 .asp-btn--primary {
-  background: linear-gradient(135deg, #10b981, #0d9488);
+  background: var(--sw-grad-brand, linear-gradient(135deg, #10b981, #0891b2));
   border-color: transparent;
   color: #ffffff;
 }
@@ -382,14 +388,14 @@
 }
 
 .asp-btn--restore {
-  background: #1d4ed8;
-  border-color: #1d4ed8;
+  background: var(--sw-indigo, #6366f1);
+  border-color: var(--sw-indigo, #6366f1);
   color: #ffffff;
 }
 
 .asp-btn--restore:hover:not(:disabled) {
-  background: #1e40af;
-  border-color: #1e40af;
+  background: #4f46e5;
+  border-color: #4f46e5;
 }
 
 .asp-btn--danger {

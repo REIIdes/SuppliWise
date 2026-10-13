@@ -612,7 +612,7 @@
 .rtl-chip--loading.is-active  { background: linear-gradient(135deg, #4338ca, #6366f1); }
 
 /* Tinted idle state so a chip reads as "this colour" before it is pressed */
-.rtl-chip--healthy  { border-color: #a7f3d0; background: #ecfdf5; }
+.rtl-chip--healthy  { border-color: var(--sw-line-strong, #cbe7da); background: var(--sw-surface-sunk, #f4fbf7); }
 .rtl-chip--warning  { border-color: #fde68a; background: #fffbeb; }
 .rtl-chip--critical { border-color: #fecdd3; background: #fff1f2; }
 .rtl-chip--error    { border-color: #ddd6fe; background: #f5f3ff; }
@@ -911,7 +911,7 @@
 .fw--cyan    { color: #0e7490; background: #ecfeff; border-color: #a5f3fc; }
 .fw--pink    { color: #be185d; background: #fdf2f8; border-color: #fbcfe8; }
 .fw--rose    { color: #be123c; background: #fff1f2; border-color: #fecdd3; }
-.fw--emerald { color: #047857; background: #ecfdf5; border-color: #a7f3d0; }
+.fw--emerald { color: #047857; background: var(--sw-surface-sunk, #f4fbf7); border-color: var(--sw-line-strong, #cbe7da); }
 .fw--slate   { color: #475569; background: #f1f5f9; border-color: #e2e8f0; }
 .fw--chain   { color: #1d4ed8; background: linear-gradient(135deg, #eff6ff, #ecfeff); border-color: #bfdbfe; }
 

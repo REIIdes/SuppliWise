@@ -140,8 +140,8 @@
   padding: 18px 16px;
   margin-bottom: 22px;
   border-radius: 18px;
-  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
-  border: 1px solid #e2e8f0;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border: 1px solid var(--sw-line, #e2f1ea);
 }
 
 .plc-journey__end {
@@ -168,7 +168,7 @@
   border-radius: 50%;
   color: #4f46e5;
   background: #fff;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--sw-line, #e2f1ea);
   box-shadow: 0 4px 12px -4px rgba(79, 70, 229, 0.45);
 }
 
@@ -187,8 +187,8 @@
 
 .plc-pill--current {
   color: #475569;
-  background: #e2e8f0;
-  border: 1px solid #cbd5e1;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border: 1px solid var(--sw-line-strong, #cbe7da);
 }
 
 .plc-pill--target {
@@ -213,7 +213,7 @@
   margin-bottom: 26px;
   border-radius: 18px;
   background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--sw-line, #e2f1ea);
   box-shadow: 0 8px 20px -14px rgba(15, 23, 42, 0.35);
 }
 
@@ -295,13 +295,13 @@
 .plc-btn--ghost {
   color: #334155;
   background: #fff;
-  border-color: #cbd5e1;
+  border-color: var(--sw-line-strong, #cbe7da);
 }
 
 .plc-btn--ghost:hover:not(:disabled) {
   color: #0f172a;
-  background: #f8fafc;
-  border-color: #94a3b8;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border-color: var(--sw-emerald, #10b981);
   transform: translateY(-2px);
   box-shadow: 0 10px 20px -12px rgba(15, 23, 42, 0.4);
 }

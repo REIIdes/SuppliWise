@@ -574,7 +574,7 @@
 .severity-badge--high { color: #be123c; background: #fff1f2; }
 .severity-badge--medium { color: #b45309; background: #fffbeb; }
 .severity-badge--low { color: #0369a1; background: #f0f9ff; }
-.severity-badge--preventive { color: #15803d; background: #f0fdf4; }
+.severity-badge--preventive { color: var(--sw-emerald-deep, #059669); background: var(--sw-sunk, #e7f8ef); }
 .severity-badge--none { display: none; }
 
 /* ── Confidence ──────────────────────────────────────────────────────────
@@ -705,9 +705,9 @@
   font-size: 13px;
   font-style: italic;
   line-height: 1.65;
-  color: #15803d;
-  background: #f0fdf4;
-  border-left: 3px solid #22c55e;
+  color: #065f46;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border-left: 3px solid var(--sw-emerald, #10b981);
   border-radius: 0 var(--sw-radius-sm, 10px) var(--sw-radius-sm, 10px) 0;
 }
 
@@ -788,8 +788,8 @@
 .detail-block--evidence .detail-block__label { color: #1d4ed8; }
 .detail-block--evidence p { color: #1e40af; }
 
-.detail-block--foods { background: #f0fdf4; border: 1px solid #bbf7d0; }
-.detail-block--foods .detail-block__label { color: #15803d; }
+.detail-block--foods { background: var(--sw-surface-sunk, #f4fbf7); border: 1px solid var(--sw-line-strong, #cbe7da); }
+.detail-block--foods .detail-block__label { color: #065f46; }
 
 .detail-block--side-effects { background: #fff7ed; border: 1px solid #fed7aa; }
 .detail-block--side-effects .detail-block__label { color: #c2410c; }
@@ -806,9 +806,9 @@
   padding: 4px 11px;
   font-size: 12px;
   font-weight: 500;
-  color: #15803d;
+  color: #065f46;
   background: #fff;
-  border: 1px solid #bbf7d0;
+  border: 1px solid var(--sw-line-strong, #cbe7da);
   border-radius: var(--sw-radius-pill, 999px);
 }
 

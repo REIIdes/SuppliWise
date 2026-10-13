@@ -383,7 +383,7 @@ textarea:focus-visible {
 }
 .sci-alert--ok {
   background: linear-gradient(135deg, #ecfdf5 0%, #e0f2fe 100%);
-  border: 1px solid #86efac;
+  border: 1px solid rgba(16, 185, 129, 0.45);
   color: #065f46;
 }
 
@@ -842,7 +842,7 @@ textarea:focus-visible {
    picks out the ones that need the member. */
 .sci-thread--open { border-left-color: #fcd34d; }
 .sci-thread--pending { border-left-color: #a5b4fc; }
-.sci-thread--resolved { border-left-color: #86efac; }
+.sci-thread--resolved { border-left-color: var(--sw-emerald, #10b981); }
 
 /* Priority until seen: a support reply the member has not opened yet floats
    to the top of the list (server sort + client mirror) and is tinted here.

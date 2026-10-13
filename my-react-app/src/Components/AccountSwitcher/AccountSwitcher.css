@@ -13,7 +13,7 @@
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: #22c55e;
+  background: var(--sw-grad-brand, linear-gradient(135deg, #10b981, #0d9488));
   color: #fff;
   font-size: 11px;
   font-weight: 700;
@@ -49,7 +49,7 @@
 }
 
 .acct-row.is-active {
-  background: #f0fdf4;
+  background: var(--sw-sunk, #e7f8ef);
   cursor: default; /* already here — nothing to switch to */
 }
 
@@ -85,8 +85,8 @@
   font: 600 10px/1 sans-serif;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #15803d;
-  background: #dcfce7;
+  color: #065f46;
+  background: rgba(16, 185, 129, 0.12);
   border-radius: 999px;
   padding: 3px 6px;
 }
@@ -119,8 +119,8 @@
 }
 
 .acct-row__switch {
-  color: #15803d;
-  border-color: #bbf7d0;
+  color: var(--sw-emerald-deep, #059669);
+  border-color: var(--sw-line-strong, #cbe7da);
 }
 
 .acct-row__signout {
@@ -128,9 +128,9 @@
 }
 
 .acct-row__switch:hover:not(:disabled) {
-  color: #166534;
-  border-color: #86efac;
-  background: #f0fdf4;
+  color: #047857;
+  border-color: var(--sw-emerald, #10b981);
+  background: var(--sw-surface-sunk, #f4fbf7);
 }
 
 .acct-row__signout:hover:not(:disabled) {
@@ -159,10 +159,10 @@
   border-top: 1px solid #f3f4f6;
   border-radius: 0 0 8px 8px;
   font: 600 13px/1 sans-serif;
-  color: #22c55e;
+  color: var(--sw-emerald-deep, #059669);
   text-decoration: none;
 }
 
 .acct-switcher__add:hover {
-  background: #f0fdf4;
+  background: var(--sw-sunk, #e7f8ef);
 }

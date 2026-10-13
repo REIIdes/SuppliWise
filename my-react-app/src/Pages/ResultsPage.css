@@ -1,9 +1,8 @@
 .results-wrapper {
   min-height: 100vh;
-  background: #f0faf0;
+  background: var(--sw-mesh, linear-gradient(168deg, #eefcf5, #ecf4ff 52%, #f5f0ff));
   display: flex;
   flex-direction: column;
-  font-family: sans-serif;
 }
 
 .results-container {
@@ -58,7 +57,7 @@
   color: #4b5563;
   line-height: 1.7;
   background: #fff;
-  border-left: 4px solid #22c55e;
+  border-left: 4px solid var(--sw-emerald, #10b981);
   padding: 14px 18px;
   border-radius: 0 8px 8px 0;
   margin: 0;
@@ -67,7 +66,7 @@
 /* ── Detail Mode Toggle ── */
 .detail-mode-toggle {
   display: flex;
-  background: #f3f4f6;
+  background: var(--sw-surface-sunk, #f4fbf7);
   border-radius: 8px;
   padding: 3px;
   gap: 2px;
@@ -81,7 +80,6 @@
   font-weight: 600;
   color: #6b7280;
   cursor: pointer;
-  font-family: sans-serif;
   transition: all 0.2s;
   white-space: nowrap;
 }
@@ -90,7 +88,7 @@
 }
 .detail-mode-btn.active {
   background: #fff;
-  color: #22c55e;
+  color: var(--sw-emerald, #10b981);
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
 
@@ -101,7 +99,7 @@
   color: #111827;
   margin: 32px 0 4px 0;
   padding-bottom: 8px;
-  border-bottom: 2px solid #f0fdf4;
+  border-bottom: 2px solid var(--sw-line, #e2f1ea);
 }
 .results-section-sub { font-size: 13px; color: #6b7280; margin: 0 0 16px 0; }
 
@@ -123,10 +121,10 @@
 /* ── Supplement Card ── */
 .rec-card {
   background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 14px;
+  border: 1px solid var(--sw-line, #e2f1ea);
+  border-radius: 16px;
   padding: 20px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  box-shadow: var(--sw-shadow-md, 0 10px 28px -14px rgba(9, 78, 58, 0.26));
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -137,10 +135,10 @@
 /* ── Simplified Card (Cleaner, Bigger, Friendlier) ── */
 .rec-card-simple {
   background: #fff;
-  border: 2px solid #e5e7eb;
+  border: 1.5px solid var(--sw-line, #e2f1ea);
   border-radius: 16px;
   padding: 28px 24px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  box-shadow: var(--sw-shadow-md, 0 10px 28px -14px rgba(9, 78, 58, 0.26));
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -150,7 +148,7 @@
 }
 .rec-card-simple:hover {
   box-shadow: 0 6px 20px rgba(0,0,0,0.1);
-  border-color: #22c55e;
+  border-color: var(--sw-emerald, #10b981);
 }
 
 /* Simple card icon - larger and centered */
@@ -193,7 +191,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  background: #f9fafb;
+  background: var(--sw-surface-sunk, #f4fbf7);
   padding: 12px;
   border-radius: 10px;
 }
@@ -215,22 +213,21 @@
 .rec-simple-expand {
   width: 100%;
   padding: 10px 16px;
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  color: #6b7280;
+  background: var(--sw-surface, #fff);
+  border: 1.5px solid var(--sw-line-strong, #cbe7da);
+  border-radius: var(--sw-radius-pill, 999px);
+  color: var(--sw-emerald-deep, #059669);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  font-family: sans-serif;
   transition: all 0.2s;
   margin-top: 8px;
 }
 
 .rec-simple-expand:hover {
-  background: #f0f0f0;
-  color: #374151;
-  border-color: #d1d5db;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  color: var(--sw-emerald-deep, #059669);
+  border-color: var(--sw-emerald, #10b981);
 }
 
 /* Simple expanded content */
@@ -250,7 +247,7 @@
 .rec-simple-foods-label {
   font-size: 13px;
   font-weight: 600;
-  color: #15803d;
+  color: var(--sw-emerald-deep, #059669);
 }
 
 /* Priority badge — at the very top before the supplement name */
@@ -289,7 +286,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  background: #f9fafb;
+  background: var(--sw-surface-sunk, #f4fbf7);
   border-radius: 8px;
   padding: 10px 12px;
 }
@@ -304,7 +301,7 @@
 .rec-triggered {
   font-size: 12px;
   color: #6b7280;
-  background: #f9fafb;
+  background: var(--sw-surface-sunk, #f4fbf7);
   border-radius: 6px;
   padding: 6px 10px;
   display: flex;
@@ -319,8 +316,8 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  background: #f0fdf4;
-  border-left: 3px solid #22c55e;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border-left: 3px solid var(--sw-emerald, #10b981);
   border-radius: 0 8px 8px 0;
   padding: 10px 12px;
   margin-top: 2px;
@@ -332,7 +329,7 @@
 }
 .rec-condition-context p {
   font-size: 13px;
-  color: #15803d;
+  color: var(--sw-emerald-deep, #059669);
   line-height: 1.6;
   margin: 0;
   font-style: italic;
@@ -365,17 +362,16 @@
 /* Expand button */
 .rec-expand-btn {
   background: none;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--sw-line-strong, #cbe7da);
   border-radius: 6px;
-  color: #6b7280;
+  color: var(--sw-emerald-deep, #059669);
   font-size: 12px;
   padding: 6px 12px;
   cursor: pointer;
-  font-family: sans-serif;
   transition: background 0.15s;
   text-align: left;
 }
-.rec-expand-btn:hover { background: #f9fafb; color: #374151; }
+.rec-expand-btn:hover { background: var(--sw-surface-sunk, #f4fbf7); color: var(--sw-emerald-deep, #059669); }
 
 /* Expanded details */
 .rec-expanded {
@@ -401,8 +397,8 @@
 
 /* Simplified Evidence — lighter, less prominent */
 .rec-expanded-simple-evidence {
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border: 1px solid var(--sw-line, #e2f1ea);
   border-radius: 10px;
   padding: 8px 12px;
 }
@@ -418,12 +414,12 @@
 
 /* Food Sources — green tint */
 .rec-expanded-foods {
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border: 1px solid var(--sw-line-strong, #cbe7da);
   border-radius: 10px;
   padding: 10px 14px;
 }
-.rec-expanded-foods .rec-expanded-label { color: #15803d; }
+.rec-expanded-foods .rec-expanded-label { color: var(--sw-emerald-deep, #059669); }
 
 /* Side Effects — amber tint */
 .rec-expanded-sideeffects {
@@ -460,9 +456,9 @@
 }
 .schedule-supplements { display: flex; flex-wrap: wrap; gap: 8px; }
 .schedule-pill {
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
-  color: #15803d;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border: 1px solid var(--sw-line-strong, #cbe7da);
+  color: var(--sw-emerald-deep, #059669);
   border-radius: 999px;
   padding: 4px 12px;
   font-size: 12px;
@@ -470,7 +466,7 @@
 }
 .schedule-pill-dosage {
   font-weight: 400;
-  color: #166534;
+  color: var(--sw-emerald-deep, #059669);
   opacity: 0.8;
 }
 
@@ -545,8 +541,8 @@
 }
 .recovery-expected {
   margin-left: 42px;
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border: 1px solid var(--sw-line-strong, #cbe7da);
   border-radius: 10px;
   padding: 10px 14px;
   display: flex;
@@ -556,7 +552,7 @@
 .recovery-expected-label {
   font-size: 11px;
   font-weight: 700;
-  color: #15803d;
+  color: var(--sw-emerald-deep, #059669);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -570,7 +566,7 @@
 }
 .recovery-expected ul li {
   font-size: 12px;
-  color: #166534;
+  color: var(--sw-emerald-deep, #059669);
   line-height: 1.5;
   padding-left: 14px;
   position: relative;
@@ -579,7 +575,7 @@
   content: '✓';
   position: absolute;
   left: 0;
-  color: #16a34a;
+  color: var(--sw-emerald, #10b981);
   font-size: 11px;
 }
 
@@ -591,12 +587,12 @@
   margin-bottom: 8px;
 }
 .lifestyle-card {
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border: 1px solid var(--sw-line-strong, #cbe7da);
   border-radius: 12px;
   padding: 16px 18px;
 }
-.lifestyle-category { font-size: 11px; font-weight: 700; color: #15803d; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
+.lifestyle-category { font-size: 11px; font-weight: 700; color: var(--sw-emerald-deep, #059669); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
 .lifestyle-advice { font-size: 13px; color: #374151; line-height: 1.65; margin: 0; }
 
 /* ── Meal Grid ── */
@@ -629,7 +625,7 @@
 .action-step-num {
   width: 28px; height: 28px;
   border-radius: 50%;
-  background: #22c55e;
+  background: var(--sw-grad-brand, linear-gradient(135deg, #10b981, #0891b2));
   color: #fff;
   font-size: 13px;
   font-weight: 700;
@@ -739,8 +735,8 @@
 
 /* ── Sources ── */
 .results-sources {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border: 1px solid var(--sw-line, #e2f1ea);
   border-radius: 10px;
   padding: 14px 18px;
   margin-bottom: 16px;
@@ -762,61 +758,60 @@
 
 .btn-primary {
   padding: 12px 24px;
-  background: #22c55e;
+  background: var(--sw-grad-brand, linear-gradient(135deg, #10b981, #0891b2));
   color: #fff;
-  border: none;
-  border-radius: 8px;
+  border: 0;
+  border-radius: var(--sw-radius-pill, 999px);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  font-family: sans-serif;
-  transition: background 0.2s;
+  box-shadow: 0 12px 24px -12px rgba(13, 148, 136, 0.9);
+  transition: background 0.2s, filter 0.2s, transform 0.2s;
 }
-.btn-primary:hover { background: #16a34a; }
+.btn-primary:hover { filter: brightness(1.05); transform: translateY(-2px); }
 
 .btn-secondary {
   padding: 12px 24px;
-  background: #fff;
-  color: #374151;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
+  background: var(--sw-surface, #fff);
+  color: var(--sw-emerald-deep, #059669);
+  border: 1.5px solid var(--sw-line-strong, #cbe7da);
+  border-radius: var(--sw-radius-pill, 999px);
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  font-family: sans-serif;
-  transition: background 0.2s;
+  transition: background 0.2s, border-color 0.2s, transform 0.2s;
 }
-.btn-secondary:hover { background: #f9fafb; }
+.btn-secondary:hover { background: var(--sw-surface-sunk, #f4fbf7); border-color: var(--sw-emerald, #10b981); }
 
 /* Show More / Show Less button */
 .btn-show-more {
   display: block;
   margin: 12px auto 0;
   padding: 10px 28px;
-  background: #f9fafb;
-  color: #374151;
-  border: 1px solid #d1d5db;
+  background: var(--sw-surface, #fff);
+  color: var(--sw-emerald-deep, #059669);
+  border: 1.5px solid var(--sw-line-strong, #cbe7da);
   border-radius: 999px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  font-family: sans-serif;
   transition: background 0.2s, border-color 0.2s;
 }
 .btn-show-more:hover {
-  background: #f3f4f6;
-  border-color: #9ca3af;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border-color: var(--sw-emerald, #10b981);
 }
 
 /* ── Fallback card ── */
 .results-card-simple {
   background: #fff;
+  border: 1px solid var(--sw-line, #e2f1ea);
   border-radius: 16px;
   padding: 48px 40px;
   max-width: 480px;
   width: 100%;
   text-align: center;
-  box-shadow: 0 2px 16px rgba(0,0,0,0.08);
+  box-shadow: var(--sw-shadow-md, 0 10px 28px -14px rgba(9, 78, 58, 0.26));
   margin: auto;
 }
 .results-icon { font-size: 48px; margin-bottom: 20px; }
@@ -858,20 +853,19 @@
   display: inline-flex;
   align-items: center;
   padding: 12px 20px;
-  background: #fff;
-  color: #16a34a;
-  border: 1.5px solid #22c55e;
-  border-radius: 8px;
+  background: var(--sw-surface, #fff);
+  color: var(--sw-emerald-deep, #059669);
+  border: 1.5px solid var(--sw-emerald, #10b981);
+  border-radius: var(--sw-radius-pill, 999px);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  font-family: sans-serif;
-  transition: background 0.2s, color 0.2s;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
   gap: 4px;
 }
 .btn-export-pdf:hover:not(:disabled) {
-  background: #f0fdf4;
-  border-color: #16a34a;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border-color: var(--sw-emerald-deep, #059669);
 }
 .btn-export-pdf:disabled {
   opacity: 0.65;
@@ -923,7 +917,7 @@
   transition: background 0.15s;
 }
 .rec-name-clickable:hover {
-  background: #f0fdf4;
+  background: var(--sw-surface-sunk, #f4fbf7);
 }
 .rec-name-text-wrap {
   display: flex;
@@ -932,7 +926,7 @@
 }
 .rec-name-hint {
   font-size: 11px;
-  color: #22c55e;
+  color: var(--sw-emerald, #10b981);
   font-weight: 600;
   letter-spacing: 0.02em;
 }
@@ -1200,16 +1194,16 @@
 .rec-simple-benefit, .rec-reason { color: #475569; }
 .rec-simple-dosage-item { background: linear-gradient(135deg, #f0fdfa, #eef2ff); border: 1px solid #dbeafe; }
 .schedule-slot, .recovery-phase, .meal-card { border-color: var(--rw-line); box-shadow: 0 6px 18px -18px rgba(15,23,42,.55); }
-.schedule-pill { background: #ecfdf5; border-color: #a7f3d0; color: #047857; }
-.lifestyle-card { background: linear-gradient(135deg, #ecfdf5, #f0fdfa); border-color: #a7f3d0; }
+.schedule-pill { background: var(--sw-surface-sunk, #f4fbf7); border-color: var(--sw-line-strong, #cbe7da); color: #047857; }
+.lifestyle-card { background: linear-gradient(135deg, #ecfdf5, #f0fdfa); border-color: var(--sw-line-strong, #cbe7da); }
 .meal-card { background: linear-gradient(135deg, #fff7ed, #fffbeb); border-color: #fed7aa; }
 .meal-type { color: #c2410c; }
 
 /* Controls and feedback */
-.btn-primary { background: linear-gradient(120deg, #059669, #0d9488); box-shadow: 0 8px 18px -12px #047857; }
-.btn-primary:hover { background: linear-gradient(120deg, #047857, #0f766e); transform: translateY(-1px); }
-.btn-secondary { background: rgba(255,255,255,.88); border-color: #cbd5e1; color: #334155; }
-.btn-secondary:hover { background: #f8fafc; border-color: #94a3b8; transform: translateY(-1px); }
+.btn-primary { background: var(--sw-grad-brand, linear-gradient(135deg, #10b981, #0891b2)); box-shadow: 0 12px 24px -12px rgba(13, 148, 136, 0.9); }
+.btn-primary:hover { filter: brightness(1.05); transform: translateY(-2px); }
+.btn-secondary { background: var(--sw-surface, #fff); border-color: var(--sw-line-strong, #cbe7da); color: var(--sw-emerald-deep, #059669); }
+.btn-secondary:hover { background: var(--sw-surface-sunk, #f4fbf7); border-color: var(--sw-emerald, #10b981); transform: translateY(-1px); }
 .btn-export-pdf { background: linear-gradient(120deg, #eef2ff, #ecfdf5); border-color: #818cf8; color: #3730a3; }
 .btn-export-pdf:hover:not(:disabled) { background: linear-gradient(120deg, #e0e7ff, #d1fae5); border-color: #6366f1; transform: translateY(-1px); }
 .btn-primary:focus-visible, .btn-secondary:focus-visible, .btn-export-pdf:focus-visible, .btn-show-more:focus-visible, .detail-mode-btn:focus-visible, .rec-name-clickable:focus-visible { outline: 3px solid rgba(99,102,241,.38); outline-offset: 2px; }

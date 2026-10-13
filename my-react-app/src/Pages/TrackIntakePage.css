@@ -200,17 +200,17 @@
 }
 
 .supplements-list::-webkit-scrollbar-track {
-  background: #f1f1f1;
+  background: var(--sw-surface-sunk, #f4fbf7);
   border-radius: 10px;
 }
 
 .supplements-list::-webkit-scrollbar-thumb {
-  background: #86efac;
+  background: var(--sw-line-strong, #cbe7da);
   border-radius: 10px;
 }
 
 .supplements-list::-webkit-scrollbar-thumb:hover {
-  background: #6ee7b7;
+  background: var(--sw-emerald, #10b981);
 }
 
 /* Rows carry their priority on a coloured edge rather than in a border of the
@@ -290,7 +290,7 @@
 }
 
 .priority-indicator.priority-high {
-  color: #10b981;
+  color: var(--sw-emerald, #10b981);
 }
 
 .priority-indicator.priority-medium {
@@ -306,7 +306,7 @@
   align-items: center;
   gap: 4px;
   padding: 4px 10px;
-  background: #10b981;
+  background: var(--sw-emerald, #10b981);
   color: white;
   border-radius: 12px;
   font-size: 11px;
@@ -336,7 +336,7 @@
 .btn-undo {
   padding: 10px 20px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--sw-radius-pill, 999px);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -345,25 +345,27 @@
 }
 
 .btn-mark-taken {
-  background: #10b981;
+  background: var(--sw-grad-brand, linear-gradient(135deg, #10b981, #0891b2));
   color: white;
+  box-shadow: 0 12px 24px -12px rgba(13, 148, 136, 0.9);
 }
 
 .btn-mark-taken:hover {
-  background: #059669;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+  background: var(--sw-grad-brand, linear-gradient(135deg, #10b981, #0891b2));
+  filter: brightness(1.05);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 24px -12px rgba(13, 148, 136, 0.9);
 }
 
 .btn-undo {
-  background: white;
-  color: #6b7280;
-  border: 2px solid #d1d5db;
+  background: var(--sw-surface, #fff);
+  color: var(--sw-emerald-deep, #059669);
+  border: 1.5px solid var(--sw-line-strong, #cbe7da);
 }
 
 .btn-undo:hover {
-  background: #f3f4f6;
-  border-color: #9ca3af;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  border-color: var(--sw-emerald, #10b981);
 }
 
 .btn-mark-taken:disabled {
@@ -760,7 +762,7 @@
    action is still the obvious default. */
 .btn-slot-taken {
   padding: 7px 14px;
-  border: 1px solid #a7f3d0;
+  border: 1px solid var(--sw-line-strong, #cbe7da);
   border-radius: 999px;
   background: #ecfdf5;
   color: #047857;
@@ -775,7 +777,7 @@
 
 .btn-slot-taken:hover:not(:disabled) {
   background: #d1fae5;
-  border-color: #6ee7b7;
+  border-color: var(--sw-emerald, #10b981);
   transform: translateY(-1px);
 }
 
@@ -878,9 +880,9 @@
 }
 
 .calendar-nav-btn:hover {
-  border-color: #10b981;
-  background: #f0fdf4;
-  color: #10b981;
+  border-color: var(--sw-emerald, #10b981);
+  background: var(--sw-surface-sunk, #f4fbf7);
+  color: var(--sw-emerald, #10b981);
 }
 
 .calendar-month {
@@ -928,8 +930,8 @@
 }
 
 .calendar-day:not(.empty):not(:disabled):hover {
-  background: #f0fdf4;
-  color: #10b981;
+  background: var(--sw-surface-sunk, #f4fbf7);
+  color: var(--sw-emerald, #10b981);
 }
 
 .calendar-day.empty {
@@ -954,10 +956,10 @@
 }
 
 .calendar-day.today {
-  background: #10b981;
+  background: var(--sw-emerald, #10b981);
   color: white;
   font-weight: 700;
-  box-shadow: 0 0 0 2px #10b981, 0 0 0 4px rgba(16, 185, 129, 0.2);
+  box-shadow: 0 0 0 2px var(--sw-emerald, #10b981), 0 0 0 4px rgba(16, 185, 129, 0.2);
 }
 
 .calendar-day.completed {
@@ -985,7 +987,7 @@
   position: absolute;
   top: 2px;
   right: 2px;
-  color: #10b981;
+  color: var(--sw-emerald, #10b981);
 }
 
 /* Calendar Legend */
@@ -1019,7 +1021,7 @@
 }
 
 .today-color {
-  background: #10b981;
+  background: var(--sw-emerald, #10b981);
 }
 
 .completed-color {
@@ -1039,7 +1041,7 @@
 
 /* Upcoming Section */
 .upcoming-section {
-  background: #f9fafb;
+  background: var(--sw-surface-sunk, #f4fbf7);
 }
 
 .upcoming-list {
@@ -1256,11 +1258,11 @@
      mobile-responsive.css already used, and the shared .toast. */
   top: 80px;
   right: 24px;
-  background: linear-gradient(135deg, #6ee7b7 0%, #3dbf8a 100%);
+  background: linear-gradient(135deg, #34d399 0%, #10b981 50%, #059669 100%);
   border-radius: 16px;
   padding: 20px 24px;
   max-width: 420px;
-  box-shadow: 0 10px 40px rgba(61, 191, 138, 0.4);
+  box-shadow: 0 20px 44px -16px rgba(5, 150, 105, 0.75);
   display: flex;
   align-items: flex-start;
   gap: 16px;
@@ -1334,7 +1336,7 @@
 }
 
 /* Interactive day-detail panel (calendar history) */
-.day-detail{border-color:#a7f3d0}
+.day-detail{border-color:var(--sw-line-strong, #cbe7da)}
 .day-detail__header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px}
 .day-detail__header .section-title{margin:0}
 .day-detail__close{background:#f3f4f6;border:none;color:#6b7280;font-size:20px;line-height:1;width:32px;height:32px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center}
@@ -1345,15 +1347,15 @@
 .day-detail__summary{font-size:14px;font-weight:600;color:#065f46;margin:0 0 12px}
 .day-detail__list{display:flex;flex-direction:column;gap:10px}
 .day-detail__row{display:flex;align-items:flex-start;gap:10px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;padding:12px 14px}
-.day-detail__row--taken{background:#f0fdf4;border-color:#bbf7d0}
+.day-detail__row--taken{background:var(--sw-surface-sunk, #f4fbf7);border-color:var(--sw-line-strong, #cbe7da)}
 .day-detail__row .priority-indicator{margin-top:4px}
 .day-detail__info{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
 .day-detail__name{font-weight:700;color:#111827;font-size:14px}
 .day-detail__meta{font-size:12.5px;color:#6b7280}
 .day-detail__pill{flex-shrink:0;font-size:11.5px;font-weight:700;padding:5px 10px;border-radius:999px;white-space:nowrap}
-.day-detail__pill--taken{background:#16a34a;color:#fff}
+.day-detail__pill--taken{background:var(--sw-emerald-deep, #059669);color:#fff}
 .day-detail__pill--missed{background:#fee2e2;color:#b91c1c}
-.day-detail__pill--taken{background:#16a34a;color:#fff}
+.day-detail__pill--taken{background:var(--sw-emerald-deep, #059669);color:#fff}
 .day-detail__pill--missed{background:#fee2e2;color:#b91c1c}
 @media (max-width:480px){.day-detail__row{flex-wrap:wrap}}
 
@@ -1380,8 +1382,8 @@
 
 .track-section {
   border-radius: 20px;
-  border: 1px solid #bbf7d0;
-  box-shadow: 0 8px 24px rgba(6, 95, 70, 0.08);
+  border: 1px solid var(--sw-line, #e2f1ea);
+  box-shadow: var(--sw-shadow-md, 0 10px 28px -14px rgba(9, 78, 58, 0.26));
   animation: track-section-in 0.45s ease both;
 }
 .track-intake-left .track-section:nth-child(2) { animation-delay: 0.08s; }
@@ -1396,13 +1398,14 @@
    came from. The single set of rules above is now the only one. */
 
 .btn-mark-taken {
-  background: linear-gradient(135deg, #34d399, #059669) !important;
-  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.30);
-  transition: transform 0.15s ease, box-shadow 0.2s ease !important;
+  background: var(--sw-grad-brand, linear-gradient(135deg, #10b981, #0891b2)) !important;
+  box-shadow: 0 12px 24px -12px rgba(13, 148, 136, 0.9);
+  transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease !important;
 }
 .btn-mark-taken:hover {
   transform: translateY(-2px) !important;
-  box-shadow: 0 10px 22px rgba(16, 185, 129, 0.38) !important;
+  filter: brightness(1.05);
+  box-shadow: 0 16px 30px -12px rgba(13, 148, 136, 1) !important;
 }
 .btn-mark-taken:active { transform: scale(0.96) !important; }
 .btn-undo {
@@ -1424,7 +1427,7 @@
   font-weight: 700;
   color: #047857;
   background: #ecfdf5;
-  border: 1.5px solid #6ee7b7;
+  border: 1.5px solid var(--sw-line-strong, #cbe7da);
   box-shadow: 0 4px 12px -8px rgba(16, 185, 129, 0.8);
   white-space: nowrap;
   user-select: none;

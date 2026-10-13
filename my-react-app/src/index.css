@@ -15,11 +15,61 @@ input[type="password"] {
   -ms-user-select: none;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
+/* ── Global type base ─────────────────────────────────────────────
+   One stack for the whole app, tuned rather than defaulted: Segoe UI
+   on Windows (the machine this ships to first), Apple rules on macOS,
+   and real bold weights everywhere so headings stop looking anemic. */
 body {
   margin: 0;
   padding: 0;
-  font-family: sans-serif;
-  background: #f0faf0;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  /* Vibrant tri-tone backdrop behind every page: mint → sky → violet.
+     Pages with their own mesh (theme.css --sw-mesh) paint over this;
+     everything else still lands on colour instead of flat #f0faf0. */
+  background: linear-gradient(168deg, #eefcf5 0%, #ecf4ff 52%, #f5f0ff 100%);
+  background-attachment: fixed;
+  color: #0d2b23;
+}
+
+button, input, select, textarea {
+  font: inherit;
+  color: inherit;
+}
+
+::selection {
+  background: rgba(16, 185, 129, 0.28);
+  color: #064e3b;
+}
+
+/* Vibrant scrollbar: brand gradient thumb, no track chrome. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background: linear-gradient(180deg, #34d399, #0d9488) border-box;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #2dd4bf, #0891b2) border-box;
+  background-clip: padding-box;
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(16, 185, 129, 0.75) transparent;
 }
 
 #root {
@@ -29,4 +79,8 @@ body {
 /* Mobile base */
 @media (max-width: 640px) {
   html { font-size: 15px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
 }

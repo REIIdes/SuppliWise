@@ -17,7 +17,6 @@
   color: #374151;
   font-size: 14px;
   font-weight: 500;
-  font-family: sans-serif;
   cursor: pointer;
   transition: all 0.15s;
   white-space: nowrap;
@@ -26,22 +25,23 @@
 }
 
 .gender-pill:hover {
-  border-color: #22c55e;
-  color: #15803d;
-  background: #f0fdf4;
+  border-color: var(--sw-emerald, #10b981);
+  color: var(--sw-emerald-deep, #065f46);
+  background: rgba(16, 185, 129, 0.08);
 }
 
 .gender-pill-active {
-  background: #22c55e;
-  border-color: #22c55e;
+  background: var(--sw-grad-brand, linear-gradient(135deg, #10b981, #0d9488));
+  border-color: transparent;
   color: #fff;
   font-weight: 600;
 }
 
 .gender-pill-active:hover {
-  background: #16a34a;
-  border-color: #16a34a;
+  background: var(--sw-grad-brand, linear-gradient(135deg, #10b981, #0d9488));
+  border-color: transparent;
   color: #fff;
+  filter: brightness(1.06);
 }
 
 /* Math CAPTCHA row — compact: [num] op [num] = [answer] [refresh] */
@@ -109,7 +109,7 @@
   border-radius: 9px;
   border: 1.5px solid #e2e8f0;
   background: #fff;
-  color: #16a34a;
+  color: var(--sw-emerald-deep, #059669);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -118,8 +118,8 @@
   padding: 0;
 }
 .captcha-refresh:hover:not(:disabled) {
-  background: #f0fdf4;
-  border-color: #6ee7b7;
+  background: var(--sw-sunk, #e7f8ef);
+  border-color: var(--sw-line-strong, #86efac);
 }
 .captcha-refresh:hover:not(:disabled) svg {
   transform: rotate(-120deg);

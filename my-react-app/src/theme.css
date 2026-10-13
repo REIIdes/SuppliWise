@@ -53,8 +53,11 @@
   --sw-cyan: #06b6d4;
   --sw-indigo: #6366f1;
   --sw-violet: #a855f7;
+  --sw-fuchsia: #d946ef;
+  --sw-pink: #ec4899;
   --sw-rose: #f43f5e;
   --sw-amber: #f59e0b;
+  --sw-lime: #84cc16;
 
   /* Semantic aliases, so a page asks for a MEANING not a hue. */
   --sw-success: var(--sw-emerald, #10b981);
@@ -64,10 +67,14 @@
 
   /* ── Gradients ──────────────────────────────────────────────────────── */
   --sw-grad-brand: linear-gradient(135deg, #10b981 0%, #0d9488 55%, #0891b2 100%);
-  --sw-grad-spectrum: linear-gradient(92deg, #059669 0%, #06b6d4 45%, #6366f1 100%);
+  --sw-grad-spectrum: linear-gradient(92deg, #059669 0%, #06b6d4 42%, #6366f1 78%, #a855f7 100%);
   --sw-grad-warm: linear-gradient(135deg, #fbbf24 0%, #f97316 100%);
   --sw-grad-cool: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
   --sw-grad-rose: linear-gradient(135deg, #fb7185 0%, #e11d48 100%);
+  /* Aurora runs the full brand arc — mint through sky to violet — for
+     heroes and large display type. */
+  --sw-grad-aurora: linear-gradient(120deg, #10b981 0%, #06b6d4 35%, #818cf8 70%, #e879f9 100%);
+  --sw-grad-sunset: linear-gradient(135deg, #f59e0b 0%, #f43f5e 55%, #d946ef 100%);
 
   /* ── Shape ──────────────────────────────────────────────────────────── */
   --sw-radius-sm: 10px;
@@ -81,12 +88,17 @@
   --sw-shadow-md: 0 10px 28px -14px rgba(9, 78, 58, 0.26);
   --sw-shadow-lg: 0 22px 46px -20px rgba(9, 78, 58, 0.34);
 
-  /* ── Page backdrop ──────────────────────────────────────────────────── */
-  --sw-mesh: radial-gradient(820px 440px at 3% -8%, rgba(52, 211, 153, 0.38), transparent 62%),
-            radial-gradient(760px 400px at 99% -4%, rgba(99, 102, 241, 0.26), transparent 62%),
-            radial-gradient(880px 520px at 76% 38%, rgba(34, 211, 238, 0.20), transparent 64%),
-            radial-gradient(820px 560px at 16% 90%, rgba(236, 72, 153, 0.17), transparent 66%),
-            linear-gradient(168deg, #eefcf5 0%, #ecf4ff 52%, #f5f0ff 100%);
+  /* ── Page backdrop ────────────────────────────────────────────────────
+     Five saturated blooms over a tri-tone base: mint top-left, indigo
+     top-right, cyan mid-right, fuchsia low-right, rose low-left. Kept
+     translucent so text on top never fights it, but dense enough that a
+     page reads as colour-washed the moment it loads. */
+  --sw-mesh: radial-gradient(820px 440px at 3% -8%, rgba(52, 211, 153, 0.42), transparent 62%),
+            radial-gradient(760px 400px at 99% -4%, rgba(129, 140, 248, 0.32), transparent 62%),
+            radial-gradient(880px 520px at 76% 38%, rgba(34, 211, 238, 0.22), transparent 64%),
+            radial-gradient(720px 460px at 96% 82%, rgba(232, 121, 249, 0.18), transparent 66%),
+            radial-gradient(820px 560px at 12% 92%, rgba(251, 113, 133, 0.20), transparent 66%),
+            linear-gradient(168deg, #e9fcf3 0%, #e9f3ff 48%, #f3edff 100%);
 
   /* ── Motion ─────────────────────────────────────────────────────────── */
   --sw-ease: cubic-bezier(0.16, 1, 0.3, 1);
