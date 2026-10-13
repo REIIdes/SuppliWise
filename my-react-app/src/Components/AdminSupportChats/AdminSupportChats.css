@@ -1152,6 +1152,22 @@
 }
 .asc-e2e svg { width: 11px; height: 11px; flex: 0 0 auto; }
 
+/* Prominent variant with stronger green lock */
+.asc-e2e--prominent {
+  border-color: #10b981;
+  background: #d1fae5;
+  color: #059669;
+  font-size: 11.5px;
+  padding: 4px 11px;
+  gap: 6px;
+  font-weight: 800;
+}
+.asc-e2e--prominent svg {
+  width: 13px;
+  height: 13px;
+  stroke-width: 2.4;
+}
+
 .asc-thread__lock { margin-right: 4px; vertical-align: -1px; color: #10b981; }
 .asc-msglock { font-style: italic; color: #94a3b8; }
 

@@ -1139,16 +1139,16 @@ export default function AdminSupportChats({ request, focusThreadId = '' }) {
                     )}
                     {sealedThread && (
                       <span
-                        className="asc-e2e"
+                        className="asc-e2e asc-e2e--prominent"
                         role="img"
-                        aria-label="End-to-end active"
+                        aria-label="End-to-end encrypted"
                         title="End-to-end encrypted — the message bodies travel as ciphertext and only this conversation's key, held by this device and the member, opens them."
                       >
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                          <path d="M12 3l7.5 3v5.5c0 4.6-3.1 8.4-7.5 9.5-4.4-1.1-7.5-4.9-7.5-9.5V6z" />
-                          <path d="M9 12l2.2 2.2L15.5 10" />
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <rect x="4.5" y="10.5" width="15" height="10" rx="2.6" />
+                          <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
                         </svg>
-                        E2E Active
+                        End-to-End Encrypted
                       </span>
                     )}
                     {sealedThread && grantable.length > 0 && (

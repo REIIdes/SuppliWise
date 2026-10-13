@@ -1310,13 +1310,13 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
                       the member to press. */}
                   {activeSealed && (
                     <span
-                      className="sci-e2e"
+                      className="sci-e2e sci-e2e--prominent"
                       role="img"
-                      aria-label="End-to-end active"
+                      aria-label="End-to-end encrypted"
                       title="End-to-end encrypted — the message bodies travel as ciphertext and only this conversation's key, held by your device and Suppliwise Support, opens them."
                     >
-                      <IconShield />
-                      E2E Active
+                      <IconLock />
+                      End-to-End Encrypted
                     </span>
                   )}
                 </div>

@@ -1072,6 +1072,21 @@ textarea:focus-visible {
 }
 .sci-e2e svg { width: 13px; height: 13px; flex: 0 0 auto; }
 
+/* Prominent variant with stronger green lock */
+.sci-e2e--prominent {
+  border-color: #10b981;
+  background: #d1fae5;
+  color: #059669;
+  font-size: 12px;
+  padding: 5px 12px;
+  gap: 7px;
+}
+.sci-e2e--prominent svg {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2.4;
+}
+
 .sci-back {
   display: inline-flex;
   align-items: center;
