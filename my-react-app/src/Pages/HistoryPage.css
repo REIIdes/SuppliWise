@@ -1104,6 +1104,42 @@
 }
 .history-rec-evidence-blue { background: #eff6ff; border-left-color: #60a5fa; color: #1e40af; }
 .history-rec-evidence-blue strong { color: #1d4ed8; }
+
+/* Food Sources Section with Pills */
+.history-rec-foods-section {
+  margin: 8px 0 0 0;
+  padding: 10px 12px;
+  background: #ecfdf5;
+  border-left: 3px solid #34d399;
+  border-radius: 0 7px 7px 0;
+}
+
+.history-rec-foods-label {
+  font-size: 11.5px;
+  color: #065f46;
+  margin: 0 0 8px 0;
+}
+
+.history-rec-foods-label strong {
+  color: #047857;
+}
+
+.history-food-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.history-food-pill {
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #065f46;
+  background: #fff;
+  border: 1px solid #a7f3d0;
+  border-radius: 999px;
+}
+
 .history-rec-foods { background: #ecfdf5; border-left-color: #34d399; color: #065f46; }
 .history-rec-foods strong { color: #047857; }
 .history-rec-sideeffects { background: #fff7ed; border-left-color: #fb923c; color: #9a3412; }

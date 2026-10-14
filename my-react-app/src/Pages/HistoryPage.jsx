@@ -9,6 +9,7 @@ import { useSubscription, SUBSCRIPTION_EVENT } from '../hooks/useSubscription';
 import { isDeadHour, DEAD_HOURS } from '../utils/slotSchedule.js';
 import useNow from '../hooks/useNow';
 import UpgradeModal from '../Components/UpgradeModal/UpgradeModal';
+import { foodPills } from '../utils/recommendationView';
 import './HistoryPage.css';
 
 // Normalize special characters that may render as ? in some environments
@@ -1094,7 +1095,14 @@ function HistoryPage() {
                                   <p className="history-rec-evidence history-rec-evidence-blue">📚 <strong>Evidence:</strong> {fixChars(rec.evidence)}</p>
                                 )}
                                 {rec.foods && (
-                                  <p className="history-rec-evidence history-rec-foods">🥗 <strong>Food Sources:</strong> {expandFoodText(rec.foods)}</p>
+                                  <div className="history-rec-foods-section">
+                                    <p className="history-rec-foods-label">🥗 <strong>Food Sources:</strong></p>
+                                    <div className="history-food-pills">
+                                      {foodPills(rec.foods).map((food, idx) => (
+                                        <span key={idx} className="history-food-pill">{food}</span>
+                                      ))}
+                                    </div>
+                                  </div>
                                 )}
                                 {rec.sideEffects && (
                                   <p className="history-rec-evidence history-rec-sideeffects">⚠ <strong>Side Effects &amp; Safe Limits:</strong> {fixChars(rec.sideEffects)}</p>

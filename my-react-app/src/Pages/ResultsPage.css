@@ -250,6 +250,24 @@
   color: var(--sw-emerald-deep, #059669);
 }
 
+/* Food examples as pills */
+.food-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+}
+
+.food-pill {
+  padding: 4px 11px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #065f46;
+  background: #fff;
+  border: 1px solid var(--sw-line-strong, #cbe7da);
+  border-radius: var(--sw-radius-pill, 999px);
+}
+
 /* Priority badge — at the very top before the supplement name */
 .rec-priority-top {
   display: flex;
@@ -420,6 +438,10 @@
   padding: 10px 14px;
 }
 .rec-expanded-foods .rec-expanded-label { color: var(--sw-emerald-deep, #059669); }
+.rec-expanded-foods .food-examples {
+  justify-content: flex-start;
+  margin-top: 8px;
+}
 
 /* Side Effects — amber tint */
 .rec-expanded-sideeffects {
