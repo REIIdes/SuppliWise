@@ -1501,8 +1501,11 @@ const otpTickRef = useRef(null);
                 rather than only from here. Cancel/Save must stay inline: they
                 act on this <form>, and a form whose submit button lives in
                 another component is a keyboard trap and breaks the native
-                Enter-to-submit behaviour. */}
-            {isEditing && view === 'personal' && (
+                Enter-to-submit behaviour. 
+                
+                Only show when explicitly in Edit Profile mode (?edit=1), not on 
+                the view-only Personal Info page (both use view='personal'). */}
+            {isEditing && view === 'personal' && urlEdit && (
               <div className="profile-actions">
                 <button
                   type="button"

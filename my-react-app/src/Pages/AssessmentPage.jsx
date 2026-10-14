@@ -2629,6 +2629,9 @@ function AssessmentPage() {
     <div className="assessment-wrapper">
       <Navbar />
       
+      {/* Full-screen blocking overlay during AI processing */}
+      {submitting && <div className="assessment-blocking-overlay" />}
+      
       {/* Update Confirmation Dialog */}
       {showUpdateConfirmation && (
         <div className="modal-overlay" onClick={() => setShowUpdateConfirmation(false)}>
