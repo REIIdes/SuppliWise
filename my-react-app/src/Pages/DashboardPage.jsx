@@ -598,18 +598,9 @@ function DashboardPage() {
   };
 
   // Handle "Learn More" on priority banner - open medical modal
-  const handleLearnMore = async () => {
-    try {
-      const reviewData = await getMedicalReviewStatus();
-      // Show the actual status from the server
-      // The user should see 'approved' status even while still blocked
-      // (they need to confirm to lift the block)
-      setMedicalReviewStatus(reviewData.medicalReviewStatus || 'none');
-      setMedicalAdminNotes(reviewData.medicalReviewNotes || '');
-      setShowMedicalModal(true);
-    } catch (error) {
-      console.error('Failed to get medical review status:', error);
-    }
+  const handleLearnMore = () => {
+    // Simply open the modal - symptoms are already loaded in state
+    setShowMedicalModal(true);
   };
 
   // Handle user confirming they've read the admin's approval
@@ -623,14 +614,11 @@ function DashboardPage() {
       console.log('[handleConfirmApproval] Success:', result);
       setShowMedicalModal(false);
       
+      // Small delay to ensure database write completes
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
       // Refresh dashboard to clear banners
-      try {
-        await fetchDashboardData({ skipLoadingState: false });
-      } catch (dashboardError) {
-        console.error('[handleConfirmApproval] Dashboard refresh failed (non-critical):', dashboardError);
-        // Don't show error alert for dashboard refresh failure - the confirm succeeded
-        // The user can manually refresh if needed
-      }
+      await fetchDashboardData();
     } catch (error) {
       console.error('[handleConfirmApproval] Failed to confirm medical review:', error);
       alert('Failed to confirm. Please try again.');
@@ -914,9 +902,6 @@ function DashboardPage() {
       {showMedicalModal && (
         <MedicalAttentionModal
           symptoms={prioritySymptoms}
-          reviewStatus={medicalReviewStatus}
-          adminNotes={medicalAdminNotes}
-          onRequestReview={handleMedicalReviewRequest}
           onConfirmApproval={handleConfirmApproval}
           onClose={() => setShowMedicalModal(false)}
           isConfirming={isConfirming}

@@ -71,49 +71,39 @@ function MedicalAttentionModal({
           </div>
         )}
 
-        {currentStatus === 'none' && (
-          <>
-            <div className="medical-modal-section">
-              <h3>What should you do?</h3>
-              <p>
-                Our system provides dietary supplement guidance based on the information you provide. 
-                It does not diagnose, treat, or manage medical conditions.
-              </p>
-              <p>
-                If you are experiencing severe or concerning symptoms, please consult a qualified healthcare professional. 
-                For a medical emergency, contact local emergency services.
-              </p>
-            </div>
+        <div className="medical-modal-section">
+          <h3>What should you do?</h3>
+          <p>
+            Our system provides dietary supplement guidance based on the information you provide. 
+            It does not diagnose, treat, or manage medical conditions.
+          </p>
+          <p>
+            If you are experiencing severe or concerning symptoms, please consult a qualified healthcare professional. 
+            For a medical emergency, contact local emergency services.
+          </p>
+        </div>
 
-            <div className="medical-modal-disclaimer">
-              <p>
-                <strong>Important:</strong> This system does not diagnose medical conditions or replace professional medical advice.
-              </p>
-            </div>
-          </>
-        )}
+        <div className="medical-modal-disclaimer">
+          <p>
+            <strong>Important:</strong> This system does not diagnose medical conditions or replace professional medical advice.
+          </p>
+        </div>
 
-        {/* Admin Response Section - only shown when approved and user clicks button */}
-        {currentStatus === 'approved' && showAdminResponse && adminNotes && (
-          <div className="admin-response-section">
-            <h3>Administrator's Response</h3>
-            <div className="admin-notes-box">
-              <p>{adminNotes}</p>
-            </div>
-          </div>
-        )}
+        <div className="medical-modal-acknowledgment">
+          <p>
+            By clicking <strong>"I Understand,"</strong> you acknowledge this notice and may proceed with creating or updating your health assessment. Any supplement guidance provided is based on the information you submit and should not replace professional medical advice.
+          </p>
+        </div>
 
         <div className="medical-modal-actions">
-          {currentStatus === 'none' && (
-            <button
-              type="button"
-              className="medical-modal-btn medical-modal-btn-request"
-              onClick={onConfirmApproval}
-              disabled={isConfirming}
-            >
-              {isConfirming ? 'Processing...' : 'I Understand'}
-            </button>
-          )}
+          <button
+            type="button"
+            className="medical-modal-btn medical-modal-btn-request"
+            onClick={onConfirmApproval}
+            disabled={isConfirming}
+          >
+            {isConfirming ? 'Processing...' : 'I Understand'}
+          </button>
           <button
             type="button"
             className="medical-modal-btn medical-modal-btn-close"

@@ -37,6 +37,7 @@ const notificationRoutes = require('./routes/notifications');
 const securityRoutes = require('./routes/security');
 const subscriptionRoutes = require('./routes/subscription');
 const web3Routes = require('./routes/web3');
+const medicalReviewRoutes = require('./routes/medicalReview');
 const { PICTURE_DIR } = require('./utils/pictures');
 const AdminAccount = require('./models/AdminAccount');
 // The one trusted-origin list, and the CSRF guard built on it. See the CORS
@@ -490,6 +491,7 @@ app.use('/api/insights', insightsRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/security', securityRoutes);
 app.use('/api/web3', web3Routes);
+app.use('/api/medical-review', medicalReviewRoutes);
 // The admin console's Chat stream is an EventSource, which cannot set an
 // Authorization header, so its ?token= has to be copied into the header BEFORE
 // anything under /api/admin authenticates: routes/admin.js registers

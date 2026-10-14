@@ -376,10 +376,6 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
   const [activeId, setActiveId] = useState(null);
   const [active, setActive] = useState(null);   // { thread, messages[] }
   const [adminProfiles, setAdminProfiles] = useState({}); // { authorName: profilePicture }
-  const [brokenPictures, setBrokenPictures] = useState(new Set());
-  const markPictureBroken = useCallback((id) => {
-    setBrokenPictures((prev) => new Set(prev).add(id));
-  }, []);
   
   const [loaded, setLoaded] = useState(false);
   // `loaded` already distinguishes "has never finished a load" from "refreshing",
@@ -528,6 +524,8 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
       setActive({ thread: data.thread, messages: rows });
       if (typeof data.supportActive === 'boolean') setSupportActive(data.supportActive);
       if (data.adminProfiles) setAdminProfiles(data.adminProfiles);
+      
+      console.log('[SupportInbox] Admin profiles received:', data.adminProfiles);
       
       // Opening it marks it read server-side, so the local badge is cleared
       // rather than waiting for the next poll to agree. The decrement is driven
@@ -1462,29 +1460,10 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
                               );
                             })()
                           ) : (
-                            // Admin message - show profile picture or initials
-                            (() => {
-                              const adminProfilePic = adminProfiles[m.authorName] || '';
-                              const avatarSrc = pictureUrl(adminProfilePic);
-                              const showPicture = Boolean(avatarSrc) && !brokenPictures.has(`admin-${m.authorName}`);
-                              
-                              return showPicture ? (
-                                <img
-                                  className="sci-msg__avatar sci-msg__avatar--image"
-                                  src={avatarSrc}
-                                  alt=""
-                                  onError={() => markPictureBroken(`admin-${m.authorName}`)}
-                                />
-                              ) : (
-                                <span
-                                  className="sci-msg__avatar"
-                                  style={{ backgroundImage: avatarGradient({ firstName: m.authorName || 'Admin' }) }}
-                                  aria-hidden="true"
-                                >
-                                  {getInitials({ firstName: m.authorName || 'Support' })}
-                                </span>
-                              );
-                            })()
+                            // Admin message - show support logo instead of profile picture
+                            <span className="sci-msg__avatar sci-msg__avatar--support-logo" aria-hidden="true">
+                              <IconHeadset style={{ width: '1.4em', height: '1.4em' }} />
+                            </span>
                           )}
                           <div className="sci-msg__col">
                             {showMeta && (

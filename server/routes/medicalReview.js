@@ -251,27 +251,27 @@ router.post('/confirm', protect, async (req, res) => {
       requested: user.medicalReviewRequested,
     });
 
-    // If already confirmed (status is 'none'), return success immediately
-    // This prevents issues with double-clicks or race conditions
-    if (user.medicalReviewStatus === 'none' || user.medicalReviewStatus === 'confirmed') {
-      console.log('[medical-review-confirm] Already confirmed, returning success');
-      return res.status(200).json({
-        message: 'Medical review already confirmed.',
-        resolvedCount: 0,
-        alreadyConfirmed: true,
-      });
-    }
-
-    // Resolve Priority assessments regardless of current status
-    // (User clicked confirm, so respect that action)
-    console.log('[medical-review-confirm] Resolving Priority assessments...');
-    
-    // Get all Priority assessments to restore their expiry dates
+    // Get all Priority assessments to check if there's anything to resolve
     const priorityAssessments = await Assessment.find({
       user: req.user._id,
       priority: 'Priority',
       resolvedAt: null,
     }).select('_id createdAt');
+
+    // If no Priority assessments found, return early
+    if (priorityAssessments.length === 0) {
+      console.log('[medical-review-confirm] No Priority assessments to resolve');
+      return res.status(200).json({
+        message: 'No priority assessments to resolve.',
+        resolvedCount: 0,
+        alreadyConfirmed: true,
+      });
+    }
+
+    console.log('[medical-review-confirm] Resolving Priority assessments...', {
+      count: priorityAssessments.length,
+      ids: priorityAssessments.map(a => a._id),
+    });
     
     // Update each assessment: resolve, restore priority to Standard, and restore expiry
     const result = await Assessment.updateMany(
@@ -280,7 +280,7 @@ router.post('/confirm', protect, async (req, res) => {
         $set: {
           priority: 'Standard',
           resolvedAt: new Date(),
-          resolvedReason: `Medical review confirmed by user${user.medicalReviewResolvedBy ? ` after approval by ${user.medicalReviewResolvedBy}` : ''}`,
+          resolvedReason: `Health safety alert acknowledged by user${user.medicalReviewResolvedBy ? ` after approval by ${user.medicalReviewResolvedBy}` : ''}`,
         },
       }
     );

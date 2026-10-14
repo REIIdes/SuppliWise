@@ -1184,6 +1184,11 @@ textarea:focus-visible {
 }
 .sci-msg__avatar svg { width: 17px; height: 17px; }
 
+/* Support logo avatar - replaces admin profile picture */
+.sci-msg__avatar--support-logo {
+  background: linear-gradient(135deg, #0ea5e9 0%, #06b6d4 100%);
+}
+
 img.sci-msg__avatar--image {
   width: 32px;
   height: 32px;

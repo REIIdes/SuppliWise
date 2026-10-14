@@ -155,7 +155,7 @@
 .medical-modal-disclaimer {
   position: relative;
   z-index: 1;
-  margin: 0 0 24px;
+  margin: 0 0 20px;
   padding: 14px 16px;
   background: #fffbeb;
   border: 1px solid #fde68a;
@@ -172,6 +172,30 @@
 
 .medical-modal-disclaimer strong {
   color: #92400e;
+  font-weight: 700;
+}
+
+/* ── Acknowledgment text ───────────────────────────────────────────────── */
+.medical-modal-acknowledgment {
+  position: relative;
+  z-index: 1;
+  margin: 0 0 24px;
+  padding: 14px 16px;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  text-align: left;
+}
+
+.medical-modal-acknowledgment p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.65;
+  color: #475569;
+}
+
+.medical-modal-acknowledgment strong {
+  color: #1e293b;
   font-weight: 700;
 }
 

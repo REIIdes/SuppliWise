@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
-import { saveAssessment, getRecommendations, saveAssessmentResults, getPriorityStatus, getCurrentSupplements, getToken, getStoredUser, migrateAssessmentHistory } from '../api';
+import { saveAssessment, getRecommendations, saveAssessmentResults, getPriorityStatus, getCurrentSupplements, getToken, getStoredUser, migrateAssessmentHistory, getMedicalReviewStatus, requestMedicalReview } from '../api';
 import { prefillSupplements } from '../utils/supplementPrefill.js';
 import { isDeadHour, countdownTo, DEAD_HOURS } from '../utils/slotSchedule.js';
 import useNow from '../hooks/useNow';
 import { useSubscription, SUBSCRIPTION_EVENT } from '../hooks/useSubscription';
+import MedicalAttentionModal from '../Components/MedicalAttentionModal/MedicalAttentionModal';
 import './AssessmentPage.css';
 import './HistoryPage.css'; // Import modal styles
 
@@ -2141,6 +2142,11 @@ function AssessmentPage() {
   const cardTopRef = useRef(null);
   const symptomRowRefs = useRef({});
 
+  // Medical review blocking state
+  const [showMedicalModal, setShowMedicalModal] = useState(false);
+  const [medicalReviewStatus, setMedicalReviewStatus] = useState('none');
+  const [prioritySymptoms, setPrioritySymptoms] = useState([]);
+
   const [formData, setFormData] = useState(() => {
     // Update mode: load existing assessment data
     if (isUpdateMode && updateAssessmentData) {
@@ -2308,6 +2314,32 @@ function AssessmentPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Check for medical review blocking on mount
+  useEffect(() => {
+    if (routeReadOnly || isUpdateMode) return;
+    
+    const checkMedicalReview = async () => {
+      try {
+        const [priorityData, reviewData] = await Promise.all([
+          getPriorityStatus(),
+          getMedicalReviewStatus(),
+        ]);
+        
+        if (priorityData.blocked) {
+          // Extract symptoms from priority assessment
+          const symptoms = priorityData.blockingItems?.[0]?.reasons || [];
+          setPrioritySymptoms(symptoms);
+          setMedicalReviewStatus(reviewData.medicalReviewStatus || 'none');
+          setShowMedicalModal(true);
+        }
+      } catch (error) {
+        console.error('Failed to check medical review status:', error);
+      }
+    };
+    
+    checkMedicalReview();
+  }, [routeReadOnly, isUpdateMode]);
+
   // Clear sessionStorage only when explicitly starting fresh after viewing history
   useEffect(() => {
     // If we just viewed history (routeAssessment exists) and user wants to start fresh
@@ -2469,6 +2501,27 @@ function AssessmentPage() {
     }
   };
 
+  // Handle medical review request
+  const handleMedicalReviewRequest = async () => {
+    try {
+      await requestMedicalReview();
+      setMedicalReviewStatus('pending');
+      setShowMedicalModal(false);
+      // Navigate to dashboard to show the updated status
+      navigate('/dashboard');
+    } catch (error) {
+      console.error('Failed to request medical review:', error);
+      // Keep modal open and show error - don't change status on error
+      alert('Failed to submit medical review request. Please try again later or contact support.');
+    }
+  };
+
+  // Handle closing the medical attention modal
+  const handleCloseMedicalModal = () => {
+    setShowMedicalModal(false);
+    navigate('/dashboard');
+  };
+
   const handleSubmit = async () => {
     setSubmitError('');
 
@@ -2628,6 +2681,16 @@ function AssessmentPage() {
   return (
     <div className="assessment-wrapper">
       <Navbar />
+      
+      {/* Medical Attention Modal - Blocks assessment when priority flag is active */}
+      {showMedicalModal && (
+        <MedicalAttentionModal
+          symptoms={prioritySymptoms}
+          reviewStatus={medicalReviewStatus}
+          onRequestReview={handleMedicalReviewRequest}
+          onClose={handleCloseMedicalModal}
+        />
+      )}
       
       {/* Full-screen blocking overlay during AI processing */}
       {submitting && <div className="assessment-blocking-overlay" />}

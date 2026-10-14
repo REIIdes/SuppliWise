@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
-import { getHistory, deleteAssessment, checkFeature, getToken } from '../api';
+import { getHistory, deleteAssessment, checkFeature, getToken, getPriorityStatus } from '../api';
 import { exportResultsToPDF } from '../utils/exportPDF';
 import { PLAN_LABELS, historyLimitForStoredPlan } from '../utils/plan';
 import { safeUrl } from '../utils/safeUrl';
@@ -367,6 +367,9 @@ function HistoryPage() {
   // History list re-loads so tier-capped page sizes update without a refresh.
   const livePlan = useSubscription();
 
+  // Priority blocking state
+  const [priorityBlocked, setPriorityBlocked] = useState(false);
+
   // `serverTime` is the clock every expiry comparison must use. The wrappers
   // below are useCallback'd so their identity only changes when the clock
   // does — otherwise the useMemo filters would rebuild on every render.
@@ -451,6 +454,22 @@ function HistoryPage() {
     window.addEventListener(SUBSCRIPTION_EVENT, onPlan);
     return () => window.removeEventListener(SUBSCRIPTION_EVENT, onPlan);
   }, [navigate]);
+
+  // Check for priority blocking on mount
+  useEffect(() => {
+    const checkPriority = async () => {
+      try {
+        const priorityData = await getPriorityStatus();
+        setPriorityBlocked(priorityData.blocked || false);
+      } catch (error) {
+        console.error('Failed to check priority status:', error);
+      }
+    };
+    
+    if (getToken()) {
+      checkPriority();
+    }
+  }, []);
 
   // A stale paywall modal clears itself the instant the plan is upgraded
   // (SSE push, admin change, expiry) — no refresh or reopen needed.
@@ -598,7 +617,7 @@ function HistoryPage() {
             <button
               className="active-info-action"
               onClick={() => { 
-                if (!deadHours) {
+                if (!deadHours && !priorityBlocked) {
                   // Clear any existing draft to start fresh
                   sessionStorage.removeItem('pending_assessment');
                   navigate('/assessment');
@@ -607,6 +626,10 @@ function HistoryPage() {
               // Assessments are closed between midnight and 4:00 AM, and this
               // button leads straight to the form. Disabling it here keeps the
               // rule consistent with the dashboard card and the form itself,
+              // so the user never finds a control that promises one thing and
+              // delivers another. Priority blocking also disables the button.
+              disabled={deadHours || priorityBlocked}
+              title={priorityBlocked ? 'New assessments are paused for priority review' : (deadHours ? `Assessment closed until ${DEAD_HOURS.endsAt}` : '')}
               // rather than letting this one route through.
               disabled={deadHours}
               title={deadHours ? `Closed between midnight and ${DEAD_HOURS.endsAt}` : undefined}
@@ -722,11 +745,18 @@ function HistoryPage() {
               You haven't completed any assessments yet. Complete your first health assessment
               to start building your assessment history.
             </p>
-            <button className="btn-primary btn-primary-lg" onClick={() => {
-              // Clear any existing draft to start fresh
-              sessionStorage.removeItem('pending_assessment');
-              navigate('/assessment');
-            }}>
+            <button 
+              className="btn-primary btn-primary-lg" 
+              onClick={() => {
+                if (!priorityBlocked) {
+                  // Clear any existing draft to start fresh
+                  sessionStorage.removeItem('pending_assessment');
+                  navigate('/assessment');
+                }
+              }}
+              disabled={priorityBlocked}
+              title={priorityBlocked ? 'New assessments are paused for priority review' : ''}
+            >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <line x1="12" y1="5" x2="12" y2="19"/>
                 <line x1="5" y1="12" x2="19" y2="12"/>
@@ -1331,17 +1361,21 @@ function HistoryPage() {
                         className="btn-update-assessment-full"
                         onClick={(e) => {
                           e.stopPropagation();
-                          navigate('/assessment', { state: { updateMode: true, assessmentId: item._id, assessmentData: item } });
+                          if (!priorityBlocked) {
+                            navigate('/assessment', { state: { updateMode: true, assessmentId: item._id, assessmentData: item } });
+                          }
                         }}
-                        disabled={deadHours}
-                        title={deadHours ? `Closed between midnight and ${DEAD_HOURS.endsAt}` : 'Update Health Assessment'}
-                        aria-label={deadHours ? `Closed between midnight and ${DEAD_HOURS.endsAt}` : 'Update this health assessment with new information'}
+                        disabled={deadHours || priorityBlocked}
+                        title={priorityBlocked ? 'Updates paused — resolve priority review first' : (deadHours ? `Closed between midnight and ${DEAD_HOURS.endsAt}` : 'Update Health Assessment')}
+                        aria-label={priorityBlocked ? 'Updates paused — resolve priority review first' : (deadHours ? `Closed between midnight and ${DEAD_HOURS.endsAt}` : 'Update this health assessment with new information')}
                       >
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                           <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 4 0 0 0 .83-.497z"/>
                           <path d="m15 5 4 4"/>
                         </svg>
-                        <span>{deadHours ? `Closed until ${DEAD_HOURS.endsAt}` : 'Update Health Assessment'}</span>
+                        <span>
+                          {priorityBlocked ? 'Updates Paused for Review' : (deadHours ? `Closed until ${DEAD_HOURS.endsAt}` : 'Update Health Assessment')}
+                        </span>
                       </button>
                     </div>
                   )}

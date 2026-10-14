@@ -199,9 +199,12 @@ const toMessageView = (message) => ({
   _id: message._id,
   thread: message.thread,
   author: message.author,
+  // Display name shown to users (generic for admins, real name for users)
   authorName: message.author === 'admin'
     ? SUPPORT_AUTHOR_LABEL
     : (message.authorName || ''),
+  // Real admin alias for profile picture lookup (only for admins)
+  authorAlias: message.author === 'admin' ? (message.authorName || '') : undefined,
   // Exactly one of these two is populated. Both travel because the client has
   // to render a transcript that mixes a legacy plaintext thread with a newly
   // encrypted one, and deciding which by guessing would be guesswork.
@@ -699,14 +702,14 @@ router.get('/:id', async (req, res) => {
 
     // Fetch admin profiles who have replied in this thread for avatar display
     const AdminAccount = require('../models/AdminAccount');
-    const adminNames = [...new Set(
+    const adminAliases = [...new Set(
       messages
         .filter(m => m.author === 'admin' && m.authorName)
         .map(m => m.authorName)
     )];
     const adminProfiles = {};
-    if (adminNames.length > 0) {
-      const admins = await AdminAccount.find({ alias: { $in: adminNames } })
+    if (adminAliases.length > 0) {
+      const admins = await AdminAccount.find({ alias: { $in: adminAliases } })
         .select('alias profilePicture')
         .lean();
       admins.forEach(admin => {

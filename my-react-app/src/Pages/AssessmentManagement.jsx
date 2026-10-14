@@ -262,18 +262,6 @@ const AssessmentManagement = ({ users: propUsers = [] }) => {
             export a report, or correct what was recorded.
           </p>
         </div>
-        <button
-          type="button"
-          className={`am-refresh-btn${isLoading ? ' am-refresh-btn--busy' : ''}`}
-          onClick={loadUsers}
-          disabled={isLoading}
-          title="Reload the member list"
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M21 12a9 9 0 1 1-2.64-6.36" /><polyline points="21 3 21 9 15 9" />
-          </svg>
-          {isLoading ? 'Loading…' : 'Refresh'}
-        </button>
       </header>
 
       <div className="am-stats" role="group" aria-label="Assessment totals">

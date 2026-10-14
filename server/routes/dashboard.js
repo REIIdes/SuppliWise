@@ -684,6 +684,7 @@ router.get('/', protect, async (req, res) => {
           scheduleTime: slot.timeLabel,
           taken: rec.taken,
           takenAt: rec.takenAt,
+          createdAt: rec.createdAt, // When this supplement was first added to the plan
         };
       }),
       stats: {

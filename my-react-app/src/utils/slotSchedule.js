@@ -190,6 +190,14 @@ export function deadHourPlaceholders(groups, now = new Date()) {
  * normally this afternoon was not — even though both would otherwise read
  * "Taken".
  *
+ * GRACE PERIOD FOR NEW ASSESSMENTS:
+ * If a supplement was added to the plan TODAY (same plan day, checked against
+ * the 4:00 AM boundary), it can NEVER be marked as "late" regardless of when
+ * it's taken. This prevents the confusing case where a user completes an
+ * assessment in the afternoon, gets morning supplements added to their plan,
+ * and immediately sees "Took it Late" when they mark them as taken.
+ * The "late" label only applies starting from the NEXT plan day (after 4:00 AM).
+ *
  * Anytime can never be late, because it has no window. Without that exemption a
  * supplement with no schedule would be permanently branded as late, which is
  * meaningless and the fastest way to make a status word get ignored.
@@ -212,10 +220,55 @@ export function isTakenLate(item, slotKey) {
   }
   if (!item.takenAt || Number.isNaN(takenAt.getTime())) return false;
 
+  // Grace period: if this supplement was added today (same plan day), never mark as late
+  if (item.createdAt) {
+    try {
+      const createdAt = new Date(item.createdAt);
+      if (!Number.isNaN(createdAt.getTime())) {
+        // Check if created and taken on the same plan day
+        // Plan day changes at 4:00 AM, so we need to compare adjusted dates
+        const createdPlanDay = getPlanDayKey(createdAt);
+        const takenPlanDay = getPlanDayKey(takenAt);
+        
+        // If added today (same plan day), never mark as late
+        if (createdPlanDay === takenPlanDay) {
+          return false;
+        }
+      }
+    } catch {
+      // If createdAt parsing fails, continue with normal late check
+    }
+  }
+
   // Local minutes, so "taken at 1:03 AM" is read against the user's own clock
   // rather than a UTC one the user never sees.
   const minutes = takenAt.getHours() * 60 + takenAt.getMinutes();
   return minutes < window.start || minutes >= window.end;
+}
+
+/**
+ * Get the plan day key for a given date, adjusted for the 4:00 AM boundary.
+ * Dates between midnight and 3:59 AM belong to the PREVIOUS plan day.
+ * 
+ * @param {Date} date - The date to get the plan day for
+ * @returns {string} Plan day key in YYYY-MM-DD format
+ */
+function getPlanDayKey(date) {
+  const hours = date.getHours();
+  const minutes = date.getMinutes();
+  const minutesOfDay = hours * 60 + minutes;
+  
+  // If before 4:00 AM (240 minutes), use previous calendar day
+  const adjustedDate = new Date(date);
+  if (minutesOfDay < 240) {
+    adjustedDate.setDate(adjustedDate.getDate() - 1);
+  }
+  
+  // Return YYYY-MM-DD format
+  const year = adjustedDate.getFullYear();
+  const month = String(adjustedDate.getMonth() + 1).padStart(2, '0');
+  const day = String(adjustedDate.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 /**
