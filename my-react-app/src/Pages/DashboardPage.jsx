@@ -980,12 +980,12 @@ function DashboardPage() {
               <strong>
                 {medicalReviewStatus === 'pending'
                   ? 'Medical Review Pending'
-                  : 'Medical Attention Required'}
+                  : 'Health Safety Alert'}
               </strong>
               <span className="sw-banner__hint">
                 {medicalReviewStatus === 'pending'
                   ? 'Your medical review request is pending administrator approval. You will be notified once the review is complete.'
-                  : 'Your recent health assessment has been flagged and requires medical clearance before you can continue with new assessments.'}
+                  : 'Your health assessment has identified symptoms that may require further attention. Creating or updating assessments is temporarily unavailable.'}
               </span>
             </div>
             <button

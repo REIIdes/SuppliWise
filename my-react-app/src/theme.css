@@ -463,6 +463,7 @@
 
 .sw-banner__btn {
   flex-shrink: 0;
+  align-self: center;
   padding: 11px 20px;
   border: 0;
   border-radius: var(--sw-radius-pill, 999px);
