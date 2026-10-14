@@ -113,7 +113,7 @@ class ErrorBoundary extends Component {
 }
 
 // Routes where the chat assistant should NOT appear
-const CHAT_HIDDEN_ROUTES = ['/', '/login', '/signup', '/admin/login', '/admin/change-password', '/admin'];
+const CHAT_HIDDEN_ROUTES = ['/', '/login', '/signup', '/forgot-password', '/reset-password', '/pricing', '/admin/login', '/admin/change-password', '/admin'];
 
 function isAdminJwt(token) {
   try {

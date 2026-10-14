@@ -863,6 +863,13 @@ function LogIn() {
                 setOtp(value);
                 setError('');
               }}
+              onKeyDown={(e) => {
+                // Submit OTP on Enter key press
+                if (e.key === 'Enter' && !otpLoading && secondFactorComplete() && (requiresTwoFactor || useRecoveryCode || otpTimeLeft > 0)) {
+                  e.preventDefault();
+                  handleOtpSubmit();
+                }
+              }}
               maxLength={useRecoveryCode ? 11 : 6}
               inputMode={useRecoveryCode ? 'text' : 'numeric'}
               autoComplete={useRecoveryCode ? 'off' : 'one-time-code'}
