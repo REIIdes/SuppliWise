@@ -522,9 +522,9 @@ function SignIn() {
             {loading ? 'Creating account...' : 'Register'}
           </button>
 
-          <p className="auth-switch">
-            Already Have an Account?{' '}
-            <NavLink to="/login">Login</NavLink>
+          <p className="auth-switch" style={{ textAlign: 'center' }}>
+            Already have an account?{' '}
+            <NavLink to="/login">Login here</NavLink>
           </p>
         </form>
       </div>

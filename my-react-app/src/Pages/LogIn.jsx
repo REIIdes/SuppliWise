@@ -794,7 +794,7 @@ function LogIn() {
             </Link>
           </div>
 
-          <p className="auth-switch">
+          <p className="auth-switch" style={{ textAlign: 'center' }}>
             Don't have an account?{' '}
             <NavLink to="/signup" state={location.state}>Create one</NavLink>
           </p>
