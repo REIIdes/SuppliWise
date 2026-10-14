@@ -1374,26 +1374,6 @@ function HistoryPage() {
             </div>
           </div>
         )}
-
-        {/* Update Assessment Button */}
-        {!loading && !error && history.length > 0 && (
-          <div className="history-update-assessment-container">
-            <button 
-              className="history-update-assessment-btn"
-              onClick={() => navigate('/assessment')}
-              disabled={deadHours}
-              title={deadHours ? `Closed between midnight and ${DEAD_HOURS.endsAt}` : 'Complete a new assessment with updated questions'}
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
-              </svg>
-              {deadHours ? `Assessment closed until ${DEAD_HOURS.endsAt}` : 'Update Assessment'}
-            </button>
-            <p className="history-update-assessment-note">
-              Complete a new assessment to update your health profile with our latest questionnaire
-            </p>
-          </div>
-        )}
       </div>
       {upgradeInfo && (
         <UpgradeModal
