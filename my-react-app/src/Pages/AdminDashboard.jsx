@@ -137,7 +137,7 @@ function subscriptionExpiryLabel(user) {
 // second (previously the whole page re-rendered 210× per idle session).
 // Memoized: only this badge updates as the countdown ticks.
 
-const AdminIdleStatus = memo(function AdminIdleStatus({ deadlineRef, idleLimitSeconds, warningSeconds, onExpire, onStay }) {
+const AdminIdleStatus = memo(function AdminIdleStatus({ deadlineRef, modalShownRef, idleLimitSeconds, warningSeconds, onExpire, onStay }) {
   // Seeded from the SERVER's window when it is known, falling back to the
   // compile-time value until the first refresh reply lands. An admin who sees
   // "9:41 remaining" and is actually killed at 3:30 has been told a lie by the
@@ -153,6 +153,7 @@ const AdminIdleStatus = memo(function AdminIdleStatus({ deadlineRef, idleLimitSe
   const [showModal, setShowModal] = useState(false);
   const [expired, setExpired] = useState(false);
   const [notice, setNotice] = useState('');
+  const [modalShown, setModalShown] = useState(false); // Track if modal was ever shown
   const onExpireRef = useRef(null);
   const onStayRef = useRef(null);
   useEffect(() => {
@@ -179,6 +180,8 @@ const AdminIdleStatus = memo(function AdminIdleStatus({ deadlineRef, idleLimitSe
 
       if (left <= warnAt && left > 0 && !expired) {
         setShowModal(true);
+        setModalShown(true); // Mark that modal has been shown
+        if (modalShownRef) modalShownRef.current = true; // Update ref for activity handler
       }
 
       if (left === 0 && !expired) {
@@ -202,6 +205,8 @@ const AdminIdleStatus = memo(function AdminIdleStatus({ deadlineRef, idleLimitSe
       // Countdown visibly resets; keep the modal briefly so the
       // "session extended" state is noticeable, not magic.
       setNotice('Session extended — you are still signed in.');
+      setModalShown(false); // Reset flag so activity tracking resumes
+      if (modalShownRef) modalShownRef.current = false; // Reset ref too
       window.setTimeout(() => { setShowModal(false); setNotice(''); }, 1800);
     } catch {
       setExpired(true);
@@ -222,6 +227,7 @@ const AdminIdleStatus = memo(function AdminIdleStatus({ deadlineRef, idleLimitSe
       notice={notice}
       onStayLoggedIn={handleStayLoggedIn}
       onLogout={handleLogout}
+      modalShown={modalShown}
     />
   );
 });
@@ -536,6 +542,7 @@ function AdminDashboard() {
 
   // Initialized by the idle effect on mount (avoids impure Date.now() in render)
   const idleDeadlineRef = useRef(0);
+  const modalShownRef = useRef(false); // Track if expiry modal has been shown
   // The server's own numbers, learned from the first successful
   // /auth/admin-refresh. Until then the compile-time fallbacks apply; after it,
   // the countdown and the warning threshold are whatever the API actually
@@ -1084,7 +1091,12 @@ function AdminDashboard() {
     };
 
     const activityEvents = ['keydown', 'mousedown', 'mousemove', 'scroll', 'touchstart', 'pointerdown', 'focus'];
-    const handleActivity = () => { resetIdleTimer(); sendActivityBeacon(); };
+    const handleActivity = () => { 
+      // Don't reset timer if expiry modal has been shown
+      if (modalShownRef.current) return;
+      resetIdleTimer(); 
+      sendActivityBeacon(); 
+    };
     resetIdleTimer();
 
     activityEvents.forEach(eventName => window.addEventListener(eventName, handleActivity, { passive: true }));
@@ -1742,6 +1754,7 @@ function AdminDashboard() {
 
           <AdminIdleStatus
             deadlineRef={idleDeadlineRef}
+            modalShownRef={modalShownRef}
             idleLimitSeconds={idleLimit}
             warningSeconds={ADMIN_WARNING_SECONDS}
             onExpire={handleIdleExpire}

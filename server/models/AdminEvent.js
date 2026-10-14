@@ -14,6 +14,7 @@ const adminEventSchema = new mongoose.Schema({
       'new-device-login', 'security', 'account', 'severe-flag', 'resolved',
       'subscription', 'subscription-request', 'subscription-cancel-request',
       'support-chat',
+      'medical-review-requested', 'medical-review-approved', 'medical-review-needs-info',
     ],
     required: true,
   },

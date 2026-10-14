@@ -65,9 +65,12 @@ async function intakeStateFor(userId, assessmentId) {
 
 /**
  * Decide whether `assessmentId` may be raised to Priority.
+ * @param {string} userId - User ID
+ * @param {string} assessmentId - Assessment ID to potentially flag
+ * @param {boolean} adminOverride - If true, bypass medical review check (for manual admin flags)
  * @returns {Promise<{ok: boolean, code?: string, message?: string, intake?: object, openId?: string}>}
  */
-async function guardRaisePriority(userId, assessmentId) {
+async function guardRaisePriority(userId, assessmentId, adminOverride = false) {
   // Fail closed on an unresolvable owner.
   //
   // Without this, `intakeStateFor(null, id)` finds no intake rows and reports
@@ -87,6 +90,22 @@ async function guardRaisePriority(userId, assessmentId) {
         'This assessment has no resolvable owner, so a priority flag could never be released, ' +
         'notified or audited. Repair the record before flagging it.',
     };
+  }
+
+  // Check for medical review approval (but allow admin override for manual flags)
+  if (!adminOverride) {
+    const User = require('../models/User');
+    const user = await User.findById(userId).select('medicalReviewStatus').lean();
+    if (user && user.medicalReviewStatus === 'approved') {
+      return {
+        ok: false,
+        code: 'medical-review-approved',
+        intake: null,
+        openId: null,
+        message:
+          'This user has been approved for medical review. Severe symptoms detected but flag not raised due to prior medical clearance.',
+      };
+    }
   }
 
   const intake = await intakeStateFor(userId, assessmentId);
@@ -113,11 +132,22 @@ async function guardRaisePriority(userId, assessmentId) {
  * @returns {Promise<{released: string[], remaining: object[]}>}
  */
 async function selfHealOpenPriority(userId) {
+  // Check if user has approved medical review awaiting confirmation
+  const User = require('../models/User');
+  const user = await User.findById(userId).select('medicalReviewStatus').lean();
+  const awaitingConfirmation = user && user.medicalReviewStatus === 'approved';
+  
   const open = await Assessment.find({ user: userId, priority: 'Priority' }).lean();
   const released = [];
   const remaining = [];
 
   for (const doc of open) {
+    // Skip auto-resolve if user has approved status awaiting confirmation
+    if (awaitingConfirmation) {
+      remaining.push(doc);
+      continue;
+    }
+    
     const { complete } = await intakeStateFor(userId, doc._id);
     if (complete) {
       const ok = await Assessment.findByIdAndUpdate(

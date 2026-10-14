@@ -622,7 +622,11 @@ router.get('/', protect, async (req, res) => {
       } catch (healError) {
         console.error('[dashboard GET /] priority self-heal failed:', healError.message);
       }
-      priorityDocs = await Assessment.find({ user: req.user._id, priority: 'Priority' })
+      priorityDocs = await Assessment.find({ 
+        user: req.user._id, 
+        priority: 'Priority',
+        resolvedAt: null  // Only unresolved priority assessments
+      })
         .sort({ createdAt: -1 })
         .limit(3)
         .select('createdAt flagReasons flaggedAt aiResults.recommendations')

@@ -403,7 +403,7 @@ const AssessmentManagement = ({ users: propUsers = [] }) => {
                     ) : assessments.length === 0 ? (
                       <p className="am-empty">No assessments found for this user.</p>
                     ) : (
-                      assessments.map((assessment) => {
+                      assessments.map((assessment, index) => {
                         const isPriority = assessment.priority === 'Priority';
                         // Real expiry — assessment.expiresAt, else the fallback
                         // createdAt + 5 calendar years (same advance the server
@@ -418,6 +418,21 @@ const AssessmentManagement = ({ users: propUsers = [] }) => {
                           && !!expiryDate
                           && Number.isFinite(expiryDate.getTime())
                           && expiryDate.getTime() <= Date.now();
+                        
+                        // Only the first non-expired assessment is the "active" one
+                        const isCurrentActive = !isExpiredRecord && index === assessments.findIndex(a => {
+                          const aIsPriority = a.priority === 'Priority';
+                          const aExpiryDate = aIsPriority
+                            ? null
+                            : a.expiresAt
+                              ? new Date(a.expiresAt)
+                              : (() => { const d = new Date(a.createdAt); d.setFullYear(d.getFullYear() + 5); return d; })();
+                          const aIsExpired = !aIsPriority
+                            && !!aExpiryDate
+                            && Number.isFinite(aExpiryDate.getTime())
+                            && aExpiryDate.getTime() <= Date.now();
+                          return !aIsExpired;
+                        });
 
                         return (
                           <div key={assessment._id} className="am-card">
@@ -425,9 +440,9 @@ const AssessmentManagement = ({ users: propUsers = [] }) => {
                             <div className="am-card__header">
                               {isExpiredRecord ? (
                                 <span className="am-pill am-pill--expired" title="Expired — record kept for reference">EXPIRED</span>
-                              ) : (
+                              ) : isCurrentActive ? (
                                 <span className="am-pill am-pill--active">ACTIVE</span>
-                              )}
+                              ) : null}
                               {isPriority && (
                                 <span
                                   className="am-pill am-pill--priority"

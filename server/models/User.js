@@ -391,6 +391,34 @@ const userSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    // ── Medical Review (Priority Flagging) ───────────────────────────────
+    // When a user's assessment is flagged for severe symptoms, they can
+    // request medical review. Admin approval lifts the assessment block.
+    medicalReviewRequested: {
+      type: Boolean,
+      default: false,
+    },
+    medicalReviewRequestedAt: {
+      type: Date,
+      default: null,
+    },
+    medicalReviewStatus: {
+      type: String,
+      enum: ['none', 'pending', 'approved', 'needs_more_info'],
+      default: 'none',
+    },
+    medicalReviewNotes: {
+      type: String,
+      default: '',
+    },
+    medicalReviewResolvedAt: {
+      type: Date,
+      default: null,
+    },
+    medicalReviewResolvedBy: {
+      type: String,
+      default: '',
+    },
   },
   { timestamps: true }
 );

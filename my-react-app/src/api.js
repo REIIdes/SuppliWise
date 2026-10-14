@@ -2711,3 +2711,73 @@ export const logoutAllSessions = async () => {
   if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
   return data;
 };
+
+// ── Medical Review (Priority Flagging) ─────────────────────────────────
+// User requests medical review after being flagged for severe symptoms
+export const requestMedicalReview = async () => {
+  const res = await apiFetch('/medical-review/request', {
+    method: 'POST',
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// Get current medical review status
+export const getMedicalReviewStatus = async () => {
+  const res = await apiFetch('/medical-review/status', {
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// User confirms they've read admin approval response
+export const confirmMedicalReview = async () => {
+  console.log('[confirmMedicalReview] Starting API call...');
+  const res = await apiFetch('/medical-review/confirm', {
+    method: 'POST',
+    headers: { ...authHeader() },
+  });
+  console.log('[confirmMedicalReview] Response received:', {
+    ok: res.ok,
+    status: res.status,
+    statusText: res.statusText,
+    headers: Object.fromEntries(res.headers.entries()),
+  });
+  const data = await parseJSON(res);
+  console.log('[confirmMedicalReview] Parsed data:', data);
+  if (!res.ok) {
+    console.error('[confirmMedicalReview] Response not ok, throwing error');
+    throw new Error(friendlyError(res.status, data?.message));
+  }
+  console.log('[confirmMedicalReview] Success, returning data');
+  return data;
+};
+
+// Admin: Get all pending medical reviews
+export const getAdminMedicalReviews = async (token) => {
+  const res = await apiFetch('/medical-review/admin/reviews', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// Admin: Resolve a medical review (approve or request more info)
+export const resolveAdminMedicalReview = async (userId, decision, notes, token) => {
+  const res = await apiFetch(`/medical-review/admin/reviews/${userId}/resolve`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ decision, notes }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};

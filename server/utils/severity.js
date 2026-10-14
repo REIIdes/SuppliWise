@@ -15,6 +15,29 @@ const SEVERE_SYMPTOMS = [
   'severe abdominal pain', 'blood in', 'bleeding', 'suicidal', 'self-harm',
 ];
 
+// CRITICAL symptoms that require immediate medical attention and block assessments
+const CRITICAL_SYMPTOMS = [
+  'severe chest pain',
+  'severe shortness of breath',
+  'coughing up blood',
+  'suicidal thoughts',
+  'unable to breathe',
+  'severe bleeding',
+  'loss of consciousness',
+];
+
+// Emergency phrases that indicate critical situations
+const EMERGENCY_PHRASES = [
+  "can't breathe",
+  'chest crushing',
+  'want to die',
+  'bleeding heavily',
+  'severe pain',
+  'passing out',
+  'feeling faint',
+  'extreme pain',
+];
+
 const CRITICAL_CONDITIONS = [
   'heart / cardiovascular disease', 'heart disease', 'diabetes',
   'hypertension (high blood pressure)', 'high blood pressure',
@@ -58,10 +81,74 @@ function containsAny(haystack, needles) {
 }
 
 /**
+ * Determine severity tier based on symptoms and conditions
+ * @returns {'critical' | 'high' | 'medium' | null}
+ */
+function getSeverityTier(input = {}, aiResults = null) {
+  const symptoms = normalizeList(input.symptoms);
+  const severity = input.symptomSeverity && typeof input.symptomSeverity === 'object' ? input.symptomSeverity : {};
+  const conditions = normalizeList(input.medicalConditions);
+
+  // Build freeText from free-text fields
+  const rawFreeText = [
+    input.feelingDescription, input.currentMedications, input.allergies,
+    input.recentBloodTest, input.bloodTestResults,
+  ].filter(v => typeof v === 'string')
+   .map(v => v.trim())
+   .filter(v => v && !IGNORE_VALUES.has(v.toLowerCase()) && v.length > 3)
+   .join('\n')
+   .toLowerCase();
+
+  const symptomNames = symptoms.join('\n').toLowerCase();
+
+  // CRITICAL tier: life-threatening symptoms
+  const criticalSymptomMatches = containsAny(symptomNames, CRITICAL_SYMPTOMS);
+  const emergencyPhraseMatches = containsAny(rawFreeText, EMERGENCY_PHRASES);
+  
+  if (criticalSymptomMatches.length > 0 || emergencyPhraseMatches.length > 0) {
+    return 'critical';
+  }
+
+  // Check AI results for emergency language
+  if (aiResults && typeof aiResults === 'object') {
+    const warnings = Array.isArray(aiResults.warnings) ? aiResults.warnings.join('\n').toLowerCase() : '';
+    const avoid = Array.isArray(aiResults.avoidList) ? aiResults.avoidList.join('\n').toLowerCase() : '';
+    const combined = `${warnings}\n${avoid}`;
+    if (combined.trim() && containsAny(combined, AI_EMERGENCY_PHRASES).length > 0) {
+      return 'critical';
+    }
+  }
+
+  // HIGH tier: multiple severe symptoms OR critical condition + severe symptom
+  const severityLower = {};
+  for (const [k, v] of Object.entries(severity)) {
+    severityLower[String(k).toLowerCase()] = v;
+  }
+  const severeRatedCount = symptoms.filter(s => {
+    const base = String(s).split('::').pop().toLowerCase();
+    const level = String(severityLower[s] || severityLower[base] || severity[s] || '').toLowerCase();
+    return level === 'severe';
+  }).length;
+
+  const hasCriticalCondition = conditions.some(c => CRITICAL_CONDITIONS.includes(c));
+
+  if (severeRatedCount >= 2 || (hasCriticalCondition && severeRatedCount >= 1)) {
+    return 'high';
+  }
+
+  // MEDIUM tier: 1 severe symptom OR red-flag phrase
+  if (severeRatedCount === 1 || containsAny(rawFreeText, RED_FLAG_PHRASES).length > 0) {
+    return 'medium';
+  }
+
+  return null;
+}
+
+/**
  * @param {object} input assessment fields (symptoms, symptomSeverity,
  *   medicalConditions, feelingDescription, currentMedications, allergies)
  * @param {object} [aiResults] optional AI results (scans warnings text)
- * @returns {{ flagged: boolean, reasons: string[] }}
+ * @returns {{ flagged: boolean, reasons: string[], tier: string | null }}
  */
 function analyzeSeverity(input = {}, aiResults = null) {
   const reasons = [];
@@ -137,16 +224,19 @@ function analyzeSeverity(input = {}, aiResults = null) {
   // This prevents "I didn't put anything severe but have depression" from being flagged as Priority.
   if (unique.length === 0 && secondaryReasons.length > 0) {
     // No strong signal — secondary condition alone is not enough
-    return { flagged: false, reasons: [] };
+    return { flagged: false, reasons: [], tier: null };
   }
   if (unique.length > 0 && secondaryReasons.length > 0) {
     // Has strong signal plus secondary condition — include secondary for context
     unique = [...new Set([...unique, ...secondaryReasons])].slice(0, MAX_REASONS);
   }
 
+  // Get severity tier
+  const tier = getSeverityTier(input, aiResults);
+
   // Empty/minimal input should never flag — require at least one strong reason
   // If unique is empty, already not flagged
-  return { flagged: unique.length > 0, reasons: unique };
+  return { flagged: unique.length > 0, reasons: unique, tier };
 }
 
-module.exports = { analyzeSeverity };
+module.exports = { analyzeSeverity, getSeverityTier, CRITICAL_SYMPTOMS, EMERGENCY_PHRASES };

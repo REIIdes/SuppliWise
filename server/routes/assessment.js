@@ -264,10 +264,14 @@ router.get('/priority-status', protect, async (req, res) => {
     if (!can(req.user, 'priorityAssessment')) {
       return res.json({ blocked: false, assessments: [] });
     }
-    const items = await Assessment.find({ user: req.user._id, priority: 'Priority' })
+    const items = await Assessment.find({ 
+      user: req.user._id, 
+      priority: 'Priority',
+      resolvedAt: null  // Only unresolved priority assessments block the user
+    })
       .sort({ createdAt: -1 })
       .limit(3)
-      .select('createdAt flagReasons flaggedAt')
+      .select('createdAt flagReasons flaggedAt symptoms')
       .lean();
     // Repair on read. Flags raised before this guard existed — or by a code
     // path that has not been audited — can still sit open on a plan the user
@@ -281,10 +285,14 @@ router.get('/priority-status', protect, async (req, res) => {
       if (healed.released.length > 0) {
         console.warn(`[assessment GET /priority-status] released ${healed.released.length} completed flag(s) for user ${req.user._id}`);
       }
-      remaining = await Assessment.find({ user: req.user._id, priority: 'Priority' })
+      remaining = await Assessment.find({ 
+        user: req.user._id, 
+        priority: 'Priority',
+        resolvedAt: null  // Only unresolved priority assessments
+      })
         .sort({ createdAt: -1 })
         .limit(3)
-        .select('createdAt flagReasons flaggedAt')
+        .select('createdAt flagReasons flaggedAt symptoms')
         .lean();
     } catch (healError) {
       console.error('[assessment GET /priority-status] self-heal failed:', healError.message);
@@ -296,6 +304,7 @@ router.get('/priority-status', protect, async (req, res) => {
         createdAt: a.createdAt,
         flaggedAt: a.flaggedAt,
         reasons: a.flagReasons || [],
+        symptoms: a.symptoms || [],
       })),
     });
   } catch (error) {
@@ -551,7 +560,8 @@ router.patch('/:id/priority', protect, async (req, res) => {
     // post, and someone who had already ticked everything off never posts
     // again. See utils/priorityGate.js.
     if (priority === 'Priority') {
-      const verdict = await guardRaisePriority(existing.user, existing._id);
+      // Pass adminOverride=true to bypass medical review check for manual admin flags
+      const verdict = await guardRaisePriority(existing.user, existing._id, true);
       if (!verdict.ok) {
         return res.status(409).json({
           message: verdict.message,

@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import Toast from '../Components/Toast/Toast';
 import ConfirmModal from '../Components/ConfirmModal/ConfirmModal';
-import { getDashboard, updateIntake, updateIntakeBulk, getToken, getStoredUser, getMyProfile, setStoredUser } from '../api';
+import MedicalAttentionModal from '../Components/MedicalAttentionModal/MedicalAttentionModal';
+import { getDashboard, updateIntake, updateIntakeBulk, getToken, getStoredUser, getMyProfile, setStoredUser, getPriorityStatus, getMedicalReviewStatus, requestMedicalReview, confirmMedicalReview } from '../api';
 import { subscribeDashboardRefresh } from '../utils/dashboardRefresh';
 import useSubscription from '../hooks/useSubscription';
 import useNow from '../hooks/useNow';
@@ -188,6 +189,12 @@ function DashboardPage() {
   const [priorityBlock, setPriorityBlock] = useState({ blocked: false, count: 0 });
   const [priorityAssessments, setPriorityAssessments] = useState([]);
   const [scoreHelpOpen, setScoreHelpOpen] = useState(false);
+
+  // Medical review state
+  const [showMedicalModal, setShowMedicalModal] = useState(false);
+  const [medicalReviewStatus, setMedicalReviewStatus] = useState('none');
+  const [medicalAdminNotes, setMedicalAdminNotes] = useState('');
+  const [prioritySymptoms, setPrioritySymptoms] = useState([]);
   // Priority Review is a premium entitlement. The API only reports it while the
   // plan includes it, and this guard makes the UI follow a downgrade in the
   // same tick — otherwise the banner, the "Paused" card and the lockout modal
@@ -328,6 +335,36 @@ function DashboardPage() {
       document.removeEventListener('visibilitychange', handleVisible);
     };
   }, [navigate, fetchDashboardData]);
+
+  // Check for medical review blocking on mount
+  useEffect(() => {
+    const checkMedicalReview = async () => {
+      try {
+        const [priorityData, reviewData] = await Promise.all([
+          getPriorityStatus(),
+          getMedicalReviewStatus(),
+        ]);
+        
+        // Always set medical review status and notes when available
+        if (reviewData) {
+          setMedicalReviewStatus(reviewData.medicalReviewStatus || 'none');
+          setMedicalAdminNotes(reviewData.medicalReviewNotes || '');
+        }
+        
+        if (priorityData.blocked) {
+          // Extract symptoms from priority assessment (user's actual reported symptoms)
+          const symptoms = priorityData.assessments?.[0]?.symptoms || [];
+          setPrioritySymptoms(symptoms);
+        }
+      } catch (error) {
+        console.error('Failed to check medical review status:', error);
+      }
+    };
+    
+    if (getToken()) {
+      checkMedicalReview();
+    }
+  }, []);
 
   // The brand control in the Navbar, pressed while already on this page, has
   // nowhere to navigate to — so it scrolls to the top and asks for a refresh
@@ -544,6 +581,62 @@ function DashboardPage() {
     setShowNewAssessmentConfirm(false);
     // When explicitly confirming to abandon current supplements, then clear draft
     navigate('/assessment', { state: { clearDraft: true } });
+  };
+
+  // Handle medical review request
+  const handleMedicalReviewRequest = async () => {
+    try {
+      await requestMedicalReview();
+      setMedicalReviewStatus('pending');
+      setMarkTakenToastKey(prev => prev + 1);
+      setMarkTakenToastMessage('Medical review request submitted successfully. An administrator will review your case shortly.');
+    } catch (error) {
+      console.error('Failed to request medical review:', error);
+      setMarkTakenToastKey(prev => prev + 1);
+      setMarkTakenToastMessage('Failed to submit medical review request. Please try again.');
+    }
+  };
+
+  // Handle "Learn More" on priority banner - open medical modal
+  const handleLearnMore = async () => {
+    try {
+      const reviewData = await getMedicalReviewStatus();
+      // Show the actual status from the server
+      // The user should see 'approved' status even while still blocked
+      // (they need to confirm to lift the block)
+      setMedicalReviewStatus(reviewData.medicalReviewStatus || 'none');
+      setMedicalAdminNotes(reviewData.medicalReviewNotes || '');
+      setShowMedicalModal(true);
+    } catch (error) {
+      console.error('Failed to get medical review status:', error);
+    }
+  };
+
+  // Handle user confirming they've read the admin's approval
+  const [isConfirming, setIsConfirming] = useState(false);
+  const handleConfirmApproval = async () => {
+    if (isConfirming) return; // Prevent double-clicks
+    
+    setIsConfirming(true);
+    try {
+      const result = await confirmMedicalReview();
+      console.log('[handleConfirmApproval] Success:', result);
+      setShowMedicalModal(false);
+      
+      // Refresh dashboard to clear banners
+      try {
+        await fetchDashboardData({ skipLoadingState: false });
+      } catch (dashboardError) {
+        console.error('[handleConfirmApproval] Dashboard refresh failed (non-critical):', dashboardError);
+        // Don't show error alert for dashboard refresh failure - the confirm succeeded
+        // The user can manually refresh if needed
+      }
+    } catch (error) {
+      console.error('[handleConfirmApproval] Failed to confirm medical review:', error);
+      alert('Failed to confirm. Please try again.');
+    } finally {
+      setIsConfirming(false);
+    }
   };
 
   // ── Derived view state ───────────────────────────────────────────────────
@@ -817,6 +910,19 @@ function DashboardPage() {
         />
       )}
 
+      {/* Medical Attention Modal */}
+      {showMedicalModal && (
+        <MedicalAttentionModal
+          symptoms={prioritySymptoms}
+          reviewStatus={medicalReviewStatus}
+          adminNotes={medicalAdminNotes}
+          onRequestReview={handleMedicalReviewRequest}
+          onConfirmApproval={handleConfirmApproval}
+          onClose={() => setShowMedicalModal(false)}
+          isConfirming={isConfirming}
+        />
+      )}
+
       {/* Completion Toast */}
       {showCompletionToast && (
         <div className="completion-toast" role="status">
@@ -875,9 +981,40 @@ function DashboardPage() {
           </p>
         </header>
 
-        {/* Priority Review Banner — surfaced whenever an assessment is flagged.
-            `.sw-banner` is the shared component in theme.css; the results page
-            renders the same markup. */}
+        {/* Medical Attention Banner — shown when medical review is needed */}
+        {priorityBlock.blocked && (
+          <div className="sw-banner sw-banner--medical" role="alert">
+            <div className="sw-banner__icon" aria-hidden="true">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/>
+                <line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+            </div>
+            <div className="sw-banner__body">
+              <strong>
+                {medicalReviewStatus === 'pending'
+                  ? 'Medical Review Pending'
+                  : 'Medical Attention Required'}
+              </strong>
+              <span className="sw-banner__hint">
+                {medicalReviewStatus === 'pending'
+                  ? 'Your medical review request is pending administrator approval. You will be notified once the review is complete.'
+                  : 'Your recent health assessment has been flagged and requires medical clearance before you can continue with new assessments.'}
+              </span>
+            </div>
+            <button
+              type="button"
+              className="sw-banner__btn"
+              onClick={handleLearnMore}
+            >
+              {medicalReviewStatus === 'pending' ? 'View Details' : 'Learn More'}
+            </button>
+          </div>
+        )}
+
+        {/* Priority Review Banner — shows flagged assessment details
+            `.sw-banner` is the shared component in theme.css; the results page renders the same markup. */}
         {priorityItems.length > 0 && (
           <div className="sw-banner" role="alert">
             <div className="sw-banner__icon" aria-hidden="true">⚑</div>
