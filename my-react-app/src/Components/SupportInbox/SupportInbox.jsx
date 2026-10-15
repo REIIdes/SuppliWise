@@ -376,7 +376,6 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
   const [activeId, setActiveId] = useState(null);
   const [active, setActive] = useState(null);   // { thread, messages[] }
   const [adminProfiles, setAdminProfiles] = useState({}); // { authorName: profilePicture }
-  
   const [loaded, setLoaded] = useState(false);
   // `loaded` already distinguishes "has never finished a load" from "refreshing",
   // and the first load does not set state synchronously — so a second

@@ -1,0 +1,139 @@
+# SuppliWise on one machine: nginx-served client + Express API, talking to the
+# same MongoDB Atlas cluster the app already uses.
+#
+#   docker compose up -d --build     start / rebuild
+#   docker compose logs -f api       boot log (it is loud about what it refused)
+#   docker compose down              stop
+#
+# Secrets are NOT baked into an image: .dockerignore excludes every .env, and the
+# API reads deploy/.env through its own loader via a read-only bind mount rather
+# than through Compose (see the api service note for why that distinction is
+# load-bearing). It is also why TLS_ENABLED=false is safe here — the app's own
+# production guard (server/utils/tls.js) refuses to boot a plaintext production
+# API unless it is told a proxy terminates TLS, which is exactly what Caddy does.
+name: suppliwise
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    image: suppliwise-api
+    container_name: suppliwise-api
+    # NOT env_file. Docker Compose interpolates `env_file` contents, so a secret
+    # containing `$` is treated as a variable reference and silently replaced:
+    # ADMIN_ACCOUNTS arrived in the container as 657 characters instead of 1220
+    # with its argon2 hashes shredded into "AdminJoma|=19=19456". The app already
+    # has a loader that reads .env literally (server/utils/envFile.js, ENV_PATH =
+    # server/.env => /app/.env here), so the file is mounted and read by the app
+    # instead of being routed through Compose's templating.
+    volumes:
+      # server/uploads holds member pictures and the per-database blockchain
+      # anchor; both resolve relative to the code, so without this a rebuild
+      # loses uploads and re-anchors the ledger.
+      #
+      # The directory is an operator choice rather than a constant, because it
+      # has to be the SAME one the plain `node index.js` dev server uses whenever
+      # both processes serve one database: the chain head is
+      # `.chain-head.<sha256(dbName)[0:12]>.anchor`, so two separate copies give
+      # each process its own head and fork the ledger silently — with no error
+      # anywhere. Set it in an untracked `.env` next to this file (Compose reads
+      # it for interpolation):
+      #   SUPPLIWISE_UPLOADS_DIR=C:/Users/you/OtherTree/server/uploads
+      # Unset, a deployment that owns its database gets this tree's own directory.
+      - ${SUPPLIWISE_UPLOADS_DIR:-./server/uploads}:/app/uploads
+      - ./deploy/.env:/app/.env:ro
+    networks: [app]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        # Relative to the page origin; nginx proxies it back to the api service.
+        VITE_API_URL: /api
+    image: suppliwise-web
+    container_name: suppliwise-web
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      # 0.0.0.0:8080 on the host, so other devices on the network can reach it.
+      - "8080:80"
+    networks: [app]
+    restart: unless-stopped
+
+  # Keeps the A record pointed at this machine's current IP. PLDT residential
+  # addresses change on reconnect, and without this the certificate is fine while
+  # the hostname quietly follows the old address.
+  duckdns:
+    image: ghcr.io/linuxserver/duckdns:latest
+    container_name: suppliwise-duckdns
+    env_file: deploy/.env.duckdns
+    restart: unless-stopped
+
+  # The public face. This machine sits behind a home gateway that passes no
+  # inbound port, and no process on this PC can open one — so the only way to be
+  # reachable from another network is to connect OUT to a relay that publishes for
+  # us. cloudflared dials out to Cloudflare and points at nginx, so the whole
+  # stack stays HTTP inside the `app` network.
+  #
+  # A quick tunnel's URL is random per start and is printed to STDERR, and the API
+  # allowlist matches origins exactly (server/utils/origins.js has no wildcards),
+  # so a new URL means re-running deploy/make-container-env.cjs with --origin and
+  # recreating api. Caddy + DuckDNS stay configured as the direct path for the day
+  # a port forward exists; nothing here depends on them.
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: suppliwise-tunnel
+    command: tunnel --no-autoupdate --url http://web:80
+    depends_on:
+      web:
+        condition: service_started
+    networks: [app]
+    restart: unless-stopped
+
+  caddy:
+    build:
+      context: .
+      dockerfile: Dockerfile.caddy
+    image: suppliwise-caddy
+    container_name: suppliwise-caddy
+    # Its own file, and deliberately free of `$`: this one DOES go through
+    # Compose's env interpolation, because Caddy has no .env loader of its own.
+    env_file: deploy/.env.caddy
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    # Only used if the ISP swallows 443. Write PUBLIC_HOSTNAME with the ":8443"
+    # suffix and the site answers there instead, with a real certificate either
+    # way — the DNS-01 challenge never needs a reachable inbound port.
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8443:8443"
+    depends_on:
+      web:
+        condition: service_started
+    networks: [app]
+    restart: unless-stopped
+
+networks:
+  app:
+    driver: bridge
+
+volumes:
+  # Let's Encrypt certificates and Caddy's autosave config. Losing caddy_data
+  # means requesting new certificates on every rebuild, and Let's Encrypt
+  # rate-limits repeated issuance for the same names — the symptom is a site
+  # that stops serving HTTPS with an error about too many certificates.
+  caddy_data:
+  caddy_config:

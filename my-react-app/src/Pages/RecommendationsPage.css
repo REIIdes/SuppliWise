@@ -16,6 +16,7 @@
 
 .recommendations-wrapper {
   min-height: 100vh;
+  min-height: 100dvh;
   position: relative;
   /* Declared twice on purpose: `hidden` would make this element a scroll
      container, and a sticky element resolves against the NEAREST ancestor
@@ -51,6 +52,7 @@
   align-items: center;
   justify-content: center;
   min-height: 80vh;
+  min-height: 80dvh;
   gap: 16px;
 }
 
@@ -79,6 +81,7 @@
   align-items: center;
   justify-content: center;
   min-height: 80vh;
+  min-height: 80dvh;
   text-align: center;
   gap: 16px;
   padding: 24px;

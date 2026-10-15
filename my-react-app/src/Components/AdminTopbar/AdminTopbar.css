@@ -499,7 +499,10 @@ img.admin-topbar__dropdown-avatar { display: block; object-fit: cover; }
 }
 @media (max-width: 480px) {
   .admin-topbar__panel,
-  .admin-topbar__divider { display: none; }
+  .admin-topbar__divider,
+  /* The lock is pure decoration, and at this width it lands one pixel off the
+     end of the wordmark. */
+  .admin-topbar__secure { display: none; }
   .admin-topbar__alias   { display: none; }
   .admin-topbar { padding: 0 14px; }
   .admin-topbar__dropdown { right: 14px; }

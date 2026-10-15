@@ -34,6 +34,7 @@
   width: 100%;
   max-width: 680px;
   max-height: 88vh;
+  max-height: 88dvh;
   overflow: hidden;
   background: var(--sw-surface, #fff);
   border-radius: var(--sw-radius-xl, 26px) var(--sw-radius-xl, 26px) 0 0;
@@ -52,6 +53,7 @@
   .swdetail__panel {
     border-radius: var(--sw-radius-lg, 20px);
     max-height: 85vh;
+    max-height: 85dvh;
   }
 }
 
@@ -307,6 +309,12 @@
   justify-content: center;
   padding: 20px;
   background: rgba(15, 42, 35, 0.5);
+  /* Centring a panel taller than the viewport over a fixed, unscrollable layer
+     put half of it above the top of the screen with no way to reach it.
+     `safe center` degrades to start-alignment when the panel does not fit, and
+     the layer then scrolls, so the whole panel is always reachable. */
+  align-items: safe center;
+  overflow-y: auto;
   animation: swdetail-fade 0.18s ease;
 }
 

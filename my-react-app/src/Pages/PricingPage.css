@@ -87,6 +87,7 @@
 
   position: relative;
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--p-bg);
   color: var(--p-text);
   font-family: var(--p-font);
@@ -2017,8 +2018,15 @@ body.pricing-scroll-locked {
 
   /* Phone only: the controls each take a full row so neither is squeezed. */
   .pricing-bar__controls { width: 100%; }
-  .pricing-currency { flex: 1 1 auto; justify-content: space-between; }
-  .pricing-currency__select { max-width: none; }
+  /* `min-width: 0` on both, and it is what stops the picker running off the
+     page. A flex item's default minimum is its MIN-CONTENT width, and this one
+     is `white-space: nowrap` around a native <select> that sizes itself to the
+     longest currency name — 369px of content in a 332px row, which `flex-shrink`
+     could not act on, so the control was cut off at the right edge. Zeroing the
+     floor lets it shrink, and the select already carries `text-overflow:
+     ellipsis`, so the value shortens instead of the layout breaking. */
+  .pricing-currency { flex: 1 1 auto; justify-content: space-between; min-width: 0; }
+  .pricing-currency__select { max-width: none; min-width: 0; flex: 1 1 auto; }
   .pricing-toggle { flex: 1 1 100%; }
   .pricing-toggle__btn { flex: 1; justify-content: center; padding: 9px 10px; }
 

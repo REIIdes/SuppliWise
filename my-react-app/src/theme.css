@@ -116,6 +116,7 @@
 .sw-shell {
   position: relative;
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--sw-mesh, linear-gradient(168deg, #eefcf5, #f5f0ff));
   background-attachment: fixed;
   color: var(--sw-ink, #0d2b23);

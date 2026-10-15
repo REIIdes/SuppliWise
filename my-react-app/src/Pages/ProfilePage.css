@@ -5,6 +5,7 @@
 
 .profile-page {
   min-height: 100vh;
+  min-height: 100dvh;
   background:
     radial-gradient(1000px 380px at 8% -100px, rgba(16, 185, 129, 0.24), transparent 60%),
     radial-gradient(900px 340px at 95% -70px, rgba(56, 189, 248, 0.22), transparent 60%),

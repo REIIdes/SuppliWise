@@ -555,6 +555,7 @@
   position: relative;
   width: min(92vw, 820px);
   max-height: 90vh;
+  max-height: 90dvh;
   overflow-y: auto;
   padding: 28px;
   border-radius: 16px;
@@ -573,17 +574,28 @@
 }
 /* Fallback for browsers without :has() — the card itself stays fluid */
 .am-modal__content > .ro-box { max-width: 100%; }
+/* The only way out of a 4,900px-long report. It was a bare `×` glyph at
+   1.6rem with no box: a ~16x20px target (under half the comfortable minimum),
+   invisible against the report's own header, and it scrolled away with the
+   content — so mid-report the admin had to scroll back to the top or find the
+   backdrop. It is now a real 40px control, and sticky below. */
 .am-modal__close {
   position: absolute;
-  top: 14px; right: 18px;
-  border: none;
-  background: none;
+  top: 12px; right: 14px;
+  width: 40px; height: 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--am-line);
+  background: rgba(255, 255, 255, .94);
+  border-radius: 50%;
+  box-shadow: 0 8px 18px -10px rgba(6, 12, 8, .45);
   color: var(--am-muted);
-  font-size: 1.6rem;
+  font-size: 1.5rem;
   line-height: 1;
   cursor: pointer;
+  z-index: 3;
 }
-.am-modal__close:hover { color: var(--am-ink); }
+.am-modal__close:hover { color: var(--am-ink); background: #fff; }
 
 /* ── Focus ───────────────────────────────────────────────────────────── */
 .am-user-row:focus-visible,
@@ -611,12 +623,53 @@
 }
 
 @media (max-width: 560px) {
-  .am-stats { grid-template-columns: 1fr; gap: 9px; }
-  .am-stat { padding: 12px 14px; }
-  .am-stat__value { font-size: 23px; }
+  /* Two columns with the icon moved above the text, for the same reason the
+     overview metrics do it: side-by-side leaves the label ~54px at 360px, and
+     the previous answer was one column — four screens of scrolling to read
+     four numbers. */
+  .am-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+  .am-stat { padding: 12px 13px; flex-direction: column; align-items: flex-start; gap: 8px; }
+  .am-stat__icon { width: 32px; height: 32px; border-radius: 10px; }
+  .am-stat__icon svg { width: 16px; height: 16px; }
+  .am-stat__value { font-size: 22px; }
   .am-user-row { padding-left: 16px; gap: 11px; }
-  .am-count-pill { display: none; }
+  /* The count pill stays. It was hidden here to buy width for the email, but
+     the email wraps now (below) and "how many assessments does this member
+     have" is the one number this list exists to answer. */
   .am-skeleton__pill { display: none; }
+  /* An ellipsized address is not actionable — the admin cannot search for, or
+     confirm, an account from "verbojanrich20@gmail…". Wrap at any character:
+     `@` and `.` are not break opportunities by default. */
+  .am-user-sub { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+  /* The name wraps for the same reason, and because the pill above took back
+     ~60px: at 320px the info column is ~88px, which is not enough for
+     "Shiela mae Basa" on one line. Two lines of a real name beats one line of
+     "Shiela mae B…". */
+  .am-user-name { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+}
+
+/* ── Dialogs on a phone ───────────────────────────────────────────────────
+   A floating card is the wrong shape here. At 360px the 92vw card spent 11% of
+   the screen on backdrop, and the report inside it is several viewports long,
+   so the card gave the admin a scroller inside a scroller with 20px of dead
+   gutter on both sides. Edge to edge, full height, one scroller. */
+@media (max-width: 620px) {
+  .am-modal { padding: 0; align-items: stretch; }
+  .am-modal__content {
+    width: 100%;
+    max-height: none;
+    height: 100dvh;
+    border-radius: 0;
+    padding: 60px 14px 34px;
+  }
+  /* The read-only reader brings its own sticky header with its own close, so
+     it needs the sheet, not the 60px reservation for ours. */
+  .am-modal__content:has(> .ro-box) { padding: 0; width: 100%; }
+  .am-modal__content:has(> .ro-box) .ro-box { max-height: none; height: 100dvh; border-radius: 0; border-left: 0; border-right: 0; }
+  .am-modal__content:has(> .ro-box) .ro-header { border-radius: 0; }
+  /* Fixed, not absolute: absolute inside the scrolling card meant the control
+     scrolled away with the first screen of the report. */
+  .am-modal__close { position: fixed; top: 10px; right: 10px; }
 }
 
 /* The only motion here is the refresh spinner, the skeleton shimmer and the

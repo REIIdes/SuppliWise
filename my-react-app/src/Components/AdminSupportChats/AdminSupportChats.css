@@ -1109,7 +1109,19 @@ img.asc-avatar--image {
 }
 
 @media (max-width: 620px) {
-  .asc-stats { grid-template-columns: 1fr; }
+  /* These four are the queue FILTER, not a readout — every one of them that
+     stays above the fold is a row of conversations the admin cannot read yet.
+     Two columns, with the icon moved above the text so the label keeps the
+     card's full width instead of sharing it with a 40px chip. */
+  .asc-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .asc-stat { flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px 13px; }
+  .asc-stat__icon { width: 32px; height: 32px; border-radius: 10px; }
+  .asc-stat__icon svg { width: 16px; height: 16px; }
+  .asc-stat__value { font-size: 22px; }
+  /* Half-width cells cannot hold these on one line, and a clipped "A member is
+     waiting for a rep" is worse than a second line. */
+  .asc-stat__label,
+  .asc-stat__hint { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
   .asc-toolbar { align-items: stretch; }
   .asc-toolbar__right { width: 100%; }
   .asc-field { width: 100%; }

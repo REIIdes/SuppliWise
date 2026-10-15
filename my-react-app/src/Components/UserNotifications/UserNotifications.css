@@ -75,6 +75,7 @@
   /* Never taller than the viewport minus the bell area, so the list can
      always scroll and the rounded bottom edge stays on screen. */
   max-height: min(420px, calc(100vh - 100px));
+  max-height: min(420px, calc(100dvh - 100px));
   display: flex;
   flex-direction: column;
   background: #fff;

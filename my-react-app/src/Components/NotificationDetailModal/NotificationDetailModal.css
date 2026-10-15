@@ -41,6 +41,7 @@
   box-shadow: 0 30px 80px -12px rgba(15, 23, 42, 0.38);
   width: min(540px, 100%);
   max-height: min(85vh, 660px);
+  max-height: min(85dvh, 660px);
   /* The message can be long (a support transcript preview), so the card scrolls
      rather than growing past the viewport. */
   overflow-y: auto;
@@ -298,6 +299,7 @@
   .ndm {
     width: 100%;
     max-height: 88vh;
+    max-height: 88dvh;
     border-radius: 20px;
   }
 

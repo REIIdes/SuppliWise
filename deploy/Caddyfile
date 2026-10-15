@@ -1,0 +1,28 @@
+# PUBLIC_HOSTNAME is the whole site address, so a non-standard port belongs in it
+# (name.duckdns.org:8443) and Caddy answers there with a real certificate.
+{$PUBLIC_HOSTNAME} {
+	# DNS-01 through DuckDNS: Let's Encrypt validates by reading a TXT record
+	# created via the DuckDNS API, so nothing has to reach this machine on port 80
+	# and the certificate survives a rebuild as long as the caddy_data volume does.
+	#
+	# The credential goes in the site's `tls` block, not a global `dns` block —
+	# this module's documented Caddyfile form. A `{ dns duckdns { token ... } }`
+	# global reads as "unrecognized subdirective 'token'" and fails validation.
+	tls {
+		dns duckdns {env.DUCKDNS_TOKEN}
+	}
+
+	# Caddy is the only inbound hop, so it is the one that knows the real client
+	# address. The nginx behind this forwards that chain untouched — see the
+	# proxy comment in deploy/nginx.conf.
+	#
+	# Access logging is on because it is the only way to prove, from our side, that
+	# a request from the internet actually arrived. Without it a third-party probe
+	# reporting "success" is unverifiable.
+	log {
+		output stderr
+		format console
+	}
+
+	reverse_proxy web:80
+}

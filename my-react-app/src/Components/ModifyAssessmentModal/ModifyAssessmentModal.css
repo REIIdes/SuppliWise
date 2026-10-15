@@ -10,6 +10,12 @@
   justify-content: center;
   z-index: 1100;
   padding: 20px;
+  /* Centring a dialog taller than the viewport over a fixed, unscrollable
+     layer put its opening questions above the top of the screen with no way to
+     reach them. `safe center` degrades to start-alignment when the dialog does
+     not fit and the layer scrolls, so every step is reachable. */
+  align-items: safe center;
+  overflow-y: auto;
   animation: mam-fade 0.2s ease;
 }
 
@@ -66,8 +72,8 @@
 .mam-close {
   background: #f3f4f6;
   border: none;
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   font-size: 1.3rem;
   line-height: 1;

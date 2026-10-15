@@ -1,0 +1,19 @@
+# Caddy with the DuckDNS provider compiled in.
+#
+# The stock caddy image cannot do a DNS-01 challenge against DuckDNS: every
+# DNS provider is a separate module, and only a handful are baked into the
+# official binary. This is xcaddy's one job — re-link Caddy with the extra
+# module. Nothing here needs an ACME HTTP-01 listener, which is why port 80 is
+# optional and a non-standard public port is workable.
+FROM caddy:2-builder AS builder
+
+RUN xcaddy build \
+    --with github.com/caddy-dns/duckdns
+
+FROM caddy:2-alpine
+
+COPY --from=builder /usr/bin/caddy /usr/bin/caddy
+
+EXPOSE 80 443
+
+CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]

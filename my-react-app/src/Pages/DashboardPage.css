@@ -57,6 +57,7 @@
   --d-shadow-lg: var(--sw-shadow-lg, 0 22px 46px -20px rgba(9, 78, 58, 0.34));
 
   min-height: 100vh;
+  min-height: 100dvh;
   color: var(--d-ink);
   background:
     radial-gradient(820px 460px at 2% -8%, rgba(52, 211, 153, 0.42), transparent 62%),
@@ -468,6 +469,7 @@
   /* Capped so the list scrolls instead of stretching the page to fifteen rows,
      which kept the right-hand column stranded far down the screen. */
   max-height: clamp(300px, 46vh, 470px);
+  max-height: clamp(300px, 46dvh, 470px);
   overflow-y: auto;
   padding-right: 6px;
   margin-right: -6px;
@@ -1238,6 +1240,7 @@
      as the space below, and the overflow scroll means a shorter panel costs
      nothing but a scroll. */
   max-height: min(58vh, 440px);
+  max-height: min(58dvh, 440px);
   overflow-y: auto;
   overscroll-behavior: contain;
 }

@@ -10,6 +10,7 @@
    note. `hidden` first, for engines without `clip`. */
 .track-intake-wrapper {
   min-height: 100vh;
+  min-height: 100dvh;
   position: relative;
   overflow-x: hidden;
   overflow-x: clip;
@@ -110,7 +111,11 @@
 /* Content Layout */
 .track-intake-content {
   display: grid;
-  grid-template-columns: 70fr 30fr;
+  /* `70fr` alone means `minmax(auto, 70fr)`: a wide child (the calendar's
+     7-day strip) sets a min-content floor that pushes the track past the
+     container on a phone. `minmax(0, …)` lets the column shrink to fit and
+     the strip scrolls inside its own box instead. */
+  grid-template-columns: minmax(0, 70fr) minmax(0, 30fr);
   grid-auto-rows: min-content;
   align-items: start;
   gap: 24px;
@@ -893,7 +898,7 @@
 
 .calendar-weekdays {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 8px;
 }
@@ -908,12 +913,18 @@
 
 .calendar-grid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 8px;
 }
 
 .calendar-day {
   aspect-ratio: 1;
+  /* Every day is a <button>, and the mobile stylesheet pins buttons to
+     min-height:44px. With aspect-ratio:1 the grid's automatic minimum
+     transferred that height into a 44px *width* floor, so seven tracks plus
+     gaps overflowed a 320px viewport. Height keeps the 44px tap target; the
+     width is allowed to follow the track. */
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1160,7 +1171,7 @@
 /* Responsive Design */
 @media (max-width: 1024px) {
   .track-intake-content {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -1245,6 +1256,21 @@
 
   .weekday {
     font-size: 11px;
+  }
+}
+
+@media (max-width: 400px) {
+  /* Seven cells plus gutters have to fit inside the section. Recapturing the
+     gutter and the section's side padding is what keeps a day cell over 36px
+     wide instead of dropping to an unreliable tap target. */
+  .calendar-section {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .calendar-weekdays,
+  .calendar-grid {
+    gap: 2px;
   }
 }
 

@@ -13,6 +13,7 @@
   margin-right: auto;
   box-sizing: border-box;
   max-height: 88vh;
+  max-height: 88dvh;
   overflow-y: auto;
   background: #fff;
   border-radius: 12px;
@@ -47,16 +48,19 @@
   color: #111827;
   font-family: Arial, sans-serif;
 }
+/* 40px, not 30: this is the only way out of the reader once the header has
+   scrolled — and on a phone the whole dialog is this control plus the sticky
+   header row. 30px is under half a comfortable thumb target. */
 .ro-close {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 40px;
+  height: 40px;
   background: none;
   border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  font-size: 16px;
+  border-radius: 10px;
+  font-size: 17px;
   color: #6b7280;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;

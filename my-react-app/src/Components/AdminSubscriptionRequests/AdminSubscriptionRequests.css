@@ -782,9 +782,10 @@
   inset: 0;
   z-index: 3200;
   display: flex;
-  align-items: center;
+  align-items: safe center;
   justify-content: center;
   padding: 20px;
+  overflow-y: auto;
   background: rgba(6, 12, 8, 0.55);
 }
 .asr-modal__card {
@@ -839,9 +840,20 @@
 }
 
 @media (max-width: 560px) {
-  .asr-stats { grid-template-columns: 1fr; gap: 9px; }
-  .asr-stat { padding: 12px 14px; }
-  .asr-stat__value { font-size: 23px; }
+  .asr-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+  .asr-stat {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 12px 13px;
+  }
+  .asr-stat__icon { width: 32px; height: 32px; }
+  .asr-stat__icon svg { width: 16px; height: 16px; }
+  .asr-stat__value { font-size: 22px; }
+  /* A half-width cell cannot hold these on one line, and "Waiting on a decis"
+     is worse than a second line. */
+  .asr-stat__label,
+  .asr-stat__hint { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
   .asr-card,
   .asr-row__head { padding-left: 16px; }
   .asr-facts { grid-template-columns: 1fr 1fr; }

@@ -2038,13 +2038,21 @@ router.post('/reset-password', async (req, res) => {
 });
 
 // @route   GET /api/auth/me
-// @desc    Current user profile incl. subscription status (lightweight: no image blobs)
+// @desc    Current user profile incl. subscription status
+//          (lightweight: the pictures are ~60-char /pictures paths, not blobs)
 // @access  Private
 router.get('/me', protect, async (req, res) => {
   try {
     if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
+    // profilePicture/bannerPicture USED to be excluded here, back when they
+    // held inline `data:` base64 and this route was a multi-megabyte answer.
+    // The bytes live on disk now and the fields are short root-relative paths,
+    // so withholding them buys nothing and costs the clients that rebuild
+    // their cached profile from this response — the navbar silently loses the
+    // member's picture after a plan revalidation, because nothing else hands
+    // it the path.
     const user = await User.findById(req.user._id)
-      .select('-password -profilePicture -bannerPicture -twoFactorSecret -twoFactorSecretEnc -webauthnUserId -lastLoginIp -lastLoginUserAgent')
+      .select('-password -twoFactorSecret -twoFactorSecretEnc -webauthnUserId -lastLoginIp -lastLoginUserAgent')
       .lean();
     if (!user) return res.status(404).json({ message: 'User not found.' });
     res.json({
@@ -2055,6 +2063,8 @@ router.get('/me', protect, async (req, res) => {
       email: user.email,
       dateOfBirth: user.dateOfBirth,
       gender: user.gender,
+      profilePicture: user.profilePicture || '',
+      bannerPicture: user.bannerPicture || '',
       subscriptionActive: user.subscriptionActive,
       subscriptionPlan: user.subscriptionPlan,
       subscriptionUpdatedAt: user.subscriptionUpdatedAt,

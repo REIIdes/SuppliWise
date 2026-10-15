@@ -30,6 +30,13 @@ server/.env
 *.env.orig
 *.env.save
 
+# The `**/.env` rule above only matches that exact filename, so the deployment
+# siblings — `deploy/.env.caddy` and `deploy/.env.duckdns`, both of which hold
+# the DuckDNS API token — were committable. Anything named `.env.<suffix>` is
+# configuration with secrets in it, so it is ignored by shape rather than by
+# listing each one. `.env.example` is re-allowed below.
+**/.env.*
+
 # Example env files may only ever contain placeholders (an earlier revision
 # of server/.env.example shipped real secrets). Keep them tracked but never
 # secret-bearing.

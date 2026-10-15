@@ -1,6 +1,7 @@
 /* Shared auth styles — used by LogIn and SignIn */
 .page-wrapper {
   min-height: 100vh;
+  min-height: 100dvh;
   background: #f0faf0;
   display: flex;
   flex-direction: column;

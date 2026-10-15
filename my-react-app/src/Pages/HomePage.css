@@ -4,6 +4,7 @@
    colour (emerald / cyan / violet / amber) instead of one flat green. */
 .home-wrapper {
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--sw-mesh, linear-gradient(168deg, #eefcf5, #ecf4ff 52%, #f5f0ff));
   background-attachment: fixed;
   display: flex;

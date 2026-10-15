@@ -1,0 +1,46 @@
+# Build context is the repo root; only server/ and my-react-app/ are copied.
+#
+# .env is excluded on purpose: secrets belong to the container's environment
+# (compose reads deploy/.env), not to an image layer that anyone who can pull
+# the image can read back out.
+**/node_modules
+**/.env
+**/.env.*
+!**/.env.example
+
+my-react-app/dist
+my-react-app/dev-dist
+my-react-app/.vite
+my-react-app/node_modules/.vite*
+server/uploads
+
+certs/
+.git/
+docs/
+scripts/
+**/*.log
+**/*.err
+_*.log
+_*.err
+_*.bak
+*.md
+*.bat
+*.ps1
+*.txt
+
+# Ad-hoc scratch that must never reach a distributable artifact. `COPY server/ ./`
+# takes whatever is in the directory, so a diagnostic dump written next to the code
+# ships inside the image layer. `_profile_oneline.json` is exactly that: a row-for-row
+# copy of a live user document (name, email, date of birth, 2FA state). Nothing at
+# runtime reads any of these; the server entry point never requires them.
+**/_profile*.json
+**/_*.json
+server/_*.js
+server/_*.cjs
+
+# Tests and their harnesses. They connect to databases and hold recorded fixtures;
+# none of it is reachable from `index.js`. Migration and diagnostic scripts are
+# deliberately NOT listed: an operator may run them with `docker compose exec`,
+# and they read their secrets from the environment rather than storing any.
+server/Test File/
+server/test-*.js

@@ -10,6 +10,7 @@
    note. `hidden` first, for engines without `clip`. */
 .assessment-wrapper {
   min-height: 100vh;
+  min-height: 100dvh;
   position: relative;
   overflow-x: hidden;
   overflow-x: clip;

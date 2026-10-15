@@ -294,6 +294,9 @@
   position: absolute;
   left: 0; right: 0; bottom: 0;
   height: 4px;
+  /* The busy sweep runs the bar to translateX(100%), so without this it paints
+     outside the banner and off the right edge of the screen. */
+  overflow: hidden;
   background: rgba(15, 23, 42, .07);
 }
 .rt-progress__bar {
@@ -1721,8 +1724,17 @@
   .rt-td--status::before { top: 0; bottom: auto; height: 4px; width: 100%; }
   .rt-td--fw { padding: 7px 14px 0 18px; }
   .rt-desc-row { padding: 9px 14px 12px 18px; }
-  .rt-desc strong { white-space: normal; }
-  .rt-impl { white-space: normal; }
+  /* Probe names are snake_case and feature titles are single long words;
+     `white-space: normal` alone cannot break either of them. */
+  .rt-desc strong { white-space: normal; overflow-wrap: anywhere; }
+  /* `white-space: normal` alone still cannot break "utils/systemDetection.js"
+     — there is no space in it — so the path clipped mid-word. */
+  .rt-impl {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+  }
 
   .rt-detail-row { margin: -4px 0 10px; }
   .rt-detail-cell { padding: 0 14px 14px 18px; }
@@ -1738,6 +1750,8 @@
   .rt-header__icon { width: 40px; height: 40px; border-radius: 12px; }
   .rt-header__icon svg { width: 19px; height: 19px; }
   .rt-header__title { font-size: 1.15rem; }
+  .rt-header__title-wrap > div { min-width: 0; }
+  .rt-header__kicker { font-size: 0.68rem; letter-spacing: .02em; }
   .rt-header__sub { padding: 11px 13px; font-size: 0.82rem; }
   .rt-stats { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 11px; }
   .rt-stat { padding: 14px 15px 13px; border-radius: 16px; }

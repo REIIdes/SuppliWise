@@ -268,8 +268,21 @@
   z-index: 20;
   display: flex;
   flex-direction: column;
-  /* No max-height — let the panel be exactly as tall as its content.
-     The chat window is fixed height so this can never overflow it. */
+  /* BOUNDED AND SCROLLING. This used to have no max-height on the theory that
+     "the chat window is fixed height so this can never overflow it" — but the
+     window is `overflow: hidden`, so overflowing it does not spill, it CLIPS.
+     Once a member had enough conversations to make the list taller than the
+     window, the older threads were cut off with no scrollbar and no gesture
+     that could reach them: the history menu became unreachable by the exact
+     users who needed it most.
+
+     It is a max-height rather than an inset `bottom` so a member with two
+     conversations still gets a two-row menu instead of a tall empty box. The
+     66px is this menu's own `top`, the 8px matches the 8px side gutters. The
+     `overscroll-behavior` below (which was already here, for a scroller that
+     did not exist) keeps a flick at either end from scrolling the page behind. */
+  max-height: calc(100% - 74px);
+  overflow-y: auto;
   background: #fff;
   border: 1px solid #e4e7f5;
   border-radius: 12px;
@@ -350,6 +363,15 @@
 .chat-thread-item.active .chat-thread-dots-btn { opacity: 1; }
 .chat-thread-dots-btn:hover { background: #ede9fe; color: #6d5ffc; }
 .chat-thread-dots-btn:focus-visible { outline: 2px solid #7c7ce8; outline-offset: 1px; opacity: 1; }
+/* `opacity: 0` behind `:hover` is a mouse-only affordance: on a touchscreen
+   there is no hover to break, so the rename/delete control stayed invisible
+   and unreachable for every phone user — the conversation list looked
+   read-only. Anyone who taps-and-holds does get a sticky :hover in some
+   browsers, which is not a thing to design around. Shown whenever the pointer
+   cannot hover. */
+@media (hover: none), (pointer: coarse) {
+  .chat-thread-dots-btn { opacity: 1; }
+}
 
 /* ── Dropdown ────────────────────────────────────── */
 .chat-thread-dropdown {

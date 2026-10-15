@@ -11,6 +11,7 @@
 /* ── Shell: full viewport background only ─────────── */
 .admin-shell {
   min-height: 100vh;
+  min-height: 100dvh;
   background:
     radial-gradient(900px 380px at 0% 0%, rgba(217,107,53,.07), transparent 55%),
     radial-gradient(820px 420px at 100% 6%, rgba(79,107,237,.07), transparent 55%),
@@ -348,7 +349,9 @@
   margin-top: var(--admin-topbar-h, 60px);   /* below fixed topbar */
   margin-left: 240px;       /* beside expanded sidebar */
   min-height: calc(100vh - var(--admin-topbar-h, 60px));
+  min-height: calc(100dvh - var(--admin-topbar-h, 60px));
   height: calc(100vh - var(--admin-topbar-h, 60px));
+  height: calc(100dvh - var(--admin-topbar-h, 60px));
   overflow-y: auto;
   padding: 34px clamp(20px, 5vw, 64px) 56px;
   position: relative;
@@ -425,6 +428,7 @@
   /* Never taller than the viewport minus the topbar, so the list always has
      something to scroll and the panel never runs off the bottom edge. */
   max-height: min(520px, calc(100vh - var(--admin-topbar-h, 60px) - 28px));
+  max-height: min(520px, calc(100dvh - var(--admin-topbar-h, 60px) - 28px));
   display: flex;
   flex-direction: column;
   padding: 0;
@@ -1439,7 +1443,17 @@
 }
 @media (max-width: 560px) {
   .usr-searchbar { flex: 1 1 100%; width: 100%; }
-  .usr-stat { padding: 12px 13px 12px 15px; gap: 10px; }
+  /* Four full-width rows pushed the actual account list below the fold. With
+     the hint dropped there is nothing left to spread out, so the count and its
+     label share a line under the icon and the strip fits two-up. */
+  .usr-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+  .usr-stat {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 12px 13px 12px 15px;
+  }
+  .usr-stat__body { flex-direction: row; align-items: baseline; gap: 6px; }
   .usr-stat__icon { width: 32px; height: 32px; border-radius: 9px; }
   .usr-stat__value { font-size: 21px; }
   .usr-stat__hint { display: none; }
@@ -1637,8 +1651,16 @@
 }
 .admin-login-card input { border: 1px solid var(--admin-line); padding: 11px; font: 14px Arial, sans-serif; background: #fbfcfa; }
 .table-wrap { overflow-x: auto; }
-table { border-collapse: collapse; width: 100%; font: 13px Arial, sans-serif; }
-th {
+/* SCOPED ON PURPOSE. These selectors used to be bare element selectors, and
+   Vite does not scope a page stylesheet to that page: once the admin console
+   had been visited, `table { width:100%; font:13px }`, the uppercase 10px `th`
+   and — worst — `th, td { white-space: nowrap }` were applied to EVERY table
+   in the app (SecurityStatus, all eight Web3 panels, ChatAssistant,
+   Marketplace, Share, Verify), forcing their cells onto one line and blowing
+   them out of their own containers on phones. The console has exactly one
+   table and it is already inside `.table-wrap`, so the rules belong there. */
+.table-wrap table { border-collapse: collapse; width: 100%; font: 13px Arial, sans-serif; }
+.table-wrap th {
   color: var(--admin-muted);
   font-size: 10px;
   text-transform: uppercase;
@@ -1646,11 +1668,11 @@ th {
   letter-spacing: .06em;
   background: linear-gradient(180deg, #f7faf7, #f2f6f3);
 }
-th, td { border-bottom: 1px solid #edf0ed; padding: 12px 10px; vertical-align: top; white-space: nowrap; }
-th:first-child, td:first-child { padding-left: 12px; }
-tbody tr { transition: background .12s ease; }
-tbody tr:hover { background: #f8fbf9; }
-td small, .provider small, .security-row small, .notification span { display: block; color: var(--admin-muted); font-size: 11px; margin-top: 4px; white-space: normal; }
+.table-wrap th, .table-wrap td { border-bottom: 1px solid #edf0ed; padding: 12px 10px; vertical-align: top; white-space: nowrap; }
+.table-wrap th:first-child, .table-wrap td:first-child { padding-left: 12px; }
+.table-wrap tbody tr { transition: background .12s ease; }
+.table-wrap tbody tr:hover { background: #f8fbf9; }
+.table-wrap td small, .provider small, .security-row small, .notification span { display: block; color: var(--admin-muted); font-size: 11px; margin-top: 4px; white-space: normal; }
 
 /* Status chips + destructive action */
 .status {
@@ -2415,9 +2437,13 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
   .route-tally li { flex: 1 1 auto; justify-content: center; }
 }
 @media (max-width: 560px) {
-  .aip-stats { grid-template-columns: 1fr; gap: 9px; }
-  .aip-stat { padding: 12px 14px; }
-  .aip-stat__value { font-size: 23px; }
+  /* Stays two-up. These cards have no icon, so the label gets ~135px at 360px
+     and wraps to two lines — far better than one column, which put four
+     numbers in front of the provider list that is the actual work here. */
+  .aip-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+  .aip-stat { padding: 12px 13px; }
+  .aip-stat__value { font-size: 22px; }
+  .aip-stat__label { font-size: 11.5px; }
   .provider__row { grid-template-columns: 1fr; gap: 2px; }
   .aip-routing { padding: 15px 13px; border-radius: 15px; }
   .route-grid { grid-template-columns: 1fr; gap: 11px; }
@@ -2562,61 +2588,122 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
 .user-actions--stacked .danger-action { align-self: flex-end; }
 /* ── Responsive ──────────────────────────────────────────────────────── */
 @media (max-width: 820px) {
-  .admin-main { padding: 26px 16px 48px; margin-left: 64px; }
-  .admin-shell--collapsed .admin-main { margin-left: 64px; }
+  /* .admin-main itself is restyled further down in this block, where the
+     sidebar turns into the tab strip — the two changes are one decision and
+     reading them apart (margin-left: 64px here, 0 below) would look like a bug. */
   .admin-notif-panel { right: 14px; width: min(360px, calc(100vw - 28px)); }
   .admin-header, .panel-heading { display: block; }
   .admin-header-actions { margin-top: 18px; justify-content: flex-end; }
   .admin-header .admin-secondary { margin-top: 0; }
   .admin-header h1 { font-size: clamp(26px, 7vw, 34px); }
-  .metric-grid { grid-template-columns: repeat(2, 1fr); }
+  /* minmax(0,1fr), not 1fr: a `1fr` track is really minmax(auto,1fr), so the
+     metric card's min-content — the label on one line plus its number — pushed
+     the track wider than its half of the row and the grid overflowed the page
+     instead of wrapping the text. */
+  .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-grid, .provider-grid { grid-template-columns: 1fr; }
   .search-row { margin-top: 15px; }
   .search-row input { min-width: 0; flex: 1; }
-  /* Sidebar is always icon-only on small screens */
+  /* ── The rail becomes a tab strip ─────────────────────────────────────
+     Above 820px the sidebar is a 240px column beside the content; below it
+     the same DOM becomes a horizontal strip pinned under the topbar.
+     Two reasons, in order of weight:
+       • 64px of a 360px screen is 18% of the width spent on eight unlabeled
+         glyphs, and an admin who does not use the console daily has to hover
+         each one to learn what it is — the tooltips are `title`, so on touch
+         they never appear at all. The strip shows the labels.
+       • The rail's items only fit because they are icon-only. Given the
+         labels back, a vertical rail would need ~200px and the content would
+         have nowhere to go.
+     `display: contents` on .admin-body keeps the sidebar before the main in
+     the flow, so `position: sticky` here behaves exactly as a sticky header. */
   .admin-sidebar,
-  .admin-sidebar--collapsed { width: 64px; }
-  .admin-sidebar nav { padding: 0 8px; }
+  .admin-sidebar--collapsed {
+    position: sticky;
+    top: var(--admin-topbar-h, 60px);
+    left: auto;
+    bottom: auto;
+    width: auto;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    overflow: visible;
+    padding: 9px 10px;
+    z-index: 110;
+    border-bottom: 1px solid rgba(255, 255, 255, .14);
+    box-shadow: 0 10px 22px -20px rgba(0, 0, 0, .95);
+  }
+  /* The collapse toggle is meaningless once the strip scrolls: there is no
+     expanded/collapsed state to switch between. */
+  .sidebar-header,
+  .admin-sidebar:not(.admin-sidebar--collapsed) .sidebar-header { display: none; }
+
+  .admin-sidebar nav {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    padding: 0;
+    overflow-x: auto;
+    /* The strip is the only horizontal scroller in the console, so it is the
+       one place where a swipe-able row is the intended interaction. The
+       scrollbar is hidden because a 4px bar inside a 40px strip reads as a
+       rendering fault, and the fade below does the affordance job instead. */
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 12px, #000 calc(100% - 22px), transparent 100%);
+    mask-image: linear-gradient(90deg, transparent 0, #000 12px, #000 calc(100% - 22px), transparent 100%);
+  }
+  .admin-sidebar nav::-webkit-scrollbar { display: none; }
+
   .admin-sidebar nav button,
   .admin-sidebar--collapsed nav button {
-    justify-content: center;
-    padding: 11px 0;
+    flex: 0 0 auto;
+    scroll-snap-align: center;
+    justify-content: flex-start;
+    gap: 8px;
+    padding: 9px 13px;
     margin: 0;
-    /* Same reason as the collapsed rule: the hidden label is still a flex item,
-       so the inherited gap would offset the icon off-centre in the 64px rail. */
-    gap: 0;
+    font-size: 13px;
+    white-space: nowrap;
   }
+  .admin-sidebar nav button:hover,
+  .admin-sidebar nav button:active { transform: none; }
   .admin-sidebar .sidebar-nav-label,
   .admin-sidebar--collapsed .sidebar-nav-label {
-    width: 0;
-    opacity: 0;
-    flex: 0;
-    pointer-events: none;
-    /* Same reason as the collapsed rule above: the box is 0px wide, so this
-       must not wrap or each label becomes a one-character-per-line column and
-       the rail rows blow out to ~167px tall. */
+    width: auto;
+    opacity: 1;
+    flex: 0 0 auto;
+    line-height: 1.15;
     white-space: nowrap;
-    line-height: 0;
-  }
-  .admin-sidebar:not(.admin-sidebar--collapsed) .sidebar-header {
-    justify-content: center;
-    padding: 14px 0;
+    pointer-events: auto;
   }
   .admin-sidebar .sidebar-signout,
-  .admin-sidebar--collapsed .sidebar-signout,
-  .admin-sidebar .admin-sidebar--collapsed .sidebar-signout {
-    justify-content: center;
-    padding: 11px 0;
-    margin: auto 8px 16px;
+  .admin-sidebar--collapsed .sidebar-signout { display: none; }
+
+  /* Back to normal document flow. `.admin-main` is a fixed-height scroll
+     container on desktop, which is what lets the rail stay put; on a phone a
+     nested scroller inside the page scroller is the classic double-flicker and
+     it fights the browser's collapsing URL bar. The sticky strip above gives
+     the same persistent navigation without the nested scroll. */
+  .admin-main,
+  .admin-shell--collapsed .admin-main {
+    margin-left: 0;
+    height: auto;
+    min-height: calc(100dvh - var(--admin-topbar-h, 60px) - 52px);
+    overflow: visible;
+    padding: 22px 14px 46px;
+    border-radius: 0;
   }
-  .admin-sidebar .sidebar-signout .sidebar-nav-label { display: none; }
 }
 @media (max-width: 480px) {
   .metric-grid { gap: 8px; }
   .metric { padding: 14px; }
   .metric strong { font-size: 24px; }
   .admin-login-card { padding: 26px; }
-  .admin-main { padding: 22px 13px 44px; }
+  .admin-main { padding: 20px 12px 42px; }
   .admin-panel { padding: 18px 15px; border-radius: 14px; }
   .admin-header { margin-bottom: 22px; }
   .admin-header h1 { font-size: 26px; }
@@ -2710,9 +2797,15 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
   text-transform: uppercase;
   letter-spacing: .09em;
   color: rgba(255, 255, 255, .86);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* WRAPS, on every width. These were `nowrap` + ellipsis, which clipped
+     "Active Subscriptions" to "Active Subscr…" even at 1280px: the four-column
+     grid leaves the text column ~110px once the icon has taken its share, and
+     the label needs 155px. A label that is truncated is not compacted, it is
+     lost — it is the only thing on the card that says what the number counts.
+     The grid row stretches to the tallest card, so a two-line label keeps the
+     four cards level. */
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 .ov-metric__value {
   font: 800 34px/1.05 Arial, sans-serif;
@@ -2723,9 +2816,8 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
 .ov-metric__note {
   font: 600 11px/1.35 Arial, sans-serif;
   color: rgba(255, 255, 255, .8);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 /* ── Bottom grid ─────────────────────────────────────────────────────── */
@@ -3722,12 +3814,31 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
   .ov-metric__icon svg { width: 19px; height: 19px; }
   .ov-metric__value { font-size: 27px; }
   .ov-metric__note { font-size: 10.5px; }
+  /* Tighter tracking buys back a few characters per line at the widths where
+     the label has to wrap. */
+  .ov-metric__label { letter-spacing: .06em; }
   .ov-chart { height: 168px; }
   .ov-panel-header { flex-direction: column; align-items: stretch; gap: 10px; }
   .ov-panel-badges { justify-content: flex-start; }
-  .ov-user-email { max-width: 18ch; }
+  /* An ellipsized email is the one value in this row the admin cannot guess:
+     "nelwinthenew1@gmail.c…" is not enough to find or verify an account, and
+     truncation here was cutting real addresses. It wraps instead, at any
+     character, because `@` and `.` are not break opportunities by default. */
+  .ov-user-email { max-width: none; white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
 }
 @media (max-width: 430px) {
+  /* Two columns, but the icon moves ABOVE the text instead of beside it.
+     That is what makes two columns possible: the row layout left the label a
+     ~54px column at 360px, so "SUBSCRIPTIONS" shattered one letter-cluster per
+     line and the earlier fix was to drop to one column — which spent four
+     screen-heights of scrolling on four numbers. Stacked, the label gets the
+     card's full ~134px back and the row halves in height. */
+  .ov-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .ov-metric { flex-direction: column; align-items: flex-start; gap: 9px; padding: 14px; }
+  .ov-metric__icon { width: 32px; height: 32px; border-radius: 10px; }
+  .ov-metric__icon svg { width: 16px; height: 16px; }
+  .ov-metric__label { font-size: 9.5px; }
+  .ov-metric__value { font-size: 26px; }
   /* Below this the axis numbers alone carry the scale — the day-of-month row
      no longer fits under 14 columns. */
   .ov-bar-label { display: none; }
@@ -5483,12 +5594,23 @@ select { border: 1px solid var(--admin-line); background: #fbfcfa; padding: 6px;
 
 /* ── Narrow columns ────────────────────────────────────────────────────── */
 @media (max-width: 640px) {
-  .adm-hero { padding: 18px 16px; gap: 12px; }
-  .adm-hero__mark { width: 46px; height: 46px; border-radius: 15px; }
+  .adm-hero { padding: 16px 14px; gap: 10px; }
+  .adm-hero__mark { width: 40px; height: 40px; border-radius: 13px; }
+  /* The text block's 300px basis is wider than the whole panel here, so the
+     mark wrapped onto its own line and added a third of the hero's height. */
+  .adm-hero__text { flex-basis: 190px; }
   .adm-searchbar { flex: 1 1 100%; max-width: none; margin-left: 0; }
   .adm-searchbar__kbd { display: none; }
   .adm-body { padding: 16px 14px 18px; }
-  .adm-stat { padding: 12px 13px 12px 15px; gap: 10px; }
+  .adm-note { padding: 10px 12px; font-size: 12px; }
+  .adm-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+  .adm-stat {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 12px 13px 12px 15px;
+  }
+  .adm-stat__body { flex-direction: row; align-items: baseline; gap: 6px; }
   .adm-stat__icon { width: 32px; height: 32px; border-radius: 10px; }
   .adm-stat__value { font-size: 21px; }
   .adm-stat__hint { display: none; }

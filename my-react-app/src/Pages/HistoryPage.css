@@ -41,6 +41,17 @@
   justify-content: center;
   z-index: 1000;
   padding: 20px;
+  /* A dialog taller than the viewport used to be centred INVISIBLE: flex
+     centring pushes the overflow equally off BOTH ends, and because this is a
+     fixed, unscrollable layer the part above the top of the screen was
+     unreachable — on a landscape phone or a short window the dialog's heading
+     and the reason you opened it were simply gone. `safe center` falls back to
+     start-alignment when the child does not fit, and the layer then scrolls,
+     so the whole dialog is always reachable. Browsers without `safe` keep the
+     plain centring above and lose nothing. */
+  align-items: center;
+  align-items: safe center;
+  overflow-y: auto;
   animation: fadeIn 0.15s ease;
 }
 
@@ -148,6 +159,7 @@
 /* ═══ Page shell ═══ */
 .history-wrapper {
   min-height: 100vh;
+  min-height: 100dvh;
   background:
     radial-gradient(760px 320px at 6% -80px, rgba(16, 185, 129, 0.20), transparent 62%),
     radial-gradient(680px 300px at 96% -40px, rgba(139, 92, 246, 0.16), transparent 62%),

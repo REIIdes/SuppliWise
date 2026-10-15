@@ -413,6 +413,7 @@ function AdminDashboard() {
   const [clearingRead, setClearingRead] = useState(false);
   const [notice, setNotice] = useState('');
   const notifBellRef = useRef(null);
+  const sidebarNavRef = useRef(null);
   const notifPanelRef = useRef(null);
   const notifCloseTimerRef = useRef(0);
   const notifHoverSuppressedRef = useRef(false);
@@ -1447,6 +1448,21 @@ function AdminDashboard() {
     }
   };
 
+  /* Below 820px the section nav is a horizontally scrolling strip (see the
+     "rail becomes a tab strip" block in AdminDashboard.css), so the active chip
+     can start off-screen — a nav that does not show where you are looks broken.
+     Centre it on every tab change. `block: 'nearest'` matters: the default
+     `start` would scroll the whole page vertically to reveal the chip. */
+  useEffect(() => {
+    const nav = sidebarNavRef.current;
+    if (!nav) return;
+    const active = nav.querySelector('button.active');
+    if (!active || nav.scrollWidth <= nav.clientWidth + 2) return;
+    const target = active.offsetLeft - (nav.clientWidth - active.offsetWidth) / 2;
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    nav.scrollTo({ left: Math.max(0, target), behavior: reduced ? 'auto' : 'smooth' });
+  }, [tab]);
+
   const TAB_LABEL = {
     overview: 'Overview',
     users: 'User management',
@@ -1514,7 +1530,7 @@ function AdminDashboard() {
           </div>
 
           {/* Nav items */}
-          <nav>
+          <nav ref={sidebarNavRef}>
             {tabs.map(item => (
               <button
                 key={item}

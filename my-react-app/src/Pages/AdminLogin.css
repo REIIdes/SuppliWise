@@ -11,6 +11,7 @@
 /* ── Page layout: two columns ──────────────────────────────────────── */
 .al-page {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
   background: #f0f4ff;
@@ -483,15 +484,15 @@
 .al-field input::placeholder { color: #94a3b8; }
 
 /* Password wrap + eye toggle */
-.al-input-wrap input { padding-right: 48px; }
+.al-input-wrap input { padding-right: 56px; }
 .al-eye {
   position: absolute;
-  right: 12px;
+  right: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
   background: none;
   border: none;
   border-radius: 9px;
@@ -613,7 +614,7 @@
   font: 600 13.5px/1 Arial, sans-serif;
   color: #64748b;
   cursor: pointer;
-  padding: 4px 0;
+  padding: 12px 0;
   text-align: left;
   transition: color .15s ease, transform .15s ease;
 }

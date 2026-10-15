@@ -193,6 +193,24 @@ export function applyPlanToCache(fresh) {
     // let a stale cached value survive a server that no longer sends one.
     subscriptionUpdatedAt: fresh?.subscriptionUpdatedAt ?? cached.subscriptionUpdatedAt ?? null,
     subscription: nextSnap ?? null,
+    // Identity, adopted only when the cache has none.
+    //
+    // The plan store revalidates with /auth/me, whose payload DOES carry the
+    // member's name and email, but `merged` above only ever copies the
+    // subscription fields out of it. A tab that resumed a token without a
+    // cached profile therefore wrote a subscription-only record and kept it
+    // forever: DashboardPage's "no profile yet" fallback asks whether a stored
+    // user exists, finds this one, and stands down — so the navbar stayed on
+    // "Account" and the generic initial instead of the member's own name and
+    // picture. Cached values win, because a profile the user just edited is
+    // newer than whatever the plan store last fetched.
+    _id: cached._id ?? fresh?._id,
+    firstName: cached.firstName ?? fresh?.firstName,
+    lastName: cached.lastName ?? fresh?.lastName,
+    name: cached.name ?? fresh?.name,
+    email: cached.email ?? fresh?.email,
+    profilePicture: cached.profilePicture ?? fresh?.profilePicture,
+    bannerPicture: cached.bannerPicture ?? fresh?.bannerPicture,
   };
 
   // Tab session + directory metadata; internal best-effort, no throw path.
