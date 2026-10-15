@@ -120,6 +120,17 @@ function resetLedgerSingleton() {
   // otherwise suppress the log line that proves the unsealed-checkpoint path ran.
   ledger.unsealedWarned = false;
   ledger.incident = null;
+  // The untrusted mark and the chain-cycle counter are in-memory state too, and
+  // mattering about them differently is how this harness used to be wrong:
+  // leaving a stale `quarantined` behind made the NEXT case re-sync from an old
+  // break point, and leaving a stale `cycle` behind made the recovery cases
+  // report a chain "restarted into cycle 0".
+  ledger.quarantined = null;
+  ledger.lastRepair = null;
+  ledger.cycle = 0;
+  ledger.resyncing = false;
+  ledger.lastResync = null;
+  ledger.watchdogTimer = null;
   // The host-filesystem head anchor is process state too. Each attack case must
   // start from the same baseline, or a case would trip the PREVIOUS case's
   // anchor and be scored as detected for the wrong reason.
@@ -401,9 +412,11 @@ async function main() {
   AdminEvent = require('./models/AdminEvent');
   crypto = require('./blockchain/crypto');
   ledger = require('./blockchain/ledger');
-  // The REAL anchoring path, not a raw ledger.append: quarantine has to hold
-  // against how production actually anchors, and this doubles as proof that the
-  // product keeps working while the ledger is unusable.
+  // The REAL anchoring path, not a raw ledger.append: this is what a reward, an
+  // order, a consent and a vote all go through, and `engine.anchor()` is what
+  // used to quietly return an empty transaction hash while the chain refused
+  // writes. Asserting on it is the only way to catch a regression at the layer
+  // users actually touch.
   anchor = require('./blockchain/engine').anchor;
 
   await mongoose.connection.dropDatabase();
@@ -523,9 +536,10 @@ async function main() {
   }
 
   // ── E. Containment & recovery ────────────────────────────────────────────
-  // Detection alone is not enough. These check that a detected break STOPS the
-  // chain from growing, that the product keeps working while it does, and that an
-  // operator can bring the chain back without losing the record of what happened.
+  // Detection alone is not enough. These check that a detected break is never
+  // built ON TOP OF, that the product keeps working and stays fully receipted
+  // throughout, that the ledger recovers on its own, repeatedly, and that an
+  // operator can still do it by hand without losing the record of what happened.
   section('E. Containment and recovery after a break');
   await restore(baseline);
   await armBaseline();
@@ -537,120 +551,147 @@ async function main() {
   // Assert the break point too, not just the flag. A related defect was seen here:
   // a second detector re-reported the SAME break at an earlier index and, because
   // quarantine was first-writer-wins, the ledger reported block 2 for a break it
-  // had located at block 3 — which would make repair discard a good block.
+  // had located at block 3 — which would make the re-sync discard a good block.
   const q1 = ledger.quarantined;
-  record('E1', 'A detected break quarantines the chain at the CORRECT block',
-    q1 === true || (q1 !== null && q1.brokenAt === 3),
-    `verdict ${broken.fullSays} · quarantined=${!!q1} at brokenAt=${q1 && q1.brokenAt} (expected 3), last good #${ledger.lastGoodIndex()}`);
+  record('E1', 'A detected break marks the chain untrusted at the CORRECT block',
+    q1 !== null && q1.brokenAt === 3,
+    `verdict ${broken.fullSays} · untrusted=${!!q1} at brokenAt=${q1 && q1.brokenAt} (expected 3), last good #${ledger.lastGoodIndex()}`);
 
   // The critical containment property: the corruption must not get buried under
-  // new blocks. Before quarantine this chain grew on every call.
-  let appendRefused = null;
+  // new blocks. Before this, appends after a break were REFUSED outright, which
+  // buried nothing but also receipted nothing — every reward, order and consent
+  // made in that window silently came back without an on-chain hash. Now the
+  // transaction is accepted AND the corrupt block is gone: not one, not the
+  // other. Run through `engine.anchor()`, the real path.
+  let anchorErr = null;
+  let receipt = null;
   try {
-    await ledger.append([{ type: 'test:after-break', actor: '0xtest', data: {} }]);
-  } catch (err) { appendRefused = err.code || err.message; }
-  const heightAfter = await Block.findOne({}).sort({ index: -1 }).lean();
-  record('E2', 'No new blocks are written on top of the corruption',
-    appendRefused === 'CHAIN_QUARANTINED' && heightAfter.index === heightBefore.index,
-    `append refused with ${appendRefused} · height held at ${heightAfter.index} (was ${heightBefore.index})`);
+    receipt = await anchor('test:after-break', '0xtest', { public: { amount: 1 } });
+  } catch (err) { anchorErr = err.code || err.message; }
+  const corruptStillThere = await Block.countDocuments({ hash: 'c'.repeat(64) });
+  record('E2', 'A transaction during a break is accepted AND the corrupt block is discarded',
+    !anchorErr && !!receipt && !!receipt.txs[0] && receipt.txs[0].length === 64 && corruptStillThere === 0,
+    anchorErr
+      ? `anchor THREW (${anchorErr}) — would break the business operation`
+      : `anchor returned index=${receipt.index} txHash="${String(receipt.txs[0]).slice(0, 12)}…"`
+        + ` · block(s) still holding the forged hash: ${corruptStillThere}`);
 
-  // Quarantine must not take the product down: engine.anchor() catches, so a
-  // business operation still succeeds and only the proof is withheld.
-  let anchorSafe = false;
-  let anchorDetail = '';
-  try {
-    const res = await anchor('test:quarantine', '0xtest', { public: { amount: 1 } });
-    anchorSafe = res && res.index === -1 && res.txs[0] === '';
-    anchorDetail = `anchor returned index=${res.index} txHash="${res.txs[0]}" (failure reported, not silently swallowed)`;
-  } catch (err) {
-    anchorDetail = `anchor THREW (${err.message}) — would break the business operation`;
-  }
-  record('E3', 'An anchor during quarantine reports failure instead of throwing', anchorSafe, anchorDetail);
+  // The transaction must land on a chain that verifies — never on the corruption.
+  const afterResync = await ledger.audit({ maxAgeMs: 0 });
+  record('E3', 'The chain recovers by itself and verifies from genesis again',
+    afterResync.valid === true && ledger.quarantined === null,
+    `full re-audit: valid=${afterResync.valid} at height ${afterResync.height}`
+    + `${afterResync.reason ? ` (${afterResync.reason})` : ''} · still untrusted: ${!!ledger.quarantined}`);
 
-  // Operator repair.
-  const repair = await ledger.repair({ actor: 'harness-operator' });
-  record('E4', 'An operator repair restores the chain to a verifiable state',
-    repair.repaired === true && repair.verdict.valid === true,
-    `discarded ${repair.discardedBlocks} block(s) above #${repair.keptThrough}; now valid=${repair.verdict.valid} at height ${repair.verdict.height}`);
+  // And it must be a NEW, independently verified chain segment — not a silent
+  // continuation, and not a second genesis.
+  const segment = await Block.findOne({ 'txs.type': 'chain:resync' }).lean();
+  const segData = segment ? ((segment.txs[0] || {}).data || {}) : {};
+  record('E4', 'A fresh chain segment is opened and commits to what was discarded',
+    !!segment && ledger.cycle >= 1 && Number(segData.discardedBlocks) > 0,
+    segment
+      ? `segment #${segment.index}, cycle ${segData.cycle}, discarding ${segData.discardedBlocks} block(s) from #${segData.brokenAt}`
+      : 'no chain:resync block found');
 
-  record('E5', 'Repair names every discarded block (evidence is reported, not hidden)',
+  // Operator repair, on a chain that ALREADY recovered once. The host anchor file
+  // is append-only and used to be never rewound, so a chain that had once been
+  // healthy could not be repaired at all and stayed broken forever — the single
+  // worst outcome available. Re-break it first, so this exercises the rewind
+  // rather than the healthy-chain no-op.
+  await Block.updateOne({ index: 1 }, { $set: { hash: 'b'.repeat(64) } });
+  await ledger.audit({ maxAgeMs: 0 });
+  const repair = await ledger.repair({ actor: 'harness-operator', resync: true });
+  record('E5', 'An operator repair succeeds on a chain that already recovered once',
+    repair.repaired === true && !!repair.verdict && repair.verdict.valid === true,
+    `repaired=${repair.repaired} keptThrough=#${repair.keptThrough} discarded=${repair.discardedBlocks}`
+    + `${repair.reason ? ` · ${repair.reason}` : ''}${repair.verdict ? ` · valid=${repair.verdict.valid}` : ''}`);
+
+  record('E6', 'Repair names every discarded block (evidence is reported, not hidden)',
     Array.isArray(repair.discarded) && repair.discarded.length === repair.discardedBlocks
       && repair.discarded.every((b) => b.hash && Number.isInteger(b.index)),
     repair.discarded ? repair.discarded.map((b) => `#${b.index}(${b.txCount}tx)`).join(' ') : 'none');
 
-  // Resume.
-  let resumed = null;
-  try {
-    await ledger.append([{ type: 'test:post-repair', actor: '0xtest', data: { ok: true } }]);
-    resumed = `accepted, height ${ledger.height}`;
-  } catch (err) { resumed = err.message; }
-  const afterResume = await ledger.audit({ maxAgeMs: 0 });
-  record('E6', 'The chain accepts new blocks again after repair, and stays valid',
-    afterResume.valid === true && ledger.quarantined === null,
-    `append after repair: ${resumed} · full re-audit: valid=${afterResume.valid} at height ${afterResume.height}`);
+  // The "continuous cycle" requirement: several breaks in a row must each
+  // recover, each must start a new chain segment, and each transaction during
+  // them must still be receipted. Block 1 is the target every time because it is
+  // always the first non-genesis block (an anchor block or a re-sync segment) —
+  // so the target cannot drift as the chain gets shorter, which is what made an
+  // earlier version of this case report "STILL BROKEN" for the wrong reason.
+  let cycles = ledger.cycle;
+  let allRecovered = true;
+  const cycleDetail = [];
+  for (let n = 0; n < 3; n += 1) {
+    const target = await Block.findOne({ index: 1 }).lean();
+    if (!target) break;
+    await Block.updateOne({ index: 1 }, { $set: { hash: String(n + 1).repeat(64) } });
+    await ledger.audit({ maxAgeMs: 0 });
+    const r = await anchor(`test:cycle-${n}`, '0xtest', { public: { n } });
+    const clean = await ledger.audit({ maxAgeMs: 0 });
+    if (!r.txs[0] || !clean.valid || ledger.cycle <= cycles) allRecovered = false;
+    cycleDetail.push(`#1 → cycle ${ledger.cycle}${clean.valid ? '' : ' (STILL BROKEN)'}`);
+    cycles = ledger.cycle;
+  }
+  record('E7', 'Repeated breaks each start a new cycle, and each transaction is receipted',
+    allRecovered && ledger.cycle >= 4, `cycle reached ${ledger.cycle}: ${cycleDetail.join(' · ')}`);
 
-  // One continuous chain — repair must NOT mint a new genesis.
+  // One continuous chain — no recovery may mint a new genesis.
   const genesisCount = await Block.countDocuments({ 'txs.type': 'genesis' });
   const genesisNow = await Block.findOne({ index: 0 }).lean();
   const genesisBefore = (await snapshot()).find((b) => b.index === 0);
-  record('E7', 'Repair continues the SAME chain — no new genesis, no silent reset',
+  record('E8', 'Every recovery continues the SAME chain — no new genesis, no silent reset',
     genesisCount === 1 && genesisNow && genesisNow.hash === genesisBefore.hash,
     `${genesisCount} genesis block(s); block 0 hash unchanged: ${genesisNow && genesisNow.hash === genesisBefore.hash}`);
 
-  // Quarantine must survive a restart, or a restart silently re-opens a chain that
-  // was proven broken: the in-memory flag is gone, appends resume onto the
-  // corruption, and the persisted record still says it is broken.
-  //
-  // This one is measured on a chain that is STILL broken — the repair below has
-  // not run yet. Measuring it after a repair would be meaningless, and an earlier
-  // version of this case did exactly that and proved only that a repaired chain
-  // stays healthy.
-  //
-  // Break the chain again from the (now healthy) post-repair state, then restart.
+  // The permanent log: it must exist and record BOTH the incident and the repair,
+  // because the blocks it describes are gone.
+  const repairs = await ChainRepair.find({ key: 'chain' }).sort({ at: 1 }).lean();
+  const kinds = [...new Set(repairs.map((r) => r.kind))];
+  record('E9', 'The repair log permanently records the incident and the repair',
+    repairs.some((r) => r.kind === 'incident') && repairs.some((r) => r.kind === 'repair'),
+    `${repairs.length} entr(ies): ${kinds.join(', ')}`);
+
+  // A restart mid-incident must not be a way to make the ledger accept blocks on
+  // a chain it already knows is broken, and it must not lose the open incident.
   await Block.updateOne({ index: 2 }, { $set: { hash: 'd'.repeat(64) } });
   await ledger.audit({ maxAgeMs: 0 });
   const beforeRestart = ledger.quarantined;
   resetLedgerSingleton(); // clears in-memory state ONLY; the DB rows persist
   await ledger.init();
   const afterRestart = ledger.quarantined;
-  record('E8', 'Quarantine survives a server restart (not just in-memory)',
+  record('E10', 'The untrusted mark survives a server restart (not just in-memory)',
     afterRestart !== null && Number(afterRestart.brokenAt) === Number(beforeRestart && beforeRestart.brokenAt),
     `before restart brokenAt=${beforeRestart && beforeRestart.brokenAt} · after restart brokenAt=${afterRestart && afterRestart.brokenAt}`);
 
   let refusedAfterRestart = null;
+  let restartReceipt = null;
   try {
-    await ledger.append([{ type: 'test:post-restart', actor: '0xtest', data: {} }]);
-  } catch (err) { refusedAfterRestart = err.code; }
-  record('E8b', 'Appends are still refused after a restart', refusedAfterRestart === 'CHAIN_QUARANTINED',
-    `append after restart: ${refusedAfterRestart || 'ACCEPTED (should be refused)'}`);
+    restartReceipt = await ledger.append([{ type: 'test:post-restart', actor: '0xtest', data: {} }]);
+  } catch (err) { refusedAfterRestart = err.code || err.message; }
+  record('E11', 'A transaction right after a restart recovers the chain and is receipted',
+    !!restartReceipt && !refusedAfterRestart,
+    restartReceipt
+      ? `accepted at #${restartReceipt.index}; chain untrusted afterwards: ${!!ledger.quarantined}`
+      : `append refused: ${refusedAfterRestart}`);
 
-  // And the inverse: a REPAIRED chain must come back from a restart OPEN. An
-  // earlier version gated the restart-quarantine on "an incident row exists",
-  // which is true forever, so a repaired chain rebooted still refusing writes.
-  await ledger.repair({ actor: 'harness-operator-3' });
+  // And the inverse: a RECOVERED chain must come back from a restart trusted, on
+  // the same cycle. An earlier version gated the restart-quarantine on "an
+  // incident row exists", which is true forever, so a repaired chain rebooted
+  // still refusing writes — and with the cycle counter unread, it also claimed
+  // to be on its first chain again.
+  const recoveredBefore = await ledger.audit({ maxAgeMs: 0 });
+  const cycleBeforeRestart = ledger.cycle;
   resetLedgerSingleton();
   await ledger.init();
-  record('E8c', 'A REPAIRED chain comes back from a restart open (not stuck quarantined)',
-    ledger.quarantined === null,
-    `quarantined after restart of a repaired chain: ${ledger.quarantined ? ledger.quarantined.reason : 'no'}`);
+  record('E12', 'A RECOVERED chain comes back from a restart trusted, on the same cycle',
+    ledger.quarantined === null && ledger.cycle === cycleBeforeRestart && recoveredBefore.valid === true,
+    `untrusted after restart: ${ledger.quarantined ? ledger.quarantined.reason : 'no'} · cycle ${ledger.cycle} (was ${cycleBeforeRestart})`);
 
   // Repair must be idempotent — an operator clicking twice must not truncate more.
-  await ledger.repair({ actor: 'harness-operator-2' });
+  const noop = await ledger.repair({ actor: 'harness-operator-2' });
   const idempotent = await ledger.audit({ maxAgeMs: 0 });
-  record('E9', 'Repairing an already-healthy chain changes nothing', idempotent.valid === true,
-    `second repair left the chain valid at height ${idempotent.height}`);
-
-  // The permanent log: it must exist and record BOTH the incident and the repair,
-  // because the blocks it describes are gone.
-  const repairs = await ChainRepair.find({ key: 'chain' }).sort({ at: 1 }).lean();
-  const kinds = [...new Set(repairs.map((r) => r.kind))];
-  record('E10', 'The repair log permanently records the incident and the repair',
-    repairs.some((r) => r.kind === 'incident') && repairs.some((r) => r.kind === 'repair'),
-    `${repairs.length} entr(ies): ${kinds.join(', ')}`);
-
-  // A repaired chain must be a clean slate for the cases below.
-  await restore(baseline);
-  await armBaseline();
+  record('E13', 'Repairing an already-healthy chain changes nothing',
+    idempotent.valid === true && noop.repaired !== true,
+    `second repair: ${noop.reason || `repaired=${noop.repaired}`} · left the chain valid at height ${idempotent.height}`);
 
   // ── Alerting ────────────────────────────────────────────────────────────
   section('D. Does a BROKEN chain alert anybody?');

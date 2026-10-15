@@ -303,8 +303,20 @@ router.post('/rewards/achievements/check', async (req, res) => {
       await Nft.bulkWrite(minted.map(({ nft }, i) => ({
         updateOne: { filter: { _id: nft._id }, update: { $set: { txHash: chain.txs[i] || '' } } },
       })));
+      // Re-read before responding. `bulkWrite` updates the COLLECTION, not the
+      // documents already in memory, so returning `m.nft` handed the client a
+      // gallery where every mint had `txHash: undefined` even though the anchor
+      // had landed — the one field that says "this is on the chain". The response
+      // is now the stored state, not a stale snapshot of it.
+      const fresh = await Nft.find({ _id: { $in: minted.map((m) => m.nft._id) } }).lean();
+      const byId = new Map(fresh.map((n) => [String(n._id), n]));
+      res.json({
+        minted: minted.map((m) => byId.get(String(m.nft._id)) || m.nft.toObject()),
+        count: minted.length,
+      });
+      return;
     }
-    res.json({ minted: minted.map((m) => m.nft), count: minted.length });
+    res.json({ minted: [], count: 0 });
   } catch (error) {
     console.error('[web3 POST /rewards/achievements/check]', error.message);
     res.status(500).json({ message: 'Could not check achievements.' });

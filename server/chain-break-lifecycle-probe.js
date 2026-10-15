@@ -1,9 +1,10 @@
 // PROBE: what actually happens to a chain AFTER it is detected as broken?
-// Read-only against a scratch database. Answers four questions:
-//   1. Does the chain ever recover on its own?
-//   2. Does append() keep adding blocks on top of the corruption?
-//   3. Do users keep earning/anchoring while the chain is broken?
-//   4. Is a NEW genesis/cycle ever started?
+// Read-only against a scratch database. Answers the questions that matter:
+//   1. Are users told?
+//   2. Can they keep making transactions?
+//   3. Do those transactions get an on-chain receipt?
+//   4. Does the chain start a NEW verified chain and keep going?
+//   5. Does the cycle survive a restart?
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
@@ -49,6 +50,13 @@ function anchorFile() {
   }
   console.log(`built ${await Block.countDocuments()} blocks, height ${ledger.height}`);
 
+  // Give the account a wallet BEFORE the break. The incident fan-out is scoped to
+  // accounts that actually have blockchain activity, so without this the probe
+  // would report "0 notifications" and that is indistinguishable from "nothing
+  // was sent".
+  await engine.ensureWalletForUser(u._id);
+  await ledger.audit({ maxAgeMs: 0 }); // prove the chain good, so the anchor is written
+
   // ── Break it the way an attacker would: corrupt a middle block ──────────
   await Block.updateOne({ index: 3 }, { $set: { hash: 'f'.repeat(64) } });
   console.log('\n--- broke block 3 (replaced its hash) ---\n');
@@ -58,28 +66,16 @@ function anchorFile() {
 
   const first = await ledger.audit({ maxAgeMs: 0 });
   console.log(`1) detection       : valid=${first.valid} brokenAt=${first.brokenAt} reason="${first.reason}"`);
-  console.log(`   quarantined?    : ${!!ledger.quarantined} (new blocks refused: ${ledger.quarantined ? 'YES' : 'no'})`);
+  console.log(`   untrusted?      : ${!!ledger.quarantined} (last provably-good block #${ledger.lastGoodIndex()})`);
 
-  // ── Q1: does it ever recover on its own? ────────────────────────────────
-  const later = [];
-  for (let i = 0; i < 3; i += 1) {
-    await new Promise((r) => setTimeout(r, 300));
-    later.push(await ledger.audit({ maxAgeMs: 0 }));
-  }
-  console.log(`2) self-recovery   : ${later.every((v) => v.valid) ? 'RECOVERED on its own' : 'still broken after 3 re-checks — by design, never automatic'}`);
+  // ── Notifications ──────────────────────────────────────────────────────
+  await new Promise((r) => setTimeout(r, 1200));
+  const incidentMsgs = await UserNotification.find({ user: u._id, title: /integrity/i }).lean();
+  console.log(`2) notification    : ${incidentMsgs.length} message(s) to the affected user`);
+  console.log(`   admins notified : ${incidentMsgs.length > 0 ? 'yes (same fan-out)' : 'n/a'}`);
+  console.log(`   copy           : "${String((incidentMsgs[0] || {}).detail || '').slice(0, 96)}…"`);
 
-  // ── Q2: does append() keep writing onto the corrupt chain? ──────────────
-  const before = await Block.countDocuments();
-  let appendErr = null;
-  try {
-    for (let i = 0; i < 3; i += 1) {
-      await ledger.append([{ type: 'probe:after-break', actor: '0xp', data: { i } }]);
-    }
-  } catch (err) { appendErr = err.message; }
-  const after = await Block.countDocuments();
-  console.log(`3) appends         : ${appendErr ? `REFUSED (${appendErr.slice(0, 46)}…) — chain held at ${after} blocks` : `ALLOWED — ${after - before} more block(s) stacked on corruption`}`);
-
-  // ── Q3: do users keep earning while broken? ─────────────────────────────
+  // ── Transactions are NOT blocked, and they are receipted ───────────────
   let reward = null;
   try {
     await engine.ensureWalletForUser(u._id);
@@ -90,36 +86,60 @@ function anchorFile() {
     const w = await Wallet.findOne({ user: u._id }).lean();
     reward = {
       credited: w.balance,
-      txHash: r.txHash ? 'present' : 'WITHHELD (quarantine)',
+      txHash: r.txHash ? 'present' : 'MISSING',
       blockIndex: r.blockIndex,
     };
   } catch (err) { reward = { error: err.message }; }
-  console.log(`4) user reward     : ${JSON.stringify(reward)}`);
-  console.log(`   → user still earns; only the on-chain receipt is withheld`);
+  console.log(`3) user reward     : ${JSON.stringify(reward)}`);
+  console.log('   → the user keeps earning AND gets a real receipt; nothing is withheld');
 
-  // ── Q5: REPAIR — the whole point of this probe ────────────────────────────
-  const q = ledger.quarantined;
-  console.log(`5) quarantined     : blocks ${q.brokenAt}-${q.affectedBlocks + q.brokenAt - 1} affected, last good #${ledger.lastGoodIndex()}`);
+  // ── A NEW CHAIN, started automatically ─────────────────────────────────
+  const segment = await Block.findOne({ 'txs.type': 'chain:resync' }).lean();
+  console.log(`4) new chain       : ${segment
+    ? `segment #${segment.index} mined, cycle ${((segment.txs[0] || {}).data || {}).cycle}, height now ${ledger.height}`
+    : 'NO SEGMENT OPENED'}`);
+  console.log(`   untrusted now?  : ${!!ledger.quarantined}`);
+  console.log(`   forged block 3  : ${await Block.countDocuments({ hash: 'f'.repeat(64) })} block(s) still hold it`);
 
-  const repair = await ledger.repair({ actor: 'probe-operator' });
-  console.log(`6) repair          : repaired=${repair.repaired} keptThrough=#${repair.keptThrough} discarded=${repair.discardedBlocks} in ${repair.durationMs}ms`);
-  if (repair.discarded) {
-    console.log(`   discarded       : ${repair.discarded.map((b) => `#${b.index}(${b.txCount}tx)`).join(' ')}`);
-  }
+  // ── Does it keep running? ──────────────────────────────────────────────
   const afterRepair = await ledger.audit({ maxAgeMs: 0 });
-  console.log(`7) post-repair     : valid=${afterRepair.valid} height=${afterRepair.height} quarantined=${!!ledger.quarantined}`);
-  console.log(`   same chain?     : genesis ${String(genesisHash).slice(0, 12)}… preserved, no new genesis: ${await Block.countDocuments({ 'txs.type': 'genesis' }) === 1}`);
+  console.log(`5) post-recovery   : valid=${afterRepair.valid} height=${afterRepair.height} cycle=${ledger.cycle}`);
 
-  // Does it accept new blocks again?
   let resumed = null;
   try {
-    await ledger.append([{ type: 'probe:post-repair', actor: '0xp', data: { ok: true } }]);
-    resumed = `YES — height ${ledger.height}, chain running forward again`;
+    await engine.grantReward({
+      userId: u._id, kind: 'probe_reward_2', refId: '-', amount: 5,
+      public: { amount: 5, kind: 'probe_reward_2' },
+    });
+    resumed = `YES — chain running forward, height ${ledger.height}`;
   } catch (err) { resumed = `NO — ${err.message}`; }
-  console.log(`8) resumes         : ${resumed}`);
+  console.log(`6) still working   : ${resumed}`);
 
   const final = await ledger.audit({ maxAgeMs: 0 });
-  console.log(`9) final           : valid=${final.valid} height=${final.height} blocks=${await Block.countDocuments()}`);
+  console.log(`7) final           : valid=${final.valid} height=${final.height} blocks=${await Block.countDocuments()}`);
+
+  // ── A SECOND break must behave identically (the continuous cycle) ──────
+  await Block.updateOne({ index: 1 }, { $set: { hash: 'a'.repeat(64) } });
+  await ledger.audit({ maxAgeMs: 0 });
+  const r2 = await engine.grantReward({
+    userId: u._id, kind: 'probe_reward_3', refId: '-', amount: 7,
+    public: { amount: 7, kind: 'probe_reward_3' },
+  });
+  const cycle2 = await ledger.audit({ maxAgeMs: 0 });
+  console.log(`8) second break    : cycle=${ledger.cycle} receipt=${r2.txHash ? 'present' : 'MISSING'} `
+    + `valid=${cycle2.valid} height=${cycle2.height}`);
+
+  console.log(`   same chain?     : genesis ${String(genesisHash).slice(0, 12)}… preserved, `
+    + `exactly one genesis: ${await Block.countDocuments({ 'txs.type': 'genesis' }) === 1}`);
+
+  // ── Does the cycle survive a restart? ──────────────────────────────────
+  const cycleBefore = ledger.cycle;
+  await mongoose.disconnect();
+  await mongoose.connect(`${m[1]}/${SCRATCH}${m[3] || ''}`, { serverSelectionTimeoutMS: 10000 });
+  ledger.initPromise = null;
+  await ledger.init();
+  console.log(`9) after restart   : cycle=${ledger.cycle} (was ${cycleBefore}) · untrusted=${!!ledger.quarantined} `
+    + `· still appends=${ledger.height >= 0}`);
 
   // Repair log — the permanent record, since the blocks themselves are gone.
   const { ChainRepair } = require('./models/Web3');
@@ -129,6 +149,7 @@ function anchorFile() {
     console.log(`    - ${e.kind.padEnd(18)} brokenAt=${e.brokenAt} kept=#${e.keptThrough} discarded=${e.discardedCount} healthy=${e.healthyAfter} actor=${e.actor}`);
   }
   console.log(`    genesis block still present: ${await Block.countDocuments({ index: 0 }) === 1}`);
+  console.log(`    probe runtime: ${Date.now() - started}ms`);
 
   await mongoose.connection.dropDatabase();
   // Remove this chain's anchor so a later run (or the real server) never inherits

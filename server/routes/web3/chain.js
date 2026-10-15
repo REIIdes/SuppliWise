@@ -87,6 +87,10 @@ router.get('/chain', async (req, res) => {
       height: ledger.height,
       tip: ledger.tip,
       difficulty: ledger.difficulty,
+      // Which chain segment these blocks belong to, so an explorer reader can see
+      // that the ledger restarted a fresh verified chain after a break.
+      cycle: ledger.cycle,
+      acceptingBlocks: true,
       blocks,
     });
   } catch (error) {
@@ -139,6 +143,7 @@ router.get('/chain/status', async (req, res) => {
     const v = await ledger.verify();
     const q = ledger.quarantined;
     const state = v.valid === false ? 'compromised' : (v.pending ? 'verifying' : 'healthy');
+    const view = ledger.statusView();
     res.json({
       state,
       ok: v.valid !== false,
@@ -148,24 +153,18 @@ router.get('/chain/status', async (req, res) => {
       checked: v.checked,
       reason: v.reason || null,
       brokenAt: typeof v.brokenAt === 'number' ? v.brokenAt : null,
-      // Quarantine is the containment state and it is a DIFFERENT fact from
-      // "we found a break". Exposed separately because the consequences differ:
-      // a break means history is untrustworthy, quarantine means new blocks are
-      // being refused until someone repairs it.
-      quarantined: !!q,
-      quarantine: q
-        ? {
-          since: q.since,
-          reason: q.reason,
-          brokenAt: q.brokenAt,
-          affectedBlocks: q.affectedBlocks,
-          // Truncation cannot be repaired by discarding blocks — the missing
-          // ones are the evidence, so recovery means restoring a backup. Saying
-          // so here stops an operator trying to "repair" a chain that needs a
-          // restore instead.
-          needsBackupRestore: !!q.unrecoverable,
-        }
-        : null,
+      // A break never stops the ledger accepting transactions. Exposed as an
+      // explicit field so no surface can imply that a member's rewards, orders or
+      // consents are being held up while the chain recovers.
+      acceptingBlocks: true,
+      resyncing: view.resyncing,
+      // Which chain segment this is. 0 is the original chain; each automatic
+      // re-sync opens a new one, so this is how "the blockchain started a new
+      // chain again" is observable rather than a silent reset.
+      cycle: view.cycle,
+      lastResync: view.lastResync,
+      quarantined: view.quarantined,
+      quarantine: view.quarantine,
       lastGoodIndex: q ? ledger.lastGoodIndex() : null,
       lastFullAuditAt: (ledger.lastAudit() && ledger.lastAudit().fullAuditAt) || null,
       lastVerifiedAt: ledger.verifiedAt ? new Date(ledger.verifiedAt).toISOString() : null,
@@ -173,12 +172,12 @@ router.get('/chain/status', async (req, res) => {
         ? { reason: ledger.incident.reason, brokenAt: ledger.incident.brokenAt, at: ledger.incident.at }
         : null,
       notice: state === 'compromised'
-        ? 'Blockchain records around the affected block are not being treated as verified. Your balances and order history are stored separately and are unaffected.'
+        ? 'An integrity problem was found in the blockchain record. Your account, balance and orders are unaffected and every feature keeps working — the ledger is automatically discarding the damaged part of its history and starting a fresh, independently verified chain. Nothing is on hold.'
         : null,
     });
   } catch (error) {
     console.error('[web3 GET /chain/status]', error.message);
-    res.status(503).json({ state: 'unknown', ok: false, verified: false, reason: 'Integrity check unavailable.' });
+    res.status(503).json({ state: 'unknown', ok: false, verified: false, acceptingBlocks: true, reason: 'Integrity check unavailable.' });
   }
 });
 

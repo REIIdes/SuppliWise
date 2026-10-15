@@ -1966,18 +1966,9 @@ const runMonitorProbes = async (app) => {
         return {
           status: 'critical',
           detail: `Chain integrity FAILED at block ${v.brokenAt} (${v.reason}) — ${what}. `
-            + `All affected accounts have been notified automatically (${v.notified ? 'notification sent' : 'notification pending'}). `
-            + (q
-              ? `QUARANTINED: new blocks are refused, so the corruption cannot be buried further. `
-                + `${q.affectedBlocks} block(s) are affected. `
-                + (q.unrecoverable
-                  // Truncation cannot be repaired by discarding: the missing
-                  // blocks ARE the evidence, so a backup restore is the only
-                  // honest recovery. Saying so stops an operator attempting a
-                  // repair that would quietly legitimise the deletion.
-                  ? 'Recovery requires RESTORING A BACKUP — discarding blocks cannot restore missing ones. '
-                  : `Repair with POST /api/admin/security/chain/repair (confirm: "DISCARD-BROKEN-BLOCKS") to discard blocks from #${q.brokenAt} onward; the last provably-good block is #${q.brokenAt - 1}. `)
-              : ''),
+            + 'All affected accounts have been notified automatically and were NOT blocked: every feature '
+            + 'keeps working and transactions keep completing. '
+            + recovery,
         };
       }
       // $sum of the per-block tx array sizes rather than $unwind + $count: same
@@ -2095,6 +2086,22 @@ const runMonitorProbes = async (app) => {
       ]);
       if (missingKey > 0) {
         return { status: 'critical', detail: `${missingKey} wallet(s) are missing their AES-256-GCM key envelope — signing keys cannot be exported for those accounts.` };
+        const recovery = q
+          ? `${q.affectedBlocks} block(s) are affected. `
+            + 'The ledger stops writing on top of the damage and re-syncs automatically: it discards '
+            + `the untrustworthy region from #${q.brokenAt} onward, rewinds its host head anchor and opens `
+            + `a new verified chain segment (last provably-good block: #${q.brokenAt - 1}). `
+            + (q.unrecoverable
+              // Truncation cannot be undone by discarding: the missing blocks ARE the
+              // evidence. The chain still recovers on its own, but restoring a backup
+              // remains the only way to recover the DISCARDED records themselves, so this
+              // is stated as outstanding work rather than as a blocker.
+              ? 'NOTE: blocks are missing, so those records can only come back from a backup restore — '
+                + 'the automatic re-sync continues the chain without them. '
+              : '')
+            + 'Force it now with POST /api/admin/security/chain/repair (confirm: "DISCARD-BROKEN-BLOCKS"), '
+            + 'or let the next transaction trigger it. '
+          : '';
       }
       return { status: 'healthy', detail: `${userWallets} user wallet(s) + ${systemWallets} system wallet(s) (treasury/escrow/inventory). ed25519 signing keys stored only inside AES-256-GCM envelopes — plaintext keys are never persisted. One-time welcome airdrop on first access.` };
     }),
@@ -2389,19 +2396,23 @@ router.get('/security', (req, res) => {
 });
 
 // @route   POST /api/admin/security/chain/repair
-// @desc    Repair a quarantined blockchain ledger by discarding everything from
-//          the first broken block onward, then re-verifying. DESTRUCTIVE and
-//          deliberately explicit: it permanently removes blocks, so it is an
-//          operator decision, never automatic and never triggered by a monitor
-//          probe.
+// @desc    Force a chain re-sync: discard everything from the first broken block
+//          onward, rewind the host head anchor, open a fresh verified chain
+//          segment and re-verify. DESTRUCTIVE, and deliberately explicit.
 // @access  Private (admin only)
 //
-// WHY IT IS NOT A ONE-CLICK BUTTON
-// --------------------------------
-// An integrity system that repairs itself would help an attacker erase their own
-// evidence: corrupt a block, and the system helpfully discards it and re-verifies
-// clean. So repair requires an explicit `confirm: 'DISCARD-BROKEN-BLOCKS'` token
-// (typed, not clicked) and is recorded permanently.
+// USUALLY UNNECESSARY — AND THAT IS THE POINT
+// --------------------------------------------
+// The ledger re-syncs itself on the next transaction, and on a background
+// watchdog when there is no traffic. This endpoint exists so an operator can
+// trigger that recovery immediately, or truncate to a chosen point.
+//
+// It previously used to be the ONLY way to recover, and that was the problem: a
+// break with nobody watching left the chain unable to accept a block at all, so
+// every reward, order and consent made in the meantime completed without an
+// on-chain receipt. The confirm token stays — it is still a permanent,
+// unauthenticated-by-nature discard of blocks — but it is no longer a
+// prerequisite for the chain working again.
 //
 // Placed after the monitor route deliberately: `runMonitorProbes` outlives the
 // request that started it, so everything between that function and the monitor
@@ -2423,7 +2434,7 @@ router.post('/security/chain/repair', async (req, res) => {
     if (!ledger.quarantined) {
       const v = await ledger.verify();
       if (v.valid !== false) {
-        return res.status(400).json({ message: 'The chain is not quarantined — nothing to repair.' });
+        return res.status(400).json({ message: 'The chain is healthy — nothing to repair.' });
       }
     }
 
@@ -2564,6 +2575,9 @@ router.post('/ai/check', async (req, res) => {
 const adminPicturesCache = new Map();
 const ADMIN_PICTURES_CACHE_MAX = 8;
 
+      // Always open a new verified segment, so a forced repair leaves the ledger
+      // on a chain a fresh walk can prove from genesis.
+      resync: true,
 function cacheAdminPictures(adminId, payload) {
   const key = String(adminId);
   adminPicturesCache.delete(key);

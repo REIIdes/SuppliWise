@@ -11,6 +11,29 @@ const mongoose = require('mongoose');
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ── Chain ───────────────────────────────────────────────────────────────────
+//
+// `minimize: false` on BOTH schemas, and it is load-bearing.
+//
+// Mongoose's `minimize` REMOVES empty objects from a document before it is
+// written. With it on (the default), a transaction whose payload is `{}` — or
+// `{a:{}}`, since it recurses — is stored with `txs[].data` ABSENT, while
+// `dataHash` is the digest of `{}`. `checkTx()` then re-derives the digest of
+// `null`, finds a mismatch, and reports "payload digest does not match the
+// stored payload" on a block nobody touched. Verified on a scratch database:
+// `{}` and `{a:{}}` came back as `undefined`; `[]`, `0`, `''`, `false`,
+// `[{}]` and every non-empty shape round-tripped intact.
+//
+// That is a self-inflicted integrity failure, and the worst kind: it cannot be
+// fixed by rewriting the block, because every honest rewrite produces the same
+// defect. An auto-re-syncing ledger would then truncate the same good block on
+// every single transaction, forever. The stored payload must be BYTE-IDENTICAL
+// to the payload the digest was computed over — that invariant is the whole
+// reason `txs[].data` is tamper-evident — so the document is kept exactly as
+// given.
+//
+// It has to be set on the transaction sub-document too: `minimize` is applied
+// per document, and the block-level option does not stop the nested `Mixed`
+// payload from being stripped.
 const txSchema = new mongoose.Schema(
   {
     txHash: { type: String, required: true }, // indexed via block 'txs.txHash' below
@@ -24,7 +47,7 @@ const txSchema = new mongoose.Schema(
     digestCovers: { type: String, enum: ['data', 'private'], default: 'data' },
     timestamp: { type: Number, required: true },
   },
-  { _id: false }
+  { _id: false, minimize: false }
 );
 
 const blockSchema = new mongoose.Schema({
@@ -36,6 +59,8 @@ const blockSchema = new mongoose.Schema({
   v: { type: Number, default: 2 },
   difficulty: { type: Number, default: 0 },
   txs: { type: [txSchema], default: [] },
+}, {
+  minimize: false,
 });
 blockSchema.index({ 'txs.txHash': 1 });
 
@@ -92,6 +117,13 @@ const chainAuditSchema = new mongoose.Schema({
     index: { type: Number, default: -1 },
     hash: { type: String, default: '' },
   },
+  // How many chain segments this ledger has produced: 0 is the original chain,
+  // and every automatic re-sync after an integrity failure increments it.
+  //
+  // Stored here so "the blockchain started a new chain again" survives a restart
+  // — a reader of /chain/status must never be told the chain is on its first
+  // cycle when it has actually been re-synced twice.
+  cycle: { type: Number, default: 0 },
 });
 
 const ChainAudit = mongoose.model('SwChainAudit', chainAuditSchema);
@@ -113,6 +145,8 @@ const chainRepairSchema = new mongoose.Schema({
   at: { type: Number, default: () => Date.now() },
   kind: {
     type: String,
+    // 'repair' / 'repair-failed' cover BOTH the operator action and the automatic
+    // re-sync; `actor` distinguishes them ('auto-resync' vs an admin alias).
     enum: ['incident', 'repair', 'repair-failed', 'quarantine-lifted'],
     required: true,
   },

@@ -669,6 +669,53 @@ test('a caller-supplied dataHash cannot opt a transaction out of the payload che
   assert.notEqual(checkTx({ ...tx, data: { real: false } }), null);
 });
 
+test('every payload shape re-derives its own digest, including an empty object', () => {
+  // REGRESSION. Mongoose's `minimize` removes empty objects from a document
+  // before it is written, so a transaction with `data: {}` was stored with
+  // `data` ABSENT while `dataHash` was sha256("{}"). The next verification
+  // re-derived sha256(null), found a mismatch, and reported "payload digest does
+  // not match the stored payload" on a block nobody had touched. `{}` and
+  // `{a:{}}` were both confirmed lossy against a live database; every other shape
+  // already round-tripped.
+  //
+  // The damage was not cosmetic: the block could not be repaired by rewriting it,
+  // because every honest rewrite reproduced the same defect — so an auto-re-syncing
+  // ledger would have truncated the same good block on every transaction, for
+  // ever. Fixed by `minimize: false` on both the block and the transaction schema.
+  //
+  // The invariant pinned here is the one that makes payloads tamper-evident:
+  // whatever `normalizeTx` hashes MUST be exactly what survives the round trip.
+  const payloads = [
+    null,
+    {},
+    { a: {} },
+    [],
+    [{}],
+    0,
+    '',
+    false,
+    { a: '' },
+    { a: [], b: {} },
+    { n: 1, s: 'x' },
+  ];
+  for (const payload of payloads) {
+    const tx = normalizeTx({ type: 'x', actor: 'y', data: payload, timestamp: 1 });
+    assert.equal(
+      checkTx(tx),
+      null,
+      `payload ${JSON.stringify(payload)} must re-derive its own digest`
+    );
+  }
+});
+
+test('keeping an empty object intact does not make it a blind spot', () => {
+  // The counterpart of the case above. Preserving `{}` round-trip must not make
+  // the payload unchecked: swapping it for anything else has to break the block.
+  const tx = normalizeTx({ type: 'x', actor: 'y', data: {}, timestamp: 1 });
+  assert.equal(checkTx({ ...tx, data: { a: 1 } }), 'payload digest does not match the stored payload');
+  assert.equal(checkTx({ ...tx, data: null }), 'payload digest does not match the stored payload');
+});
+
 test('an explicit secret is the only way to anchor a non-re-derivable digest', () => {
   const tx = normalizeTx({
     type: 'health:anchor', actor: '0xuser', data: { digest: 'published' },
@@ -760,31 +807,78 @@ test('a block with an empty tx list cannot masquerade as one with a blank tx', (
   assert.notEqual(empty, withBlank);
 });
 
-// ── Containment: a broken chain must stop, not grow ───────────────────────
+// ── Recovery: a broken chain must recover, not stop ───────────────────────
 
-test('a quarantined ledger refuses new blocks', () => {
-  // The pure state machine, no database. Detection alone was not enough: a
-  // break used to be reported while the ledger happily kept appending onto the
-  // corruption, burying it deeper and minting new proofs that inherited the
-  // defect.
+test('a break is recorded as untrusted, and the last good block is derivable', () => {
+  // The pure state machine, no database. Detection alone was never enough: the
+  // break has to be REMEMBERED so the next append knows to re-sync, and the
+  // truncate point has to be derivable without re-walking.
   const fake = Object.create(LedgerProto);
   fake.quarantined = null;
-  fake.assertNotQuarantined();
+  fake.cycle = 0;
+  fake.assertTrusted();
 
   fake.quarantine({ reason: 'hash mismatch', brokenAt: 3, height: 6, kind: 'linkage' });
   assert.equal(fake.quarantined.brokenAt, 3);
   assert.equal(fake.quarantined.affectedBlocks, 4);
+  assert.equal(fake.quarantined.cycle, 0, 'the incident records which chain segment it happened on');
   assert.equal(fake.lastGoodIndex(), 2, 'the last provably-good block is one below the break');
-  assert.throws(() => fake.assertNotQuarantined(), (err) => {
-    assert.equal(err.code, 'CHAIN_QUARANTINED');
+});
+
+test('a break NEVER blocks a transaction', () => {
+  // This is the contract that replaced the old "a quarantined ledger refuses new
+  // blocks" rule, which cost every reward, order and consent made during an
+  // incident its on-chain receipt while the product looked broken to its users.
+  const fake = Object.create(LedgerProto);
+  fake.quarantined = null;
+  fake.cycle = 1;
+  fake.quarantined = {
+    reason: 'hash mismatch', brokenAt: 3, height: 6, kind: 'linkage', since: Date.now(),
+  };
+
+  // `append()` has no quarantine check at all — the source of truth for that is
+  // this test: the method simply does not exist.
+  assert.equal(typeof LedgerProto.assertNotQuarantined, 'undefined',
+    'the refusal path must not be reachable any more');
+  assert.ok(!/CHAIN_QUARANTINED/.test(LedgerProto.assertTrusted.toString()),
+    'the fallback must not reuse the old "chain is quarantined" code');
+
+  // `assertTrusted()` only fires for the narrow case where a re-sync was
+  // ATTEMPTED and still failed, and it is about the proof, not the transaction.
+  assert.throws(() => fake.assertTrusted(), (err) => {
+    assert.equal(err.code, 'CHAIN_RESYNC_PENDING');
+    assert.match(err.message, /recorded normally/i, 'must say the transaction itself is fine');
+    assert.match(err.message, /nothing is lost/i);
     return true;
-  }, 'the refusal must be identifiable by code, not just by message');
+  }, 'a failed re-sync is identifiable by code, not just by message');
+});
+
+test('the status view always reports that the chain accepts blocks', () => {
+  const fake = Object.create(LedgerProto);
+  fake.quarantined = null;
+  fake.resyncing = false;
+  fake.lastResync = null;
+  fake.cycle = 4;
+  fake.height = 12;
+
+  assert.equal(fake.statusView().acceptingBlocks, true);
+  assert.equal(fake.statusView().cycle, 4);
+
+  // Even mid-incident, and even while a re-sync is in flight.
+  fake.quarantined = { reason: 'truncation', brokenAt: 8, height: 7, unrecoverable: true, kind: 'truncation' };
+  fake.resyncing = true;
+  const view = fake.statusView();
+  assert.equal(view.acceptingBlocks, true);
+  assert.equal(view.resyncing, true);
+  assert.equal(view.quarantine.needsBackupRestore, true, 'missing blocks still need a backup — as advice, not a blocker');
+  assert.equal(view.quarantine.autoRecovery, true);
+  assert.equal(fake.lastGoodIndex(), 7);
 });
 
 test('quarantine keeps the EARLIEST structural break, not a cascading one', () => {
   // Once block 3 is corrupt, block 4's prevHash no longer matches and the tip
-  // reports a break too. Repair truncates from the break, so honouring the latest
-  // (or the tip's) index would discard every good block in between.
+  // reports a break too. The re-sync truncates from the break, so honouring the
+  // latest (or the tip's) index would discard every good block in between.
   const fake = Object.create(LedgerProto);
   fake.quarantined = null;
 
@@ -794,6 +888,23 @@ test('quarantine keeps the EARLIEST structural break, not a cascading one', () =
 
   assert.equal(fake.quarantined.brokenAt, 3, 'must stay at the first divergence');
   assert.equal(fake.quarantined.reason, 'hash mismatch');
+});
+
+test('a cascading truncation report never moves the truncate point later', () => {
+  // A linkage break makes the tip mismatch the host anchor too, and that
+  // truncation report is a CONSEQUENCE. It used to win anyway, because the old
+  // rule was `if (unrecoverable || earlier || …)` — so the re-sync truncated from
+  // 5 and KEPT the corrupt block 3 it existed to remove.
+  const fake = Object.create(LedgerProto);
+  fake.quarantined = null;
+
+  fake.quarantine({ reason: 'hash mismatch', brokenAt: 3, height: 10, kind: 'linkage' });
+  fake.quarantine({
+    reason: 'chain truncated: tip is at block 10', brokenAt: 5, height: 10, unrecoverable: true, kind: 'truncation',
+  });
+
+  assert.equal(fake.quarantined.brokenAt, 3, 'the re-sync must still truncate from the first divergence');
+  assert.equal(fake.quarantined.unrecoverable, true, 'unrecoverable stays sticky');
 });
 
 test('a truncation verdict escalates to unrecoverable and stays that way', () => {
@@ -808,6 +919,67 @@ test('a truncation verdict escalates to unrecoverable and stays that way', () =>
 
   assert.equal(fake.quarantined.unrecoverable, true, 'unrecoverable must be sticky');
   assert.equal(fake.quarantined.brokenAt, 4, 'but the earlier break point is still better');
+});
+
+test('one open incident is announced once, no matter how many detectors report it', async () => {
+  // A single truncation is detected twice in one audit — once by the database
+  // high-water mark ("previously proven") and once by the host anchor ("sealed on
+  // this host"). Those are different strings, and the old fingerprint was
+  // `${reason}@${brokenAt}`, so one incident produced two full fan-outs and two
+  // identical scary emails in every user's inbox.
+  const sent = [];
+  const fake = Object.create(LedgerProto);
+  fake.incident = null;
+  fake.quarantined = null;
+  fake.lastRepair = null;
+  fake.cycle = 2;
+
+  // The ledger holds these modules at module scope, so stub the objects
+  // rather than the bindings: no database round trip, and no 10s Mongoose
+  // buffering timer holding the test process open afterwards.
+  // eslint-disable-next-line global-require
+  const { ChainAudit, ChainRepair } = require('../models/Web3');
+  // eslint-disable-next-line global-require
+  const alertingModule = require('../blockchain/alerting');
+  const original = {
+    auditUpdate: ChainAudit.updateOne,
+    repairFind: ChainRepair.findOne,
+    repairCreate: ChainRepair.create,
+    notifyIncident: alertingModule.notifyChainIncident,
+    notifyRecovered: alertingModule.notifyChainRecovered,
+  };
+  ChainAudit.updateOne = async () => ({ acknowledged: true });
+  ChainRepair.findOne = async () => null;
+  ChainRepair.create = async (doc) => doc;
+  alertingModule.notifyChainIncident = async (i) => { sent.push(i.reason); return { users: 0, admins: 0 }; };
+  alertingModule.notifyChainRecovered = async () => 0;
+  const settle = () => new Promise((r) => setTimeout(r, 25));
+
+  try {
+    fake.raiseIncident({ reason: 'previously proven', brokenAt: 5, height: 4, checked: 5 });
+    fake.raiseIncident({ reason: 'sealed on this host', brokenAt: 5, height: 4, checked: 5 });
+    fake.raiseIncident({ reason: 'sealed on this host', brokenAt: 9, height: 10, checked: 11 });
+    await settle();
+
+    assert.equal(sent.length, 1, `expected exactly one notification, got ${sent.length}`);
+    assert.equal(fake.incident.brokenAt, 5, 'a later report further downstream must not move the break');
+    assert.equal(fake.incident.reason, 'sealed on this host', 'the more specific reason wins at the same spot');
+    assert.equal(fake.incident.cycle, 2, 'the incident records which chain segment it happened on');
+
+    // After a recovery, the SAME break must be announced again — that second
+    // occurrence is exactly what an operator most needs in the log.
+    fake.clearIncident();
+    await settle();
+    fake.raiseIncident({ reason: 'sealed on this host', brokenAt: 5, height: 4, checked: 5 });
+    await settle();
+    assert.equal(sent.length, 2, 'a genuine second occurrence is announced again');
+  } finally {
+    ChainAudit.updateOne = original.auditUpdate;
+    ChainRepair.findOne = original.repairFind;
+    ChainRepair.create = original.repairCreate;
+    alertingModule.notifyChainIncident = original.notifyIncident;
+    alertingModule.notifyChainRecovered = original.notifyRecovered;
+  }
 });
 
 // ── Checkpoint sealing ────────────────────────────────────────────────────

@@ -691,87 +691,88 @@ When a break is found, SuppliWise automatically sends a notification to:
 **What the notification says:**
 
 > An automatic integrity check found a problem in SuppliWise's blockchain ledger
-> at block N. Nothing has been deleted and your account is still safe, but records
-> anchored around that block are temporarily not being treated as verified, and
-> the ledger is under investigation. Your balances and order history are stored
-> separately and are unaffected. This notice is sent automatically to every
-> account with blockchain activity the moment a problem is detected. You do not
-> need to do anything.
+> at block N. Nothing has been deleted from your account and nothing you can do
+> will fix or cause this. You can keep using every feature normally: earning,
+> spending, orders, staking, consent and voting all continue to work, and new
+> on-chain receipts are still being issued. The ledger is automatically
+> discarding the damaged part of its record and starting a fresh, independently
+> verified chain, and it will tell you here when that is done. You do not need
+> to do anything.
+
+Note what that message deliberately does **not** say: it never tells you your
+rewards or receipts are "on hold". You are not blocked. An earlier version of
+this system refused new blocks while the problem was being fixed, which meant
+every reward, order and consent you completed in that window came back with an
+empty transaction hash — so the app looked broken even though your balance was
+perfectly fine. That is gone.
 
 **What this means for you in practice:** you don't need to do anything, and you
 don't need to have the app open to find out. If your records are affected, you
 are told.
 
 **When it's resolved**, the same audience receives a follow-up notice saying the
-chain has been re-verified and is healthy again. An alarm you can never turn off
-would train you to ignore alarms.
+chain has been re-verified and is healthy again, and naming the fresh chain it
+started. An alarm you can never turn off would train you to ignore alarms.
 
-### Step 4 — The chain stops accepting new records
+### Step 4 — The chain restarts itself, and you never notice
 
-This is the most important thing to understand, because it affects what you see
-in your account.
+A hash chain cannot have a damaged block corrected in place, so the only
+consistent chain is the part that was never damaged. The ledger therefore does
+this, automatically, as one continuous cycle:
 
-When a break is found, the ledger **quarantines itself**: it refuses to write any
-new blocks until an engineer resolves it.
-
-You might think that is drastic. It is the opposite. Before this behaviour
-existed, the chain would report a problem and then **keep accepting new records
-anyway** — piling fresh blocks on top of the damaged ones, so the problem got
-buried deeper with every transaction, and every new receipt inherited the
-defect. Freezing is what stops a bad situation from compounding.
+1. It **stops writing on top of the damage.** Nothing new is added to the
+   corrupted region, so the problem can never be buried deeper.
+2. The **next transaction you make triggers the repair.** It discards everything
+   from the first damaged block onward, keeps everything before it, and opens a
+   **fresh, independently verified chain segment** for your transaction to land
+   on.
+3. A background watchdog does the same thing if nobody happens to transact, so a
+   quiet chain still heals on its own.
 
 **What this means for you in practice:**
 
-| | During quarantine |
+| | After a break is detected |
 |---|---|
 | Your balance, rewards, orders | **Unaffected.** These live in your account, not the chain. |
 | Using the app normally | **Works exactly as usual.** |
-| Earning rewards | **Still happens.** You are credited as normal. |
-| The on-chain receipt (transaction hash) | **Temporarily withheld.** It appears once the chain is repaired. |
+| Earning rewards | **Still happens, and is receipted.** |
+| The on-chain receipt (transaction hash) | **Still issued** — on the new verified chain. |
+| Anything you do during this | **Fully valid and fully recorded.** |
 
-So if you complete a reward during this time and don't see a transaction hash
-next to it, **nothing was lost.** Your reward is recorded on your account; only
-the blockchain receipt is on hold. This is stated plainly in the notification you
-receive, precisely so you don't have to guess.
+### Step 5 — Why automatic, and what stops it hiding anything
 
-### Step 5 — Repair
-
-A hash chain cannot have a bad block corrected in place. Editing block N changes
-its fingerprint, which breaks the link to block N+1, which breaks that one's
-fingerprint, and so on to the very end. **There is no such thing as "fixing" a
-block** — the only consistent chain is the part that was never damaged.
-
-So repair means: **discard everything from the first damaged block onward, keep
-everything before it, and carry on from there.**
-
-That sounds drastic, so here is what it is *not*:
+Automatic recovery sounds like it could let someone who damaged the chain simply
+wait for the system to tidy up after them. It cannot, because recovery is
+recorded rather than hidden:
 
 - ❌ **It is not a reset.** The chain keeps its original genesis block and all
   verified history before the problem. It does not start over.
 - ❌ **It is not silent.** The discarded blocks are recorded permanently in a
   repair log, visible to administrators and readable afterwards.
-- ❌ **It is not automatic.** A self-healing chain would let someone who damaged
-  it simply wait for the system to tidy up after them. Repair is always a
-  deliberate human decision.
+- ❌ **It does not erase the evidence.** The new chain segment is a real
+  proof-of-work block that commits to *what* was discarded, *how many* blocks, and
+  *why* — so the cycle boundary is visible in the explorer and in a transaction
+  lookup, not just in a server log.
 - ❌ **It does not affect your account.** Balances, orders, rewards and history
-  are untouched — only the blockchain proof is rebuilt.
+  are untouched.
 
-**You will be told when it happens.** After a repair, everyone who received a
-warning receives a follow-up notice explaining what was resolved, whether blocks
-were discarded, and that their account was never at risk.
+**You will be told when it happens.** Everyone who received a warning receives a
+follow-up notice explaining what was resolved, whether blocks were discarded,
+and that their account was never at risk.
 
 ### Step 6 — Affected records are distrusted
 
-Until the chain is healthy, digests from the affected block onward are not
+Until the re-sync completes, digests from the affected block onward are not
 treated as proof. This is the safe default: better to say "unverified" than to
-confirm something that may be wrong.
+confirm something that may be wrong. It is a window of seconds, not a freeze.
 
-### One case repair cannot fix
+### One case recovery cannot fix
 
 If blocks are **missing** rather than altered, discarding blocks cannot bring
-them back — the missing blocks are the evidence. In that situation the correct
-response is to **restore from a backup**, and the system says so rather than
-letting anyone attempt a repair that cannot possibly work.
+them back — the missing blocks are the evidence. The chain still continues
+without them, and the system says so plainly, but the correct response for those
+particular records is to **restore from a backup**. This is flagged as
+outstanding work for administrators rather than used as a reason to block you.
 
 Your account data is safe in this case too, because it was never in the chain.
 
@@ -779,12 +780,12 @@ Your account data is safe in this case too, because it was never in the chain.
 
 | Question | Answer |
 |---|---|
-| Is it permanent? | **No.** An engineer repairs it. |
-| Does it start a brand-new chain? | **No.** The same chain continues from the last verified block. |
+| Is it permanent? | **No.** It repairs itself, usually within seconds. |
+| Does it start a brand-new chain? | **It starts a fresh verified chain segment**, keeping all verified history before the problem. |
 | Do I lose my balance, rewards, or orders? | **No.** Those live in your account, not the chain. |
-| Can I keep using the app? | **Yes.** Everything works; only on-chain receipts pause. |
+| Can I keep using the app? | **Yes.** Everything works and is receipted throughout. |
 | Will I be told what happened? | **Yes.** At the time, and again when it is resolved. |
-| Could someone tamper and hide it? | No. Detection is automatic and alerting is automatic. |
+| Could someone tamper and hide it? | No. Detection, alerting and recovery are all automatic and all recorded. |
 
 ### What we would do about it
 

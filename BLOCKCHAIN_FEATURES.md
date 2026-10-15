@@ -14,8 +14,9 @@ and the checks that prove it works.
 
 | Concern | Implementation | Notes |
 | --- | --- | --- |
-| Ledger | `server/blockchain/ledger.js` + `Block` model | Append‑only PoW chain. Each block stores `{index, timestamp, prevHash, nonce, hash, txs}`. Difficulty `3` (override with `CHAIN_DIFFICULTY`). |
+| Ledger | `server/blockchain/ledger.js` + `Block` model | Append‑only PoW chain. Each block stores `{index, timestamp, prevHash, nonce, hash, txs}`. Difficulty `3` (override with `CHAIN_DIFFICULTY`). The stored payload is byte‑identical to the payload the digest was computed over (`minimize:false`), which is what makes `txs[].data` tamper‑evident. |
 | Integrity | `GET /api/web3/chain/verify` | Recomputes every `headerHash` and the `prevHash` linkage. The E2E test asserts `valid === true`. |
+| Break recovery | `ledger.resync()` / `ledger.repair()` | A break **never blocks a transaction**. The chain is marked untrusted, every account is notified, and the next append discards the untrustworthy region, rewinds the host head anchor and opens a fresh verified chain segment (`chain:resync`, cycle +1). A watchdog does the same when there is no traffic. |
 | State engine | `server/blockchain/engine.js` | **The only place that mutates Web3 state.** Rule: mutate the DB first (source of truth), then anchor. An anchor failure is logged and never fails the request. |
 | Privacy | `blockchain/crypto.js` | Personal payloads are never written on‑chain — only a `sha256` digest over canonical JSON (`stableStringify` + `hashPayload`). |
 | Identity | `generateIdentity()` | `ed25519` keypair. DID `did:suppliwise:<userId>`, address `0x` + `sha256("sw:addr:"+publicKey).slice(0,40)`. |
