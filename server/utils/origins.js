@@ -52,37 +52,35 @@ function webauthnOrigins() {
 /**
  * Development origins: the Vite dev servers, the loopback forms the Capacitor
  * shell uses, and the backend's own port. Never used in production.
+ *
+ * The port set comes from DEV_WEB_PORTS because a second checkout on the same
+ * machine cannot hold 5173 as well as the first: `vite --port 5176` is the
+ * normal answer, and the API then refused the page it was built to serve. The
+ * origins stay an exact list — no wildcard — so widening it is a deliberate,
+ * visible setting rather than a side effect of trusting localhost at large.
  */
 function developmentOrigins() {
   const port = str(process.env.PORT || '5000');
+  const webPorts = (str(process.env.DEV_WEB_PORTS) || '5173,5174,5175')
+    .split(',')
+    .map((p) => p.trim())
+    .filter((p) => /^\d{2,5}$/.test(p));
+  const loopback = ['localhost', '127.0.0.1'];
+  const schemes = ['http', 'https'];
   return [
-    // The Vite dev servers, both schemes. The https forms are not optional
-    // decoration: the dev server runs over TLS when a certificate is present
-    // (see scripts/dev-certs.mjs), and an https page talking to an http API is
-    // blocked by the browser as mixed content — so trusting only the http form
-    // would leave the whole app unable to reach its own API.
-    'http://localhost:5173',
-    'http://localhost:5174',
-    'http://localhost:5175',
-    'https://localhost:5173',
-    'https://localhost:5174',
-    'https://localhost:5175',
-    'http://127.0.0.1:5173',
-    'http://127.0.0.1:5174',
-    'http://127.0.0.1:5175',
-    'https://127.0.0.1:5173',
-    'https://127.0.0.1:5174',
-    'https://127.0.0.1:5175',
+    // Both schemes for every port: the dev server runs over TLS when a
+    // certificate is present (see scripts/dev-certs.mjs), and an https page
+    // talking to an http API is blocked by the browser as mixed content — so
+    // trusting only the http form would leave the whole app unable to reach
+    // its own API.
+    ...schemes.flatMap((scheme) => loopback.flatMap((host) => webPorts.map((p) => `${scheme}://${host}:${p}`))),
     'capacitor://localhost',
     'http://localhost',
     'http://127.0.0.1',
     // The API's own origin. Same-origin requests (a page served by this
     // process, curl, the native app) must be trusted in both schemes for the
     // same reason as above.
-    `http://localhost:${port}`,
-    `https://localhost:${port}`,
-    `http://127.0.0.1:${port}`,
-    `https://127.0.0.1:${port}`,
+    ...schemes.flatMap((scheme) => loopback.map((host) => `${scheme}://${host}:${port}`)),
   ];
 }
 
