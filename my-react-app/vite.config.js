@@ -79,8 +79,36 @@ function serverTlsEnabled() {
   return false
 }
 
+// The port the API listens on, resolved the same way TLS_ENABLED is: an OS-provided
+// value wins, otherwise the server's own .env is read, otherwise 5000.
+//
+// Hardcoding 5000 here is what made a second worktree unusable. Two dev APIs on one
+// machine cannot share a port, so the second one starts on 5010 — and the proxy then
+// silently targeted the FIRST tree's server. Every request answered, with no error,
+// against code you were not editing; the only symptom was a route 404ing because the
+// other checkout does not have it. Deriving the port means `PORT=5010 node index.js`
+// plus `API_PORT=5010 vite` is a complete, self-consistent dev pair.
+function serverApiPort() {
+  const fromEnvironment = process.env.API_PORT || process.env.PORT
+  const envFile = resolve(REPO_ROOT, 'server', '.env')
+  if (!fromEnvironment && existsSync(envFile)) {
+    try {
+      for (const line of readFileSync(envFile, 'utf8').split(/\r?\n/)) {
+        const match = /^\s*PORT\s*=\s*(.*)$/.exec(line)
+        if (!match) continue
+        const value = match[1].trim().replace(/^["']|["']$/g, '')
+        if (/^\d+$/.test(value)) return value
+      }
+    } catch {
+      // Fall through to the default; an unreadable .env is not evidence of a port.
+    }
+  }
+  const candidate = String(fromEnvironment ?? '').trim()
+  return /^\d+$/.test(candidate) ? candidate : '5000'
+}
+
 const API_USES_TLS = serverTlsEnabled()
-const API_PROXY_TARGET = API_USES_TLS ? 'https://localhost:5000' : 'http://localhost:5000'
+const API_PROXY_TARGET = `${API_USES_TLS ? 'https' : 'http'}://localhost:${serverApiPort()}`
 
 // The development CA, for verifying the API's certificate through the proxy.
 // Node does not read the OS certificate store (where `mkcert -install` put the
