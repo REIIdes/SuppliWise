@@ -52,7 +52,7 @@ export default function ExplorerPanel() {
       const res = await verifyChain();
       setVerify(res);
       if (res.valid) ok(`Chain valid ✓ — ${res.checked} blocks recomputed at difficulty ${res.difficulty}.`);
-      else fail({ message: `Chain BROKEN at block #${res.brokenAt}: ${res.reason}` });
+      else fail({ message: `Chain BROKEN at block #${res.brokenAt}: ${res.reason} — everyone has been notified and the ledger is restarting on a fresh verified chain automatically.` });
     } catch (err) {
       fail(err, 'Could not verify the chain.');
     } finally {
@@ -125,32 +125,36 @@ export default function ExplorerPanel() {
             label="Integrity"
             tone={integrityTone}
           />
+          <Stat value={`#${(status ?? chain).cycle ?? 0}`} label="Chain cycle" />
         </div>
         {status && status.state === 'compromised' && (
           <div className="w3-alert err" style={{ marginTop: 14 }} role="alert">
             <strong>⚠️ Blockchain record integrity issue.</strong>{' '}
-            {status.notice || 'Records anchored around the affected block are not being treated as verified.'}
+            {status.notice || 'An integrity problem was found in the blockchain record.'}
             {status.brokenAt != null && (
               <> Affected block: <span className="w3-mono">#{status.brokenAt}</span>. </>
             )}
             {status.reason && <> <span className="w3-mono">{status.reason}</span></>}
             {/*
-              Say the two things a user would otherwise have to guess: that the
-              ledger is frozen rather than broken-forever, and what that means for
-              a receipt they are waiting on. Without this the warning reads as
-              "everything is lost", which is the opposite of the truth.
+              The one thing a user must never be told here is that their
+              transactions are on hold. They are not: the ledger re-syncs itself
+              and keeps issuing receipts. Calling it "paused" is what made the
+              blockchain look broken while it was still working.
             */}
-            {status.quarantined && (
-              <div style={{ marginTop: 8 }}>
-                The ledger has paused rather than continuing on the damaged blocks, and your
-                account, balance and orders are unaffected. New on-chain receipts are temporarily
-                withheld — anything you complete is still recorded on your account and will be
-                anchored once the chain is repaired.
-                {status.quarantine?.needsBackupRestore && (
-                  <> This one requires a backup restore rather than a repair.</>
-                )}
-              </div>
-            )}
+            <div style={{ marginTop: 8 }}>
+              Your account, balance, rewards and orders are unaffected and every feature keeps
+              working — nothing is on hold. The ledger has stopped writing on top of the damaged
+              blocks and is discarding them to start a fresh, independently verified chain.
+              {status.resyncing && <> A new chain is being opened right now.</>}
+              {status.lastResync && status.lastResync.ok && (
+                <> Last time: kept up to block #{status.lastResync.keptThrough ?? 0},{' '}
+                  {status.lastResync.discarded ?? 0} block(s) discarded.</>
+              )}
+              {status.quarantine?.needsBackupRestore && (
+                <> This one means some historical blocks are missing, so those records can only come
+                  back from a backup restore — the chain itself continues without them.</>
+              )}
+            </div>
           </div>
         )}
         {status && status.lastVerifiedAt && status.state !== 'compromised' && (

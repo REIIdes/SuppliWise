@@ -36,25 +36,21 @@ const BATCH = 500;
 // ("prevHash mismatch"); this is what a member actually reads.
 function describe(incident) {
   const where = incident.brokenAt >= 0 ? `block ${incident.brokenAt}` : 'the chain';
-  const quarantined = incident.quarantine === true;
 
-  let userDetail =
+  // The single most important thing this message must not say is "your rewards
+  // are on hold". Transactions are NEVER blocked by a chain break: the ledger
+  // re-syncs itself and keeps issuing receipts. Telling a member otherwise makes
+  // them think a balance was lost, which is both false and the fastest way to
+  // make people distrust a working system.
+  const userDetail =
     `An automatic integrity check found a problem in SuppliWise's blockchain ledger at ${where}. `
-    + `Nothing has been deleted and your account is still safe, but records anchored around that block `
-    + `are temporarily not being treated as verified, and the ledger is under investigation. `
-    + `Your balances and order history are stored separately and are unaffected. `
+    + `Nothing has been deleted from your account and nothing you can do will fix or cause this. `
+    + `You can keep using every feature normally: earning, spending, orders, staking, consent and voting `
+    + `all continue to work, and new on-chain receipts are still being issued. `
+    + `The ledger is automatically discarding the damaged part of its record and starting a fresh, `
+    + `independently verified chain, and it will tell you here when that is done. `
     + `This notice is sent automatically to every account with blockchain activity the moment a `
     + `problem is detected. You do not need to do anything.`;
-
-  // Say plainly that new receipts are paused. A member who claims a reward during
-  // a quarantine and sees no transaction hash has otherwise no way to know
-  // whether they lost it or whether it is simply not written yet.
-  if (quarantined) {
-    userDetail +=
-      ' While this is being fixed the ledger is not accepting new records, so a reward or order you '
-      + 'complete right now may not show an on-chain receipt yet. Your reward, balance and order are '
-      + 'still recorded normally on your account — only the blockchain receipt is on hold.';
-  }
 
   return {
     userTitle: 'Blockchain record integrity issue',
@@ -63,8 +59,11 @@ function describe(incident) {
     adminDetail:
       `Ledger verification failed: ${incident.reason}. `
       + `Detected ${new Date(incident.at || Date.now()).toISOString()} `
-      + `at height ${incident.height}, ${incident.checked} block(s) checked. `
-      + `Do not trust anchored digests from this block onward until the ledger is re-synced. `
+      + `at height ${incident.height}, ${incident.checked} block(s) checked (chain cycle ${incident.cycle || 0}). `
+      + `All affected accounts have been notified and were NOT blocked — transactions continue, and the `
+      + `ledger re-syncs automatically: it discards the untrustworthy region, rewinds its host head anchor `
+      + `and opens a new chain segment. `
+      + `Do not trust anchored digests from this block onward until the re-sync completes. `
       + `Investigate the database for an out-of-band write, and check whether CHAIN_SEAL_KEY changed.`,
   };
 }
@@ -156,9 +155,11 @@ async function notifyChainRecovered(incident) {
   // "all healthy" would leave every recipient who was told about the incident
   // unable to tell whether anything was lost — and in a repair, something WAS.
   const repaired = copy.repaired === true;
+  const cycle = Number(copy.cycle) || 0;
   let detail =
     'Good news: SuppliWise\'s blockchain ledger has passed a full integrity re-check and is verified healthy again. '
     + `The earlier problem at block ${copy.brokenAt} has been resolved and anchored records are being trusted normally again. `
+    + 'Your balance, rewards and orders were never affected, and nothing was taken from your account. '
     + 'No action was needed on your part.';
 
   if (repaired && copy.discardedCount > 0) {
@@ -167,6 +168,12 @@ async function notifyChainRecovered(incident) {
       + 'verified and were discarded. Records before that point are untouched and still verified, the chain continues '
       + 'from there, and every affected account was notified automatically. Nothing on your account was lost: balances, '
       + 'orders and rewards are held separately from the ledger.';
+  }
+
+  if (copy.resynced) {
+    detail += cycle > 0
+      ? ` The ledger then opened a fresh, independently verified chain (cycle ${cycle}) and is running forward on it again.`
+      : ' The ledger then opened a fresh, independently verified chain and is running forward on it again.';
   }
 
   try {

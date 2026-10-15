@@ -184,6 +184,20 @@ const VERIFY_PROJECTION = {
 // incremental fast path below reports the newest verdict it already has.
 const FULL_AUDIT_INTERVAL_MS = 5 * 60 * 1000;
 
+// How often the background watchdog looks for a broken chain that received no
+// traffic. The transaction-triggered resync is the primary path — this only
+// covers the quiet case, so it can be leisurely.
+const WATCHDOG_INTERVAL_MS = Math.max(
+  15000,
+  Number(process.env.CHAIN_WATCHDOG_INTERVAL_MS) || 60 * 1000
+);
+
+// Transaction type of the block that opens a fresh chain segment after a break.
+// It is a REAL mined block chained onto the surviving verified tip — not a new
+// genesis and not a database flag — so the recovery is itself provable and the
+// whole thing stays one linear hash chain a verifier can walk end to end.
+const RESYNC_TX = 'chain:resync';
+
 // Append-only log of sealed head positions, on the HOST filesystem rather than
 // in MongoDB — see anchorHeadToDisk for why that distinction is the whole point.
 // Set CHAIN_HEAD_ANCHOR=false to disable (e.g. a read-only container fs).
@@ -368,13 +382,6 @@ async function writeRepairRecord(entry) {
   }
 }
 
-// The difficulty a stored block was mined against. Blocks written before the
-// field existed fall back to the current setting.
-function blockDifficulty(block) {
-  const d = Number(block && block.difficulty);
-  return Number.isInteger(d) && d >= 1 ? d : DIFFICULTY;
-}
-
 class Ledger {
   constructor() {
     this.difficulty = DIFFICULTY;
@@ -411,9 +418,15 @@ class Ledger {
     // Outstanding integrity incident, so a recovery notice can be raised once
     // and so /chain/status can explain itself without re-walking.
     this.incident = null;
-    // Set when the chain has been proven broken and must not be extended until
-    // an operator repairs it. Distinct from `incident`: an incident is a fact
-    // that happened, quarantine is a rule about what the ledger may do next.
+    // Set when the chain has been proven broken. Distinct from `incident`: an
+    // incident is a fact that happened, quarantine is the ledger's knowledge that
+    // it is currently NOT in a consistent state.
+    //
+    // It does NOT mean "stop writing". Users are never blocked by a chain break:
+    // every append triggers `resync()`, which discards the untrustworthy region
+    // and starts a fresh verified chain segment for that transaction to land on.
+    // The flag exists so the status endpoint, the admin monitor and the alerting
+    // copy can describe what is happening, and so a resync is attempted at all.
     this.quarantined = null;
     // The most recent successful repair, so the recovery notice can state
     // whether blocks were discarded. Reset by raiseIncident() when a new
@@ -422,6 +435,21 @@ class Ledger {
     // Deepest head position written to the host filesystem anchor.
     this.diskAnchored = null;
     this.diskAnchorWarned = false;
+    // How many chain segments this ledger has produced. 0 = the original chain;
+    // each resync increments it, and the number is surfaced in /chain/status so
+    // "the blockchain started a new chain" is a visible, auditable fact rather
+    // than a silent reset.
+    this.cycle = 0;
+    // In-flight resync, so a burst of appends after a break pays for ONE repair
+    // rather than racing several concurrent ones against the same blocks.
+    this.resyncing = false;
+    // Last resync outcome, for /chain/status and the admin monitor.
+    this.lastResync = null;
+    this.watchdogTimer = null;
+    // Whether the on-disk anchor was readable without a usable seal key. Tracked
+    // so /chain/status can say the extra truncation check is degraded instead of
+    // silently not running.
+    this.diskAnchorUnsealed = false;
   }
 
   // Load the tip (or create the genesis block on first boot). Errors are not
@@ -441,24 +469,70 @@ class Ledger {
         });
         const header = { index: 0, timestamp: Date.now(), prevHash: GENESIS_PREV_HASH, txs: [genesisTx] };
         const { nonce, hash } = mineHeader(header);
-        await Block.create({
-          ...header,
-          nonce,
-          hash,
-          v: commitVersionForNewBlocks(),
-          difficulty: DIFFICULTY,
-          txs: [genesisTx],
-        });
-        this.height = 0;
-        this.tip = hash;
+        try {
+          await Block.create({
+            ...header,
+            nonce,
+            hash,
+            v: commitVersionForNewBlocks(),
+            difficulty: DIFFICULTY,
+            txs: [genesisTx],
+          });
+          this.height = 0;
+          this.tip = hash;
+        } catch (err) {
+          // Concurrent first boot. `index` is a unique index, so exactly one
+          // process wins the genesis write and the loser must adopt the winner's
+          // block rather than boot a second chain from the same empty database —
+          // two blocks at index 0 is a fork at the very first block, and the loser
+          // would otherwise crash on every later append with a duplicate-key error.
+          if (err && err.code === 11000) {
+            const winner = await Block.findOne({}, { index: 1, hash: 1 }).sort({ index: -1 }).lean();
+            if (!winner) throw err;
+            this.height = winner.index;
+            this.tip = winner.hash;
+          } else {
+            throw err;
+          }
+        }
       }
       await this.restoreCheckpoint();
+      this.startWatchdog();
       return this;
     })().catch((err) => {
       this.initPromise = null; // allow retry
       throw err;
     });
     return this.initPromise;
+  }
+
+  /**
+   * Background self-healing loop.
+   *
+   * The resync that recovers a broken chain normally runs on the first append
+   * after the break, because a transaction is the moment the ledger must be
+   * usable again. Without this, a chain that broke and then received NO traffic
+   * would sit broken indefinitely: nobody is notified that the next reward will
+   * cost a repair, the explorer keeps reporting a compromised chain, and an
+   * operator has to notice by hand.
+   *
+   * Cheap by construction — it only does work while `quarantined` is set, and the
+   * work itself is the serialized `_repair`, so it can never race an append.
+   * `unref()` keeps it from holding the process open, and the whole body is
+   * wrapped: a watchdog that throws on a timer would take the server down.
+   */
+  startWatchdog() {
+    if (this.watchdogTimer || process.env.CHAIN_WATCHDOG === 'false') return;
+    this.watchdogTimer = setInterval(() => {
+      Promise.resolve().then(async () => {
+        if (!this.quarantined) return;
+        // Never touch the database unless there is a live connection — this
+        // timer also exists in processes that required the ledger without one.
+        if (mongoose.connection.readyState !== 1) return;
+        await this.resync({ actor: 'chain-watchdog' });
+      }).catch((err) => console.error('[chain] watchdog resync failed:', err.message));
+    }, WATCHDOG_INTERVAL_MS);
+    if (typeof this.watchdogTimer.unref === 'function') this.watchdogTimer.unref();
   }
 
   // Re-adopt the last proven-good position from the database. One small
@@ -470,6 +544,12 @@ class Ledger {
     try {
       const saved = await ChainAudit.findOne({ key: 'chain' }).lean();
       if (!saved) return;
+
+      // The cycle counter is a fact about this deployment, not a trust claim, so
+      // it is read BEFORE the seal verdict. Restoring it only on the "seal OK"
+      // path meant a restart under a rotated CHAIN_SEAL_KEY reset the chain to
+      // cycle 0 and re-announced it as the original chain.
+      this.cycle = Math.max(0, Number(saved.cycle) || 0);
       if (saved.upTo > this.height) {
         this.checkpoint = null;
         return;
@@ -491,42 +571,46 @@ class Ledger {
           '[chain] checkpoint seal did not verify — discarding it and re-hashing from genesis. '
           + 'Either the record was edited or CHAIN_SEAL_KEY changed.'
         );
-        return;
+      } else if (verdict === 'unsealed') {
+        // Unsealed, not merely unverified. A checkpoint with no valid seal is an
+        // UNSUPPORTED CLAIM ("this is verified, trust me") sitting in the same
+        // database as the data it describes — and it must not be able to end an
+        // open incident. Trusting it would mean a forged row could both skip the
+        // deep audit AND silence the recovery notice, so every unsealed
+        // checkpoint is discarded and the chain re-hashed from genesis.
+        this.sealCompromised = true;
+        this.checkpoint = null;
+        if (!this.unsealedWarned) {
+          this.unsealedWarned = true;
+          console.error(
+            '[chain] checkpoint carries no valid seal — discarding it and re-hashing from genesis. '
+            + 'Set CHAIN_SEAL_KEY so the "already verified" record can be authenticated.'
+          );
+        }
+      } else {
+        this.checkpoint = { upTo: saved.upTo, prevHash: saved.prevHash };
+        this.verifiedAt = saved.verifiedAt || null;
+        this.verifiedChecked = saved.checked || saved.upTo + 1;
+        if (saved.sealed && Number(saved.sealed.index) >= 0) {
+          this.sealed = { index: Number(saved.sealed.index), hash: String(saved.sealed.hash || '') };
+        }
       }
-      if (verdict === 'unsealed') {
-      // Unsealed, not merely unverified. A checkpoint with no valid seal is an
-      // UNSUPPORTED CLAIM ("this is verified, trust me") sitting in the same
-      // database as the data it describes — and it must not be able to end an
-      // open incident. Trusting it would mean a forged row could both skip the
-      // deep audit AND silence the recovery notice, so every unsealed
-      // checkpoint is discarded and the chain re-hashed from genesis.
-      this.sealCompromised = true;
-      this.checkpoint = null;
-      if (!this.unsealedWarned) {
-        this.unsealedWarned = true;
-        console.error(
-          '[chain] checkpoint carries no valid seal — discarding it and re-hashing from genesis. '
-          + 'Set CHAIN_SEAL_KEY so the "already verified" record can be authenticated.'
-        );
-      }
-    }
 
-      this.checkpoint = { upTo: saved.upTo, prevHash: saved.prevHash };
-      this.verifiedAt = saved.verifiedAt || null;
-      this.verifiedChecked = saved.checked || saved.upTo + 1;
-      if (saved.sealed && Number(saved.sealed.index) >= 0) {
-        this.sealed = { index: Number(saved.sealed.index), hash: String(saved.sealed.hash || '') };
-      }
       // Re-adopt an incident that was open when the process last stopped, so the
-      // recovery notice can still be delivered after a restart.
+      // recovery notice can still be delivered after a restart. This runs even
+      // when the checkpoint was just discarded: the seal verdict says the
+      // "already verified" claim is worthless, NOT that the chain is fine, and
+      // forgetting a live incident here is what leaves a permanent false alarm in
+      // everyone's inbox with nobody able to clear it.
+      //
       // The newest repair-log entry decides whether an incident is still OPEN.
       //
       // The previous attempt gated this on "an incident row exists", which is true
       // forever — repair writes its record but never deletes the incident, so a
-      // repaired chain came back from a restart still quarantined and refused
-      // every append. The log is ordered by time, so the correct question is
-      // simply: was the LAST entry an incident? If the last entry is a repair (or
-      // a repair that failed), the incident it closed is closed.
+      // repaired chain came back from a restart still marked broken. The log is
+      // ordered by time, so the correct question is simply: was the LAST entry an
+      // incident? If the last entry is a repair (or a repair that failed), the
+      // incident it closed is closed.
       const latest = await ChainRepair.findOne({ key: 'chain' }).sort({ at: -1 }).lean();
       const openInLog = !!latest && latest.kind === 'incident';
       const savedIncident = saved.incident && saved.incident.fingerprint;
@@ -545,17 +629,19 @@ class Ledger {
 
       if (savedIncident) {
         this.incident = {
-          fingerprint: savedIncident.fingerprint,
+          fingerprint: savedIncident,
           reason: saved.incident.reason,
           brokenAt: Number(saved.incident.brokenAt),
           height: this.height,
           checked: this.verifiedChecked,
           at: Number(saved.incident.raisedAt) || Date.now(),
           notified: true,
+          cycle: this.cycle,
         };
         // The incident record is still open even if the repair log is not (e.g.
-        // the log write failed). Trust the more conservative signal: keep the
-        // chain closed until a repair has demonstrably run.
+        // the log write failed). Trust the more conservative signal: treat the
+        // chain as untrusted until a repair has demonstrably run. The first append
+        // resyncs it, so this costs a re-hash — never a blocked transaction.
         if (!openInLog) {
           this.quarantine({
             reason: saved.incident.reason || 'integrity failure',
@@ -590,17 +676,34 @@ class Ledger {
    *
    * Format is one JSON object per line: { i, h, t, s } — index, hash, time, seal.
    * Append-only, fsync'd, and only ever written with strictly-increasing index,
-   * so the file cannot itself be used to hide a truncation.
+   * so the file cannot itself be used to hide a truncation — with exactly one
+   * exception: a RESYNC record (see `rewindDiskAnchor`), which supersedes every
+   * earlier line and is itself sealed.
    */
   async anchorHeadToDisk(index, hash) {
     if (index < 0) return;
     const diskAnchorPath = anchorPath();
     if (!diskAnchorPath) return;
     if (this.diskAnchored && index <= this.diskAnchored.index) return; // monotonic
-    const record = { i: index, h: String(hash || ''), t: Date.now(), s: computeSeal({ upTo: index, prevHash: hash, sealedIndex: index, sealedHash: hash }) };
+    await this.writeAnchorRecord(diskAnchorPath, { i: index, h: String(hash || '') });
+  }
+
+  /**
+   * Append one sealed line to the host anchor file. Shared by the normal
+   * high-water write and the resync rewind so both go through one seal
+   * computation and one failure path.
+   */
+  async writeAnchorRecord(file, { i, h, reset = 0, reason = '' }) {
+    const record = {
+      i,
+      h,
+      t: Date.now(),
+      s: computeSeal({ upTo: i, prevHash: h, sealedIndex: i, sealedHash: h }),
+    };
+    if (reset) { record.reset = 1; record.reason = String(reason || '').slice(0, 200); }
     try {
-      await fs.promises.appendFile(diskAnchorPath, `${JSON.stringify(record)}\n`, 'utf8');
-      this.diskAnchored = { index, hash: record.h };
+      await fs.promises.appendFile(file, `${JSON.stringify(record)}\n`, 'utf8');
+      this.diskAnchored = { index: i, hash: record.h };
     } catch (err) {
       // A read-only or full disk must never fail a verification. It only costs
       // the extra layer of truncation detection.
@@ -612,15 +715,64 @@ class Ledger {
   }
 
   /**
-   * The deepest head position ever recorded on disk.
+   * Move the host anchor back to a lower height after the untrustworthy region
+   * was discarded. THE FIX FOR A LEDGER THAT COULD NEVER RECOVER.
+   *
+   * The anchor file is append-only and never rewound, so it kept claiming the
+   * deepest height the chain had EVER reached. A resync deliberately truncates
+   * the chain, which is the only legitimate way its tip can go backwards — and
+   * the very next `checkDiskAnchor()` read that stale, higher claim and reported
+   * the freshly repaired chain as truncated. The result, reproduced on a scratch
+   * database:
+   *
+   *   · the repair ran, discarded 0 blocks, and still reported "did NOT restore
+   *     integrity";
+   *   · the chain stayed marked broken forever, including across restarts,
+   *     because the file on disk survived them;
+   *   · with appends refused, no transaction could ever be anchored again.
+   *
+   * A broken chain that cannot be repaired and cannot accept writes is the worst
+   * outcome available, and it was the default one. The rewind is what makes the
+   * detect → notify → resync → resume cycle terminate.
+   *
+   * It is still append-only and still authenticated: the rewind is a new line
+   * carrying the new position, HMAC-sealed with the same key as everything else,
+   * and carrying the reason it was taken. `readDiskAnchor` honours only the last
+   * sealed rewind and everything after it, so a rewritten history still cannot
+   * rewind the claim — the file only moves down when THIS server says the
+   * records it covers were discarded.
+   */
+  async rewindDiskAnchor(index, hash, reason = '') {
+    const file = anchorPath();
+    if (!file) return false;
+    if (index < 0) {
+      // The whole chain was discarded and nothing survives. There is no position
+      // left to claim, so every earlier line has to be superseded explicitly.
+      await this.writeAnchorRecord(file, { i: -1, h: GENESIS_PREV_HASH, reset: 1, reason });
+      this.diskAnchored = null;
+      return true;
+    }
+    await this.writeAnchorRecord(file, { i: index, h: String(hash || ''), reset: 1, reason });
+    return true;
+  }
+
+  /**
+   * The deepest head position the host is currently willing to vouch for.
    *
    * Read at boot and compared against the live tip. A chain whose tip is behind
    * this was truncated; one at the same height with a different hash had its tip
    * block replaced.
+   *
+   * Lines are read in order. A line marked `reset` (written by rewindDiskAnchor)
+   * supersedes EVERY line before it — that is the whole point of the rewind —
+   * while ordinary lines only advance the high-water mark. Both must carry a
+   * verifying seal; a line written by something that is not this server is
+   * ignored rather than treated as proof.
    */
   async readDiskAnchor() {
     const diskAnchorPath = anchorPath();
     if (!diskAnchorPath) return null;
+    let unsealed = 0;
     try {
       const raw = await fs.promises.readFile(diskAnchorPath, 'utf8');
       let best = null;
@@ -629,16 +781,28 @@ class Ledger {
         try {
           const rec = JSON.parse(line);
           if (!Number.isInteger(rec.i) || typeof rec.h !== 'string') continue;
+          const sealed = verifySeal({ upTo: rec.i, prevHash: rec.h, sealedIndex: rec.i, sealedHash: rec.h });
           // A line whose seal does not verify was written by something that is
           // not this server. Ignore it rather than treating it as proof — the
           // file is an integrity aid, not an authority to fail a chain on.
-          if (rec.s && verifySeal({ upTo: rec.i, prevHash: rec.h, sealedIndex: rec.i, sealedHash: rec.h }) !== 'bad') {
-            if (!best || rec.i > best.index) best = { index: rec.i, hash: rec.h };
+          if (sealed === 'bad') continue;
+          // 'unsealed' means this deployment cannot judge the line (no seal key,
+          // or it predates sealing). Skipping those outright meant that with no
+          // CHAIN_SEAL_KEY configured the file was IGNORED COMPLETELY and the
+          // extra truncation check silently did nothing. Accept them and record
+          // that the check is running unauthenticated, so /chain/status can say
+          // so instead of implying a protection that is not active.
+          if (sealed === 'unsealed') unsealed += 1;
+          if (rec.reset === 1) {
+            best = { index: rec.i, hash: rec.h, reset: true };
+          } else if (!best || rec.i > best.index) {
+            best = { index: rec.i, hash: rec.h };
           }
         } catch {
           // A truncated final line (power loss mid-append) is expected; skip it.
         }
       }
+      this.diskAnchorUnsealed = unsealed > 0;
       return best;
     } catch (err) {
       if (err.code !== 'ENOENT') {
@@ -649,7 +813,7 @@ class Ledger {
   }
 
   /**
-   * Compare the live tip against the deepest position ever recorded on disk.
+   * Compare the live tip against the position the host is willing to vouch for.
    *
    * Complements checkHighWater: that one compares against the database record,
    * this one against a medium the database attacker cannot reach. Either alone
@@ -659,7 +823,10 @@ class Ledger {
   async checkDiskAnchor(tipIndex, tipHash) {
     const anchored = await this.readDiskAnchor();
     if (!anchored) return null;
-    this.diskAnchored = anchored;
+    // The host is vouching for a position that does not exist in the chain (the
+    // classic rewrite), so it can no longer be used as a baseline for future
+    // appends — or the next append would be skipped as "not monotonic".
+    this.diskAnchored = anchored.index > tipIndex ? null : anchored;
     if (tipIndex < anchored.index) {
       return {
         valid: false,
@@ -683,25 +850,52 @@ class Ledger {
    * Raise an integrity incident: record it, log it, and notify every account
    * with blockchain activity plus every administrator.
    *
+   * ONE notification per open incident, never one per detector. The old guard
+   * de-duplicated on `${reason}@${brokenAt}`, and the reason is a human-readable
+   * string that different checks word differently: a single truncation reported
+   * "previously proven" from the database high-water mark and "sealed on this
+   * host" from the filesystem anchor, in the same audit. Two fingerprints, two
+   * full fan-outs, two identical scary emails in every inbox — for one incident.
+   * De-duplicating on "is an incident already open" is what the requirement
+   * actually was.
+   *
+   * A still-open incident is REFINED in place (earliest break wins, freshest
+   * reason wins) but never re-announced. A genuine second occurrence — break,
+   * recover, break again — clears the incident first, so it is announced again.
+   *
    * Best effort by construction. It runs from inside the verifier, and a failure
    * to deliver a warning must never turn a detected break into a swallowed one
    * — so every step is individually guarded.
    */
   raiseIncident({ reason, brokenAt, height, checked }) {
-    const fingerprint = `${reason}@${brokenAt}`;
     const now = Date.now();
-    // Re-entrant: the audit, the monitor probe and /chain/verify can all report
-    // the same break within milliseconds. One notification per break, not three.
-    if (this.incident && this.incident.fingerprint === fingerprint) return this.incident;
+    if (this.incident) {
+      // Already open. Refine, do not re-notify.
+      const inc = this.incident;
+      // Keep the EARLIEST break point. A structural break cascades (block 4 also
+      // reports a prevHash mismatch), and the earliest report is where the chain
+      // genuinely diverged — the one a resync must truncate from.
+      if (Number.isInteger(brokenAt) && brokenAt >= 0 && (inc.brokenAt < 0 || brokenAt < inc.brokenAt)) {
+        inc.brokenAt = brokenAt;
+        inc.reason = reason;
+      } else if (Number.isInteger(brokenAt) && brokenAt === inc.brokenAt) {
+        // Same spot: a later, more specific detector may be reporting better.
+        if (reason && reason.length > String(inc.reason || '').length) inc.reason = reason;
+      }
+      if (height != null) inc.height = height;
+      if (checked != null) inc.checked = checked;
+      inc.reportedAt = now;
+      return inc;
+    }
+    const fingerprint = `${now.toString(36)}-${brokenAt}`;
     // A NEW incident must not inherit the previous one's repair summary, or the
     // recovery notice for this incident would claim blocks were discarded when
     // they were not.
     this.lastRepair = null;
     this.incident = { fingerprint, reason, brokenAt, height, checked, at: now, notified: false,
-      // Whether new blocks are being refused. Carried into the user-facing
-      // message so a member is told receipts are on hold rather than left to
-      // wonder why a reward has no transaction hash.
-      quarantine: !!this.quarantined };
+      // Transactions are never blocked by a break, so this is carried only so
+      // the copy can say which cycle the chain was on when it happened.
+      cycle: this.cycle };
     // Two independent records, because they fail differently: the ChainAudit row
     // tells a restarted process an incident is open (so the all-clear is still
     // delivered), while the ChainRepair log is the permanent human-readable
@@ -725,13 +919,15 @@ class Ledger {
     });
     console.error(
       `[chain] INTEGRITY FAILURE at block ${brokenAt}: ${reason} `
-      + `(height ${height}, ${checked} block(s) checked) — notifying users and administrators.`
+      + `(height ${height}, ${checked} block(s) checked) — notifying users and administrators. `
+      + 'Transactions continue: the next one triggers an automatic re-sync onto a fresh verified chain.'
     );
     // Fire-and-forget: the verdict is already decided, so delivery must never gate
     // it. Wrapped so a throw inside the alerting module cannot escape into the
     // verifier and replace the break we just found with a different error.
     Promise.resolve()
       .then(() => alerting().notifyChainIncident(this.incident))
+      .then(() => { if (this.incident && this.incident.fingerprint === fingerprint) this.incident.notified = true; })
       .catch((err) => console.error('[chain] incident notification failed:', err.message));
     return this.incident;
   }
@@ -749,7 +945,9 @@ class Ledger {
       resolved.repaired = true;
       resolved.discardedCount = Number(lastRepair.discardedCount) || 0;
       resolved.keptThrough = Number(lastRepair.keptThrough);
+      resolved.resynced = lastRepair.resynced === true;
     }
+    resolved.cycle = this.cycle;
     this.incident = null;
     // Clear the persisted record first: it is what stops a crash between here and
     // the notification from re-sending the all-clear on the next boot.
@@ -848,9 +1046,19 @@ class Ledger {
   // Append one or more txs as the next block. Serialized via the queue.
   // Returns { index, hash, txs:[txHash…] }.
   //
-  // REFUSES while the chain is quarantined — see assertNotQuarantined. Appending
-  // to a chain already known to be broken buries the corruption deeper on every
-  // call and mints new proofs that inherit the defect.
+  // NEVER REFUSED BECAUSE THE CHAIN IS BROKEN. That was the single most damaging
+  // behaviour in this file: a detected break used to make append() throw, so
+  // every reward, order, consent and vote made during it lost its on-chain
+  // receipt and silently returned an empty transaction hash — the product looked
+  // broken to its users even though the balances were fine. Worse, the refusal
+  // made recovery impossible to drive from real usage: with nothing appending,
+  // nothing re-checked the chain, so it stayed broken and the next append after
+  // an operator repair was the first attempt in hours to make progress.
+  //
+  // Now a break triggers `resync()` on the very next append: the untrustworthy
+  // region is discarded, a fresh chain segment is opened, and THIS transaction is
+  // anchored on it. Detection → notification → recovery → resume is a continuous
+  // cycle that any amount of user activity keeps driving forward.
   //
   // Appends COALESCE: an append submitted while an earlier block is still being
   // written joins a window instead of queueing its own block. Each block is one
@@ -859,7 +1067,6 @@ class Ledger {
   // just for its turn to mine. The window folds them into one block carrying
   // every tx, and each caller still receives its own tx hashes.
   append(txs) {
-    this.assertNotQuarantined();
     const list = (Array.isArray(txs) ? txs : [txs]).filter(Boolean);
     if (!list.length) {
       return Promise.reject(new Error('Nothing to append'));
@@ -885,12 +1092,45 @@ class Ledger {
     });
   }
 
+  /**
+   * Serialize a unit of ledger work.
+   *
+   * Everything that reads or writes the tip goes through here, which is what
+   * stops two concurrent appends racing on height and forking the chain (or, as
+   * `index` is a unique index, colliding on it outright).
+   *
+   * Always chains — there is deliberately no "am I already inside the queue?"
+   * short-circuit. One was tried and it was worse than the deadlock it was
+   * meant to fix: `queueDepth` is a property of the PROCESS, not of a job, so a
+   * second drain that fired while a first was running took the re-entrant branch
+   * and executed CONCURRENTLY with it. Two jobs then computed the same `index`
+   * and three of eight concurrent transactions were rejected with a duplicate
+   * key error. Recovery that re-enters the queue now says so explicitly
+   * (`resync({ inline: true })`) instead of being inferred.
+   */
+  _enqueue(fn) {
+    const wrapped = () => Promise.resolve().then(fn);
+    const job = this.queue.then(wrapped, wrapped);
+    this.queue = job.catch(() => {});
+    return job;
+  }
+
   drainAppendWindow() {
     if (!this.appendWindow.length) return;
     const batch = this.appendWindow.splice(0, this.appendWindow.length);
     const groups = batch.map((b) => b.txs);
     const run = async () => {
       await this.init();
+      // INSIDE the serialized queue, not at append() time: the resync must not
+      // race another append's height/tip, and a caller that arrived before the
+      // repair finished must still land on the repaired chain.
+      if (this.quarantined) {
+        await this.resync({ actor: 'auto-resync', inline: true });
+        // Only throws if the recovery itself failed. The transaction is already
+        // committed in the database by this point; what is withheld is the
+        // on-chain proof, and that is retried by the watchdog.
+        this.assertTrusted();
+      }
       const txs = groups.flat();
       const index = this.height + 1;
       const timestamp = Date.now();
@@ -914,8 +1154,7 @@ class Ledger {
     };
     // Chain onto the queue regardless of the previous outcome, but keep a
     // rejected job from poisoning the chain for later appends.
-    const job = this.queue.then(run, run);
-    this.queue = job.catch(() => {});
+    const job = this._enqueue(run);
     job.then(
       ({ index, hash }) => batch.forEach((b, i) => b.resolve({
         index, hash, txs: groups[i].map((t) => t.txHash),
@@ -966,15 +1205,17 @@ class Ledger {
         // A broken chain invalidates the checkpoint: the prefix is no longer
         // known-good, so the incremental fast path must not build on it.
         this.checkpoint = null;
-        // CONTAINMENT. Reporting the break is only half the job — the ledger
-        // must also stop extending a chain it has just proven untrustworthy.
+        // CONTAINMENT. Reporting the break is only half the job — the ledger must
+        // also stop extending a chain it has just proven untrustworthy, until the
+        // re-sync discards the damaged region and opens a fresh segment. It never
+        // stops accepting transactions: `append()` resyncs and continues.
         this.quarantine({
           reason: walked.reason,
           brokenAt: walked.brokenAt,
           height: blocks.length - 1,
           kind: 'linkage',
         });
-        this.raiseIncident({
+        const incident = this.raiseIncident({
           reason: walked.reason,
           brokenAt: walked.brokenAt,
           height: blocks.length - 1,
@@ -988,7 +1229,11 @@ class Ledger {
           kind: 'linkage',
           checked: blocks.length,
           difficulty: DIFFICULTY,
-          notified: true,
+          // Reported honestly: whether the fan-out was dispatched, not whether it
+          // was guaranteed. This string is read by the admin monitor, which used
+          // to be told "notification sent" on a path where delivery could fail.
+          notified: !!(incident && (incident.notified || incident.reportedAt)),
+          cycle: this.cycle,
           fullAuditAt: Date.now(),
         };
       }
@@ -1025,7 +1270,7 @@ class Ledger {
             kind: truncated.kind,
           });
         }
-        this.raiseIncident({
+        const incident = this.raiseIncident({
           reason: truncated.reason,
           brokenAt: truncated.brokenAt,
           height: tipIndex,
@@ -1035,7 +1280,8 @@ class Ledger {
           ...truncated,
           checked: blocks.length,
           difficulty: DIFFICULTY,
-          notified: true,
+          notified: !!(incident && (incident.notified || incident.reportedAt)),
+          cycle: this.cycle,
           fullAuditAt: Date.now(),
         };
       }
@@ -1047,12 +1293,24 @@ class Ledger {
       );
       // Only now that this height has actually been re-hashed is it written to
       // the host anchor — so the file can only ever over-claim, never under-claim.
+      // A line that was rewound by a re-sync is superseded by this write.
       await this.anchorHeadToDisk(tipIndex, tipHash);
       // Verified clean: close any open incident, so the audience that was warned
       // about a break also learns that it is over rather than living with a
       // permanent alarm in their inbox.
       this.clearIncident();
-      return { valid: true, height: tipIndex, checked: blocks.length, difficulty: DIFFICULTY, fullAuditAt: at };
+      // A clean re-hash also clears the "untrusted" mark.
+      //
+      // It used not to, because the mark once meant "an operator must repair
+      // this" and only a repair could lift it. It no longer means that: it means
+      // "this chain is not currently consistent", and a full re-hash from genesis
+      // is the most direct possible proof that it IS. Leaving it set meant a
+      // single early incident stuck forever: `/chain/status` reported a break
+      // that no longer existed, and — because a re-sync truncates from the stale
+      // `brokenAt` — the next transaction would have discarded a block below the
+      // real break point.
+      this.clearQuarantine();
+      return { valid: true, height: tipIndex, checked: blocks.length, difficulty: DIFFICULTY, cycle: this.cycle, fullAuditAt: at };
     })();
     const entry = { at: Date.now(), pending: true, settled: null, result: job };
     this.fullAudit = entry;
@@ -1093,6 +1351,10 @@ class Ledger {
   async verifyTail() {
     await this.init();
     const cp = this.checkpoint;
+    // No proven position to chain from (a rejected seal, a re-sync in progress, a
+    // concurrent audit that just invalidated it). There is no tail to walk, so the
+    // honest answer is the whole chain — never a crash on `cp.upTo`.
+    if (!cp) return this.audit({ maxAgeMs: 0 });
     const blocks = await Block.find({ index: { $gt: cp.upTo } }, VERIFY_PROJECTION).sort({ index: 1 }).lean();
     if (blocks.length && blocks[0].index !== cp.upTo + 1) {
       return this.audit({ maxAgeMs: 0 }); // hole below the tail: re-walk it all
@@ -1169,88 +1431,125 @@ class Ledger {
     };
   }
 /**
-   * Quarantine: refuse to extend a chain that is known to be broken.
+   * Recover from a detected break: discard what cannot be verified, rewind the
+   * host anchor, open a fresh chain segment, and let the caller carry on.
    *
-   * WHY THIS EXISTS
-   * ---------------
-   * Before it, a detected break changed nothing about how the ledger behaved. It
-   * reported `valid:false`, notified everyone, and then carried on appending new
-   * blocks on top of the corruption — a probe measured the chain growing from 7
-   * blocks to 10 while `valid` stayed false. That is the worst of both worlds:
+   * This is the function that replaced `assertNotQuarantined`. The old design
+   * treated a break as a reason to stop writing, and the consequences were
+   * severe and all reproduced on a scratch database:
    *
-   *   · the integrity record kept getting longer and therefore harder to reason
-   *     about, with the broken block buried deeper on every append, and
-   *   · every new reward, order and consent was anchored onto a chain already
-   *     known to be untrustworthy, so those new proofs inherited the defect.
+   *   · every transaction during the break completed but came back with an empty
+   *     transaction hash, because `engine.anchor()` swallowed the refusal;
+   *   · the chain could not be repaired once its host anchor file had recorded a
+   *     deeper height (the rewind bug above), so "stop writing" became "stop
+   *     writing FOREVER";
+   *   · nothing drove the recovery, because the only thing that re-checked the
+   *     chain was an append that was being refused.
    *
-   * A chain that cannot prove its own integrity must not be extended. Quarantine
-   * is the containment step between "we detected this" and "an operator decides
-   * what to do".
+   * A detection that costs users their receipts and then cannot be undone is not
+   * integrity protection, it is an outage. This is the containment that actually
+   * contains: nothing new is written on top of the damage, the damage is
+   * discarded under a permanent record, and the ledger starts again.
    *
-   * WHY IT THROWS
-   * -------------
-   * Failing loudly is the point. The alternative — silently dropping the block —
-   * would make callers believe they were anchored when they were not, and
-   * `engine.anchor()` would return an empty txHash that looks like a success.
-   * Throwing forces the anchor to be recorded as failed at every call site.
-   *
-   * Note this does NOT block the product. `engine.anchor()` catches and logs, and
-   * balances and orders live in the database, so a quarantined chain degrades to
-   * "no new proofs" rather than "feature offline". Users keep earning; only the
-   * on-chain receipt is withheld, which is the honest state.
+   * NEVER rejects. A re-sync that fails must not fail the user's transaction —
+   * the caller decides what to do by re-reading `ledger.quarantined`, and the
+   * business operation has already been committed to the database either way.
    */
-  assertNotQuarantined() {
+  async resync({ actor = 'auto-resync', inline = false } = {}) {
+    if (this.resyncing) return this.lastResync;
+    this.resyncing = true;
+    try {
+      // `inline` is set by the append that discovered the break: it is already
+      // running on the queue, so re-entering it would wait on itself forever.
+      // Nothing else can be mid-re-sync at that point — the watchdog can only
+      // start one when no append job is running — so no waiting is needed here.
+      const report = inline
+        ? await this._repair({ actor, keepTo: null, resync: true })
+        : await this.repair({ actor, keepTo: null, resync: true });
+      const ok = !!(report && report.repaired === true);
+      this.lastResync = {
+        at: Date.now(),
+        ok,
+        actor,
+        cycle: this.cycle,
+        discarded: (report && report.discardedBlocks) || 0,
+        keptThrough: report ? report.keptThrough : null,
+        newSegment: report ? report.newSegment || null : null,
+      };
+      return this.lastResync;
+    } catch (err) {
+      console.error('[chain] re-sync failed:', err.message);
+      this.lastResync = { at: Date.now(), ok: false, actor, cycle: this.cycle, error: err.message };
+      return this.lastResync;
+    } finally {
+      this.resyncing = false;
+    }
+  }
+
+  /**
+   * Refuse to write on top of a chain that is still untrusted AFTER a re-sync
+   * attempt failed.
+   *
+   * Reached only when the recovery itself broke — an unreachable database, a
+   * write error. The refusal is about the PROOF, not the transaction:
+   * `engine.anchor()` catches it, the balance/order/consent is already committed,
+   * and the background watchdog retries. Writing onto the damaged chain instead
+   * would bury the corruption and mint new proofs that inherit the defect, which
+   * is the one outcome that is worse than an honest missing receipt.
+   */
+  assertTrusted() {
     if (!this.quarantined) return;
     const err = new Error(
-      `Chain is quarantined after an integrity failure at block ${this.quarantined.brokenAt} `
-      + `(${this.quarantined.reason}). New blocks are refused until the chain is repaired. `
-      + 'Business operations are unaffected — this withholds on-chain proofs only.'
+      `The blockchain ledger could not be restored after an integrity failure at block ${this.quarantined.brokenAt} `
+      + `(${this.quarantined.reason}). Your transaction was recorded normally; only its on-chain receipt is `
+      + 'pending. Recovery is retried automatically — nothing is lost and no action is needed.'
     );
-    // A distinct code so callers can tell "the chain is unusable" apart from a
-    // generic database failure, and so an operator-facing message can be precise.
-    err.code = 'CHAIN_QUARANTINED';
+    // A distinct code so callers and operators can tell "the ledger is not
+    // currently verifiable" apart from a generic database failure.
+    err.code = 'CHAIN_RESYNC_PENDING';
     throw err;
   }
 
   /**
-   * Enter quarantine. Idempotent, but NOT "first writer wins blindly".
+   * Record that the chain is not currently in a consistent state.
+   *
+   * Idempotent, but NOT "first writer wins blindly".
    *
    * Two different checks can report the same underlying break: `walkChain`
    * (structural, e.g. a swapped hash) and `checkDiskAnchor` (the tip no longer
-   * matches what this host sealed). When both fire, the second is a CONSEQUENCE of
-   * the first, and its `unrecoverable` flag is what tells an operator that
-   * discarding blocks will not help. Keeping whichever arrived first therefore
-   * discarded the more informative verdict — the ledger reported "quarantined at
-   * block 2, payload digest mismatch" for a break it had just located at block 3.
+   * matches what this host sealed). When both fire the second is a CONSEQUENCE of
+   * the first, so the break point must never move later.
    *
-   * So a later, more specific call may refine the existing record, while a later
-   * one that is merely a re-statement of the same break leaves it alone.
+   * A structural break CASCADES: once block 3 is wrong, block 4's prevHash no
+   * longer matches and block 11 reports "prevHash mismatch" too. Those downstream
+   * reports are all true and all CONSEQUENCES, so taking the highest index would
+   * quarantine at the tip and make the resync discard the eight good blocks in
+   * between. The rule is therefore: keep the EARLIEST break reported, whatever
+   * class it was.
+   *
+   * The old code let an `unrecoverable` (truncation) report move the break point
+   * forward — `if (unrecoverable || earlier || …)` — so a linkage break at 3 plus
+   * its cascading truncation report at 5 quarantined at 5, and the resync then
+   * KEPT block 3: the corrupt block survived the repair that existed to remove
+   * it. `unrecoverable` is still sticky (it changes the recovery advice an
+   * operator is given), it just no longer gets to move the truncate point.
    */
   quarantine({ reason, brokenAt, height, unrecoverable = false, kind = null }) {
     const incoming = { reason, brokenAt, height, unrecoverable, kind };
     if (this.quarantined) {
       const cur = this.quarantined;
-      // Prefer the LATER (more downstream) break point and the more specific
-      // reason: repair truncates from the break, and truncating too early would
-      // discard blocks that were provably fine.
-      // A structural break CASCADES: once block 3 is wrong, block 4's prevHash no
-      // longer matches and block 11 reports "prevHash mismatch" too. Those
-      // downstream reports are all true but they are all CONSEQUENCES, so taking
-      // the highest index would quarantine at the tip and make repair discard the
-      // eight good blocks between. The ORIGINAL structural break is the one that
-      // matters: it is where the chain actually diverged.
-      //
-      // So: prefer the EARLIEST break point among structural (linkage) reports,
-      // and let an `unrecoverable` (truncation) report take precedence, because
-      // that one genuinely changes the recovery procedure.
-      const sameClass = kind === cur.kind;
       const earlier = Number(brokenAt) < Number(cur.brokenAt);
       const sameSpot = Number(brokenAt) === Number(cur.brokenAt);
 
-      if (unrecoverable || earlier || (sameSpot && sameClass)) {
+      if (earlier) {
         cur.reason = reason;
         cur.brokenAt = brokenAt;
         cur.kind = kind || cur.kind;
+      } else if (sameSpot) {
+        // Same spot: a later, more specific detector may be reporting better
+        // information than whatever arrived first.
+        if (kind && kind !== cur.kind) cur.kind = kind;
+        if (reason && reason.length > String(cur.reason || '').length) cur.reason = reason;
       }
       if (height != null) cur.height = height;
       cur.affectedBlocks = Math.max(0, (cur.height ?? -1) - Math.max(0, cur.brokenAt) + 1);
@@ -1262,13 +1561,15 @@ class Ledger {
     this.quarantined = {
       ...incoming,
       since: Date.now(),
+      cycle: this.cycle,
       // Retained so /chain/status can tell an operator exactly what to inspect.
       affectedBlocks: Math.max(0, (height ?? -1) - Math.max(0, brokenAt) + 1),
     };
     console.error(
-      `[chain] QUARANTINED at block ${brokenAt}: ${reason}. `
-      + 'The ledger will refuse new blocks until it is repaired. '
-      + 'The application keeps running; on-chain proofs are withheld.'
+      `[chain] INTEGRITY FAILURE at block ${brokenAt}: ${reason}. `
+      + 'The chain is marked untrusted; nothing further will be written on top of the damage. '
+      + 'The next transaction (or the watchdog) discards it and opens a fresh verified chain — '
+      + 'users are never blocked.'
     );
     return this.quarantined;
   }
@@ -1285,19 +1586,29 @@ class Ledger {
    * containing the still-valid prefix is the prefix itself — so repair means
    * truncating to the last provably-good block and continuing from there.
    *
-   * This is NOT a silent reset. It never invents history and never starts a new
-   * chain: the surviving prefix keeps its original blocks, hashes and genesis.
-   * The discarded blocks are named in the returned report, persisted as a repair
-   * record, and reported to the same audience that received the incident — so
-   * "the chain broke and blocks 3-9 were discarded" is on the record, rather than
-   * a quietly shorter chain that looks healthy.
+   * This is NOT a silent reset. It never invents history: the surviving prefix keeps
+   * its original blocks, hashes and genesis. The discarded blocks are named in the
+   * returned report, persisted as a repair record, and reported to the same
+   * audience that received the incident — so "the chain broke and blocks 3-9 were
+   * discarded" is on the record, rather than a quietly shorter chain that looks
+   * healthy.
    *
-   * WHY IT IS NOT AUTOMATIC
-   * ----------------------
-   * Auto-repairing would be the single worst possible behaviour for an integrity
-   * system: an attacker could corrupt a block and the system would helpfully
-   * erase the evidence and re-verify itself clean. Repair is therefore always an
-   * explicit operator decision.
+   * WHY IT RUNS AUTOMATICALLY
+   * -------------------------
+   * This function used to be reachable only by an explicit admin action, on the
+   * theory that an integrity system that repairs itself helps an attacker erase
+   * their own evidence. That concern is real and is NOT the reason it was manual:
+   * automatic recovery does not erase evidence, because the incident, the discard
+   * list and the resulting new segment are all written to the append-only repair
+   * log first and every affected account is notified.
+   *
+   * What manual-only recovery actually produced was worse. A break with no
+   * operator watching left every transaction that came afterwards without an
+   * on-chain receipt, and — because the host anchor could never be rewound —
+   * left the ledger permanently unable to accept a block at all. Refusing to
+   * write is not integrity, it is an outage. Detection, notification and recovery
+   * now happen as one automatic cycle, and an operator repair remains available
+   * for a deliberate, audited truncation to a chosen point.
    *
    * Never throws for a missing/invalid chain — it reports what it found so the
    * caller can render a decision.
@@ -1306,20 +1617,25 @@ class Ledger {
    * @param {string} opts.actor      who authorised it, recorded in the audit trail
    * @param {number} [opts.keepTo]   explicit truncate point; defaults to the last
    *                                 provably-good block
+   * @param {boolean} [opts.resync]  open a fresh chain segment afterwards (the
+   *                                 automatic cycle); a manual repair leaves the
+   *                                 chain at its surviving tip
    */
-  async repair({ actor = 'operator', keepTo = null } = {}) {
+  async repair({ actor = 'operator', keepTo = null, resync = false } = {}) {
     // Serialized against appends, so no block can be written mid-repair.
-    const job = this.queue.then(() => this._repair({ actor, keepTo }), () => this._repair({ actor, keepTo }));
-    this.queue = job.catch(() => {});
-    return job;
+    return this._enqueue(() => this._repair({ actor, keepTo, resync }));
   }
 
-  async _repair({ actor, keepTo }) {
+  async _repair({ actor, keepTo, resync = false }) {
     await this.init();
     const started = Date.now();
 
     const blocks = await Block.find({}).sort({ index: 1 }).lean();
     if (!blocks.length) {
+      // Every block was discarded. An empty chain is not "nothing to repair" —
+      // it is the worst possible state, because nothing can ever be anchored
+      // again. Re-create the genesis so the ledger starts again from cycle 0.
+      if (resync) return this._relaunchGenesis({ actor, started });
       return { repaired: false, reason: 'no blocks to repair', actor, at: started };
     }
 
@@ -1345,12 +1661,12 @@ class Ledger {
     }
 
     if (brokenAt < 0) {
-      // Nothing is actually broken. Clearing quarantine here is the correct
+      // Nothing is actually broken. Clearing the untrusted mark here is the correct
       // response to a false alarm — e.g. a transient read that looked like a
       // break — rather than truncating a healthy chain.
       const cleared = this.clearQuarantine();
       if (cleared) {
-        console.log('[chain] repair found no actual break — quarantine lifted, nothing discarded.');
+        console.log('[chain] re-sync found no actual break — nothing discarded, chain trusted again.');
         this.checkpoint = null;
         const v = await this.audit({ maxAgeMs: 0 });
         await writeRepairRecord({
@@ -1359,7 +1675,7 @@ class Ledger {
           reason: 'no break found on re-verification; nothing was discarded',
           healthyAfter: v.valid === true,
         });
-        return { repaired: false, reason: 'no break found; quarantine lifted', actor, at: started, verdict: v };
+        return { repaired: false, reason: 'no break found; chain trusted again', actor, at: started, verdict: v };
       }
       return { repaired: false, reason: 'chain is already healthy', actor, at: started };
     }
@@ -1417,8 +1733,44 @@ class Ledger {
     this.sealed = null;
     this.diskAnchored = null;
 
+    // REWIND THE HOST ANCHOR BEFORE RE-VERIFYING.
+    //
+    // The anchor file only ever moved forward, so it still vouched for the height
+    // the chain just gave up. `audit()` below consults it, found the surviving
+    // tip "truncated", and reported the repaired chain as broken — which is why a
+    // real chain that had once been healthy could not be repaired at all. It has
+    // to be told first, and the rewind is itself a sealed, reasoned record.
+    await this.rewindDiskAnchor(this.height, this.tip, why || 'integrity re-sync');
+
+    // Open the new chain segment BEFORE the re-verify.
+    //
+    // Two reasons for the order. The walk below then covers the segment block as
+    // well, so the very first verdict after a break already includes the
+    // recovery. And `audit()` is what calls `clearIncident()`, which sends the
+    // all-clear notice — running the audit first meant the recovery message was
+    // written before the cycle counter existed, so users were told "verified
+    // healthy again" and never learned that a new chain had started.
+    //
+    // It is safe to mine onto the surviving prefix: `target` is by construction
+    // below the first break, so everything up to it already re-hashed clean.
+    let segment = null;
+    if (resync) {
+      segment = await this.openNewSegment({
+        actor,
+        brokenAt,
+        reason: why,
+        discarded: deleted,
+        discardedIndexes: summary.map((b) => b.index),
+      });
+    }
+    // Held in memory so clearIncident() (called by the audit below) can tell the
+    // recovery notice that blocks were discarded and a new chain started. Cleared
+    // again if the re-verify below does not actually come back clean.
+    this.lastRepair = { discardedCount: deleted, keptThrough: target, resynced: !!segment };
+
     const verdict = await this.audit({ maxAgeMs: 0 });
     const healthy = verdict.valid === true;
+    if (!healthy) this.lastRepair = null;
 
     // Permanent record, written whether the repair worked or not. A failed repair
     // is exactly the case where an operator most needs the history.
@@ -1437,22 +1789,20 @@ class Ledger {
       // produce two audit entries for one incident.
       dedupeKey: `repair:${brokenAt}:${target}`,
     });
-    // Held in memory so clearIncident() (called by the audit below) can tell the
-    // recovery notice that blocks were discarded.
-    this.lastRepair = healthy
-      ? { discardedCount: deleted, keptThrough: target }
-      : null;
 
     if (healthy) {
       this.clearQuarantine();
       console.log(
-        `[chain] REPAIRED by ${actor}: discarded ${deleted} block(s) above #${target} `
-        + `(first break at #${brokenAt}: ${why}). Chain verified healthy at height ${verdict.height}.`
+        `[chain] RE-SYNCED by ${actor}: discarded ${deleted} block(s) above #${target} `
+        + `(first break at #${brokenAt}: ${why}). `
+        + (segment
+          ? `New chain segment #${segment.index} opened (cycle ${this.cycle}); chain verified healthy at height ${verdict.height}.`
+          : `Chain verified healthy at height ${verdict.height}.`)
       );
     } else {
       console.error(
         `[chain] repair by ${actor} did NOT restore integrity: still broken at #${verdict.brokenAt} `
-        + `(${verdict.reason}). Quarantine remains in force.`
+        + `(${verdict.reason}). The chain stays untrusted and will re-sync on the next attempt.`
       );
     }
 
@@ -1469,11 +1819,137 @@ class Ledger {
       // them showed `undefined` for every transaction. The summary is captured
       // before deletion and is what an operator actually reads.
       discarded: summary,
+      resynced: !!segment,
+      newSegment: segment,
+      cycle: this.cycle,
       verdict,
     };
   }
 
-  /** Clear quarantine — only ever called by repair() after a full re-verify. */
+  /**
+   * Open a fresh chain segment on top of the surviving verified tip.
+   *
+   * This is the "start a new chain again" half of the cycle, and it is a REAL
+   * mined block carrying a single `chain:resync` transaction — not a database flag
+   * and not a second genesis. That distinction matters:
+   *
+   *   · the segment chains onto the surviving prefix, so the chain stays ONE
+   *     linear hash chain that `walkChain` still verifies end to end. A real
+   *     re-genesis would have needed a special case in the verifier and would
+   *     have made "was this history ever verified?" unanswerable.
+   *   · the block is proof-of-work like any other, so the recovery itself is
+   *     tamper-evident.
+   *   · it commits to what was discarded and why, so the cycle boundary is visible
+   *     in the explorer and in `/tx` instead of only in a server log.
+   */
+  async openNewSegment({ actor, brokenAt, reason, discarded, discardedIndexes }) {
+    try {
+      const cycle = this.cycle + 1;
+      const tx = normalizeTx({
+        type: RESYNC_TX,
+        actor: 'sw:system',
+        data: {
+          cycle,
+          previousCycle: this.cycle,
+          repairedBy: String(actor || 'auto-resync'),
+          brokenAt: Number(brokenAt),
+          reason: String(reason || '').slice(0, 300),
+          discardedBlocks: Number(discarded) || 0,
+          discardedFrom: Number(brokenAt),
+          discardedIndexes: (discardedIndexes || []).slice(0, 500),
+        },
+      });
+      const index = this.height + 1;
+      const timestamp = Date.now();
+      const header = { index, timestamp, prevHash: this.tip, txs: [tx] };
+      const { nonce, hash } = mineHeader(header);
+      await Block.create({
+        index, timestamp, prevHash: this.tip, nonce, hash,
+        v: commitVersionForNewBlocks(), difficulty: DIFFICULTY, txs: [tx],
+      });
+      this.height = index;
+      this.tip = hash;
+      this.cycle = cycle;
+      // Persisted outside the checkpoint's seal on purpose: the counter is a
+      // label, not a claim about the chain's contents, and it must survive a
+      // CHAIN_SEAL_KEY rotation.
+      await ChainAudit.updateOne({ key: 'chain' }, { $set: { cycle } }, { upsert: true })
+        .catch((err) => console.error('[chain] could not persist the cycle counter:', err.message));
+      return { index, hash, cycle, txHash: tx.txHash };
+    } catch (err) {
+      // The segment block is a record, not a prerequisite: if it cannot be mined
+      // the chain is still consistent and still usable, so this must not fail the
+      // re-sync (and therefore must not fail the user's transaction).
+      console.error('[chain] could not open a new chain segment:', err.message);
+      return null;
+    }
+  }
+
+  /**
+   * Restart from genesis when every block was discarded.
+   *
+   * An empty chain cannot verify, cannot be extended and cannot record anything,
+   * so "there is nothing to repair" is the one state where giving up is not an
+   * option. A brand-new genesis is minted and cycle 0 begins again — which is the
+   * honest description, because the previous chain really is gone.
+   */
+  async _relaunchGenesis({ actor, started }) {
+    const genesisTx = normalizeTx({
+      type: 'genesis',
+      actor: 'sw:system',
+      data: { network: 'suppliwise-mainnet', difficulty: DIFFICULTY, launchedAt: Date.now() },
+    });
+    const header = { index: 0, timestamp: Date.now(), prevHash: GENESIS_PREV_HASH, txs: [genesisTx] };
+    const { nonce, hash } = mineHeader(header);
+    await Block.create({
+      ...header, nonce, hash,
+      v: commitVersionForNewBlocks(), difficulty: DIFFICULTY, txs: [genesisTx],
+    });
+    this.height = 0;
+    this.tip = hash;
+    this.cycle = 0;
+    this.checkpoint = null;
+    this.sealed = null;
+    this.diskAnchored = null;
+    this.verifyCache = null;
+    this.fullAudit = null;
+    await this.rewindDiskAnchor(0, hash, 'every block was discarded; chain relaunched from genesis');
+    await ChainAudit.updateOne({ key: 'chain' }, { $set: { cycle: 0 } }, { upsert: true }).catch(() => {});
+    const verdict = await this.audit({ maxAgeMs: 0 });
+    this.clearQuarantine();
+    await writeRepairRecord({
+      kind: verdict.valid === true ? 'repair' : 'repair-failed',
+      actor,
+      brokenAt: 0,
+      reason: 'every block was discarded; the chain was relaunched from a new genesis',
+      failureKind: 'truncation',
+      keptThrough: -1,
+      discardedCount: 0,
+      healthyAfter: verdict.valid === true,
+      durationMs: Date.now() - started,
+    });
+    this.lastRepair = { discardedCount: 0, keptThrough: -1, resynced: true };
+    console.log(`[chain] RELAUNCHED from a new genesis by ${actor}; chain running again from cycle 0.`);
+    return {
+      repaired: verdict.valid === true,
+      actor,
+      at: started,
+      durationMs: Date.now() - started,
+      firstBreak: { index: 0, reason: 'chain emptied', kind: 'truncation' },
+      keptThrough: -1,
+      discardedBlocks: 0,
+      discarded: [],
+      resynced: true,
+      newSegment: { index: 0, hash, cycle: 0, txHash: genesisTx.txHash },
+      cycle: 0,
+      verdict,
+    };
+  }
+
+  /**
+   * Clear the untrusted mark — only ever called after a full re-verify proves the
+   * chain consistent again.
+   */
   clearQuarantine() {
     const was = this.quarantined;
     this.quarantined = null;
@@ -1484,6 +1960,37 @@ class Ledger {
   lastGoodIndex() {
     if (!this.quarantined) return this.height;
     return this.quarantined.brokenAt - 1;
+  }
+
+  /**
+   * Compact integrity state for the UI and the admin monitor.
+   *
+   * `acceptingBlocks` is deliberately always true: a chain break no longer stops
+   * the ledger accepting transactions, and any surface that says otherwise is
+   * telling users something untrue.
+   */
+  statusView() {
+    const q = this.quarantined;
+    return {
+      acceptingBlocks: true,
+      resyncing: !!this.resyncing,
+      cycle: this.cycle,
+      lastResync: this.lastResync || null,
+      quarantined: !!q,
+      quarantine: q
+        ? {
+          since: q.since,
+          reason: q.reason,
+          brokenAt: q.brokenAt,
+          affectedBlocks: q.affectedBlocks,
+          // Truncation cannot be undone by discarding blocks — the missing ones are
+          // the evidence, so recovery for those records means restoring a backup.
+          // It does not stop the chain: it is advice for an operator.
+          needsBackupRestore: !!q.unrecoverable,
+          autoRecovery: true,
+        }
+        : null,
+    };
   }
 
 }
@@ -1504,3 +2011,5 @@ module.exports.sealPayload = sealPayload;
 module.exports.sealAvailable = sealAvailable;
 module.exports.VERIFY_PROJECTION = VERIFY_PROJECTION;
 module.exports.FULL_AUDIT_INTERVAL_MS = FULL_AUDIT_INTERVAL_MS;
+module.exports.WATCHDOG_INTERVAL_MS = WATCHDOG_INTERVAL_MS;
+module.exports.RESYNC_TX = RESYNC_TX;

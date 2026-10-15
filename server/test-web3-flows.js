@@ -620,6 +620,25 @@ async function main() {
     eventsA.data.totalCount >= 8 && eventsA.data.events.every((e) => e.amount >= 0)
       && eventsA.data.events.some((e) => e.txHash),
     JSON.stringify({ total: eventsA.data?.totalCount }));
+
+  // ── Integrity status surface ───────────────────────────────────────────
+  // The explorer polls /chain/status every 30 s, so its shape is a contract in
+  // its own right: `acceptingBlocks` is what stops the UI from telling a member
+  // their receipts are on hold, and `cycle` is how "the blockchain started a new
+  // chain again" is observable instead of a silent reset.
+  const st = await call('GET', '/web3/chain/status', { token: A.token });
+  check('integrity status reports a healthy, always-accepting chain',
+    st.status === 200 && st.data.state === 'healthy' && st.data.ok === true
+      && st.data.acceptingBlocks === true && st.data.resyncing === false
+      && Number.isInteger(st.data.cycle) && st.data.cycle >= 0,
+    JSON.stringify(st.data).slice(0, 200));
+  check('a healthy chain has no open incident and no quarantine',
+    st.data.quarantined === false && st.data.quarantine === null && st.data.incident === null,
+    JSON.stringify({ q: st.data?.quarantined, i: st.data?.incident }));
+  const rp = await call('GET', '/web3/chain/repairs?limit=5', { token: A.token });
+  check('chain repair log readable (permanent incident/repair history)',
+    rp.status === 200 && Array.isArray(rp.data.repairs),
+    `status ${rp.status} count ${rp.data?.count}`);
 }
 
 main()
