@@ -48,7 +48,7 @@ Module._load = function patched(request, parent, isMain) {
 
 const { protect, PASSWORD_CHANGE_REQUIRED, PASSWORD_CHANGE_ALLOWLIST, mayChangePassword } = require('../middleware/auth');
 const { evaluatePassword } = require('../utils/passwordRules');
-const { hashPassword, verifyPassword } = require('../utils/password');
+const { hashPassword, verifyPassword, isArgon2id } = require('../utils/password');
 
 // The loader patch stays installed for the WHOLE file on purpose. Restoring it
 // after the first require left routes/admin.js resolving the real mongoose
@@ -306,7 +306,7 @@ test('a wrong password or code is a 400, never a 401', async (t) => {
 
 test('a hash of the new password verifies, and the old one does not', async () => {
   const before = await hashPassword('Fjord-Lantern-42!');
-  assert.ok(/^\$argon2id\$/.test(before));
+  assert.ok(isArgon2id(before), 'current-format hash (raw or layered)');
   assert.strictEqual(await verifyPassword('Fjord-Lantern-42!', before), true);
   assert.strictEqual(await verifyPassword('something-else-9!', before), false);
 });

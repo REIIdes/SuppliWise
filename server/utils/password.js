@@ -1,12 +1,16 @@
 /**
- * Password hashing — argon2id for everything new, bcrypt accepted for legacy.
+ * Password hashing — SHA-3-layered argon2id for everything new, raw argon2id
+ * and bcrypt accepted for existing stores.
  *
- * - New/changed passwords are hashed with argon2id (OWASP interactive profile:
- *   19 MiB memory, 2 iterations, 1 lane) via hash-wasm (no native build).
- * - Stored bcrypt hashes ($2a/$2b, cost 12) keep verifying, so existing users
- *   and ADMIN_ACCOUNTS entries keep working with zero downtime.
+ * - New/changed passwords are hashed with argon2id over SHA3-512(password)
+ *   (OWASP interactive profile: 19 MiB memory, 2 iterations, 1 lane) via
+ *   hash-wasm (no native build), stored with an `sw2$` marker.
+ * - Stored bcrypt hashes ($2a/$2b, cost 12) and pre-layer raw argon2id hashes
+ *   keep verifying UNCHANGED — no existing credential is rewritten by the
+ *   SHA-3 layer. Users and ADMIN_ACCOUNTS entries keep working with zero
+ *   downtime.
  * - On successful bcrypt verification, callers upgrade the stored hash to
- *   argon2id transparently (see upgradeHashIfLegacy).
+ *   the current layered form transparently (see upgradeHashIfLegacy).
  */
 
 const bcrypt = require('bcryptjs');
@@ -21,8 +25,23 @@ const ARGON2_OPTS = {
   hashLength: 32,
 };
 
+// ── SHA-3 pre-hash layer (added 2026-10-18) ─────────────────────────────
+// New hashes feed argon2id SHA3-512(password) instead of the raw password
+// and carry an `sw2$` marker:
+//   • bounded KDF input — a multi-megabyte "password" can no longer stall
+//     the hash beyond argon2's own fixed cost;
+//   • no NUL-byte or encoding surprises reach the KDF;
+//   • the KDF never sees the literal password bytes.
+// This is strictly ADDITIVE. Stored raw-argon2id and bcrypt hashes keep
+// verifying through their original branches and are never rewritten by
+// this layer — existing credentials are untouched.
+const V2_PREFIX = 'sw2$';
+function sha3Pre(password) {
+  return crypto.createHash('sha3-512').update(String(password), 'utf8').digest('base64');
+}
+
 function isArgon2id(hash) {
-  return /^\$argon2id\$/.test(String(hash || ''));
+  return /^(?:sw2\$)?\$argon2id\$/.test(String(hash || ''));
 }
 
 function isBcrypt(hash) {
@@ -36,8 +55,8 @@ function needsRehash(hash) {
 
 async function hashPassword(plaintext) {
   const salt = crypto.randomBytes(16);
-  return argon2id({
-    password: String(plaintext),
+  const encoded = await argon2id({
+    password: sha3Pre(plaintext),
     salt,
     parallelism: ARGON2_OPTS.parallelism,
     iterations: ARGON2_OPTS.iterations,
@@ -45,12 +64,16 @@ async function hashPassword(plaintext) {
     hashLength: ARGON2_OPTS.hashLength,
     outputType: 'encoded',
   });
+  return V2_PREFIX + encoded;
 }
 
 async function verifyPassword(plaintext, hash) {
   const password = String(plaintext);
   const stored = String(hash || '');
   try {
+    if (stored.startsWith(V2_PREFIX)) {
+      return await argon2Verify({ password: sha3Pre(password), hash: stored.slice(V2_PREFIX.length) });
+    }
     if (isArgon2id(stored)) return await argon2Verify({ password, hash: stored });
     if (isBcrypt(stored)) return await bcrypt.compare(password, stored);
     return false;
@@ -88,6 +111,8 @@ async function burnPasswordCompare() {
 
 module.exports = {
   ARGON2_OPTS,
+  V2_PREFIX,
+  sha3Pre,
   isArgon2id,
   isBcrypt,
   needsRehash,
