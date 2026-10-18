@@ -253,16 +253,13 @@ router.post('/confirm', protect, async (req, res) => {
       requested: user.medicalReviewRequested,
     });
 
-    // THE WHOLE POINT OF THE CONFIRM STEP: it lifts the block only after an
-    // administrator approved the review (admin resolve sets 'approved' and
-    // deliberately leaves the Priority flag up until the user confirms).
-    // Without this check, any member could POST /confirm directly and clear
-    // their own severe-case flag with no admin ever acting on it.
-    if (user.medicalReviewStatus !== 'approved') {
-      return res.status(403).json({
-        message: 'An administrator must approve your medical review before you can confirm and continue.',
-      });
-    }
+    // PRODUCT RULE (owner decision 2026-10-18): the person owns their own
+    // health decision. The severe-case alert blocks new assessments until
+    // THEY acknowledge the terms — this call IS that acknowledgment. No
+    // admin approval is required to lift it, and none may be added here:
+    // an adult consenting on their own behalf is the design, not a gap.
+    // (If an admin did approve earlier, the confirm still works and the
+    // resolvedReason keeps their name.)
 
     // Get all Priority assessments to check if there's anything to resolve
     const priorityAssessments = await Assessment.find({

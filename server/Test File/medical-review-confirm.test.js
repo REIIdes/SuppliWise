@@ -1,10 +1,9 @@
 /**
- * POST /api/medical-review/confirm — self-clear regression (bug-hunt find).
- *
- * The confirm step exists so a user acknowledges an ADMIN'S approval. It used
- * to resolve every open Priority assessment regardless of medicalReviewStatus,
- * so a flagged member could POST it directly and lift the severe-case block
- * with no admin ever acting. It must now 403 unless status is 'approved'.
+ * POST /api/medical-review/confirm — consent model regression (owner decision
+ * 2026-10-18). The severe-case flag is lifted by the USER agreeing to the
+ * terms; admin approval must NOT be a precondition ("sila naman ang
+ * magpapasya para sa kanila"). What the route must still guarantee: auth via
+ * protect, and it only ever touches the caller's own assessments.
  */
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -53,42 +52,33 @@ function callConfirm() {
   });
 }
 
-test('confirm refuses to lift the block while no admin approval exists', async () => {
-  for (const status of ['none', 'pending', 'needs_more_info']) {
-    User.findById = async () => ({
+test('confirm lifts the block WITHOUT any admin approval — consent is the gate', async () => {
+  for (const status of ['none', 'pending', 'approved']) {
+    const user = {
       _id: 'u1', email: 'a@b.c', medicalReviewStatus: status,
-      medicalReviewRequested: status === 'pending',
+      medicalReviewRequested: status === 'pending', medicalReviewResolvedBy: 'AdminX',
       save: async () => {},
-    });
-    let resolved = false;
-    Assessment.find = () => ({ select: async () => { resolved = true; return []; } });
+    };
+    User.findById = async () => user;
+    Assessment.find = () => ({ select: async () => [{ _id: 'a1', createdAt: new Date('2026-01-01') }] });
+    let captured = null;
+    Assessment.updateMany = async (q, u) => {
+      captured = { q, u };
+      return { matchedCount: 1, modifiedCount: 1 };
+    };
     const r = await callConfirm();
-    assert.equal(r.status, 403, `${status} must not be self-clearable`);
-    assert.match(r.payload.message, /administrator must approve/i);
-    assert.equal(resolved, false, `${status}: must refuse BEFORE querying assessments`);
+    assert.equal(r.status, 200, `${status} must be self-clearable by consent`);
+    assert.equal(r.payload.resolvedCount, 1);
+    assert.equal(captured.q.user, 'u1', 'only the caller\'s own assessments');
+    assert.equal(captured.q.priority, 'Priority');
+    assert.equal(captured.u.$set.priority, 'Standard');
+    assert.equal(user.medicalReviewStatus, 'none');
   }
 });
 
-test('confirm still works after a real admin approval', async () => {
-  const user = {
-    _id: 'u1', email: 'a@b.c', medicalReviewStatus: 'approved',
-    medicalReviewRequested: true, medicalReviewResolvedBy: 'AdminX',
-    save: async () => {},
-  };
-  User.findById = async () => user;
-  Assessment.find = () => ({ select: async () => [{ _id: 'a1', createdAt: new Date('2026-01-01') }] });
-  let updates = 0;
-  Assessment.updateMany = async (q, u) => {
-    updates++;
-    assert.equal(q.user, 'u1');
-    assert.equal(q.priority, 'Priority');
-    assert.equal(u.$set.priority, 'Standard');
-    return { matchedCount: 1, modifiedCount: 1 };
-  };
-  const r = await callConfirm();
-  assert.equal(r.status, 200);
-  assert.equal(updates, 1);
-  assert.equal(user.medicalReviewStatus, 'none');
+test('protect is mounted on /confirm — an anonymous request never resolves', () => {
+  const match = router.stack.find((l) => l.route?.path === '/confirm' && l.route.methods.post);
+  assert.equal(match.route.stack.length, 2, 'protect + handler');
 });
 
 test('500 responses never echo internal error messages to the client', () => {
