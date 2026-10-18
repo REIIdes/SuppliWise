@@ -271,6 +271,13 @@ const probes = {
     return { status: 'healthy', detail: 'Stateless JWT in Authorization header; no cookies or server sessions — CSRF not applicable.' };
   },
 
+  // ── Least-privilege database account ──────────────────────────────
+  // The one mitigation the request boundary cannot provide: whatever MONGO_URI
+  // authenticates as is what EVERY query in this process runs as. Read at boot
+  // (utils/dbPrivileges.js) so the monitor stays cheap and never issues a
+  // cluster command on a dashboard refresh.
+  db_least_privilege: async () => require('./dbPrivileges').leastPrivilegeReport(),
+
   // ── SSRF: no server-side outbound request may take its target from a client ─
   ssrf_outbound: async () => {
     const fs = require('fs');

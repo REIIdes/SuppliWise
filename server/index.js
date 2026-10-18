@@ -654,6 +654,11 @@ mongoose
   })
   .then(() => {
     console.log('Connected to MongoDB');
+    // Least-privilege measurement on the connection every request will reuse.
+    // Logged and remembered for the Security Center, never fatal.
+    return require('./utils/dbPrivileges').evaluateAndLog().catch(() => {});
+  })
+  .then(() => {
     const legacy = process.env.ADMIN_ALIAS && process.env.ADMIN_PASSWORD_HASH && process.env.ADMIN_TOTP_SECRET
       ? [{ alias: process.env.ADMIN_ALIAS, passwordHash: process.env.ADMIN_PASSWORD_HASH, totpSecret: process.env.ADMIN_TOTP_SECRET }]
       : [];

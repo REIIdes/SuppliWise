@@ -1920,11 +1920,20 @@ const runMonitorProbes = async (app) => {
           prototype_pollution: ['Prototype Pollution', 'proto'],
           auth_bruteforce:     ['Auth Brute Force + Replay', 'bruteforce'],
           csrf_stateless:      ['CSRF (Stateless Auth)', 'csrf'],
+          db_least_privilege:  ['Database Account Least Privilege', 'dbpriv'],
           ssrf_outbound:       ['SSRF (Outbound Requests)', 'ssrf'],
           command_injection:   ['Command Injection', 'cmdi'],
           insecure_deserialization: ['Insecure Deserialization', 'deser'],
           xxe_ssti:            ['XXE + SSTI', 'xxe'],
           access_control_default_deny: ['Access Control (Deny By Default)', 'authz'],
+          rate_limit_lockout:  ['Auth Rate Limit + Lockout', 'bruteforce'],
+          prompt_injection:    ['Prompt Injection (AI)', 'ai'],
+          pii_ai_prompts:      ['PII in AI Prompts', 'ai'],
+          ai_quota:            ['AI Quota Abuse', 'ai'],
+          jwt_security:        ['JWT Strength + Lifetime', 'jwt'],
+          headers_security:    ['Security Headers', 'misconfig'],
+          email_enumeration:   ['Email Enumeration', 'misconfig'],
+          sensitive_data:      ['Sensitive Data Exposure', 'misconfig'],
         }[key] || [key, key];
         // `app` rather than `req`: this run is shared by every concurrent
         // caller (see monitorInFlight), so it must not close over one request's

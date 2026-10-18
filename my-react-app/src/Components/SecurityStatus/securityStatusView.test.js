@@ -332,6 +332,45 @@ test('every monitor key the server returns has a row in the Security Center', ()
 });
 
 /**
+ * The same drift, at the scale the OWASP sweep added.
+ *
+ * Five new attack probes were registered server-side in one commit and the
+ * dashboard rendered them as bare snake_case keys with no framework chip, no
+ * display name and no implementation path — a monitor that technically reports
+ * but is unreadable to the person reading it. The list of keys is read from
+ * `server/utils/attack_probes.js` rather than repeated here, so adding a probe
+ * without giving it a row fails in the client suite where the row lives.
+ */
+test('every attack probe the server registers has a complete row', () => {
+  const src = fs.readFileSync(path.join(HERE, 'SecurityStatus.jsx'), 'utf8');
+  const serverSrc = fs.readFileSync(
+    path.resolve(HERE, '..', '..', '..', '..', 'server', 'utils', 'attack_probes.js'), 'utf8');
+
+  const probeKeys = [...serverSrc.matchAll(/^  ([a-z0-9_]+): async \(?/gm)].map(m => m[1]);
+  assert.ok(probeKeys.length >= 18,
+    `only ${probeKeys.length} probe keys parsed — the extractor drifted, not the dashboard`);
+
+  const blockOf = (name) => {
+    const objStart = src.indexOf(`const ${name} = {`);
+    const arrStart = src.indexOf(`const ${name} = [`);
+    const start = objStart !== -1 ? objStart : arrStart;
+    assert.ok(start !== -1, `${name} not found in SecurityStatus.jsx`);
+    const closer = objStart !== -1 && (arrStart === -1 || objStart < arrStart) ? '};' : '];';
+    return src.slice(start, src.indexOf(closer, start));
+  };
+
+  const maps = ['MONITOR_FRAMEWORK', 'MONITOR_LABEL', 'MONITOR_IMPL'];
+  for (const key of probeKeys) {
+    for (const name of maps) {
+      assert.ok(new RegExp(`(^|[{,\\s])'??${key}'??\\s*:`, 'm').test(blockOf(name)),
+        `${key} has no entry in ${name}`);
+    }
+    assert.ok(new RegExp(`^\\s*'${key}',`, 'm').test(blockOf('MONITOR_ORDER')),
+      `${key} is missing from MONITOR_ORDER, so it would render no row at all`);
+  }
+});
+
+/**
  * The probe detail is a full sentence, but the cell that holds it is a <td>,
  * and AdminDashboard.css ships an UNSCOPED `th, td { … white-space: nowrap }`
  * rule. `white-space` is an inherited property, so the detail text inherited

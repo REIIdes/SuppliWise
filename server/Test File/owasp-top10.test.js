@@ -44,3 +44,19 @@ test('the probe set covers every category the security checklist names', () => {
     assert.equal(typeof attackProbes[key], 'function', `missing probe: ${key}`);
   }
 });
+
+test('every registered probe has a Security Center label', () => {
+  // The monitor map in routes/admin.js turns a probe key into the row an admin
+  // reads. A probe registered without a label still RUNS and reports, but shows
+  // up as a bare snake_case key — the failure is invisible to whoever wrote it
+  // and obvious to whoever has to interpret the dashboard.
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const admin = fs.readFileSync(path.join(__dirname, '..', 'routes', 'admin.js'), 'utf8');
+  for (const key of Object.keys(attackProbes)) {
+    assert.ok(
+      new RegExp(`(^|[{,\\s])'?${key}'?\\s*:\\s*\\[`, 'm').test(admin),
+      `${key} is registered as a probe but has no label entry in routes/admin.js`,
+    );
+  }
+});
