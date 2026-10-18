@@ -70,6 +70,34 @@
   line-height: 1.55;
 }
 
+/* Standalone-route only: this page has no shell of its own, so without this
+   the only way back to the control panel is typing /admin. Full width so the
+   flex-wrap header drops the title block onto its own line below it. */
+.am-back {
+  width: 100%;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 13px;
+  border: 1px solid var(--am-line);
+  border-radius: 10px;
+  background: var(--am-paper);
+  color: var(--am-ok-deep);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background-color 0.16s ease, transform 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.am-back:hover {
+  background: var(--am-ok-wash);
+}
+
+.am-back:active {
+  transform: scale(0.97);
+}
+
 .am-refresh-btn {
   display: inline-flex;
   align-items: center;

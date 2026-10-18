@@ -108,11 +108,12 @@ test('the brand renders no text besides the wordmark', () => {
 test('the brand points at the dashboard when signed in, and home when not', () => {
   const link = brandLink();
   assert.match(link, /to=\{token\s*\?\s*DASHBOARD_PATH\s*:\s*'\/'\}/);
-  // One constant for both the destination and the "already there?" test — the
-  // two must not be allowed to drift.
+  // One constant for every dashboard reference — destination, "already there?"
+  // test, and the Back button's visibility rule and fallback. They must not be
+  // allowed to drift apart.
   assert.match(NAVBAR, /const DASHBOARD_PATH = '\/dashboard';/);
   const uses = NAVBAR.match(/DASHBOARD_PATH/g) || [];
-  assert.equal(uses.length, 3, 'DASHBOARD_PATH should be the const plus its two uses');
+  assert.equal(uses.length, 5, 'DASHBOARD_PATH should be the const plus its four uses');
 });
 
 test('pressing the brand on the dashboard scrolls to top and asks for a refresh', () => {

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { BASE_URL, parseJSON } from '../api';
 import { exportResultsToPDF } from '../utils/exportPDF';
 import { pictureUrl } from '../utils/pictureUrl';
@@ -46,6 +47,10 @@ function StatIcon({ name }) {
 }
 
 const AssessmentManagement = ({ users: propUsers = [] }) => {
+  // Dual-use: a tab panel inside /admin (AdminDashboard owns the shell) and a
+  // standalone page at its own route. Only the standalone route needs its own
+  // back control — the tab already lives under the admin topbar.
+  const standalone = useLocation().pathname === '/admin/assessment-management';
   const [users, setUsers] = useState(propUsers);
   const [assessments, setAssessments] = useState([]);
   const [selectedAssessment, setSelectedAssessment] = useState(null);
@@ -255,6 +260,15 @@ const AssessmentManagement = ({ users: propUsers = [] }) => {
   return (
     <div className="am-container">
       <header className="am-head">
+        {standalone && (
+          <Link to="/admin" className="am-back">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M19 12H5" />
+              <path d="M11 18l-6-6 6-6" />
+            </svg>
+            Back to Control Panel
+          </Link>
+        )}
         <div>
           <h3 className="am-head__title">Assessment Management</h3>
           <p className="am-head__sub">

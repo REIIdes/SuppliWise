@@ -220,6 +220,64 @@
      this side holds its width and the wordmark is what gives way — see
      .navbar-left. */
   flex-shrink: 0;
+  /* With the Back button present the bar has three children, and plain
+     space-between would float the brand to the middle. The auto margin eats
+     all slack here instead, so Back + brand sit together on the left. With
+     only two children it is what space-between already did — no change. */
+  margin-left: auto;
+}
+
+/* ── Back button ──────────────────────────────────────────────────── */
+/* Ghost pill matching the icon-cluster tiles: solid tint only (the surface
+   contract rejects stacked translucent layers on this bar), press scales
+   down like every other control in the bar. */
+.navbar-back-btn {
+  flex-shrink: 0;
+  /* The auto margin on .navbar-right consumes all the slack, so the gap that
+     `space-between` would have placed between Back and the brand is zero —
+     own it explicitly here. */
+  margin-right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1.5px solid #a7f3d0;
+  border-radius: 11px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  transition:
+    transform 0.16s cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 0.16s ease,
+    outline-color 0.18s ease;
+}
+
+.navbar-back-btn:hover {
+  background: #d1fae5;
+}
+
+.navbar-back-btn:active {
+  transform: scale(0.955);
+}
+
+.navbar-back-btn:focus-visible {
+  outline-color: #10b981;
+}
+
+/* Narrow phones: the arrow alone says "back", the word is the first thing
+   sacrificed so the account pill never wraps or gets clipped. */
+@media (max-width: 480px) {
+  .navbar-back-text {
+    display: none;
+  }
+  .navbar-back-btn {
+    padding: 0 9px;
+  }
 }
 
 /* ── History link (legacy class, kept for safety) ─────────────────── */
@@ -374,6 +432,7 @@
   .navbar-nav-link::before,
   .navbar-nav-link svg,
   .navbar-signin-btn,
+  .navbar-back-btn,
   .navbar-logo-box,
   .navbar-logo-box svg,
   .navbar-brand,
@@ -384,7 +443,9 @@
   .navbar-nav-link:hover,
   .navbar-nav-link:active,
   .navbar-nav-link:hover svg,
-  .navbar-nav-link.active svg {
+  .navbar-nav-link.active svg,
+  .navbar-back-btn:hover,
+  .navbar-back-btn:active {
     transform: none;
   }
   .navbar-signin-btn:hover,
