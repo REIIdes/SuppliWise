@@ -49,7 +49,10 @@ async function withSurveyRoutes(fn) {
   // The router module is cached across boots, so the stubs must be dynamic:
   // the test picks an identity per request via a header.
   authMiddleware.protect = (req, _res, next) => {
-    req.user = { _id: USER_ID, role: req.get('x-test-role') === 'admin' ? 'admin' : 'user' };
+    req.user = {
+      _id: req.get('x-test-user') || USER_ID,
+      role: req.get('x-test-role') === 'admin' ? 'admin' : 'user',
+    };
     next();
   };
   // adminOnly keeps its real semantics: refuse non-admins.
@@ -83,12 +86,13 @@ async function withSurveyRoutes(fn) {
 
   const server = app.listen(0);
   const { port } = server.address();
-  const call = async (pathname, { method = 'GET', body, role } = {}) => {
+  const call = async (pathname, { method = 'GET', body, role, user } = {}) => {
     const res = await fetch(`http://127.0.0.1:${port}/api/survey${pathname}`, {
       method,
       headers: {
         ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
         ...(role ? { 'x-test-role': role } : {}),
+        ...(user ? { 'x-test-user': user } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -171,19 +175,31 @@ test('/validation is admin-only', async () => {
 test('/validation computes reliability from three stored responses', async () => {
   await withSurveyRoutes(async ({ call, store }) => {
     const answers = [[4, 3, 5, 4], [3, 4, 4, 5], [5, 2, 4, 3]];
-    for (const values of answers) {
-      const r = await call('/respond', { method: 'POST', body: { instrument: 'efficiency', values } });
+    // One response per PARTICIPANT — alpha treats rows as independent
+    // samples, so each submission comes from a distinct user.
+    const users = ['507f1f77bcf86cd7994390a1', '507f1f77bcf86cd7994390a2', '507f1f77bcf86cd7994390a3'];
+    for (let i = 0; i < answers.length; i += 1) {
+      const r = await call('/respond', {
+        method: 'POST', body: { instrument: 'efficiency', values: answers[i] }, user: users[i],
+      });
       assert.equal(r.status, 201);
     }
-    assert.equal(store.length, 3);
+    // A resubmission by one participant must not become a second sample.
+    const dupe = await call('/respond', {
+      method: 'POST', body: { instrument: 'efficiency', values: [4, 4, 4, 4] }, user: users[0],
+    });
+    assert.equal(dupe.status, 201);
+    assert.equal(store.length, 4);
 
     const forbidden = await call('/validation');
     assert.equal(forbidden.status, 403, 'a member must not read the research report');
+
     const r = await call('/validation', { role: 'admin' });
     assert.equal(r.status, 200);
     assert.match(r.body.threshold, /0\.70/);
     const eff = r.body.instruments.find((i) => i.instrument === 'efficiency');
-    assert.equal(eff.respondents, 3);
+    assert.equal(eff.totalSubmissions, 4, 'every stored row is still counted as a submission');
+    assert.equal(eff.respondents, 3, 'only the latest answer per participant is a sample');
     assert.ok(Number.isFinite(eff.scoreMean), 'score mean must compute from stored scores');
     assert.ok(Number.isFinite(eff.reliability.alpha), 'alpha must compute with 3+ complete rows');
   });

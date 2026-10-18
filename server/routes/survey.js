@@ -67,8 +67,20 @@ router.get('/validation', protect, adminOnly, async (req, res) => {
         .sort({ createdAt: -1 })
         .limit(VALIDATION_CAP)
         .lean();
-      const scores = docs.map((d) => d.score).filter((s) => Number.isFinite(s));
-      const matrix = docs
+      // One observation per participant: alpha treats rows as independent
+      // samples, so a member who resubmits (the UI allows correcting an
+      // answer before the study closes) must contribute only their LATEST
+      // response. The query is newest-first, so first-seen wins.
+      const perUser = new Set();
+      const respondentsAll = docs;
+      const uniqueDocs = respondentsAll.filter((d) => {
+        const k = String(d.user ?? d._id);
+        if (perUser.has(k)) return false;
+        perUser.add(k);
+        return true;
+      });
+      const scores = uniqueDocs.map((d) => d.score).filter((s) => Number.isFinite(s));
+      const matrix = uniqueDocs
         .map((d) => (Array.isArray(d.reversed) && d.reversed.length === instrument.items.length ? d.reversed : null))
         .filter(Boolean);
       report.push({
@@ -76,7 +88,8 @@ router.get('/validation', protect, adminOnly, async (req, res) => {
         title: instrument.title,
         measures: instrument.measures,
         source: instrument.source,
-        respondents: docs.length,
+        respondents: uniqueDocs.length,
+        totalSubmissions: respondentsAll.length,
         scoreMean: Number.isFinite(mean(scores)) ? Math.round(mean(scores) * 10) / 10 : null,
         scoreSd: Number.isFinite(sampleStandardDeviation(scores)) ? Math.round(sampleStandardDeviation(scores) * 10) / 10 : null,
         reliability: matrix.length >= 3 ? describeInstrument(matrix) : { respondents: matrix.length, note: 'Need at least 3 complete responses to compute Cronbach\'s alpha.' },
