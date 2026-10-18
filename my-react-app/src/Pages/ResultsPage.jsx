@@ -416,13 +416,15 @@ function ResultsPage() {
   const allRecommendations = (Array.isArray(r.recommendations) ? r.recommendations : [])
     .filter((rec) => rec && typeof rec === 'object');
 
-  // Sort: High → Medium → Low, then by confidenceScore descending within each group
+  // Sort: High → Medium → Low only. The API already emits canonical nutrient
+  // order inside each tier (Omega-3 before Magnesium, per planConsistency.js),
+  // and Array#sort is stable, so re-sorting by confidence here would destroy
+  // that guarantee. Legacy plans without server ordering keep their saved order.
   const PRIORITY_ORDER = { High: 0, Medium: 1, Low: 2 };
   const sortedRecommendations = [...allRecommendations].sort((a, b) => {
     const pa = PRIORITY_ORDER[a.priority] ?? 3;
     const pb = PRIORITY_ORDER[b.priority] ?? 3;
-    if (pa !== pb) return pa - pb;
-    return (b.confidenceScore || 0) - (a.confidenceScore || 0);
+    return pa - pb;
   });
   const dailySchedule = Array.isArray(r.dailySchedule) ? r.dailySchedule : [];
   const actionPlan = Array.isArray(r.actionPlan) ? r.actionPlan : [];

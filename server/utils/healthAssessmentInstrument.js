@@ -133,8 +133,8 @@ const ITEMS = [
     },
   },
   {
-    id: 'healthGoals', step: 2, section: 'Diet & Health Goals', label: 'Health Goals (select all that apply)',
-    type: 'multi', required: true, minSelections: 1,
+    id: 'healthGoals', step: 2, section: 'Diet & Health Goals', label: 'Health Goals (pick up to 5)',
+    type: 'multi', required: true, minSelections: 1, maxSelections: 5,
     options: [
       'Increase Energy', 'Improve Sleep', 'Boost Immunity', 'Support Heart Health',
       'Digestive Health', 'Muscle Gain', 'Fat Loss', 'Improve Strength',

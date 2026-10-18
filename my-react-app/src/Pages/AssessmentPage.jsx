@@ -632,11 +632,19 @@ function Step2({ data, onChange, errors = {} }) {
   // Group adult goals by category for display
   const groups = isChild ? [''] : ['General', 'Fitness', 'Wellness'];
 
+  // Selecting every goal is the same as selecting none — the plan engine
+  // weights goals, so the instrument caps new picks at 5. Legacy saved
+  // assessments with more stay editable (they just can't grow).
+  const MAX_GOALS = 5;
+  const selectedGoals = data.healthGoals || [];
+  const atGoalCap = selectedGoals.length >= MAX_GOALS;
+
   const toggleGoal = (goal) => {
-    const current = data.healthGoals || [];
-    onChange('healthGoals', current.includes(goal)
-      ? current.filter((g) => g !== goal)
-      : [...current, goal]);
+    if (selectedGoals.includes(goal)) {
+      onChange('healthGoals', selectedGoals.filter((g) => g !== goal));
+    } else if (!atGoalCap) {
+      onChange('healthGoals', [...selectedGoals, goal]);
+    }
   };
 
   return (
@@ -673,14 +681,20 @@ function Step2({ data, onChange, errors = {} }) {
 
       {/* Health goals grouped by category */}
       <div id="field-healthGoals" className="step-field" style={{ marginTop: '24px' }}>
-        <label>Health Goals <span className="field-hint">(select all that apply)</span></label>
+        <label>
+          Health Goals <span className="field-hint">(pick up to {MAX_GOALS} — focused goals make a sharper plan)</span>
+          <span className={`goal-count-chip ${selectedGoals.length > MAX_GOALS ? 'goal-count-chip--over' : ''}`}>
+            {selectedGoals.length}/{MAX_GOALS}
+          </span>
+        </label>
         {isChild ? (
           <div className="checkbox-grid-2">
             {goals.map(({ label }) => (
               <label key={label} className="checkbox-label">
                 <input
                   type="checkbox"
-                  checked={(data.healthGoals || []).includes(label)}
+                  checked={selectedGoals.includes(label)}
+                  disabled={!selectedGoals.includes(label) && atGoalCap}
                   onChange={() => toggleGoal(label)}
                 />
                 {label}
@@ -703,13 +717,14 @@ function Step2({ data, onChange, errors = {} }) {
                       <p className="goal-subgroup-label">{sub}</p>
                       <div className="checkbox-grid-2">
                         {groupGoals.filter(g => g.subgroup === sub).map(({ label, description }) => {
-                          const checked = (data.healthGoals || []).includes(label);
+                          const checked = selectedGoals.includes(label);
                           return (
                             <div key={label} className="goal-option-wrap">
                               <label className="checkbox-label">
                                 <input
                                   type="checkbox"
                                   checked={checked}
+                                  disabled={!checked && atGoalCap}
                                   onChange={() => toggleGoal(label)}
                                 />
                                 {label}
@@ -724,13 +739,14 @@ function Step2({ data, onChange, errors = {} }) {
                 ) : (
                   <div className="checkbox-grid-2">
                     {groupGoals.filter(g => !g.subgroup).map(({ label, description }) => {
-                      const checked = (data.healthGoals || []).includes(label);
+                      const checked = selectedGoals.includes(label);
                       return (
                         <div key={label} className="goal-option-wrap">
                           <label className="checkbox-label">
                             <input
                               type="checkbox"
                               checked={checked}
+                              disabled={!checked && atGoalCap}
                               onChange={() => toggleGoal(label)}
                             />
                             {label}
