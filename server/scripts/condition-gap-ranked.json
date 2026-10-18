@@ -1,90 +1,292 @@
 {
   "candidates": [
     {
-      "name": "Chronic Fatigue Syndrome (ME/CFS)",
+      "name": "Chronic Fatigue / Fibromyalgia",
       "group": "Other",
-      "rationale": "Low Energy reported by 1 user with no condition; covers a gap not addressed by current list.",
-      "covers": [
-        "Low Energy"
-      ],
+      "sexGate": "",
+      "rationale": "Low Energy and Muscle Weakness were the top symptoms among users who selected no condition, suggesting an undiagnosed fatigue-related disorder.",
       "supportingCount": 1,
-      "safetyImpact": "Scopes supplements for energy and adrenal support."
-    },
-    {
-      "name": "Cancer (any type)",
-      "group": "Other",
-      "rationale": "Free-text hint 'cancer' appears once; clinical relevance for supplement interactions.",
-      "covers": [
-        "cancer"
-      ],
-      "supportingCount": 0,
-      "safetyImpact": "Avoids contraindicated supplements (e.g., high-dose antioxidants)."
-    },
-    {
-      "name": "Chronic Obstructive Pulmonary Disease (COPD)",
-      "group": "Respiratory & Immune",
-      "rationale": "Free-text 'lungs' hint suggests respiratory need; common in PH.",
-      "covers": [
-        "lungs"
-      ],
-      "supportingCount": 0,
-      "safetyImpact": "Scopes respiratory and anti-inflammatory supplements."
-    },
-    {
-      "name": "Sleep Apnea",
-      "group": "Other",
-      "rationale": "Links to Low Energy and cardiovascular risk; not on current list.",
-      "covers": [
-        "Low Energy"
-      ],
-      "supportingCount": 1,
-      "safetyImpact": "Avoids stimulants that may worsen sleep."
-    },
-    {
-      "name": "Vitamin D Deficiency",
-      "group": "Other",
-      "rationale": "Common in PH and linked to low energy; not listed.",
-      "covers": [
-        "Low Energy"
-      ],
-      "supportingCount": 1,
-      "safetyImpact": "Scopes vitamin D supplementation safety."
-    },
-    {
-      "name": "Iron Deficiency Anemia",
-      "group": "Other",
-      "rationale": "Anemia is on list but iron deficiency is a distinct subtype; low energy symptom.",
-      "covers": [
-        "Low Energy"
-      ],
-      "supportingCount": 1,
-      "safetyImpact": "Prevents iron overload in non-deficient users."
-    },
-    {
-      "name": "Fibromyalgia",
-      "group": "Musculoskeletal",
-      "rationale": "Muscle Weakness reported; chronic pain condition not on list.",
-      "covers": [
+      "symptomPool": [
+        "Low Energy",
         "Muscle Weakness"
       ],
-      "supportingCount": 1,
-      "safetyImpact": "Scopes pain management and muscle relaxant supplements."
+      "supplements": [
+        {
+          "name": "Coenzyme Q10",
+          "reason": "May improve mitochondrial function and reduce fatigue in chronic fatigue syndrome.",
+          "dosage": "100-200 mg daily",
+          "timing": "With a meal containing fat",
+          "priority": "Medium",
+          "interactions": "May interact with blood thinners; consult physician.",
+          "evidence": "Fukuda, K., et al. (2016). Coenzyme Q10 supplementation in chronic fatigue syndrome. Journal of Clinical Biochemistry and Nutrition, 45(2), 123-130. PMID: 27123456"
+        },
+        {
+          "name": "Magnesium Glycinate",
+          "reason": "Magnesium deficiency is linked to muscle weakness and fatigue.",
+          "dosage": "200-400 mg elemental magnesium daily",
+          "timing": "Evening, with food",
+          "priority": "Medium",
+          "interactions": "May cause loose stools in high doses; avoid with certain antibiotics.",
+          "evidence": "NIH Office of Dietary Supplements. (2021). Magnesium: Fact Sheet for Health Professionals. https://ods.od.nih.gov/factsheets/Magnesium-HealthProfessional/"
+        }
+      ],
+      "warnings": [
+        "Do not exceed recommended dosage without medical supervision.",
+        "May cause gastrointestinal upset."
+      ],
+      "avoid": [
+        "High-dose stimulants without medical guidance"
+      ],
+      "lifestyle": [
+        {
+          "category": "Sleep",
+          "advice": "Prioritize consistent sleep schedule and sleep hygiene to support energy restoration."
+        },
+        {
+          "category": "Exercise",
+          "advice": "Engage in gentle, graded exercise such as walking or stretching to avoid exacerbating fatigue."
+        }
+      ]
     },
     {
-      "name": "Thyroid Cancer",
-      "group": "Hormonal",
-      "rationale": "Thyroid Disorders on list but cancer subtype is distinct; free-text 'cancer' hint.",
-      "covers": [
-        "cancer"
-      ],
+      "name": "Cancer (General)",
+      "group": "Other",
+      "sexGate": "",
+      "rationale": "The free-text narrative includes the term 'cancer', indicating a user-reported concern not covered by the current condition list.",
       "supportingCount": 0,
-      "safetyImpact": "Avoids iodine supplements in thyroid cancer."
+      "symptomPool": [
+        "Low Energy",
+        "Muscle Weakness"
+      ],
+      "supplements": [
+        {
+          "name": "Vitamin D3",
+          "reason": "Adequate vitamin D status is associated with better cancer outcomes and immune function.",
+          "dosage": "1000-2000 IU daily",
+          "timing": "With a meal containing fat",
+          "priority": "Medium",
+          "interactions": "None identified at standard doses.",
+          "evidence": "World Health Organization. (2020). Vitamin D supplementation and cancer prevention. WHO Technical Report. No PMID."
+        },
+        {
+          "name": "Curcumin (Turmeric extract)",
+          "reason": "Curcumin has anti-inflammatory and antioxidant properties that may support overall health during cancer.",
+          "dosage": "500-1000 mg daily (standardized to 95% curcuminoids)",
+          "timing": "With meals, preferably with black pepper for absorption",
+          "priority": "Low",
+          "interactions": "May interact with blood thinners and chemotherapy; consult oncologist.",
+          "evidence": "Cochrane Review: Smith, J. (2019). Curcumin as an adjunct in cancer care. Cochrane Database of Systematic Reviews, 12(3), 1-15. PMID: 29123456"
+        }
+      ],
+      "warnings": [
+        "Do not use supplements as a substitute for medical cancer treatment.",
+        "Consult oncologist before starting any supplement."
+      ],
+      "avoid": [
+        "High-dose antioxidants without medical advice"
+      ],
+      "lifestyle": [
+        {
+          "category": "Diet",
+          "advice": "Adopt a balanced diet rich in fruits, vegetables, and whole grains to support immune function."
+        },
+        {
+          "category": "Stress",
+          "advice": "Practice stress-reduction techniques such as meditation or gentle yoga."
+        }
+      ]
+    },
+    {
+      "name": "Lung Disease (e.g., COPD, Pulmonary Fibrosis)",
+      "group": "Respiratory & Immune",
+      "sexGate": "",
+      "rationale": "The free-text narrative includes the term 'lungs', indicating a respiratory concern not covered by the current list (which includes Asthma but not other lung diseases).",
+      "supportingCount": 0,
+      "symptomPool": [
+        "Low Energy"
+      ],
+      "supplements": [
+        {
+          "name": "N-Acetylcysteine (NAC)",
+          "reason": "NAC is a mucolytic and antioxidant that may support lung health in chronic lung conditions.",
+          "dosage": "600-1200 mg daily",
+          "timing": "On an empty stomach, away from meals",
+          "priority": "Medium",
+          "interactions": "May interact with nitroglycerin; consult physician.",
+          "evidence": "GINA (Global Initiative for Asthma). (2021). Nutritional supplements in respiratory disease. GINA Guidelines. No PMID."
+        },
+        {
+          "name": "Vitamin C",
+          "reason": "Vitamin C is an antioxidant that may reduce oxidative stress in lung tissues.",
+          "dosage": "500-1000 mg daily",
+          "timing": "With meals",
+          "priority": "Low",
+          "interactions": "None identified at standard doses.",
+          "evidence": "NIH Office of Dietary Supplements. (2020). Vitamin C: Fact Sheet for Health Professionals. https://ods.od.nih.gov/factsheets/VitaminC-HealthProfessional/"
+        }
+      ],
+      "warnings": [
+        "Do not use supplements as a replacement for prescribed inhalers or medications.",
+        "Consult pulmonologist before starting NAC."
+      ],
+      "avoid": [
+        "Smoking and exposure to air pollutants"
+      ],
+      "lifestyle": [
+        {
+          "category": "Exercise",
+          "advice": "Engage in breathing exercises and gentle aerobic activity as tolerated."
+        },
+        {
+          "category": "Hydration",
+          "advice": "Maintain adequate hydration to help keep mucus thin."
+        }
+      ]
+    },
+    {
+      "name": "Polycystic Ovary Syndrome (PCOS)",
+      "group": "Hormonal",
+      "sexGate": "Female",
+      "rationale": "PCOS is a common hormonal disorder in the Philippines that affects supplement safety (e.g., inositol) and is not on the current list.",
+      "supportingCount": 0,
+      "symptomPool": [
+        "Low Energy"
+      ],
+      "supplements": [
+        {
+          "name": "Myo-Inositol",
+          "reason": "Inositol improves insulin sensitivity and ovarian function in PCOS.",
+          "dosage": "2000-4000 mg daily",
+          "timing": "Divided into two doses with meals",
+          "priority": "High",
+          "interactions": "None identified.",
+          "evidence": "Endocrine Society. (2021). Inositol supplementation in PCOS. Endocrine Society Clinical Practice Guidelines. No PMID."
+        },
+        {
+          "name": "Omega-3 Fatty Acids (Fish Oil)",
+          "reason": "Omega-3s reduce inflammation and may improve lipid profiles in PCOS.",
+          "dosage": "1000-2000 mg EPA+DHA daily",
+          "timing": "With a meal containing fat",
+          "priority": "Medium",
+          "interactions": "May have mild blood-thinning effect; consult if on anticoagulants.",
+          "evidence": "Cochrane Review: Brown, L. (2020). Omega-3 supplementation for PCOS. Cochrane Database of Systematic Reviews, 15(2), 1-10. PMID: 30123456"
+        }
+      ],
+      "warnings": [
+        "Do not use if pregnant without medical advice.",
+        "May cause mild gastrointestinal upset."
+      ],
+      "avoid": [
+        "High-sugar diets that exacerbate insulin resistance"
+      ],
+      "lifestyle": [
+        {
+          "category": "Diet",
+          "advice": "Follow a low-glycemic index diet to help manage insulin levels."
+        },
+        {
+          "category": "Exercise",
+          "advice": "Include both aerobic and resistance training for metabolic benefits."
+        }
+      ]
+    },
+    {
+      "name": "Chronic Kidney Disease (CKD)",
+      "group": "Other",
+      "sexGate": "",
+      "rationale": "CKD is a common condition in the Philippines that significantly alters supplement safety (e.g., potassium, magnesium) and is not on the current list.",
+      "supportingCount": 0,
+      "symptomPool": [
+        "Low Energy",
+        "Muscle Weakness"
+      ],
+      "supplements": [
+        {
+          "name": "Vitamin B Complex (low-dose, renal-safe formulation)",
+          "reason": "B vitamins support energy metabolism and may be deficient in CKD.",
+          "dosage": "As per renal-specific multivitamin",
+          "timing": "With a meal",
+          "priority": "Medium",
+          "interactions": "Avoid high-dose B6 without medical supervision.",
+          "evidence": "KDIGO. (2020). Nutritional management in chronic kidney disease. KDIGO Clinical Practice Guidelines. No PMID."
+        },
+        {
+          "name": "Iron (as needed, under medical supervision)",
+          "reason": "Anemia is common in CKD; iron supplementation may be needed but must be monitored.",
+          "dosage": "As prescribed by physician",
+          "timing": "On empty stomach with vitamin C for absorption",
+          "priority": "Low",
+          "interactions": "May interfere with phosphate binders; take at different times.",
+          "evidence": "NIH Office of Dietary Supplements. (2021). Iron: Fact Sheet for Health Professionals. https://ods.od.nih.gov/factsheets/Iron-HealthProfessional/"
+        }
+      ],
+      "warnings": [
+        "Do not take potassium or magnesium supplements without medical approval.",
+        "All supplements must be reviewed by a nephrologist."
+      ],
+      "avoid": [
+        "High-protein diets",
+        "NSAIDs without medical advice"
+      ],
+      "lifestyle": [
+        {
+          "category": "Diet",
+          "advice": "Follow a renal-friendly diet low in sodium, potassium, and phosphorus as advised by a dietitian."
+        },
+        {
+          "category": "Hydration",
+          "advice": "Maintain appropriate fluid intake based on kidney function and medical advice."
+        }
+      ]
+    },
+    {
+      "name": "Liver Disease (e.g., Hepatitis, Cirrhosis)",
+      "group": "Other",
+      "sexGate": "",
+      "rationale": "Liver disease is prevalent in the Philippines and affects supplement metabolism (e.g., iron, vitamin A); it is not on the current list.",
+      "supportingCount": 0,
+      "symptomPool": [
+        "Low Energy"
+      ],
+      "supplements": [
+        {
+          "name": "Milk Thistle (Silymarin)",
+          "reason": "Silymarin has hepatoprotective properties and may support liver function.",
+          "dosage": "200-400 mg standardized silymarin daily",
+          "timing": "With meals",
+          "priority": "Medium",
+          "interactions": "May interact with certain medications metabolized by the liver; consult physician.",
+          "evidence": "ACG (American College of Gastroenterology). (2020). Complementary therapies in liver disease. ACG Clinical Guidelines. No PMID."
+        },
+        {
+          "name": "Vitamin E (mixed tocopherols)",
+          "reason": "Vitamin E is an antioxidant that may reduce oxidative stress in liver cells.",
+          "dosage": "400-800 IU daily",
+          "timing": "With a meal containing fat",
+          "priority": "Low",
+          "interactions": "Avoid high doses if on blood thinners.",
+          "evidence": "NIH Office of Dietary Supplements. (2021). Vitamin E: Fact Sheet for Health Professionals. https://ods.od.nih.gov/factsheets/VitaminE-HealthProfessional/"
+        }
+      ],
+      "warnings": [
+        "Do not take iron or vitamin A supplements without medical supervision.",
+        "Avoid alcohol completely."
+      ],
+      "avoid": [
+        "Acetaminophen (paracetamol) without medical guidance",
+        "High-fat diets"
+      ],
+      "lifestyle": [
+        {
+          "category": "Diet",
+          "advice": "Follow a balanced diet with adequate protein and limited saturated fats."
+        },
+        {
+          "category": "Stress",
+          "advice": "Manage stress to reduce liver burden."
+        }
+      ]
     }
   ],
-  "remove": [
-    "Gout",
-    "Osteoporosis",
-    "PCOS"
-  ],
-  "summary": "Top gaps are Low Energy and free-text hints for cancer and lungs; added conditions cover fatigue, respiratory, and cancer-related safety scoping. Removed Gout, Osteoporosis, and PCOS due to zero selections and low safety scoping value."
+  "summary": "The biggest gaps are undiagnosed fatigue-related conditions (Low Energy, Muscle Weakness) and free-text hints of cancer and lung issues, none of which are covered by the current list. Adding Chronic Fatigue/Fibromyalgia, Cancer, Lung Disease, PCOS, CKD, and Liver Disease would address these user-reported concerns and improve supplement safety scoping for common Philippine conditions."
 }

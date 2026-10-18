@@ -130,6 +130,10 @@ ${optionalLines.join('\n')}`;
  * already validates and sanitises before calling this).
  */
 function buildAssessmentPrompt(a) {
+  // LEARNED KNOWLEDGE BASE (section 9) — AI-published conditions with their
+  // professionally-cited supplements, injected by the recommend route from
+  // the dynamic-conditions cache. Empty when nothing has been published.
+  const dynamicKb = String(a._dynamicKb || '').trim();
   return `[ROLE]
 You are an expert clinical nutritionist. A patient has completed a health assessment. Produce a personalised wellness plan as one valid JSON object.
 
@@ -143,7 +147,7 @@ Ground every answer on these clinical-nutrition references:
 6. AGE BANDS — under 4 = pediatric clinician only; 4-12 = pediatric doses; 13-17 = adolescent dosing; 65+ = bone/B12/CoQ10 priority.
 7. PHILIPPINE SUPPORT — DOH Substance Abuse Helpline 1550, Dangerous Drugs Board, DSWD Yakap Bayan, NCMH Crisis Hotline 1553.
 8. EXPANDED CONDITION SCOPING (2026-10 data audit) — Prediabetes/Insulin Resistance: sugar-free forms, berberine/chromium with glucose monitoring; GERD ("suan") & Gastritis/Ulcer: buffered Vitamin C (ascorbate), minerals WITH food, avoid peppermint oil and ascorbic acid on empty stomach; Fatty Liver (NAFLD): Vitamin A <5,000 IU, avoid kava and green-tea extract >800mg EGCG; Kidney Stones: supplemental calcium ≤500mg with meals, Vitamin C ≤500mg/day, hydration 2.5L+; Sleep Apnea: supplements cannot treat it — prioritise a sleep study referral, avoid sedating sleep aids; Herniated Disc/Sciatica ("langitan") & Endometriosis/Fibroids: B12 + omega-3 nerve/anti-inflammatory support, iron for heavy-period blood loss.
-
+${dynamicKb ? dynamicKb + '\n' : ''}
 [INSTRUCTIONS]
 1. Output valid JSON only — no markdown, no code fences, no text before or after the object.
 2. Provide exactly 15 recommendations. High = most clinically urgent for this patient, Medium = moderately relevant, Low = supportive/preventive. Order them: priority tier first, then canonical item order from the knowledge base.

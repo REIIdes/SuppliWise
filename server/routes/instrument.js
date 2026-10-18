@@ -12,6 +12,7 @@ const {
   contentValidityReport,
   statisticalValidationReport,
 } = require('../utils/instrumentValidation');
+const { getLiveConditions } = require('../utils/dynamicConditions');
 
 /**
  * System Health Assessment instrument endpoints.
@@ -36,6 +37,31 @@ const {
 
 router.get('/', protect, (req, res) => {
   res.json({ instrument: INSTRUMENT_VERSION, items: ITEMS });
+});
+
+// AI-published condition options — the questionnaire grows from the learned,
+// evidence-gated knowledge base without anyone approving anything by hand.
+// Every entry here passed the automated clinical-evidence gate; the client
+// merges these into the condition groups, tooltips and symptom scoping.
+router.get('/live-extensions', protect, async (req, res) => {
+  try {
+    const docs = await getLiveConditions();
+    return res.json({
+      instrument: INSTRUMENT_VERSION,
+      conditions: docs.map((d) => ({
+        label: d.label,
+        group: d.group,
+        sexGate: d.sexGate || '',
+        rationale: d.rationale,
+        symptomPool: d.symptomPool || [],
+        evidence: (d.supplements || []).map((s) => ({ name: s.name, citation: s.evidence })),
+        publishedAt: d.source?.runAt,
+      })),
+    });
+  } catch (err) {
+    console.error('[instrument] live extensions failed:', err.message);
+    return res.status(500).json({ message: 'Could not load published conditions.' });
+  }
 });
 
 // Cap the corpus the statistics run over; alpha on 5,000 assessments is far

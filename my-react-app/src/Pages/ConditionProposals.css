@@ -173,38 +173,12 @@
 .cp-verdict--reject { background: #fbe4e6; color: #a3283c; }
 .cp-verdict__when { color: #97a0b6; font-size: 12px; }
 
-.cp-decision {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  border-top: 1px dashed #e0e4ee;
-  padding-top: 14px;
-}
-
-.cp-decision label {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
+.cp-head__rule code {
   font-size: 12px;
-  color: #7d86a0;
+  background: #f2f4fa;
+  padding: 1px 6px;
+  border-radius: 6px;
 }
-
-.cp-decision select,
-.cp-decision textarea {
-  font: inherit;
-  font-size: 14px;
-  color: #1e2433;
-  border: 1px solid #d7dbe6;
-  border-radius: 8px;
-  padding: 8px 10px;
-  background: #fbfcff;
-}
-
-.cp-decision textarea { resize: vertical; }
-
-.cp-decision__discipline { max-width: 240px; }
-
-.cp-decision__actions { display: flex; gap: 10px; }
 
 .cp-btn {
   font: inherit;
@@ -218,12 +192,6 @@
 
 .cp-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
-.cp-btn--approve { background: #178a4c; color: #fff; }
-.cp-btn--approve:hover:not(:disabled) { background: #12733f; }
-
-.cp-btn--reject { background: #fff; color: #a3283c; border-color: #eab8bf; }
-.cp-btn--reject:hover:not(:disabled) { background: #fbe4e6; }
-
 .cp-btn--ghost {
   background: #fff;
   border-color: #d7dbe6;
@@ -231,7 +199,6 @@
   font-weight: 500;
 }
 
-.cp-decision__error,
 .cp-error { color: #a3283c; font-size: 13px; margin: 0; }
 
 .cp-decided-note {

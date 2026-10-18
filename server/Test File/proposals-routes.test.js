@@ -1,18 +1,21 @@
 /**
- * The AI condition-proposal ratification queue, without a live server.
+ * The AI learning log, without a live server.
  *
  * Run: node --test "Test File/proposals-routes.test.js"
  *
  * WHY THIS FILE EXISTS
- * The "tested by health professionals" claim only holds if the AI's
- * suggestions CANNOT ship on their own. These tests pin the construction:
- *   - the queue is admin-read and admin-decide only (member token = 403);
- *   - a verdict REQUIRES a written comment and one of approve|reject —
- *     there is no silent/empty ratification path;
- *   - verdicts append to an audit trail and flip the status;
- *   - the analysis upsert never overwrites a decided proposal, so a re-run
- *     cannot undo a professional's ratification;
- *   - liveNow reflects the real registry, not a stored guess.
+ * The admin approve/reject gate was deliberately removed: the gap analysis
+ * now decides AUTONOMOUSLY through the clinical evidence gate, and this
+ * endpoint only SHOWS that reasoning. These tests pin the new construction:
+ *   - the log is admin-read only (member token = 403);
+ *   - there is NO human decision route anymore — POSTing a verdict is a 404,
+ *     and the source itself contains no router.post;
+ *   - every proposal row carries its liveNow / publishedStatus so the console
+ *     can show what the AI actually published;
+ *   - the sort is by decision weight (approved → pending → rejected), not by
+ *     mongoose's lexical status order;
+ *   - the model's upsertFromRanking still behaves (it stays test-covered even
+ *     though the script now writes via the gate).
  *
  * Middleware is stubbed BEFORE require (routes/proposals.js destructures
  * protect/adminOnly at load time), per the survey-routes.test.js pattern.
@@ -27,6 +30,8 @@ const express = require('express');
 
 const authMiddleware = require('../middleware/auth');
 const ConditionProposal = require('../models/ConditionProposal');
+const DynamicCondition = require('../models/DynamicCondition');
+const { invalidateCache } = require('../utils/dynamicConditions');
 const { MEDICAL_CONDITIONS } = require('../utils/healthAssessmentInstrument');
 
 const ID = '507f1f77bcf86cd7994390aa';
@@ -48,12 +53,17 @@ function pendingDoc(over = {}) {
   };
 }
 
+// Live AI-published bundles the read path joins against.
+const LIVE_DOCS = [
+  { label: 'Fibromyalgia', normalizedLabel: 'fibromyalgia', status: 'live' },
+];
+
 async function withProposalRoutes(store, fn) {
   const originals = {
     protect: authMiddleware.protect,
     adminOnly: authMiddleware.adminOnly,
     find: ConditionProposal.find,
-    findByIdAndUpdate: ConditionProposal.findByIdAndUpdate,
+    dynamicFind: DynamicCondition.find,
   };
 
   authMiddleware.protect = (req, _res, next) => {
@@ -77,13 +87,10 @@ async function withProposalRoutes(store, fn) {
     };
     return q;
   };
-  ConditionProposal.findByIdAndUpdate = async (id, update) => {
-    const row = store.find((r) => String(r._id) === String(id));
-    if (!row) return null;
-    if (update.$set?.status) row.status = update.$set.status;
-    if (update.$push?.verdicts) row.verdicts = [...(row.verdicts || []), update.$push.verdicts];
-    return { ...row };
-  };
+  DynamicCondition.find = (filter) => ({
+    lean: async () => LIVE_DOCS.filter((d) => !filter?.status || d.status === filter.status).map((d) => ({ ...d })),
+  });
+  invalidateCache();
 
   const router = require('../routes/proposals');
   const app = express();
@@ -100,14 +107,23 @@ async function withProposalRoutes(store, fn) {
     });
     return { status: res.status, body: await res.json() };
   };
+  const rawCall = async (pathname, { method = 'POST', body, role } = {}) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/proposals${pathname}`, {
+      method,
+      headers: { 'content-type': 'application/json', ...(role ? { 'x-test-role': role } : {}) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return res.status;
+  };
 
   try {
-    return await fn(call);
+    return await fn(call, rawCall);
   } finally {
     await new Promise((ok) => server.close(ok));
+    invalidateCache();
     Object.assign(authMiddleware, originals);
     ConditionProposal.find = originals.find;
-    ConditionProposal.findByIdAndUpdate = originals.findByIdAndUpdate;
+    DynamicCondition.find = originals.dynamicFind;
   }
 }
 
@@ -116,7 +132,13 @@ test('GET / is admin-only', async () => {
   assert.equal(r.status, 403);
 });
 
-test('GET / lists proposals pending-first with counts and liveNow', async () => {
+test('GET / is a read-only log: no human decision route exists', async () => {
+  const status = await withProposalRoutes([pendingDoc()], (_call, rawCall) =>
+    rawCall(`/${ID}/decision`, { method: 'POST', role: 'admin', body: { decision: 'approve', comment: 'x' } }));
+  assert.equal(status, 404, 'POST /:id/decision must 404 — the gate decides, not the admin');
+});
+
+test('GET / orders approved → pending → rejected with counts, governedBy, liveNow and publishedStatus', async () => {
   const store = [
     pendingDoc({
       _id: '507f1f77bcf86cd7994390bb',
@@ -126,64 +148,30 @@ test('GET / lists proposals pending-first with counts and liveNow', async () => 
       supportingCount: 4,
     }),
     pendingDoc(),
+    pendingDoc({
+      _id: '507f1f77bcf86cd7994390cc',
+      name: 'Vitamin D Deficiency',
+      normalizedName: 'vitamin d deficiency',
+      status: 'rejected',
+      supportingCount: 9,
+    }),
   ];
   const r = await withProposalRoutes(store, (call) => call('/', { role: 'admin' }));
   assert.equal(r.status, 200);
-  assert.deepEqual(r.body.counts, { pending: 1, approved: 1, rejected: 0 });
-  assert.equal(r.body.proposals[0]._id, ID, 'pending sorts before approved');
+  assert.equal(r.body.governedBy, 'clinical-evidence-gate (automated)');
+  assert.deepEqual(r.body.counts, { pending: 1, approved: 1, rejected: 1 });
+  assert.deepEqual(
+    r.body.proposals.map((p) => p.status),
+    ['approved', 'pending', 'rejected'],
+    'decision weight sorts status-aware, not lexically'
+  );
   const gout = r.body.proposals.find((p) => p.normalizedName === 'gout');
   assert.equal(gout.liveNow, MEDICAL_CONDITIONS.includes('Gout'));
   assert.equal(gout.liveNow, true);
-});
-
-test('a member token cannot record a decision', async () => {
-  const r = await withProposalRoutes([pendingDoc()], (call) =>
-    call(`/${ID}/decision`, { method: 'POST', body: { decision: 'approve', comment: 'ok' } }));
-  assert.equal(r.status, 403);
-});
-
-test('decision must be approve|reject and carries no silent path', async () => {
-  const r = await withProposalRoutes([pendingDoc()], (call) =>
-    call(`/${ID}/decision`, { method: 'POST', role: 'admin', body: { decision: 'ship it', comment: 'x' } }));
-  assert.equal(r.status, 400);
-});
-
-test('an empty comment is refused — every verdict needs a written rationale', async () => {
-  for (const comment of [undefined, '', '   ']) {
-    const r = await withProposalRoutes([pendingDoc()], (call) =>
-      call(`/${ID}/decision`, { method: 'POST', role: 'admin', body: { decision: 'reject', comment } }));
-    assert.equal(r.status, 400, `comment ${JSON.stringify(comment)} must be refused`);
-  }
-});
-
-test('malformed object id is refused before touching the database', async () => {
-  const r = await withProposalRoutes([pendingDoc()], (call) =>
-    call('/not-an-id/decision', { method: 'POST', role: 'admin', body: { decision: 'approve', comment: 'x' } }));
-  assert.equal(r.status, 400);
-});
-
-test('approve appends an audit verdict and flips status', async () => {
-  const store = [pendingDoc()];
-  const r = await withProposalRoutes(store, (call) =>
-    call(`/${ID}/decision`, {
-      method: 'POST',
-      role: 'admin',
-      body: { decision: 'approve', comment: 'Covers a real gap; add with myalgia symptom scoping.', discipline: 'clinician' },
-    }));
-  assert.equal(r.status, 200);
-  assert.equal(r.body.proposal.status, 'approved');
-  assert.equal(r.body.proposal.verdicts.length, 1);
-  const v = r.body.proposal.verdicts[0];
-  assert.equal(v.decision, 'approve');
-  assert.equal(v.reviewerAlias, 'Dr Test');
-  assert.equal(v.discipline, 'clinician');
-  assert.ok(v.at);
-});
-
-test('unknown-but-valid id is a 404, not a 500', async () => {
-  const r = await withProposalRoutes([], (call) =>
-    call('/507f1f77bcf86cd7994390ff/decision', { method: 'POST', role: 'admin', body: { decision: 'reject', comment: 'no' } }));
-  assert.equal(r.status, 404);
+  assert.equal(gout.publishedStatus, null, 'registry conditions have no dynamic bundle');
+  const fibro = r.body.proposals.find((p) => p.normalizedName === 'fibromyalgia');
+  assert.equal(fibro.liveNow, true, 'AI-published label counts as live');
+  assert.equal(fibro.publishedStatus, 'live');
 });
 
 test('normalizeConditionName folds case, whitespace and punctuation drift', () => {
@@ -197,7 +185,7 @@ test('upsertFromRanking: creates pending rows, never reopens decided ones, refre
     updateOne: ConditionProposal.updateOne,
   };
   const store = [
-    // Already ratified by the panel — a re-run must not touch it.
+    // Already ratified by the gate — a re-run must not touch it.
     { _id: 'x1', normalizedName: 'gout', status: 'approved', rationale: 'old', supportingCount: 3 },
   ];
   try {
@@ -252,9 +240,9 @@ test('upsertFromRanking: creates pending rows, never reopens decided ones, refre
   }
 });
 
-test('routes/proposals.js enforces protect+adminOnly on both routes', () => {
+test('routes/proposals.js is guarded and human-decision-free', () => {
   const src = require('fs').readFileSync(require.resolve('../routes/proposals.js'), 'utf8');
   assert.match(src, /require\('\.\.\/middleware\/auth'\)/);
   assert.match(src, /router\.get\('\/', protect, adminOnly/);
-  assert.match(src, /router\.post\('\/:id\/decision', protect, adminOnly/);
+  assert.doesNotMatch(src, /router\.post/, 'no write endpoint may exist — the gate is the only decider');
 });

@@ -1071,6 +1071,18 @@ export const getActiveAssessment = async () => {
   return data;
 };
 
+// AI-published conditions the intake form may offer (evidence-gated,
+// server/scripts/conditionGapAnalysis.js). Curated view only — label, group,
+// sex gate, symptom pool and the professional citations behind each bundle.
+export const getLiveConditionExtensions = async () => {
+  const res = await apiFetch('/instrument/live-extensions', {
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throwFriendly(res.status, data);
+  return Array.isArray(data?.conditions) ? data.conditions : [];
+};
+
 // Save AI results to an assessment record
 export const saveAssessmentResults = async (assessmentId, results) => {
   const res = await apiFetch(`/assessment/${assessmentId}/results`, {

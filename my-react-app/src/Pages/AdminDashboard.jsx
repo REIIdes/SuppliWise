@@ -287,12 +287,11 @@ const TAB_ICONS = {
       <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
     </svg>
   ),
-  // Hourglass over a line: an AI suggestion waiting on a professional verdict.
+  // Logbook: the AI's own gate decisions and citations, recorded automatically.
   proposals: (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M6 2h12M6 22h12"/>
-      <path d="M8 2v4l4 4 4-4V2"/>
-      <path d="M8 22v-4l4-4 4 4v4"/>
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
     </svg>
   ),
   profile: (
@@ -1479,7 +1478,7 @@ function AdminDashboard() {
     subscriptions: 'Subscription management',
     chats: 'Chat management',
     'assessment-management': 'Assessment Management',
-    proposals: 'AI Proposal Queue',
+    proposals: 'AI Learning Log',
     ai: 'AI management',
     profile: 'Profile',
     security: 'Security',
@@ -1758,7 +1757,7 @@ function AdminDashboard() {
                   : tab === 'chats'            ? 'Chat management'
                   : tab === 'security'         ? 'Security center'
                   : tab === 'profile'          ? 'Administrator profile'
-                  : tab === 'proposals'        ? 'AI proposal queue'
+                  : tab === 'proposals'        ? 'AI learning log'
                   : 'Assessment Management'}
               </h1>
             </div>

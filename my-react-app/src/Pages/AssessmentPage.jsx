@@ -1,8 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
-import { saveAssessment, getRecommendations, saveAssessmentResults, getPriorityStatus, getCurrentSupplements, getToken, getStoredUser, migrateAssessmentHistory, getMedicalReviewStatus, requestMedicalReview } from '../api';
+import { saveAssessment, getRecommendations, saveAssessmentResults, getPriorityStatus, getCurrentSupplements, getToken, getStoredUser, migrateAssessmentHistory, getMedicalReviewStatus, requestMedicalReview, getLiveConditionExtensions } from '../api';
 import { prefillSupplements } from '../utils/supplementPrefill.js';
+import {
+  mergeConditionGroups,
+  dynamicSymptomsFor,
+  dynamicTooltip,
+  prefixDynamicSymptoms,
+} from '../utils/dynamicAssessment.js';
 import { isDeadHour, countdownTo, DEAD_HOURS } from '../utils/slotSchedule.js';
 import useNow from '../hooks/useNow';
 import { useSubscription, SUBSCRIPTION_EVENT } from '../hooks/useSubscription';
@@ -173,10 +179,13 @@ const CONDITION_INFO = {
   'Endometriosis / Uterine Fibroids': 'Uterine-tissue conditions causing heavy or prolonged periods, pelvic pain, and fatigue — iron loss and chronic inflammation are the two supplement-safety angles.',
 };
 
-// Reusable condition tooltip component
-function ConditionTooltip({ condition, openCondition, onToggle }) {
+// Reusable condition tooltip component. `liveInfo` carries the tooltip for an
+// AI-published condition (its rationale + professional citations); built-in
+// labels always win, so the hard-coded copy is never shadowed.
+function ConditionTooltip({ condition, openCondition, onToggle, liveInfo = null }) {
+  const info = CONDITION_INFO[condition] || liveInfo;
   const visible = openCondition === condition;
-  if (!CONDITION_INFO[condition]) return null;
+  if (!info) return null;
   return (
     <span className="diet-tooltip-wrap diet-tooltip-wrap--card" onClick={(e) => e.stopPropagation()}>
       <button
@@ -189,7 +198,7 @@ function ConditionTooltip({ condition, openCondition, onToggle }) {
       </button>
       {visible && (
         <span className="diet-tooltip-box">
-          {CONDITION_INFO[condition]}
+          {info}
           <button
             type="button"
             className="diet-tooltip-close"
@@ -1247,7 +1256,7 @@ const FITNESS_FOCUS_OPTIONS = [
   'Endurance / Cardio', 'Flexibility / Mobility', 'General Fitness',
 ];
 
-function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current: {} } }) {
+function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current: {} }, live = [] }) {
   // Calculate BMI from Step 1 data
   const calculateBMI = () => {
     const weight = parseFloat(data.weight);
@@ -1446,7 +1455,7 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
 
       <p id="field-medicalConditions" className="step-hint">Medical Conditions <span className="field-hint">(select all that apply)</span></p>
 
-      {conditionGroups.map(({ group, items }) => (
+      {mergeConditionGroups(conditionGroups, live, data.gender).map(({ group, items }) => (
         <div key={group} className="condition-group">
           <p className="condition-group-label">{group}</p>
           <div className="checkbox-grid-2">
@@ -1458,7 +1467,7 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
                   onChange={() => toggleCondition(c)}
                 />
                 {c}
-                <ConditionTooltip condition={c} openCondition={openCondition} onToggle={setOpenCondition} />
+                <ConditionTooltip condition={c} openCondition={openCondition} onToggle={setOpenCondition} liveInfo={dynamicTooltip(live, c)} />
               </label>
             ))}
           </div>
@@ -1593,7 +1602,10 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
 
             <div className="symptoms-list">
               {selectedConditions.map((condition) => {
-                const conditionSymptoms = ALL_SYMPTOMS.filter(s => {
+                // AI-published conditions answer from their own evidence-gated
+                // pool; built-ins keep the hard-coded ALL_SYMPTOMS scoping.
+                const dynSymptoms = dynamicSymptomsFor(live, condition);
+                const conditionSymptoms = dynSymptoms ?? ALL_SYMPTOMS.filter(s => {
                   if (s.conditions.length === 0) return false;
                   if (!s.conditions.includes(condition)) return false;
                   if (s.genders.length > 0 && !s.genders.includes(gender) && gender !== '') return false;
@@ -1601,7 +1613,11 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
                   return true;
                 });
 
-                if (conditionSymptoms.length === 0) return null;
+                // A built-in with nothing to show stays hidden (pre-existing
+                // behaviour). An AI-published label must ALWAYS render: with an
+                // empty or not-yet-loaded pool, its "No symptoms for X" escape
+                // is the only way Step 3 validation can be satisfied.
+                if (conditionSymptoms.length === 0 && dynSymptoms === null) return null;
 
                 const noSymptomsChecked = noSymptomsPerCondition.includes(condition);
 
@@ -2321,6 +2337,26 @@ function AssessmentPage() {
   const [medicalReviewStatus, setMedicalReviewStatus] = useState('none');
   const [prioritySymptoms, setPrioritySymptoms] = useState([]);
 
+  // AI-published conditions (server evidence gate). A failed fetch leaves []
+  // — the form is then exactly the hard-coded questionnaire.
+  const [liveConditions, setLiveConditions] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    getLiveConditionExtensions()
+      .then((conds) => { if (!cancelled) setLiveConditions(conds); })
+      .catch(() => { /* offline: built-in list only */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Update mode prefills reconstruct symptom keys synchronously, before this
+  // bundle can arrive — re-prefix the plain leftovers once it lands.
+  // prefixDynamicSymptoms returns the same object when nothing matches, so
+  // this never loops.
+  useEffect(() => {
+    if (liveConditions.length === 0) return;
+    setFormData((prev) => prefixDynamicSymptoms(prev, liveConditions));
+  }, [liveConditions]);
+
   const [formData, setFormData] = useState(() => {
     // Update mode: load existing assessment data
     if (isUpdateMode && updateAssessmentData) {
@@ -2969,7 +3005,7 @@ function AssessmentPage() {
 
           {step === 1 && <Step1 data={formData} onChange={handleChange} errors={errors} />}
           {step === 2 && <Step2 data={formData} onChange={handleChange} errors={errors} />}
-          {step === 3 && <Step3Combined data={formData} onChange={handleChange} errors={errors} symptomRowRefs={symptomRowRefs} />}
+          {step === 3 && <Step3Combined data={formData} onChange={handleChange} errors={errors} symptomRowRefs={symptomRowRefs} live={liveConditions} />}
           {step === 4 && (
             <Step4Lifestyle
               data={formData}

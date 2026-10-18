@@ -7,6 +7,7 @@ const { simplifiedReasonFor, simplifiedEvidenceFor } = require('../utils/recomme
 const { promptSafe, ASSESSMENT_SYSTEM_PROMPT, buildAssessmentPrompt } = require('../utils/assessmentPrompt');
 const { enforcePlanConsistency } = require('../utils/planConsistency');
 const { containsForbiddenFood } = require('../utils/planEvaluation');
+const { getLiveConditions, mergeSelectedBundles, kbBlockForPrompt } = require('../utils/dynamicConditions');
 
 // Kept on the route's public surface because existing probes import it from
 // here; the implementation now lives in utils/assessmentPrompt.js.
@@ -63,6 +64,12 @@ router.post('/', protect, async (req, res) => {
     const processedAllergies = sanitizeMedicalField(a.allergies);
     const processedSupplements = sanitizeMedicalField(a.currentSupplements);
 
+    // AI-published conditions (60s-cached): the learned knowledge enters BOTH
+    // paths — section 9 of the prompt KB for the LLM, and a deterministic
+    // bundle merge for the rule fallback — so a published condition behaves
+    // identically to a hard-coded one regardless of which engine answers.
+    const liveDynamic = await getLiveConditions();
+
     // The structured prompt (ROLE / DOMAIN KNOWLEDGE BASE / INSTRUCTIONS /
     // TONE / PATIENT DATA / OUTPUT FORMAT) is built in utils/assessmentPrompt
     // so the benchmark harness (eval/aiBenchmark.js) scores the exact prompt
@@ -72,6 +79,7 @@ router.post('/', protect, async (req, res) => {
       currentMedications: processedMedications,
       allergies: processedAllergies,
       currentSupplements: processedSupplements,
+      _dynamicKb: kbBlockForPrompt(liveDynamic),
     });
 
     // -- Default AI call (assessment) ---------------------------------------
@@ -139,11 +147,11 @@ router.post('/', protect, async (req, res) => {
     }
 
     console.log('Using rule-based clinical fallback');
-    return res.json(sanitizeStrings(enforcePlanConsistency(generateClinicalFallback(req.body))));
+    return res.json(sanitizeStrings(enforcePlanConsistency(generateClinicalFallback(req.body, liveDynamic))));
 
   } catch (error) {
     console.error('Recommend route error:', error.message);
-    return res.json(sanitizeStrings(enforcePlanConsistency(generateClinicalFallback(req.body))));
+    return res.json(sanitizeStrings(enforcePlanConsistency(generateClinicalFallback(req.body, liveDynamic))));
   }
 });
 
@@ -184,7 +192,7 @@ function buildSeekingSupport() {
   };
 }
 
-function generateClinicalFallback(a) {
+function generateClinicalFallback(a, liveDynamic = []) {
   // Helper function to check allergies
   const hasAllergy = (substance) => {
     const allergies = (a.allergies || '').toLowerCase();
@@ -759,6 +767,15 @@ function generateClinicalFallback(a) {
       if (!recs.find(r => r.name.includes('Berberine')) && !conditions.includes('Diabetes'))
         recs.push({ name: 'Berberine', reason: 'Berberine improves insulin sensitivity and supports healthy weight management by activating AMPK, the body\'s metabolic master switch. Clinical trials show modest but meaningful weight reduction alongside metabolic improvements.', dosage: '500mg twice daily with meals', timing: 'With breakfast and dinner', priority: 'Medium', interactions: 'Monitor blood sugar if on diabetes medications' });
     }
+  }
+
+  // -- AI-published conditions (evidence-gated, scripts/conditionGapAnalysis) --
+  {
+    const dyn = mergeSelectedBundles(liveDynamic, conditions, a.gender);
+    recs.push(...dyn.recs);
+    warnings.push(...dyn.warnings);
+    avoidList.push(...dyn.avoidList);
+    lifestyleAdvice.push(...dyn.lifestyleAdvice);
   }
 
   // -- General lifestyle if not enough specific advice --

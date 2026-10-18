@@ -4,19 +4,23 @@ import { formatShortDate } from '../utils/dates';
 import './ConditionProposals.css';
 
 /*
- * AI condition-proposal ratification queue.
+ * AI learning log — read-only.
  *
- * The gap analysis proposes medical conditions from real assessment data; it
- * cannot ship any of them. A condition only moves from `pending` to live when
- * a health professional — signed in here as an admin, the same identity the
- * instrument panel uses — records a verdict, and the server refuses a verdict
- * without a written comment. There is deliberately no "create", "edit" or
- * "approve all" affordance: the queue is the ratification step, not a form.
+ * The gap analysis reads real assessments, drafts condition candidates, and
+ * the clinical evidence gate decides each one AUTONOMOUSLY: a candidate
+ * publishes itself into the live questionnaire only when every supplement it
+ * proposes cites an authoritative health-professional source, and nothing
+ * inside the prescription/danger blocklist survives review. No admin click
+ * ships or blocks anything — this page exists to show WHY each verdict
+ * happened: every row carries the gate's reasoning verbatim and the exact
+ * citations it accepted or missed. There is deliberately no decision form.
  */
 
-const DISCIPLINES = ['clinician', 'dietitian', 'statistician', 'public-health'];
-
-const STATUS_LABEL = { pending: 'Pending ratification', approved: 'Approved', rejected: 'Rejected' };
+const STATUS_LABEL = {
+  pending: 'Awaiting a gated re-run',
+  approved: 'Auto-approved by the evidence gate',
+  rejected: 'Auto-rejected by the evidence gate',
+};
 
 async function request(path, options = {}) {
   const res = await fetch(`${BASE_URL}/proposals${path}`, {
@@ -36,32 +40,22 @@ function StatusChip({ status }) {
   return <span className={`cp-chip cp-chip--${status}`}>{STATUS_LABEL[status] || status}</span>;
 }
 
-function ProposalCard({ proposal, busy, onDecide, error }) {
-  const [comment, setComment] = useState('');
-  const [discipline, setDiscipline] = useState('');
-  const canDecide = proposal.status === 'pending';
-  const trimmed = comment.trim();
-
-  const submit = (decision) => {
-    if (!trimmed || busy) return;
-    onDecide(proposal._id, { decision, comment: trimmed, discipline });
-  };
-
+function ProposalCard({ proposal }) {
   return (
-    <article className="cp-card" aria-label={`Proposal: ${proposal.name}`}>
+    <article className="cp-card" aria-label={`AI learning entry: ${proposal.name}`}>
       <header className="cp-card__head">
         <div>
           <h3>{proposal.name}</h3>
           <div className="cp-tags">
             {proposal.group && <span className="cp-chip cp-chip--group">{proposal.group}</span>}
             <StatusChip status={proposal.status} />
-            {proposal.alreadyLive && (
-              <span className="cp-chip cp-chip--live" title="An earlier human review shipped this option before the queue existed. Ratify or retire it.">
-                Shipped in 2026-10 audit — ratify or retire
+            {proposal.publishedStatus === 'live' && (
+              <span className="cp-chip cp-chip--live" title="The gate accepted this bundle — it is now offered in the live assessment and consumed by both recommendation engines.">
+                Published in the live questionnaire
               </span>
             )}
-            {!proposal.alreadyLive && proposal.liveNow && (
-              <span className="cp-chip cp-chip--live">Already in the live registry</span>
+            {proposal.liveNow && proposal.publishedStatus !== 'live' && (
+              <span className="cp-chip cp-chip--live">Already in the built-in registry</span>
             )}
           </div>
         </div>
@@ -90,52 +84,22 @@ function ProposalCard({ proposal, busy, onDecide, error }) {
         </div>
       </dl>
 
-      {proposal.verdicts?.length > 0 && (
+      {proposal.verdicts?.length > 0 ? (
         <ul className="cp-verdicts">
           {proposal.verdicts.map((v, i) => (
             <li key={`${v.at}-${i}`}>
-              <span className={`cp-verdict cp-verdict--${v.decision}`}>{v.decision === 'approve' ? 'Approved' : 'Rejected'}</span>
-              <strong>{v.reviewerAlias || 'Panelist'}</strong>
+              <span className={`cp-verdict cp-verdict--${v.decision}`}>{v.decision === 'approve' ? 'Accepted' : 'Refused'}</span>
+              <strong>{v.reviewerAlias || 'Evidence Gate (automated)'}</strong>
               {v.discipline && <em>{v.discipline}</em>}
               <span className="cp-verdict__when">{v.at ? formatShortDate(v.at) : ''}</span>
               <p>{v.comment}</p>
             </li>
           ))}
         </ul>
-      )}
-
-      {canDecide ? (
-        <div className="cp-decision">
-          <label className="cp-decision__discipline">
-            Your discipline (optional)
-            <select value={discipline} onChange={(e) => setDiscipline(e.target.value)}>
-              <option value="">—</option>
-              {DISCIPLINES.map((d) => <option key={d} value={d}>{d}</option>)}
-            </select>
-          </label>
-          <label className="cp-decision__comment">
-            Written rationale — required for every verdict
-            <textarea
-              rows={2}
-              maxLength={2000}
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              placeholder="e.g. Clinically common in PH cohorts; add with myalgia symptom scoping and an interactions review."
-            />
-          </label>
-          <div className="cp-decision__actions">
-            <button type="button" className="cp-btn cp-btn--approve" disabled={!trimmed || busy} onClick={() => submit('approve')}>
-              {busy === 'approve' ? 'Recording…' : 'Approve'}
-            </button>
-            <button type="button" className="cp-btn cp-btn--reject" disabled={!trimmed || busy} onClick={() => submit('reject')}>
-              {busy === 'reject' ? 'Recording…' : 'Reject'}
-            </button>
-          </div>
-          {error && <p className="cp-decision__error" role="alert">{error}</p>}
-        </div>
       ) : (
         <p className="cp-decided-note">
-          Ratified {proposal.verdicts?.length ? `in ${proposal.verdicts.length} recorded verdict${proposal.verdicts.length === 1 ? '' : 's'}` : ''} — a further panel verdict can still revise this decision through the API.
+          Queued before the evidence gate existed — the next gated run publishes or refuses it automatically
+          with the citations it accepted or missed recorded here.
         </p>
       )}
     </article>
@@ -146,9 +110,7 @@ const ConditionProposals = () => {
   const [data, setData] = useState(null);
   const [loadError, setLoadError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('pending');
-  const [busy, setBusy] = useState(null); // { id, decision }
-  const [decisionError, setDecisionError] = useState('');
+  const [filter, setFilter] = useState('all');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -165,22 +127,6 @@ const ConditionProposals = () => {
 
   useEffect(() => { load(); }, [load]);
 
-  const decide = useCallback(async (id, { decision, comment, discipline }) => {
-    setBusy({ id, decision });
-    setDecisionError('');
-    try {
-      await request(`/${id}/decision`, {
-        method: 'POST',
-        body: JSON.stringify({ decision, comment, ...(discipline ? { discipline } : {}) }),
-      });
-      await load();
-    } catch (err) {
-      setDecisionError(err.message);
-    } finally {
-      setBusy(null);
-    }
-  }, [load]);
-
   const proposals = useMemo(() => {
     const all = data?.proposals || [];
     return filter === 'all' ? all : all.filter((p) => p.status === filter);
@@ -189,14 +135,17 @@ const ConditionProposals = () => {
   const counts = data?.counts || { pending: 0, approved: 0, rejected: 0 };
 
   return (
-    <section className="cp" aria-label="AI condition proposal queue">
+    <section className="cp" aria-label="AI learning log">
       <header className="cp-head">
         <div>
-          <h2>AI condition proposals</h2>
+          <h2>AI learning log</h2>
           <p className="cp-head__rule">
-            The gap analysis reads real assessments and <strong>proposes</strong> new medical-condition options.
-            Nothing ships without your written verdict — approve or reject requires a rationale, and every
-            verdict is stored in an audit trail attributed to your admin identity.
+            The gap analysis reads real assessments and drafts new condition knowledge, then the{' '}
+            <strong>clinical evidence gate</strong> (<code>{data?.governedBy || 'automated'}</code>) decides
+            autonomously: a candidate publishes itself into the live questionnaire only when every supplement
+            it proposes cites an authoritative health-professional source — otherwise it is refused, with the
+            missing proof recorded verbatim. This log is read-only by design: the gate is the decider, not a
+            button here.
           </p>
         </div>
         <button type="button" className="cp-btn cp-btn--ghost" onClick={load} disabled={loading}>
@@ -204,8 +153,8 @@ const ConditionProposals = () => {
         </button>
       </header>
 
-      <div className="cp-filters" role="tablist" aria-label="Filter proposals by status">
-        {[['pending', counts.pending], ['approved', counts.approved], ['rejected', counts.rejected], ['all', data ? data.proposals.length : 0]].map(([key, n]) => (
+      <div className="cp-filters" role="tablist" aria-label="Filter learning log entries by gate outcome">
+        {[['all', data ? data.proposals.length : 0], ['approved', counts.approved], ['rejected', counts.rejected], ['pending', counts.pending]].map(([key, n]) => (
           <button
             key={key}
             type="button"
@@ -214,31 +163,25 @@ const ConditionProposals = () => {
             className={filter === key ? 'cp-filter cp-filter--on' : 'cp-filter'}
             onClick={() => setFilter(key)}
           >
-            {STATUS_LABEL[key] || 'All proposals'} <strong>{n}</strong>
+            {key === 'all' ? 'All entries' : STATUS_LABEL[key]} <strong>{n}</strong>
           </button>
         ))}
       </div>
 
       {loadError && <p className="cp-error" role="alert">{loadError}</p>}
 
-      {!loadError && loading && !data && <p className="cp-empty">Loading the queue…</p>}
+      {!loadError && loading && !data && <p className="cp-empty">Loading the learning log…</p>}
       {!loadError && data && proposals.length === 0 && (
         <p className="cp-empty">
           {filter === 'pending'
-            ? 'Nothing awaits ratification. Run the condition-gap analysis to queue new candidates.'
-            : `No ${filter} proposals yet.`}
+            ? 'Nothing awaits a gated re-run.'
+            : `No ${filter} entries yet — run the condition-gap analysis to let the AI learn and decide.`}
         </p>
       )}
 
       <div className="cp-list">
         {proposals.map((p) => (
-          <ProposalCard
-            key={p._id}
-            proposal={p}
-            busy={busy?.id === p._id ? busy.decision : null}
-            onDecide={decide}
-            error={busy?.id === p._id ? decisionError : ''}
-          />
+          <ProposalCard key={p._id} proposal={p} />
         ))}
       </div>
     </section>
