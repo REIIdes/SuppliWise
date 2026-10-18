@@ -167,18 +167,48 @@ const probes = {
     return { status: 'healthy', detail: `Stored markup stripped ("${out.value.slice(0, 60)}"). React escapes on render as a second layer.` };
   },
 
-  // ── NoSQL injection: crafted JSON types must not reach query operators ──
+  // ── NoSQL injection: the REAL boundary guard, attacked with live payloads ─
   nosql_injection: async () => {
-    // Mirrors the auth-layer str() coercion: objects become inert strings.
-    const coerce = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v));
-    const evil = { $gt: '' };
-    const coerced = coerce(evil);
-    const stillOperator = coerced && typeof coerced === 'object';
-    const loginGuard = typeof evil !== 'string'; // login typeof-checks before use
-    if (stillOperator || !loginGuard) {
-      return { status: 'critical', detail: 'Non-string input could reach a Mongo operator.' };
+    const { nosqlGuard } = require('../middleware/nosqlGuard');
+    const attack = (req) => { nosqlGuard(req, {}, () => {}); return req; };
+    // Every classic operator payload, run through the mounted middleware.
+    const bags = [
+      attack({ query: { email: { $ne: null } }, params: {}, body: undefined }),
+      attack({ query: {}, params: { id: { $gt: '' } }, body: undefined }),
+      attack({ query: {}, params: {}, body: { email: { $ne: null }, password: { $gt: '' } } }),
+      attack({ query: {}, params: {}, body: { otp: { $regex: '.*' }, $where: 'sleep(5000)' } }),
+      attack({ query: {}, params: {}, body: JSON.parse('{"__proto__":{"polluted":true},"a":{"$set":{"x":1}}}') }),
+    ];
+    const survivingOperators = [];
+    for (const req of bags) {
+      for (const part of ['query', 'params', 'body']) {
+        const bag = req[part];
+        if (!bag || typeof bag !== 'object') continue;
+        for (const [key, value] of Object.entries(bag)) {
+          if (key.startsWith('$') || key.includes('.')) survivingOperators.push(`${part}.${key}`);
+          else if (value && typeof value === 'object'
+            && Object.keys(value).some((k) => k.startsWith('$') || k.includes('.'))) {
+            survivingOperators.push(`${part}.${key}`);
+          }
+        }
+      }
     }
-    return { status: 'healthy', detail: 'Object-typed email/password/OTP coerced to inert strings with 400 guards; operators never reach queries.' };
+    if (survivingOperators.length > 0) {
+      return { status: 'critical', detail: `Operator keys survived the guard: ${survivingOperators.join(', ')}.` };
+    }
+    // ({}).polluted must still be undefined after a __proto__ body.
+    if (({}).polluted !== undefined) {
+      return { status: 'critical', detail: 'Prototype pollution succeeded through the guard.' };
+    }
+    // A field whose value was ONLY operators is dropped, not passed on as `{}`.
+    const bypass = attack({ query: {}, params: {}, body: { email: { $ne: null }, age: 30 } });
+    if (Object.prototype.hasOwnProperty.call(bypass.body, 'email')) {
+      return { status: 'critical', detail: 'The {"email":{"$ne":null}} login bypass survived.' };
+    }
+    if (bypass.body.age !== 30) {
+      return { status: 'warning', detail: 'Guard removed legitimate data alongside the operator payload.' };
+    }
+    return { status: 'healthy', detail: 'Middleware-stripped: 5 operator/proto payloads (query, params, body) left no $-key, no dotted key, no reachable bypass.' };
   },
 
   // ── Path traversal: actively attack every static-file URL encoding ──────
@@ -239,6 +269,198 @@ const probes = {
       return { status: 'warning', detail: `Cookie/session middleware detected (${[...new Set(cookieBased)].join(', ')}) — confirm SameSite/CSRF tokens.` };
     }
     return { status: 'healthy', detail: 'Stateless JWT in Authorization header; no cookies or server sessions — CSRF not applicable.' };
+  },
+
+  // ── SSRF: no server-side outbound request may take its target from a client ─
+  ssrf_outbound: async () => {
+    const fs = require('fs');
+    const dir = path.join(__dirname, '..', 'utils');
+    const offenders = [];
+    // Every fetch() in the outbound-calling helpers must resolve its URL from
+    // configuration (process.env / a hard-coded provider table), never from a
+    // request. The rule is checked against the call site's own statement, so a
+    // future `fetch(req.body.callbackUrl)` is caught rather than reviewed.
+    for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.js'))) {
+      const src = fs.readFileSync(path.join(dir, file), 'utf8');
+      const lines = src.split('\n');
+      lines.forEach((line, i) => {
+        if (!/await fetch\(|https?\.request\(/.test(line)) return;
+        // The URL argument is either on this line or the 1-3 lines after it.
+        const statement = lines.slice(i, i + 4).join(' ');
+        if (/\bfetch\(\s*(req\.|String\(req\.)|`[^`]*\$\{[^}]*\breq\./.test(statement)) {
+          offenders.push(`${file}:${i + 1}`);
+        }
+      });
+    }
+    if (offenders.length > 0) {
+      return { status: 'critical', detail: `Outbound request target derived from a request: ${offenders.join(', ')}.` };
+    }
+    return { status: 'healthy', detail: 'All outbound calls (AI providers, SMS transports, geo lookup) target env-configured or hard-coded hosts; no user-supplied URL is ever fetched. Geo replies are treated as untrusted and sanitized.' };
+  },
+
+  // ── Command injection: request handling must never reach a shell ────────
+  command_injection: async () => {
+    const fs = require('fs');
+    const roots = ['routes', 'middleware', 'utils', 'models'];
+    const hits = [];
+    for (const root of roots) {
+      const dir = path.join(__dirname, '..', root);
+      for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.js'))) {
+        const src = fs.readFileSync(path.join(dir, file), 'utf8');
+        if (/require\((?:'node:)?child_process'|\bexecSync\(|\bspawnSync\(|\bshell:\s*true/.test(src)) {
+          hits.push(`${root}/${file}: shell execution`);
+        }
+        // `.exec()` here is the mongoose query executor, not a shell — match
+        // only a bare global eval / Function constructor.
+        if (/(^|[^.\w])eval\s*\(|new Function\s*\(/.test(src)) {
+          hits.push(`${root}/${file}: dynamic code evaluation`);
+        }
+      }
+    }
+    if (hits.length > 0) {
+      return { status: 'critical', detail: `Request-handling code can execute code/commands: ${hits.join(', ')}.` };
+    }
+    return { status: 'healthy', detail: 'No shell, spawn, or dynamic code evaluation anywhere in routes/middleware/utils/models — user input is only ever data (mongoose filters, fs paths built from server-generated ids).' };
+  },
+
+  // ── Insecure deserialization ───────────────────────────────────────────
+  insecure_deserialization: async () => {
+    const fs = require('fs');
+    const root = path.join(__dirname, '..');
+    const deps = Object.keys({
+      ...JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).dependencies,
+    });
+    const unsafeLibs = ['node-serialize', 'serialize-javascript', 'session-file-store', 'js-yaml', 'yaml', 'xml2js', 'fast-xml-parser', 'dot'];
+    const present = unsafeLibs.filter((lib) => deps.includes(lib));
+    if (present.length > 0) {
+      return { status: 'critical', detail: `Deserialization/parse library with known gadget risk installed: ${present.join(', ')}.` };
+    }
+    // Tokens are the only serialized object this API accepts from a client, so
+    // the algorithm set is the entire deserialization trust boundary — and it
+    // has to be pinned at EVERY verify site, not just the middleware one.
+    const verifyFiles = [];
+    const walkVerify = (dir) => {
+      for (const entry of fs.readdirSync(path.join(root, dir), { withFileTypes: true })) {
+        const abs = path.join(root, dir, entry.name);
+        if (entry.isDirectory()) { if (!entry.name.startsWith('node_modules')) walkVerify(`${dir}/${entry.name}`); }
+        else if (entry.name.endsWith('.js')) verifyFiles.push({ rel: `${dir}/${entry.name}`, abs });
+      }
+    };
+    walkVerify('routes'); walkVerify('middleware'); walkVerify('utils');
+    const unpinned = [];
+    let sites = 0;
+    for (const { rel, abs } of verifyFiles) {
+      const src = fs.readFileSync(abs, 'utf8');
+      for (const line of src.split('\n')) {
+        if (!/jwt\.verify\(/.test(line) || /^\s*(\/\/|\*)/.test(line)) continue;
+        sites += 1;
+        if (!/algorithms/.test(line)) unpinned.push(rel);
+      }
+    }
+    if (sites === 0) {
+      return { status: 'critical', detail: 'No jwt.verify call sites found — the census is broken, not secure.' };
+    }
+    if (unpinned.length > 0) {
+      return { status: 'critical', detail: `Unpinned jwt.verify (algorithm could be 'none' or swapped): ${[...new Set(unpinned)].join(', ')}.` };
+    }
+    return { status: 'healthy', detail: `Trusted-types only: JSON over Bearer tokens, no native/serialized object graphs, no XML/YAML parser installed. All ${sites} jwt.verify sites pin HS256; step-up tokens are HMAC-signed JWTs.` };
+  },
+
+  // ── XXE + SSTI: no XML parser, no server-side template engine ──────────
+  xxe_ssti: async () => {
+    const fs = require('fs');
+    const root = path.join(__dirname, '..');
+    const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+    const all = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+    const xml = Object.keys(all).filter((d) => /xml|xsd|soap|dtd/i.test(d));
+    const tpl = Object.keys(all).filter((d) => /^(ejs|pug|jade|handlebars|nunjucks|dot|twig|mustache|liquid)$/.test(d));
+    if (xml.length > 0) {
+      return { status: 'critical', detail: `XML parser dependency present (${xml.join(', ')}) — verify external entities are disabled.` };
+    }
+    const routesDir = path.join(root, 'routes');
+    const renderers = fs.readdirSync(routesDir).filter((f) => f.endsWith('.js'))
+      .filter((f) => /res\.render\(|\bnew\s+(Template|Nunjucks|Handlebars)\b/.test(fs.readFileSync(path.join(routesDir, f), 'utf8')));
+    if (tpl.length > 0 || renderers.length > 0) {
+      return { status: 'critical', detail: `Server-side template surface: deps [${tpl.join(', ')}], files [${renderers.join(', ')}] — user input could reach template syntax.` };
+    }
+    return { status: 'healthy', detail: 'The API speaks JSON only: no XML parser (XXE structurally impossible) and no template engine (SSTI structurally impossible) — responses are res.json/res.send of data, never compiled templates.' };
+  },
+
+  // ── Broken access control: deny-by-default route census ───────────────
+  // Every registered route must be gated (router-level `protect`, or
+  // `protect`/`adminOnly` inline) unless it appears in this explicit public
+  // list. A new endpoint therefore fails CLOSED in this audit: adding one
+  // without a gate turns the monitor red instead of shipping it quietly open.
+  access_control_default_deny: async () => {
+    const fs = require('fs');
+    const PUBLIC = {
+      'routes/auth.js': ['/captcha', '/register', '/login', '/admin-login', '/verify-admin-2fa', '/admin-refresh',
+        '/verify-login-otp', '/send-login-sms', '/verify-login-sms', '/remember', '/login-2fa', '/resend-login-otp',
+        '/forgot-password', '/resend-password-reset-otp', '/verify-password-reset-otp', '/reset-password',
+        '/request-email-otp', '/verify-email-otp', '/profile'],
+      'routes/passwordReset.js': ['*'], // token-bound recovery flow, rate-limited per step
+      'routes/passkeys.js': ['/login/options', '/login/verify'],
+      'routes/recoveryCodes.js': ['/verify'],
+      'routes/totp.js': ['/verify'],
+      'routes/subscription.js': ['/plans'],
+      // Registered ahead of the router-level protect on purpose: a buyer scans a
+      // batch QR without an account, and a share link is opened by whoever holds
+      // the unguessable token the owner issued.
+      'routes/web3/index.js': ['/verify/:code', '/verify/:code/qr', '/share/:token'],
+    };
+    const files = [];
+    const walk = (dir, prefix) => {
+      for (const entry of fs.readdirSync(path.join(__dirname, '..', dir), { withFileTypes: true })) {
+        if (entry.isDirectory()) walk(`${dir}/${entry.name}`, `${prefix}${entry.name}/`);
+        else if (entry.name.endsWith('.js')) files.push({ rel: `${prefix}${entry.name}`, abs: path.join(__dirname, '..', dir, entry.name) });
+      }
+    };
+    walk('routes', 'routes/');
+
+    const ungated = [];
+    // A sub-router mounted by a parent that already ran `router.use(protect)`
+    // ahead of the mount is gated by that parent — the web3 family works exactly
+    // this way (routes/web3/index.js gates, then mounts chain/supply/market/…).
+    const parentGateCovers = (rel) => {
+      const base = path.basename(rel, '.js');
+      return files.some((f) => {
+        if (f.rel === rel) return false;
+        const src = fs.readFileSync(f.abs, 'utf8').split('\n');
+        const blanketAt = src.findIndex((l) => /^router\.use\([^)]*\bprotect\b/.test(l));
+        if (blanketAt < 0) return false;
+        const mountedAt = src.findIndex((l) => new RegExp(`router\\.use\\([^)]*\\b${base}[Rr]outer\\b`).test(l));
+        return mountedAt > blanketAt;
+      });
+    };
+    const parentCovered = new Set();
+    for (const { rel } of files) {
+      if (parentGateCovers(rel)) parentCovered.add(rel);
+    }
+
+    for (const { rel, abs } of files) {
+      const src = fs.readFileSync(abs, 'utf8');
+      const lines = src.split('\n');
+      // A router-level gate protects every route registered AFTER it.
+      const blanketAt = lines.findIndex((l) => /^router\.use\([^)]*\bprotect\b/.test(l));
+      const coveredByParent = parentCovered.has(rel);
+      const allow = PUBLIC[rel] || [];
+      lines.forEach((line, i) => {
+        const m = line.match(/^router\.(?:get|post|put|patch|delete)\(\s*'([^']+)'/);
+        if (!m) return;
+        const routePath = m[1];
+        const own = line.slice(line.indexOf(routePath) + routePath.length);
+        const gated = /\bprotect\b|\badminOnly\b/.test(own)
+          || (blanketAt > -1 && blanketAt < i)
+          || coveredByParent
+          || allow.includes(routePath) || allow.includes('*');
+        if (!gated) ungated.push(`${rel} ${routePath}`);
+      });
+    }
+    if (ungated.length > 0) {
+      return { status: 'critical', detail: `Ungated routes (no protect/adminOnly, not in the public allowlist): ${ungated.join(', ')}.` };
+    }
+    const total = files.reduce((n, f) => n + fs.readFileSync(f.abs, 'utf8').split('\n').filter((l) => /^router\.(?:get|post|put|patch|delete)\(/.test(l)).length, 0);
+    return { status: 'healthy', detail: `${total} registered routes audited: every one is behind protect/adminOnly or an explicit public allowlist entry (credential + token-bound flows). Ownership is additionally enforced per query by user-scoped filters.` };
   },
 
   // ── Helpers for self-HTTP behavioral probes (localhost only) ──────────

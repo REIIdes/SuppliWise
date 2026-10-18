@@ -46,6 +46,9 @@ const AdminAccount = require('./models/AdminAccount');
 // The one trusted-origin list, and the CSRF guard built on it. See the CORS
 // block below for why these two used to be separate concerns.
 const { isAllowed: isTrustedOrigin, verifyOrigin, assertProductionConfigured, list: trustedOriginList } = require('./utils/origins');
+// Centralized Mongo-operator guard, mounted once after the JSON parsers —
+// see middleware/nosqlGuard.js for what it removes and what it leaves alone.
+const { nosqlGuard } = require('./middleware/nosqlGuard');
 // WebAuthn / passkey relying-party configuration. Loading it here is what makes
 // the production boot check below possible.
 const webauthn = require('./utils/webauthn');
@@ -469,6 +472,13 @@ app.use('/api/auth/profile', express.json({ limit: JSON_UPLOAD_LIMIT_BYTES }));
 app.use('/api/admin/profile', express.json({ limit: JSON_UPLOAD_LIMIT_BYTES }));
 app.use('/api/subscription/requests', express.json({ limit: JSON_UPLOAD_LIMIT_BYTES }));
 app.use(express.json({ limit: JSON_LIMIT_BYTES }));
+
+// The one Mongo-operator guard for the whole API. It must sit below the
+// parsers (there is nothing to clean above them) and above every router, so
+// that an object-typed `{$ne: null}` arriving in a query string, a route
+// parameter, or as a top-level body field can never reach a filter — including
+// in routes written later that forget their own type check.
+app.use(nosqlGuard);
 
 // ── STAGE 3 — HANDLE ───────────────────────────────────────────────────────
 // Password reset (emailed link) is mounted BEFORE routes/auth.js so it owns

@@ -1920,6 +1920,11 @@ const runMonitorProbes = async (app) => {
           prototype_pollution: ['Prototype Pollution', 'proto'],
           auth_bruteforce:     ['Auth Brute Force + Replay', 'bruteforce'],
           csrf_stateless:      ['CSRF (Stateless Auth)', 'csrf'],
+          ssrf_outbound:       ['SSRF (Outbound Requests)', 'ssrf'],
+          command_injection:   ['Command Injection', 'cmdi'],
+          insecure_deserialization: ['Insecure Deserialization', 'deser'],
+          xxe_ssti:            ['XXE + SSTI', 'xxe'],
+          access_control_default_deny: ['Access Control (Deny By Default)', 'authz'],
         }[key] || [key, key];
         // `app` rather than `req`: this run is shared by every concurrent
         // caller (see monitorInFlight), so it must not close over one request's
