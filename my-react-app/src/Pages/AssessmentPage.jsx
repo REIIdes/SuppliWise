@@ -1135,6 +1135,23 @@ const WATER_OPTIONS = [
   { value: '9+ glasses',           label: '9 or more glasses a day' },
 ];
 
+// Perceived daily stress. The VALUES must stay exactly these four strings:
+// the recommendation engine branches on 'High' | 'Severe' | 'Moderate'
+// (server/routes/recommend.js) and the admin overview chart groups by them.
+const STRESS_OPTIONS = [
+  { value: 'Low',       label: 'Low  (rarely feel stressed)' },
+  { value: 'Moderate',  label: 'Moderate  (stressed sometimes)' },
+  { value: 'High',      label: 'High  (stressed most days)' },
+  { value: 'Severe',    label: 'Severe  (constantly overwhelmed)' },
+];
+
+// Primary training goal. 'Muscle Gain' and 'Endurance / Cardio' are matched
+// verbatim by the recommendation engine — keep the strings in sync.
+const FITNESS_FOCUS_OPTIONS = [
+  'Not applicable', 'Muscle Gain', 'Weight Loss',
+  'Endurance / Cardio', 'Flexibility / Mobility', 'General Fitness',
+];
+
 function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current: {} } }) {
   // Calculate BMI from Step 1 data
   const calculateBMI = () => {
@@ -1605,6 +1622,23 @@ function Step4Lifestyle({ data, onChange, errors, isReadOnly = false, supplement
         {errors.sleepQuality && <span className="field-error-msg">{errors.sleepQuality}</span>}
       </div>
 
+      {/* Daily Stress Level — feeds the stress-response recommendations, the
+          admin stress chart, and (with High/Severe) ashwagandha scoring. */}
+      <div className="step-field">
+        <label>Daily Stress Level <span className="required-star">*</span></label>
+        <div className="radio-group flex-wrap">
+          {STRESS_OPTIONS.map(({ value, label }) => (
+            <label key={value} className="radio-label">
+              <input type="radio" name="stressLevel" value={value}
+                checked={data.stressLevel === value}
+                onChange={() => onChange('stressLevel', value)} />
+              {label}
+            </label>
+          ))}
+        </div>
+        {errors.stressLevel && <span className="field-error-msg">{errors.stressLevel}</span>}
+      </div>
+
       {/* Daily Water Intake */}
       <div className="step-field">
         <label>Daily Water Intake</label>
@@ -1692,6 +1726,40 @@ function Step4Lifestyle({ data, onChange, errors, isReadOnly = false, supplement
             </label>
           ))}
         </div>
+      </div>
+
+      {/* Primary Fitness Focus — optional; 'Muscle Gain' /
+          'Endurance / Cardio' steer the fitness recommendation branches. */}
+      <div className="step-field">
+        <label>Primary Fitness Focus</label>
+        <div className="radio-group flex-wrap">
+          {FITNESS_FOCUS_OPTIONS.map((opt) => (
+            <label key={opt} className="radio-label">
+              <input type="radio" name="fitnessFocus" value={opt}
+                checked={data.fitnessFocus === opt}
+                onChange={() => onChange('fitnessFocus', opt)} />
+              {opt}
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {/* Patient narrative — the priority red-flag scanner reads this text
+          (server/utils/priorityFlagging.js), so an anxious user typing
+          "chest pain and can't breathe" gets a safety path, not just a plan. */}
+      <div className="step-field">
+        <label>How You&apos;ve Been Feeling <span className="field-hint">(optional, in your own words)</span></label>
+        <textarea
+          placeholder="Describe how you have been feeling lately — energy, mood, sleep, digestion, anything unusual."
+          value={data.feelingDescription || ''}
+          onChange={(e) => onChange('feelingDescription', e.target.value.slice(0, 1000))}
+          rows={3}
+          maxLength={1000}
+          style={{ marginTop: '12px', resize: 'vertical' }}
+        />
+        <p className="field-hint-text">
+          {`${(data.feelingDescription || '').length}/1000`}
+        </p>
       </div>
 
       {/* Step Section Divider */}
@@ -1968,6 +2036,10 @@ function validateStep(step, formData) {
   }
 
   if (step === 4) {
+    // Daily Stress Level - REQUIRED (feeds stress-response recs + admin analytics)
+    if (!formData.stressLevel)
+      errors.stressLevel = 'Please rate your daily stress level.';
+
     // Lifestyle Habits - OPTIONAL, but if "Recreational Drugs" is checked, drug types is REQUIRED
     if ((formData.lifestyleHabits || []).includes('Recreational Drugs')) {
       if (!formData.recreationalDrugTypes || !formData.recreationalDrugTypes.trim()) {
@@ -2094,6 +2166,7 @@ const EMPTY_FORM = {
   symptoms: [], symptomSeverity: {},
   noSymptomsForConditions: [],
   stressLevel: '', sleepQuality: '', waterIntake: '',
+  fitnessFocus: '', feelingDescription: '',
   medicalConditions: [], currentMedications: '', allergies: '',
   lifestyleHabits: [],
   recreationalDrugTypes: '',

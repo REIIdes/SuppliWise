@@ -111,6 +111,8 @@ router.post('/', protect, async (req, res) => {
       return res.status(400).json({ message: `Blood test results must be ${TEXT_MAX} characters or fewer.` });
     if (currentSupplements && currentSupplements.length > SHORT_MAX)
       return res.status(400).json({ message: `Current supplements must be ${SHORT_MAX} characters or fewer.` });
+    if (req.body.feelingDescription && String(req.body.feelingDescription).length > TEXT_MAX)
+      return res.status(400).json({ message: `Feeling description must be ${TEXT_MAX} characters or fewer.` });
 
     // ── Sanitize short fields (rule-based) ───────────────────────────────
     const medsResult      = sanitizeShortField(currentMedications);
@@ -189,6 +191,12 @@ router.post('/', protect, async (req, res) => {
       sunExposure: req.body.sunExposure,
       fitnessFocus: req.body.fitnessFocus,
       proteinIntake: req.body.proteinIntake,
+      // The patient narrative is a data path, not decoration: the priority
+      // red-flag scanner (utils/priorityFlagging.js) and the AI profile both
+      // read it, so it must actually be stored.
+      feelingDescription: typeof req.body.feelingDescription === 'string'
+        ? req.body.feelingDescription.trim().slice(0, 1000)
+        : '',
       recreationalDrugTypes: recreationalDrugTypes || '',
       // Track if this assessment updates a previous one
       ...(req.body.updatedFrom ? { updatedFrom: req.body.updatedFrom } : {}),

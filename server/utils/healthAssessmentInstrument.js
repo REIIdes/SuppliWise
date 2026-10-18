@@ -11,10 +11,9 @@
  * measures, and which published standard or expert review it rests on.
  *
  * The registry mirrors the live form (my-react-app/src/Pages/AssessmentPage.jsx)
- * exactly. Fields that exist in the Assessment schema but are NOT asked in
- * the current form (stressLevel, feelingDescription, fitnessFocus) are
- * deliberately excluded — an instrument may not claim credit for questions it
- * does not ask.
+ * exactly. Version 2 added the three questions the backend already consumed
+ * (stress level, fitness focus, free-text narrative) but the form never asked
+ * — a dead data path until the instrument asked for them.
  *
  * `provenance.kind`:
  *   standardized — the response format is taken from a published, cited
@@ -25,7 +24,7 @@
  *                  in routes/instrument.js (see models/InstrumentReview.js)
  */
 
-const INSTRUMENT_VERSION = 'health-assessment-v1';
+const INSTRUMENT_VERSION = 'health-assessment-v2';
 
 // Single source for the severity ordinal scale so validation, flagging and
 // the registry cannot drift to different wording.
@@ -211,6 +210,17 @@ const ITEMS = [
     },
   },
   {
+    id: 'stressLevel', step: 4, section: 'Lifestyle', label: 'Daily Stress Level',
+    type: 'single', required: true,
+    options: ['Low', 'Moderate', 'High', 'Severe'],
+    construct: 'Perceived stress, 4-point ordinal',
+    provenance: {
+      kind: 'expert-panel',
+      source: 'Global perceived-stress single item (PSS family, Cohen et al. 1988)',
+      citation: 'Cohen, Kamarck & Mermelstein 1988 introduced the Perceived Stress Scale; this is the single global-rating variant used in brief screens. Values match verbatim the recommendation-engine branches (High/Severe -> adaptogen pathway, Moderate -> supportive).',
+    },
+  },
+  {
     id: 'lifestyleHabits', step: 4, section: 'Lifestyle', label: 'Lifestyle Habits (Smoking / Alcohol / Recreational Drugs / None)',
     type: 'multi', required: false, allowsNone: true,
     options: ['Smoking', 'Alcohol', 'Recreational Drugs', 'None'],
@@ -253,6 +263,28 @@ const ITEMS = [
       kind: 'standardized',
       source: 'WHO/FAO/UNU 2007 protein-amino-acid requirements',
       citation: 'FAO/WHO/UNU Expert Consultation (2007): 0.83 g/kg/day adult reference — bands bracket the requirement for a 60-90 kg adult; "Not sure" preserves honest non-response.',
+    },
+  },
+  {
+    id: 'fitnessFocus', step: 4, section: 'Lifestyle', label: 'Primary Fitness Focus',
+    type: 'single', required: false,
+    options: ['Not applicable', 'Muscle Gain', 'Weight Loss', 'Endurance / Cardio', 'Flexibility / Mobility', 'General Fitness'],
+    construct: 'Training goal category',
+    provenance: {
+      kind: 'expert-panel',
+      source: 'ACSM-style goal categories (resistance / cardio / mobility / general)',
+      citation: 'Goal domains follow ACSM Guidelines for Exercise Testing and Prescription goal setting; "Muscle Gain" and "Endurance / Cardio" match the recommendation engine verbatim.',
+    },
+  },
+  {
+    id: 'feelingDescription', step: 4, section: 'Lifestyle',
+    label: "How You've Been Feeling (free text, optional)",
+    type: 'text', required: false, maxLength: 1000,
+    construct: 'Patient narrative / chief complaint in own words',
+    provenance: {
+      kind: 'expert-panel',
+      source: 'Open narrative — the history-of-present-illness tradition',
+      citation: 'Free-text patient narrative is the standard opening of a clinical history; here it is also scanned by the priority red-flag detector (utils/priorityFlagging.js) so urgent phrasing can raise a Priority review even without checkbox selections.',
     },
   },
   {

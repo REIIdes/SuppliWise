@@ -177,6 +177,12 @@ export default function ReadOnlyAssessment({ assessment, onClose, inline }) {
             {assessment.recreationalDrugTypes && <Field label="Recreational Drugs" value={assessment.recreationalDrugTypes} />}
             <Field label="Sun Exposure" value={assessment.sunExposure} />
             <Field label="Protein Intake" value={assessment.proteinIntake} />
+            {assessment.fitnessFocus && assessment.fitnessFocus !== 'Not applicable' && (
+              <Field label="Fitness Focus" value={assessment.fitnessFocus} />
+            )}
+            {assessment.feelingDescription && (
+              <Field label="How They Felt" value={assessment.feelingDescription} />
+            )}
           </div>
         </div>
 

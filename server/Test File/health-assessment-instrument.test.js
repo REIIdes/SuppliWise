@@ -40,6 +40,7 @@ const InstrumentReview = require('../models/InstrumentReview');
 const {
   ITEMS,
   INSTRUMENT_VERSION,
+  itemById,
 } = require('../utils/healthAssessmentInstrument');
 const {
   lawsheCvr,
@@ -149,6 +150,22 @@ async function withInstrumentRoutes(fn) {
 }
 
 // ── Pure math: Lawshe CVR ─────────────────────────────────────────────────
+
+test('v2 asks the three questions the backend already consumed', () => {
+  // These values are load-bearing: recommend.js branches on the stress
+  // strings and the fitness-focus strings verbatim, and priorityFlagging
+  // scans the narrative. The registry must match them exactly.
+  const stress = itemById('stressLevel');
+  assert.equal(stress.required, true);
+  assert.deepEqual(stress.options, ['Low', 'Moderate', 'High', 'Severe']);
+  const fitness = itemById('fitnessFocus');
+  assert.ok(fitness.options.includes('Muscle Gain'));
+  assert.ok(fitness.options.includes('Endurance / Cardio'));
+  const narrative = itemById('feelingDescription');
+  assert.equal(narrative.type, 'text');
+  assert.equal(narrative.required, false);
+  assert.match(narrative.provenance.citation, /priorityFlagging/);
+});
 
 test('lawsheCvr matches the published formula', () => {
   // CVR = (Ne - N/2) / (N/2)

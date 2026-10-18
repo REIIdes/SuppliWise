@@ -98,6 +98,7 @@ function buildPatientData(a) {
     optionalLines.push(`- Symptoms: ${_symptomsStr}`);
   }
   if (a.sleepQuality) optionalLines.push(`- Sleep Quality: ${a.sleepQuality}`);
+  if (a.stressLevel) optionalLines.push(`- Daily Stress Level: ${a.stressLevel}`);
   if (a.waterIntake) optionalLines.push(`- Daily Water Intake: ${a.waterIntake}`);
   const _activeHabits = (a.lifestyleHabits || []).filter((h) => h !== 'None');
   if (_activeHabits.length > 0) optionalLines.push(`- Lifestyle Habits: ${promptSafe(_activeHabits.join(', '))}`);
@@ -120,6 +121,8 @@ function buildPatientData(a) {
   if (a.sunExposure) optionalLines.push(`- Daily Sun Exposure: ${a.sunExposure}`);
   if (a.fitnessFocus && a.fitnessFocus !== 'Not applicable') optionalLines.push(`- Primary Fitness Focus: ${a.fitnessFocus}`);
   if (a.proteinIntake && a.proteinIntake !== 'Not sure') optionalLines.push(`- Daily Protein Intake: ${a.proteinIntake}`);
+  const _narrative = typeof a.feelingDescription === 'string' ? a.feelingDescription.trim() : '';
+  if (_narrative) optionalLines.push(`- In the Patient's Own Words: ${promptSafe(_narrative.slice(0, 500))}`);
 
   return `PATIENT PROFILE:
 - Age: ${a.age}, Gender: ${a.gender}
