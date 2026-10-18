@@ -400,8 +400,10 @@ test('a model is never rendered as the literal "not configured"', () => withClea
   assert.equal(resolveModel(unroutable), null, 'no default and no override is still null');
 
   // OpenRouter's call sites resolve through the routing table, so this is the
-  // model every health feature actually sends.
-  assert.equal(resolveModel(byKey('openrouter')), 'deepseek/deepseek-v4-flash-0731');
+  // model every health feature actually sends. Pinned to the registry default
+  // WITHOUT the old "-0731" suffix — that stale id is exactly the drift the
+  // routing table was introduced to make impossible.
+  assert.equal(resolveModel(byKey('openrouter')), 'deepseek/deepseek-v4-flash');
 
   for (const provider of AI_PROVIDERS) {
     assert.notEqual(resolveModel(provider), 'not configured');

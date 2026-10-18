@@ -33,6 +33,7 @@ const Assessment = require('../models/Assessment');
 const IntakeRecord = require('../models/IntakeRecord');
 const DashboardMetrics = require('../models/DashboardMetrics');
 const UserNotification = require('../models/UserNotification');
+const User = require('../models/User');
 const AdminEvent = require('../models/AdminEvent');
 const { expiryFrom } = require('../utils/assessments');
 
@@ -186,6 +187,15 @@ function installFakes(store, opts = {}) {
     store.notifications.push(doc);
     return doc;
   });
+  // priorityGate reads the owner's medical-review status before raising or
+  // healing a flag (guardRaisePriority / selfHealOpenPriority call
+  // User.findById). Unstubbed, that query buffers against the unconnected
+  // mongoose for 10 seconds and then throws, which the route swallows as the
+  // conservative outcome — every submit test inherits a 10s stall and the
+  // flag/heal verdicts never run.
+  stub(User, 'findById', (id) => chain(
+    Object.values(store.users).find((u) => key(u._id) === key(id)) || null,
+  ));
   stub(AdminEvent, 'create', async (doc) => {
     if (opts.failEvents) throw new Error('audit store unavailable');
     store.events.push(doc);

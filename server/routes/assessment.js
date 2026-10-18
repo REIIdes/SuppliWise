@@ -11,7 +11,7 @@ const { historyLimitFor, tierOf, can, PLAN_LABELS, resolveSubscription } = requi
 // Severity is reached through the flagging layer, which runs the rule engine
 // (utils/severity.js) as its authoritative floor and can only escalate on top.
 const { analyzePriorityFlagging } = require('../utils/priorityFlagging');
-const { expiryDateFromNow, expiryFromCreatedAt } = require('../utils/assessments');
+const { expiryDateFromNow, expiryFromCreatedAt, notExpiredFilter } = require('../utils/assessments');
 const { guardRaisePriority, selfHealOpenPriority } = require('../utils/priorityGate');
 
 // Flag an assessment as Priority + notify the user and admins (best-effort,
@@ -38,6 +38,7 @@ async function flagSevereAssessment(assessment, reasons, userEmail) {
         user: assessment.user,
         assessmentId: assessment._id,
         linkUserId: assessment.user,
+        link: 'assessment-management',
       }).catch(() => {});
       return { flagged: false, reason: verdict.code };
     }
@@ -52,6 +53,7 @@ async function flagSevereAssessment(assessment, reasons, userEmail) {
       title: 'Health review flagged for your assessment',
       detail: `Our review flagged possible severe concerns (${label}). An administrator has been notified. If you feel unwell, please seek medical care promptly.`,
       assessmentId: assessment._id,
+      link: '/history',
     });
     await AdminEvent.create({
       type: 'severe-flag',
@@ -60,6 +62,7 @@ async function flagSevereAssessment(assessment, reasons, userEmail) {
       user: assessment.user,
       assessmentId: assessment._id,
       linkUserId: assessment.user,
+      link: 'assessment-management',
     }).catch(() => {});
     return { flagged: true };
   } catch (err) {
@@ -251,6 +254,29 @@ router.post('/', protect, async (req, res) => {
   } catch (error) {
     console.error('[assessment POST]', error.message);
     res.status(500).json({ message: 'Could not save your assessment. Please try again.' });
+  }
+});
+
+// @route   GET /api/assessment/active
+// @desc    The newest assessment still in force, aiResults projected out.
+//          Powers the dashboard's "Update current assessment" pre-fill; an
+//          expired record must 404 so a retired plan is never served as active.
+// @access  Private
+router.get('/active', protect, async (req, res) => {
+  try {
+    const assessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
+      .sort({ createdAt: -1 })
+      // The ~500 KB `aiResults` blob is projected out on purpose: this route
+      // exists to pre-fill a FORM, and the replacement assessment generates
+      // fresh results. Shipping the old ones costs bandwidth and saves nothing.
+      .select('-aiResults');
+    if (!assessment) {
+      return res.status(404).json({ message: 'No active assessment.' });
+    }
+    return res.json(assessment);
+  } catch (error) {
+    console.error('[assessment GET /active]', error.message);
+    return res.status(500).json({ message: 'Could not load the active assessment.' });
   }
 });
 
@@ -617,6 +643,7 @@ router.patch('/:id/priority', protect, async (req, res) => {
         title,
         detail,
         assessmentId: existing._id,
+        link: '/history',
       }).catch((err) => {
         console.error('[assessment PATCH /:id/priority] notification failed:', err.message);
       });
@@ -627,6 +654,7 @@ router.patch('/:id/priority', protect, async (req, res) => {
         user: existing.user,
         assessmentId: existing._id,
         linkUserId: existing.user,
+        link: 'assessment-management',
       }).catch((err) => {
         console.error('[assessment PATCH /:id/priority] audit failed:', err.message);
       });

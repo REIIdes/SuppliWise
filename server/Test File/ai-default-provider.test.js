@@ -115,7 +115,7 @@ test('one default key makes EVERY feature runnable', async () => {
   const { rows, chains } = await real();
   for (const row of rows) {
     assert.equal(row.provider, 'openrouter', `${row.purpose} should be served by the default`);
-    assert.equal(row.model, 'deepseek/deepseek-v4-flash-0731', `${row.purpose} should carry the default model`);
+    assert.equal(row.model, 'deepseek/deepseek-v4-flash', `${row.purpose} should carry the default model`);
     assert.equal(row.configured, true, `${row.purpose} is not actually unconfigured`);
     assert.equal(row.envKey, 'OPENROUTER_API_KEY', `${row.purpose} should name the key that is spent`);
 

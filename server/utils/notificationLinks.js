@@ -80,6 +80,9 @@ const MEMBER_ROUTES = [
   // The ledger.
   { match: /blockchain|ledger|chain record/i, path: '/web3', label: 'View the blockchain ledger' },
 
+  // Medical review — its status banner lives on the dashboard.
+  { match: /medical review/i, path: '/dashboard', label: 'View your review status' },
+
   // Assessments and intake.
   { match: /priority|assessment|health review|intake/i, path: '/history', label: 'View the assessment' },
 
@@ -129,6 +132,12 @@ const ADMIN_ROUTES = {
   subscription: { tab: 'subscriptions', label: 'Open Subscription management' },
   'severe-flag': { tab: 'assessment-management', label: 'Open Assessment Management' },
   resolved: { tab: 'assessment-management', label: 'Open Assessment Management' },
+  // Medical review is the priority-assessment escalation flow, so its bell
+  // events land on the same console tab that acts on them. Without these the
+  // admin event enum carries types the notification test proves nothing maps.
+  'medical-review-requested': { tab: 'assessment-management', label: 'Open Assessment Management' },
+  'medical-review-approved': { tab: 'assessment-management', label: 'Open Assessment Management' },
+  'medical-review-needs-info': { tab: 'assessment-management', label: 'Open Assessment Management' },
   'new-device-login': { tab: 'security', label: 'Open the Security center' },
   security: { tab: 'security', label: 'Open the Security center' },
   account: { tab: 'users', label: 'Open User management' },

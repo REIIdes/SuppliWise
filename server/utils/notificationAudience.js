@@ -47,6 +47,12 @@ const ADMIN_BELL_TYPES = new Set([
   'subscription-cancel-request',
   'severe-flag',
   'resolved',
+  // Medical review is admin work: an operator must approve it or ask the
+  // member for more information, so its bell events live in the same queue
+  // as the priority flags they escalate from.
+  'medical-review-requested',
+  'medical-review-approved',
+  'medical-review-needs-info',
   // The system-security family. NOTE what is absent: 'new-device-login'. A
   // member signing in on a new device is that member's security event — they
   // already get it in their own bell — and it is not work for an operator.
@@ -59,7 +65,15 @@ const ADMIN_BELL_TYPES = new Set([
  * Kept in step with SECURITY_TITLES and MEMBER_ROUTES in
  * server/utils/notificationLinks.js — a test asserts the two agree.
  */
-const MEMBER_BELL_TYPES = new Set(['info', 'severe-flag']);
+const MEMBER_BELL_TYPES = new Set([
+  'info',
+  'severe-flag',
+  // The member's own copy of the medical-review flow — the same events the
+  // operator sees as work, the member sees as their review's progress.
+  'medical-review-requested',
+  'medical-review-approved',
+  'medical-review-needs-info',
+]);
 
 /**
  * True when this event belongs in the admin bell.

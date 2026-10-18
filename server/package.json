@@ -1,46 +1,48 @@
 {
-  "name": "suppliwise-server",
-  "version": "1.0.0",
-  "description": "MERN backend for SuppliWise",
-  "main": "index.js",
-  "engines": {
-    "node": ">=18"
-  },
-  "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js",
-    "test": "node --test \"Test File/*.test.js\"",
-    "test:flows": "node scripts/withDevCa.mjs test-subscription-flows.js",
-    "glitch-hunt": "node scripts/withDevCa.mjs glitch-hunt.js",
-    "glitch-hunt:web3": "node scripts/withDevCa.mjs glitch-hunt-web3.js",
-    "verify:bc-monitor": "node scripts/withDevCa.mjs verify-bc-monitor.js",
-    "audit:bell-links": "node scripts/audit-bell-links.js",
-    "verify:bell-links": "node scripts/withDevCa.mjs scripts/e2e-notification-links.js",
-    "verify:legacy-bell-links": "node scripts/withDevCa.mjs scripts/verify-legacy-bell-links.js",
-    "cleanup:bell-walkthrough": "node scripts/withDevCa.mjs scripts/cleanup-bell-walkthrough.js",
-    "mint-admin-token": "node scripts/mint-admin-token.js",
-    "audit:notification-boundary": "node scripts/audit-notification-boundary.js",
-    "verify:notification-boundary": "node scripts/withDevCa.mjs scripts/verify-notification-boundary.js",
-    "check": "node scripts/check-syntax.js"
-  },
-  "dependencies": {
-    "@simplewebauthn/server": "^14.0.3",
-    "bcryptjs": "^2.4.3",
-    "compression": "^1.8.2",
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "express": "^4.18.2",
-    "express-rate-limit": "7.5.0",
-    "hash-wasm": "^4.12.0",
-    "helmet": "8.0.0",
-    "jsonwebtoken": "^9.0.2",
-    "mongoose": "^8.3.4",
-    "nodemailer": "^10.0.13",
-    "qrcode": "^1.5.4",
-    "speakeasy": "^2.0.0"
-  },
-  "devDependencies": {
-    "cbor": "^10.0.12",
-    "nodemon": "^3.1.0"
-  }
+ "name": "suppliwise-server",
+ "version": "1.0.0",
+ "description": "MERN backend for SuppliWise",
+ "main": "index.js",
+ "engines": {
+  "node": ">=18"
+ },
+ "scripts": {
+  "start": "node index.js",
+  "dev": "nodemon index.js",
+  "test": "node --test \"Test File/*.test.js\"",
+  "test:flows": "node scripts/withDevCa.mjs test-subscription-flows.js",
+  "glitch-hunt": "node scripts/withDevCa.mjs glitch-hunt.js",
+  "glitch-hunt:web3": "node scripts/withDevCa.mjs glitch-hunt-web3.js",
+  "verify:bc-monitor": "node scripts/withDevCa.mjs verify-bc-monitor.js",
+  "audit:bell-links": "node scripts/audit-bell-links.js",
+  "verify:bell-links": "node scripts/withDevCa.mjs scripts/e2e-notification-links.js",
+  "verify:legacy-bell-links": "node scripts/withDevCa.mjs scripts/verify-legacy-bell-links.js",
+  "cleanup:bell-walkthrough": "node scripts/withDevCa.mjs scripts/cleanup-bell-walkthrough.js",
+  "mint-admin-token": "node scripts/mint-admin-token.js",
+  "audit:notification-boundary": "node scripts/audit-notification-boundary.js",
+  "verify:notification-boundary": "node scripts/withDevCa.mjs scripts/verify-notification-boundary.js",
+  "check": "node scripts/check-syntax.js",
+  "eval:ai": "node eval/aiBenchmark.js",
+  "eval:ai:live": "node eval/aiBenchmark.js --live"
+ },
+ "dependencies": {
+  "@simplewebauthn/server": "^14.0.3",
+  "bcryptjs": "^2.4.3",
+  "compression": "^1.8.2",
+  "cors": "^2.8.5",
+  "dotenv": "^16.4.5",
+  "express": "^4.18.2",
+  "express-rate-limit": "7.5.0",
+  "hash-wasm": "^4.12.0",
+  "helmet": "8.0.0",
+  "jsonwebtoken": "^9.0.2",
+  "mongoose": "^8.3.4",
+  "nodemailer": "^10.0.13",
+  "qrcode": "^1.5.4",
+  "speakeasy": "^2.0.0"
+ },
+ "devDependencies": {
+  "cbor": "^10.0.12",
+  "nodemon": "^3.1.0"
+ }
 }

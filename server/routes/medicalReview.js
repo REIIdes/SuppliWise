@@ -34,6 +34,7 @@ router.post('/request', protect, async (req, res) => {
       type: 'medical-review-requested',
       title: 'Medical review requested',
       detail: 'Your medical review request has been submitted. An administrator will review your case shortly.',
+      link: '/dashboard',
     });
 
     // Create admin event for visibility
@@ -43,6 +44,7 @@ router.post('/request', protect, async (req, res) => {
       detail: `${user.email} has requested medical review for priority assessment`,
       user: user._id,
       linkUserId: user._id,
+      link: 'assessment-management',
     });
 
     res.status(200).json({
@@ -189,6 +191,7 @@ router.post('/admin/reviews/:userId/resolve', protect, adminOnly, async (req, re
         type: 'medical-review-approved',
         title: 'Medical review approved',
         detail: `Your medical review has been approved. Please check your dashboard to view the administrator's response and confirm to continue.${notes ? ` Note: ${notes}` : ''}`,
+        link: '/dashboard',
       });
 
       // Create admin event
@@ -198,6 +201,7 @@ router.post('/admin/reviews/:userId/resolve', protect, adminOnly, async (req, re
         detail: `${user.email} - Review approved by ${user.medicalReviewResolvedBy}${notes ? ` - ${notes}` : ''}`,
         user: userId,
         linkUserId: userId,
+        link: 'assessment-management',
       });
     } else {
       // Request more info
@@ -206,6 +210,7 @@ router.post('/admin/reviews/:userId/resolve', protect, adminOnly, async (req, re
         type: 'medical-review-needs-info',
         title: 'Medical review needs more information',
         detail: `Your medical review requires additional information. ${notes || 'Please contact support for details.'}`,
+        link: '/dashboard',
       });
 
       // Create admin event
@@ -215,6 +220,7 @@ router.post('/admin/reviews/:userId/resolve', protect, adminOnly, async (req, re
         detail: `${user.email} - ${user.medicalReviewResolvedBy} requested more information${notes ? ` - ${notes}` : ''}`,
         user: userId,
         linkUserId: userId,
+        link: 'assessment-management',
       });
     }
 
@@ -313,6 +319,7 @@ router.post('/confirm', protect, async (req, res) => {
       detail: `${user.email} confirmed medical review and lifted the block (${result.modifiedCount} assessment(s) resolved)`,
       user: req.user._id,
       linkUserId: req.user._id,
+      link: 'assessment-management',
     });
 
     console.log('[medical-review-confirm] Audit event created successfully');

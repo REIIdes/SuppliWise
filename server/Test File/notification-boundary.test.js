@@ -51,6 +51,9 @@ test('the admin bell admits only the work an operator must do', () => {
     'subscription-cancel-request',
     'severe-flag',
     'resolved',
+    'medical-review-requested',
+    'medical-review-approved',
+    'medical-review-needs-info',
     'security',
     'account',
   ];

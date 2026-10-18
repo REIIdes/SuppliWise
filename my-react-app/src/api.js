@@ -2781,3 +2781,27 @@ export const resolveAdminMedicalReview = async (userId, decision, notes, token) 
   if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
   return data;
 };
+
+// ── Evaluation instruments (usability / efficiency / satisfaction) ─────────
+// The questionnaires are defined server-side (server/utils/surveyInstruments.js)
+// so an instrument revision is a deploy, not an app release.
+
+export const getSurveyInstruments = async () => {
+  const res = await apiFetch('/survey/instruments', {
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data.instruments || [];
+};
+
+export const submitSurveyResponse = async (instrument, values, assessmentId = null) => {
+  const res = await apiFetch('/survey/respond', {
+    method: 'POST',
+    headers: { ...authHeader(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ instrument, values, assessmentId }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};

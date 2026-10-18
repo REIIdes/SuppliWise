@@ -25,6 +25,7 @@ const ChatAssistant = lazy(() => import('./Pages/ChatAssistant'));
 // Human support channel (the "where did I pay" conversation with an admin).
 // Separate from ChatAssistant, which is the stateless AI assistant.
 const SupportChatPage = lazy(() => import('./Pages/SupportChatPage'));
+const FeedbackSurveyPage = lazy(() => import('./Pages/FeedbackSurveyPage'));
 const AdminLogin = lazy(() => import('./Pages/AdminLogin'));
 const AdminChangePassword = lazy(() => import('./Pages/AdminChangePassword'));
 const AdminDashboard = lazy(() => import('./Pages/AdminDashboard'));
@@ -408,6 +409,7 @@ function App() {
               Requires a session: a guest has no account for an admin to reply
               to, and the server refuses anonymous threads outright. */}
           <Route path="/support" element={<ProtectedRoute><SupportChatPage /></ProtectedRoute>} />
+          <Route path="/feedback" element={<ProtectedRoute><FeedbackSurveyPage /></ProtectedRoute>} />
 
           {/* Plans & pricing — deliberately PUBLIC: a prospective user has to be
               able to compare plans before signing up, and a signed-in user

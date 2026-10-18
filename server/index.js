@@ -38,6 +38,7 @@ const securityRoutes = require('./routes/security');
 const subscriptionRoutes = require('./routes/subscription');
 const web3Routes = require('./routes/web3');
 const medicalReviewRoutes = require('./routes/medicalReview');
+const surveyRoutes = require('./routes/survey');
 const { PICTURE_DIR } = require('./utils/pictures');
 const AdminAccount = require('./models/AdminAccount');
 // The one trusted-origin list, and the CSRF guard built on it. See the CORS
@@ -412,6 +413,9 @@ app.use('/api/security', userLimiter);
 // sovereignty). Same non-escalating user bucket: normal feature traffic must
 // never climb the brute-force lockout ladder.
 app.use('/api/web3', userLimiter);
+// Evaluation questionnaires (SUS / efficiency / satisfaction). Small,
+// infrequent submissions — ordinary user bucket, never the escalating one.
+app.use('/api/survey', userLimiter);
 app.use('/api/admin', lockoutCheck, adminLimiter);
 
 // ── STAGE 2 — PARSE (only requests that passed metering reach here) ────────
@@ -492,6 +496,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/security', securityRoutes);
 app.use('/api/web3', web3Routes);
 app.use('/api/medical-review', medicalReviewRoutes);
+app.use('/api/survey', surveyRoutes);
 // The admin console's Chat stream is an EventSource, which cannot set an
 // Authorization header, so its ?token= has to be copied into the header BEFORE
 // anything under /api/admin authenticates: routes/admin.js registers
