@@ -33,6 +33,9 @@ const { protect } = require('../middleware/auth');
 const { dedupe } = require('../utils/cache');
 const { completeWithFallback } = require('../utils/aiRouter');
 const {
+  neutralize, neutralizeList, fenceData, GUARDRAIL_CLAUSE,
+} = require('../utils/aiGuardrails');
+const {
   GENERATION_TIMEOUT_MS,
   memoryKey,
   profileKey: guideProfileKey,
@@ -57,24 +60,28 @@ const {
  */
 function buildPatientProfile(ctx) {
   if (!ctx) return null;
+  // Every field below can arrive from the request body, so it is untrusted:
+  // neutralize() strips delimiter/injection tokens before interpolation and
+  // the result travels inside a fenced, banner-labelled data block.
+  const n = (v, max = 500) => neutralize(v, { maxLength: max });
+  const list = (v) => neutralizeList(v, { maxLength: 120 }).join(', ');
   const lines = [];
-  if (ctx.age && ctx.gender) lines.push(`Patient: ${ctx.age}-year-old ${ctx.gender}`);
-  if (ctx.symptoms?.length)  lines.push(`Symptoms: ${ctx.symptoms.join(', ')}`);
-  if (ctx.goals?.length)     lines.push(`Health Goals: ${ctx.goals.join(', ')}`);
-  if (ctx.conditions?.length) lines.push(`Medical Conditions: ${ctx.conditions.join(', ')}`);
-  if (ctx.allergies)         lines.push(`Allergies: ${ctx.allergies}`);
-  if (ctx.lifestyle?.length) lines.push(`Lifestyle Factors: ${ctx.lifestyle.join(', ')}`);
-  if (ctx.diet)              lines.push(`Diet Type: ${ctx.diet}`);
+  if (ctx.age && ctx.gender) lines.push(`Patient: ${Number(ctx.age) || 0}-year-old ${n(String(ctx.gender), 40)}`);
+  if (ctx.symptoms?.length)  lines.push(`Symptoms: ${list(ctx.symptoms)}`);
+  if (ctx.goals?.length)     lines.push(`Health Goals: ${list(ctx.goals)}`);
+  if (ctx.conditions?.length) lines.push(`Medical Conditions: ${list(ctx.conditions)}`);
+  if (ctx.allergies)         lines.push(`Allergies: ${n(ctx.allergies)}`);
+  if (ctx.lifestyle?.length) lines.push(`Lifestyle Factors: ${list(ctx.lifestyle)}`);
+  if (ctx.diet)              lines.push(`Diet Type: ${n(ctx.diet, 80)}`);
   if (ctx.pregnancyStatus && ctx.pregnancyStatus !== 'Not applicable')
-    lines.push(`Pregnancy/Breastfeeding: ${ctx.pregnancyStatus}`);
-  if (ctx.recommendationReason) lines.push(`Why recommended: ${ctx.recommendationReason}`);
-  return lines.length > 0 ? lines.join('\n') : null;
+    lines.push(`Pregnancy/Breastfeeding: ${n(ctx.pregnancyStatus, 40)}`);
+  if (ctx.recommendationReason) lines.push(`Why recommended: ${n(ctx.recommendationReason)}`);
+  return lines.length > 0 ? fenceData('PATIENT PROFILE', lines.join('\n')) : null;
 }
 
 /** The personalized prompt. Hoisted so it is one string, not rebuilt per request. */
 const PERSONALIZED_PROMPT = (name, profile) => `You are an expert clinical nutritionist and pharmacologist. A patient has been recommended "${name}" based on their health assessment. Write a detailed, personalized supplement guide tailored specifically to this patient.
 
-PATIENT PROFILE:
 ${profile}
 
 Your response must explain:
@@ -174,6 +181,10 @@ router.post('/', protect, async (req, res) => {
   // null for the generic guide, and the digest of the reader's profile otherwise.
   const key = guideProfileKey(patientProfile);
   const nameKey = supplementName.toLowerCase().trim();
+  // The cache stays keyed on nameKey (the client sends a name from OUR plan), but
+  // the prompt only ever sees the neutralised copy — a crafted name cannot break
+  // out of its quotes or inject role tokens into the instruction text.
+  const safeName = neutralize(supplementName, { maxLength: 200 });
 
   // ── 1. Storage, before anything that can spend money ──────────────────────
   // Memory, then Mongo. This is the whole cost argument for the feature: past
@@ -203,10 +214,11 @@ router.post('/', protect, async (req, res) => {
       const completion = await completeWithFallback('supplementDetail', {
         system:
           'You are an expert clinical nutritionist. Always respond with valid JSON only — '
-          + 'no markdown, no code fences, no extra text.',
+          + 'no markdown, no code fences, no extra text. '
+          + GUARDRAIL_CLAUSE,
         user: patientProfile
-          ? PERSONALIZED_PROMPT(supplementName, patientProfile)
-          : GENERIC_PROMPT(supplementName),
+          ? PERSONALIZED_PROMPT(safeName, patientProfile)
+          : GENERIC_PROMPT(safeName),
         maxTokens: 2000,
         temperature: 0.3,
         timeoutMs: GENERATION_TIMEOUT_MS,

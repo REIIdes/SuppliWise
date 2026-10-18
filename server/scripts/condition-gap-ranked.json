@@ -1,0 +1,90 @@
+{
+  "candidates": [
+    {
+      "name": "Chronic Fatigue Syndrome (ME/CFS)",
+      "group": "Other",
+      "rationale": "Low Energy reported by 1 user with no condition; covers a gap not addressed by current list.",
+      "covers": [
+        "Low Energy"
+      ],
+      "supportingCount": 1,
+      "safetyImpact": "Scopes supplements for energy and adrenal support."
+    },
+    {
+      "name": "Cancer (any type)",
+      "group": "Other",
+      "rationale": "Free-text hint 'cancer' appears once; clinical relevance for supplement interactions.",
+      "covers": [
+        "cancer"
+      ],
+      "supportingCount": 0,
+      "safetyImpact": "Avoids contraindicated supplements (e.g., high-dose antioxidants)."
+    },
+    {
+      "name": "Chronic Obstructive Pulmonary Disease (COPD)",
+      "group": "Respiratory & Immune",
+      "rationale": "Free-text 'lungs' hint suggests respiratory need; common in PH.",
+      "covers": [
+        "lungs"
+      ],
+      "supportingCount": 0,
+      "safetyImpact": "Scopes respiratory and anti-inflammatory supplements."
+    },
+    {
+      "name": "Sleep Apnea",
+      "group": "Other",
+      "rationale": "Links to Low Energy and cardiovascular risk; not on current list.",
+      "covers": [
+        "Low Energy"
+      ],
+      "supportingCount": 1,
+      "safetyImpact": "Avoids stimulants that may worsen sleep."
+    },
+    {
+      "name": "Vitamin D Deficiency",
+      "group": "Other",
+      "rationale": "Common in PH and linked to low energy; not listed.",
+      "covers": [
+        "Low Energy"
+      ],
+      "supportingCount": 1,
+      "safetyImpact": "Scopes vitamin D supplementation safety."
+    },
+    {
+      "name": "Iron Deficiency Anemia",
+      "group": "Other",
+      "rationale": "Anemia is on list but iron deficiency is a distinct subtype; low energy symptom.",
+      "covers": [
+        "Low Energy"
+      ],
+      "supportingCount": 1,
+      "safetyImpact": "Prevents iron overload in non-deficient users."
+    },
+    {
+      "name": "Fibromyalgia",
+      "group": "Musculoskeletal",
+      "rationale": "Muscle Weakness reported; chronic pain condition not on list.",
+      "covers": [
+        "Muscle Weakness"
+      ],
+      "supportingCount": 1,
+      "safetyImpact": "Scopes pain management and muscle relaxant supplements."
+    },
+    {
+      "name": "Thyroid Cancer",
+      "group": "Hormonal",
+      "rationale": "Thyroid Disorders on list but cancer subtype is distinct; free-text 'cancer' hint.",
+      "covers": [
+        "cancer"
+      ],
+      "supportingCount": 0,
+      "safetyImpact": "Avoids iodine supplements in thyroid cancer."
+    }
+  ],
+  "remove": [
+    "Gout",
+    "Osteoporosis",
+    "PCOS"
+  ],
+  "summary": "Top gaps are Low Energy and free-text hints for cancer and lungs; added conditions cover fatigue, respiratory, and cancer-related safety scoping. Removed Gout, Osteoporosis, and PCOS due to zero selections and low safety scoping value."
+}

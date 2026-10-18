@@ -160,6 +160,17 @@ const CONDITION_INFO = {
   'Liver Disease': 'Damage or dysfunction of the liver affecting its ability to process nutrients, filter toxins, and produce proteins. Includes fatty liver, hepatitis, and cirrhosis.',
   'Migraine': 'A neurological condition characterized by recurring moderate to severe headaches, often with nausea, light sensitivity, and visual disturbances.',
   'PCOS': 'Polycystic Ovary Syndrome — a hormonal disorder in people with ovaries causing irregular periods, elevated androgens, and often small cysts on the ovaries. Linked to insulin resistance.',
+  // 2026-10 condition-gap additions (server/scripts/conditionGapAnalysis.js).
+  'Prediabetes / Insulin Resistance': 'Blood sugar is higher than normal but not yet Type 2 diabetes. The body stops responding well to insulin. Diet and exercise can still reverse it — and some supplements (berberine, chromium) lower blood sugar, so doses matter.',
+  'High Triglycerides': 'Elevated triglyceride fats in the blood (a standard lipid-panel number). Raises cardiovascular risk alongside LDL cholesterol; omega-3 EPA+DHA and alcohol reduction are the most evidence-backed levers.',
+  'GERD / Acid Reflux (Suan)': 'Stomach acid repeatedly rises into the food pipe, causing heartburn and a sour taste — locally called "suan." Certain supplement forms (ascorbic acid, peppermint, effervescent tablets) can worsen it, so form and timing matter.',
+  'Gastritis / Stomach Ulcer': 'Inflammation or an open sore in the stomach lining, often from H. pylori infection, NSAID painkillers, or alcohol. Iron, zinc, and magnesium on an empty stomach can aggravate it — these are taken with food here.',
+  'Fatty Liver (NAFLD)': 'Fat builds up in the liver without heavy alcohol use — the most common liver condition in the Philippines. The liver processes most supplements, so high-dose Vitamin A, green-tea extract, and kava are avoided.',
+  'Kidney Stones': 'Hard mineral deposits (usually calcium oxalate) that form in the kidney. Supplemental calcium dose, Vitamin C ceiling (>500 mg raises oxalate), and hydration all change stone risk.',
+  'Sleep Apnea (Snoring / Paused Breathing)': 'Breathing repeatedly stops during sleep, classically with loud snoring and unrefreshing sleep. It is an airway problem — supplements cannot fix it, and sedating sleep aids can make it worse.',
+  'Allergies / Allergic Rhinitis': 'An overreactive immune response to dust, pollen, or pet dander — sneezing, itchy or watery eyes, runny nose. Extremely common in Filipino homes ( dust mites ); antihistamine timing affects some mineral absorption.',
+  'Herniated Disc / Sciatica (Langitan)': 'A spinal disc presses on a nearby nerve, sending pain from the lower back down the leg — locally called "langitan." Nerve-support nutrients (B12, omega-3) and anti-inflammatories are scoped for it.',
+  'Endometriosis / Uterine Fibroids': 'Uterine-tissue conditions causing heavy or prolonged periods, pelvic pain, and fatigue — iron loss and chronic inflammation are the two supplement-safety angles.',
 };
 
 // Reusable condition tooltip component
@@ -1126,14 +1137,14 @@ const SEVERITY_DESCRIPTIONS = {
 // Gender-specific symptoms are filtered in the component
 const ALL_SYMPTOMS = [
   // ── Cardiovascular & Metabolic ──────────────────────────────────────────
-  { name: 'Fatigue',                       genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Hypertension (High Blood Pressure)', 'High Cholesterol', 'Diabetes', 'Heart / Cardiovascular Disease', 'Obesity', 'Anemia', 'Thyroid Disorders', 'Chronic Kidney Disease', 'Liver Disease', 'Anxiety Disorder', 'Depression'] },
+  { name: 'Fatigue',                       genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Hypertension (High Blood Pressure)', 'High Cholesterol', 'Diabetes', 'Heart / Cardiovascular Disease', 'Obesity', 'Anemia', 'Thyroid Disorders', 'Chronic Kidney Disease', 'Liver Disease', 'Anxiety Disorder', 'Depression', 'Prediabetes / Insulin Resistance', 'Fatty Liver (NAFLD)', 'Sleep Apnea (Snoring / Paused Breathing)'] },
   { name: 'Shortness of Breath',           genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Heart / Cardiovascular Disease', 'Asthma', 'Obesity'] },
-  { name: 'Chest Tightness',               genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Heart / Cardiovascular Disease', 'Asthma', 'Hypertension (High Blood Pressure)'] },
+  { name: 'Chest Tightness',               genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Heart / Cardiovascular Disease', 'Asthma', 'Hypertension (High Blood Pressure)', 'GERD / Acid Reflux (Suan)'] },
   { name: 'Rapid or Irregular Heartbeat',  genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Heart / Cardiovascular Disease', 'Hypertension (High Blood Pressure)', 'Anxiety Disorder', 'Thyroid Disorders'] },
   { name: 'Dizziness / Lightheadedness',   genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Hypertension (High Blood Pressure)', 'Anemia', 'Diabetes', 'Heart / Cardiovascular Disease'] },
   { name: 'Frequent Headaches',            genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Hypertension (High Blood Pressure)', 'Migraine', 'Anxiety Disorder', 'Depression'] },
   { name: 'Excessive Thirst',              genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Diabetes'] },
-  { name: 'Frequent Urination',            genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Diabetes', 'Chronic Kidney Disease'] },
+  { name: 'Frequent Urination',            genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Diabetes', 'Chronic Kidney Disease', 'Prediabetes / Insulin Resistance'] },
   { name: 'Blurred Vision',               genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Diabetes', 'Hypertension (High Blood Pressure)'] },
   { name: 'Unexplained Weight Gain',       genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Thyroid Disorders', 'Obesity', 'Diabetes'] },
   { name: 'Unexplained Weight Loss',       genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Thyroid Disorders', 'Diabetes'] },
@@ -1143,13 +1154,13 @@ const ALL_SYMPTOMS = [
   { name: 'Joint Swelling',               genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Arthritis', 'Gout'] },
   { name: 'Morning Stiffness',             genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Arthritis', 'Autoimmune Disorders'] },
   { name: 'Muscle Weakness',              genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Arthritis', 'Autoimmune Disorders', 'Thyroid Disorders', 'Anemia', 'Chronic Kidney Disease'] },
-  { name: 'Back / Bone Pain',             genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Osteoporosis', 'Arthritis'] },
+  { name: 'Back / Bone Pain',             genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Osteoporosis', 'Arthritis', 'Herniated Disc / Sciatica (Langitan)', 'Kidney Stones'] },
 
   // ── Digestive ─────────────────────────────────────────────────────────────
-  { name: 'Bloating',                      genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['IBS (Irritable Bowel Syndrome)', 'Celiac / Gluten Sensitivity'] },
-  { name: 'Digestive Issue',               genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['IBS (Irritable Bowel Syndrome)', 'Celiac / Gluten Sensitivity', 'Liver Disease'] },
-  { name: 'Nausea',                        genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['IBS (Irritable Bowel Syndrome)', 'Migraine', 'Chronic Kidney Disease', 'Liver Disease'] },
-  { name: 'Abdominal Pain / Cramps',       genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['IBS (Irritable Bowel Syndrome)', 'Celiac / Gluten Sensitivity'] },
+  { name: 'Bloating',                      genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['IBS (Irritable Bowel Syndrome)', 'Celiac / Gluten Sensitivity', 'Gastritis / Stomach Ulcer'] },
+  { name: 'Digestive Issue',               genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['IBS (Irritable Bowel Syndrome)', 'Celiac / Gluten Sensitivity', 'Liver Disease', 'GERD / Acid Reflux (Suan)', 'Gastritis / Stomach Ulcer', 'Fatty Liver (NAFLD)'] },
+  { name: 'Nausea',                        genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['IBS (Irritable Bowel Syndrome)', 'Migraine', 'Chronic Kidney Disease', 'Liver Disease', 'GERD / Acid Reflux (Suan)', 'Gastritis / Stomach Ulcer'] },
+  { name: 'Abdominal Pain / Cramps',       genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['IBS (Irritable Bowel Syndrome)', 'Celiac / Gluten Sensitivity', 'Gastritis / Stomach Ulcer', 'Kidney Stones'] },
   { name: 'Low Appetite',                  genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Liver Disease', 'Chronic Kidney Disease', 'Depression', 'IBS (Irritable Bowel Syndrome)'] },
 
   // ── Respiratory & Immune ─────────────────────────────────────────────────
@@ -1163,16 +1174,16 @@ const ALL_SYMPTOMS = [
   { name: 'Persistent Sadness / Low Mood', genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Depression', 'Thyroid Disorders'] },
   { name: 'Panic Attacks',                 genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Anxiety Disorder'] },
   { name: 'Anxiety / Excessive Worry',     genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Anxiety Disorder', 'Thyroid Disorders'] },
-  { name: 'Sleep Disturbances',            genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Anxiety Disorder', 'Depression', 'Thyroid Disorders'] },
+  { name: 'Sleep Disturbances',            genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Anxiety Disorder', 'Depression', 'Thyroid Disorders', 'Sleep Apnea (Snoring / Paused Breathing)'] },
   { name: 'Loss of Interest',              genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Depression'] },
-  { name: 'Brain Fog',                     genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Depression', 'Anxiety Disorder', 'Thyroid Disorders', 'Anemia', 'Chronic Kidney Disease', 'Celiac / Gluten Sensitivity'] },
+  { name: 'Brain Fog',                     genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Depression', 'Anxiety Disorder', 'Thyroid Disorders', 'Anemia', 'Chronic Kidney Disease', 'Celiac / Gluten Sensitivity', 'Sleep Apnea (Snoring / Paused Breathing)', 'Prediabetes / Insulin Resistance'] },
 
   // ── Thyroid / Anemia / Kidney / Liver ────────────────────────────────────
   { name: 'Cold Sensitivity',              genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Thyroid Disorders', 'Anemia'] },
   { name: 'Hair Loss',                     genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Thyroid Disorders', 'Anemia', 'Autoimmune Disorders'] },
   { name: 'Swollen Neck / Goiter',         genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Thyroid Disorders'] },
   { name: 'Pale Skin / Pallor',            genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Anemia'] },
-  { name: 'Numbness / Tingling',           genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Diabetes', 'Anemia', 'Chronic Kidney Disease'] },
+  { name: 'Numbness / Tingling',           genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Diabetes', 'Anemia', 'Chronic Kidney Disease', 'Prediabetes / Insulin Resistance', 'Herniated Disc / Sciatica (Langitan)'] },
   { name: 'Slow Recovery',                 genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Anemia', 'Autoimmune Disorders', 'Diabetes', 'Heart / Cardiovascular Disease'] },
   { name: 'Swelling (Edema)',              genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Chronic Kidney Disease', 'Heart / Cardiovascular Disease', 'Liver Disease'] },
   { name: 'Jaundice / Yellow Skin',        genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Liver Disease'] },
@@ -1185,7 +1196,16 @@ const ALL_SYMPTOMS = [
   { name: 'Irregular Periods',             genders: ['Female'],                              conditions: ['PCOS'] },
   { name: 'Hormonal Acne',                 genders: ['Female'],                              conditions: ['PCOS'] },
   { name: 'Excessive Hair Growth',         genders: ['Female'],                              conditions: ['PCOS'] },
-  { name: 'Pelvic Pain',                   genders: ['Female'],                              conditions: ['PCOS'] },
+  { name: 'Pelvic Pain',                   genders: ['Female'],                              conditions: ['PCOS', 'Endometriosis / Uterine Fibroids'] },
+  { name: 'Heavy / Prolonged Periods',     genders: ['Female'],                              conditions: ['Endometriosis / Uterine Fibroids'] },
+
+  // ── 2026-10 condition-gap additions ─────────────────────────────────────
+  { name: 'Heartburn / Sour Taste',        genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['GERD / Acid Reflux (Suan)'] },
+  { name: 'Upper Abdominal Burning',       genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Gastritis / Stomach Ulcer', 'GERD / Acid Reflux (Suan)'] },
+  { name: 'Flank / Side Pain',             genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Kidney Stones'] },
+  { name: 'Snoring / Gasping at Night',    genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Sleep Apnea (Snoring / Paused Breathing)'] },
+  { name: 'Sneezing / Itchy Nose or Eyes', genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Allergies / Allergic Rhinitis'] },
+  { name: 'Lower Back Pain Radiating to Leg', genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Herniated Disc / Sciatica (Langitan)'] },
 
   // ── Male / Neutral ────────────────────────────────────────────────────────
   { name: 'Low Libido',                    genders: ['Male'],           conditions: ['Diabetes', 'Hypertension (High Blood Pressure)', 'Depression', 'Thyroid Disorders'] },
@@ -1249,6 +1269,8 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
         'Hypertension (High Blood Pressure)',
         'High Cholesterol',
         'Diabetes',
+        'Prediabetes / Insulin Resistance',
+        'High Triglycerides',
         'Heart / Cardiovascular Disease',
         // Only show Obesity when BMI >= 25
         ...(showObesity ? ['Obesity'] : []),
@@ -1256,15 +1278,18 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
     },
     {
       group: 'Bone & Joint',
-      items: ['Arthritis', 'Osteoporosis', 'Gout'],
+      items: ['Arthritis', 'Osteoporosis', 'Gout', 'Herniated Disc / Sciatica (Langitan)'],
     },
     {
       group: 'Digestive',
-      items: ['IBS (Irritable Bowel Syndrome)', 'Celiac / Gluten Sensitivity'],
+      items: [
+        'IBS (Irritable Bowel Syndrome)', 'Celiac / Gluten Sensitivity',
+        'GERD / Acid Reflux (Suan)', 'Gastritis / Stomach Ulcer', 'Fatty Liver (NAFLD)',
+      ],
     },
     {
       group: 'Respiratory & Immune',
-      items: ['Asthma', 'Autoimmune Disorders'],
+      items: ['Asthma', 'Autoimmune Disorders', 'Allergies / Allergic Rhinitis', 'Sleep Apnea (Snoring / Paused Breathing)'],
     },
     {
       group: 'Mental Health',
@@ -1274,8 +1299,8 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
       group: 'Other',
       items: [
         'Thyroid Disorders', 'Anemia', 'Chronic Kidney Disease',
-        'Liver Disease', 'Migraine',
-        ...(data.gender === 'Female' ? ['PCOS'] : []),
+        'Liver Disease', 'Migraine', 'Kidney Stones',
+        ...(data.gender === 'Female' ? ['PCOS', 'Endometriosis / Uterine Fibroids'] : []),
       ],
     },
   ];
@@ -1319,10 +1344,11 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
     }
   };
 
-  // If gender switches to Male, remove PCOS from selected conditions
+  // If gender switches to Male, remove female-only conditions and their symptoms
   useEffect(() => {
-    if (data.gender === 'Male' && (data.medicalConditions || []).includes('PCOS')) {
-      onChange('medicalConditions', data.medicalConditions.filter(c => c !== 'PCOS'));
+    const femaleOnly = ['PCOS', 'Endometriosis / Uterine Fibroids'];
+    if (data.gender === 'Male' && (data.medicalConditions || []).some((c) => femaleOnly.includes(c))) {
+      onChange('medicalConditions', data.medicalConditions.filter((c) => !femaleOnly.includes(c)));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.gender]);

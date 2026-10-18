@@ -545,6 +545,31 @@ function generateClinicalFallback(a) {
     warnings.push('Gout: Avoid high-purine foods (organ meats, anchovies, sardines, shellfish, beer). Stay well hydrated (3L+ water daily) to promote uric acid excretion.');
     lifestyleAdvice.push({ category: 'Diet', advice: 'Gout management diet: avoid organ meats, shellfish, red meat, and alcohol (especially beer). Increase low-fat dairy, cherries, and water. Coffee (2-4 cups/day) is associated with lower uric acid levels.' });
   }
+  // -- Expanded conditions (2026-10 gap audit, scripts/conditionGapAnalysis.js) --
+  // Safety scoping is the whole reason these checkboxes exist: each branch is
+  // what the option UNLOCKS in an offline (rule-engine) plan. The AI path gets
+  // the same facts through the knowledge-base prompt.
+  if (conditions.includes('GERD / Acid Reflux (Suan)')) {
+    avoidList.push('Peppermint oil capsules (relax the valve between stomach and esophagus, worsening reflux)');
+    warnings.push('GERD/acid reflux: choose buffered Vitamin C (ascorbate, not ascorbic acid), skip effervescent or mint-flavored forms, and take iron with food.');
+  }
+  if (conditions.includes('Gastritis / Stomach Ulcer')) {
+    warnings.push('Gastritis/ulcer: take iron, zinc, and magnesium with food — never on an empty stomach. Avoid capsicum/cayenne capsules and Vitamin C above 1g.');
+  }
+  if (conditions.includes('Fatty Liver (NAFLD)')) {
+    avoidList.push('Kava (liver injury risk)');
+    avoidList.push('Green-tea extract above ~800mg EGCG daily (liver injury reports)');
+    warnings.push('Fatty liver: keep Vitamin A below 5,000 IU/day, favor choline-rich foods and omega-3, and skip unlisted "liver cleanse" herb blends.');
+  }
+  if (conditions.includes('Kidney Stones')) {
+    warnings.push('Kidney stones: keep supplemental calcium ≤500mg taken WITH meals (food-first is safer), cap Vitamin C at 500mg/day (oxalate), and drink enough to reach 2.5L+ urine output daily.');
+  }
+  if (conditions.includes('Prediabetes / Insulin Resistance')) {
+    warnings.push('Prediabetes: berberine and chromium can lower blood sugar — monitor if medication is started, and pick sugar-free supplement forms (not gummies or syrups).');
+  }
+  if (conditions.includes('Sleep Apnea (Snoring / Paused Breathing)')) {
+    warnings.push('Sleep apnea is an airway condition that supplements cannot treat — ask a clinician about a sleep study. Avoid leaning on sedating sleep aids (valerian, high-dose melatonin), which can worsen airway relaxation.');
+  }
   // -- New goals handling ---------------------------------------------------
   if (goals.includes('Muscle Gain') || a.fitnessFocus === 'Muscle Gain') {
     recs.push({ name: 'Creatine Monohydrate', reason: 'Most researched sports supplement. Increases ATP regeneration for strength, power, and muscle recovery. Also has cognitive benefits.', dosage: '3-5g daily', timing: 'Post-workout or with any meal', priority: 'High', interactions: 'Safe for healthy kidneys. Stay well hydrated.', triggeredBy: 'Muscle Gain goal' });

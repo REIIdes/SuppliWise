@@ -63,8 +63,21 @@ const CONDITION_SYMPTOMS = [
   'Numbness / Tingling', 'Slow Recovery', 'Swelling (Edema)',
   'Jaundice / Yellow Skin', 'Light / Sound Sensitivity', 'Visual Aura',
   'Irregular Periods', 'Hormonal Acne', 'Excessive Hair Growth', 'Pelvic Pain',
+  // Added by the 2026-10 condition-gap audit (scripts/conditionGapAnalysis.js)
+  'Heartburn / Sour Taste', 'Upper Abdominal Burning', 'Flank / Side Pain',
+  'Snoring / Gasping at Night', 'Sneezing / Itchy Nose or Eyes',
+  'Lower Back Pain Radiating to Leg', 'Heavy / Prolonged Periods',
 ];
 
+// The 10 conditions appended below came from scripts/conditionGapAnalysis.js:
+// aggregate counts of what real assessments reported that NO existing option
+// covered (unmatched free-text hints, symptoms from "None" reporters), ranked
+// with the routed LLM under the AI guardrails and then reviewed by a human
+// against Philippine prevalence + supplement-safety scoping value. The LLM's
+// other suggestions (CFS, Iron-Deficiency Anemia, Thyroid Cancer, Vitamin D
+// Deficiency) were rejected as near-synonyms or lab findings, and its
+// removal list (Gout, Osteoporosis, PCOS) was rejected: each carries symptom
+// scoping and sex/lab gating that the recommendation engine depends on.
 const MEDICAL_CONDITIONS = [
   'Hypertension (High Blood Pressure)', 'High Cholesterol', 'Diabetes',
   'Heart / Cardiovascular Disease', 'Obesity', 'Arthritis', 'Osteoporosis',
@@ -72,6 +85,12 @@ const MEDICAL_CONDITIONS = [
   'Asthma', 'Autoimmune Disorders', 'Anxiety Disorder', 'Depression',
   'Thyroid Disorders', 'Anemia', 'Chronic Kidney Disease', 'Liver Disease',
   'Migraine', 'PCOS',
+  // 2026-10 data-audit additions.
+  'Prediabetes / Insulin Resistance', 'High Triglycerides',
+  'GERD / Acid Reflux (Suan)', 'Gastritis / Stomach Ulcer',
+  'Fatty Liver (NAFLD)', 'Kidney Stones',
+  'Sleep Apnea (Snoring / Paused Breathing)', 'Allergies / Allergic Rhinitis',
+  'Herniated Disc / Sciatica (Langitan)', 'Endometriosis / Uterine Fibroids',
 ];
 
 const ITEMS = [
@@ -167,7 +186,7 @@ const ITEMS = [
     provenance: {
       kind: 'expert-panel',
       source: 'Chronic-condition screener reviewed by clinical advisory panel',
-      citation: 'Condition list follows AHRQ Clinical Classifications (CCS) groupings restricted to chronic conditions relevant to supplement safety; "Obesity" is BMI-gated (WHO TRS 854 cut-off >= 25), "PCOS" is sex-gated.',
+      citation: 'Condition list follows AHRQ Clinical Classifications (CCS) groupings restricted to chronic conditions relevant to supplement safety; "Obesity" is BMI-gated (WHO TRS 854 cut-off >= 25), "PCOS" and "Endometriosis / Uterine Fibroids" are sex-gated. The 2026-10 option-set revision (10 additions) came from a data audit of real assessments (scripts/conditionGapAnalysis.js), LLM-ranked under the AI guardrails and human-reviewed; the item\u2019s construct and rating are unchanged (minor revision, v2).',
     },
   },
   {

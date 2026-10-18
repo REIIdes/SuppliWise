@@ -1,3 +1,5 @@
+const { neutralize } = require('./aiGuardrails');
+
 const MAX_MESSAGE_LENGTH = 1000;
 const MAX_CONTEXT_ITEMS = 5;
 const MAX_HISTORY_ITEMS = 20;
@@ -17,13 +19,16 @@ const isPlainObject = (value) => Boolean(value)
   && typeof value === 'object'
   && !Array.isArray(value);
 
-const cleanSingleLine = (value, maxLength) => String(value || '')
+// Recommendation fields are model-echoed patient text that re-enters a system
+// prompt, so they go through the shared guardrail neutralizer before the cap —
+// this is a data channel, not a conversation, and it must not carry tokens.
+const cleanSingleLine = (value, maxLength) => neutralize(String(value || ''), { maxLength: Number.MAX_SAFE_INTEGER })
   .replace(/[\u0000-\u001f\u007f]+/g, ' ')
   .replace(/\s+/g, ' ')
   .trim()
   .slice(0, maxLength);
 
-const cleanHistoryText = (value, maxLength) => String(value || '')
+const cleanHistoryText = (value, maxLength) => neutralize(String(value || ''), { maxLength: Number.MAX_SAFE_INTEGER })
   .replace(/\u0000/g, '')
   .trim()
   .slice(0, maxLength);

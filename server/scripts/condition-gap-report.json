@@ -1,0 +1,97 @@
+{
+  "generatedAt": "2026-10-18T10:35:19.980Z",
+  "assessmentsScanned": 7,
+  "conditionsSelected": [
+    [
+      "Anxiety Disorder",
+      4
+    ],
+    [
+      "Depression",
+      3
+    ],
+    [
+      "None",
+      2
+    ],
+    [
+      "None known",
+      1
+    ],
+    [
+      "Migraine",
+      1
+    ]
+  ],
+  "symptomsSelected": [
+    [
+      "Sleep Disturbances",
+      4
+    ],
+    [
+      "Panic Attacks",
+      3
+    ],
+    [
+      "Afternoon fatigue",
+      1
+    ],
+    [
+      "Fatigue",
+      1
+    ],
+    [
+      "Frequent Headaches",
+      1
+    ],
+    [
+      "Anxiety / Excessive Worry",
+      1
+    ],
+    [
+      "Brain Fog",
+      1
+    ],
+    [
+      "Light / Sound Sensitivity",
+      1
+    ],
+    [
+      "Visual Aura",
+      1
+    ],
+    [
+      "Low Energy",
+      1
+    ],
+    [
+      "Muscle Weakness",
+      1
+    ]
+  ],
+  "noneReportersSymptoms": [
+    [
+      "Low Energy",
+      1
+    ],
+    [
+      "Muscle Weakness",
+      1
+    ]
+  ],
+  "freeTextConditionHints": [],
+  "topNarrativeTerms": [
+    [
+      "looks",
+      1
+    ],
+    [
+      "cancer",
+      1
+    ],
+    [
+      "lungs",
+      1
+    ]
+  ]
+}
