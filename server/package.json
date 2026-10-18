@@ -22,6 +22,9 @@
   "audit:notification-boundary": "node scripts/audit-notification-boundary.js",
   "verify:notification-boundary": "node scripts/withDevCa.mjs scripts/verify-notification-boundary.js",
   "check": "node scripts/check-syntax.js",
+  "backup": "node scripts/backup.js",
+  "backup:drill": "node scripts/backup-drill.js",
+  "restore": "node scripts/restore.js",
   "eval:ai": "node eval/aiBenchmark.js",
   "eval:ai:live": "node eval/aiBenchmark.js --live"
  },

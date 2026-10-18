@@ -284,6 +284,78 @@ const probes = {
   // must not spawn it every 30 s.
   dependency_audit: async () => require('./dependencyAudit').dependencyAudit(),
 
+  // ── Is there anything to restore, and has restoring it ever been proven? ──
+  // Filesystem facts only — no database reads — so this is safe to ask on every
+  // dashboard refresh. A backup folder that nobody has read back is a hypothesis,
+  // and this project has already lost data once to exactly that assumption (the
+  // ledger truncation), so a dump without a passed drill is reported as the gap
+  // it is rather than as a passing control.
+  backup_currency: async () => {
+    const { backupRoot, newestBackup, readDrillReceipt } = require('./backupStore');
+    const root = backupRoot();
+    try {
+      const newest = newestBackup(root);
+      if (!newest) {
+        return {
+          status: 'warning',
+          detail: `No backup dump exists in ${root}, so there is nothing to restore. `
+            + 'Take one with `npm run backup` and prove it with `npm run backup:drill`.',
+        };
+      }
+      const m = newest.manifest;
+      const ageHours = (Date.now() - new Date(m.createdAt).getTime()) / 3600000;
+      const age = `${ageHours < 48 ? `${Math.max(0, Math.round(ageHours))} h` : `${Math.round(ageHours / 24)} d`} old`;
+      const limitHours = Number(process.env.SUPPLIWISE_BACKUP_MAX_AGE_HOURS) || 24 * 7;
+      const size = `${m.documentTotal} document(s) across ${(m.collections || []).length} collection(s), `
+        + `${(m.uploads && m.uploads.files) || 0} upload file(s)`;
+      const receipt = readDrillReceipt(root);
+
+      if (!receipt) {
+        return {
+          status: 'warning',
+          detail: `The newest backup (${age}, ${size}) has never been restored. A dump nobody has read back is an `
+            + 'untested hypothesis — run `npm run backup:drill` to export, restore into a scratch database and compare.',
+        };
+      }
+      if (!receipt.passed) {
+        const sinceDrill = Math.max(0, Math.round((Date.now() - new Date(receipt.at).getTime()) / 3600000));
+        return {
+          status: 'critical',
+          detail: `The last restore drill FAILED (${sinceDrill} h ago) — ${receipt.error}. `
+            + 'Treat the backups as unusable until a drill passes.',
+        };
+      }
+      if (new Date(receipt.at).getTime() < new Date(m.createdAt).getTime()) {
+        return {
+          status: 'warning',
+          detail: `Backups are being taken, but the drill proved an older one — the ${age} dump is newer than the `
+            + 'last passed restore. Run `npm run backup:drill`.',
+        };
+      }
+      if (ageHours > limitHours) {
+        const sinceDrill = Math.max(0, Math.round((Date.now() - new Date(receipt.at).getTime()) / 3600000));
+        return {
+          status: 'warning',
+          detail: `The newest backup is ${age}, past the ${limitHours} h limit — ${size}, restored ${sinceDrill} h ago `
+            + 'with no differences. Nothing has been dumped since.',
+        };
+      }
+      return {
+        status: 'healthy',
+        detail: `Newest backup is ${age} (${size}) and a drill has restored it since, document for document, into `
+          + `scratch database "${receipt.scratch}". Limit: ${limitHours} h.`,
+      };
+    } catch (err) {
+      // Unmeasured, never a pass: a backup control this row cannot read is a
+      // backup control nobody has checked.
+      return {
+        status: 'warning',
+        detail: `Backups could not be measured in ${root}: ${err.message}. `
+          + 'Until it can, treat the dumps as unverified.',
+      };
+    }
+  },
+
   // ── SSRF: no server-side outbound request may take its target from a client ─
   ssrf_outbound: async () => {
     const fs = require('fs');
@@ -586,6 +658,36 @@ Object.assign(probes, {
       detail: `Lockout ladder ${ladder}. Currently holding ${s.ipsLocked} IP(s) and ${s.accountsLocked} account(s). Every 429 climbs the ladder; success clears the account bucket.`,
     };
   },
+  // ── Detection: is anyone spraying accounts, and did we notice? ───────────
+  credential_stuffing_tripwire: async () => {
+    const { tripwireStats } = require('./lockout');
+    let s;
+    try {
+      s = tripwireStats();
+    } catch (err) {
+      return { status: 'warning', detail: `Tripwire state is unmeasured (${err.message}) — the console cannot say whether an address is spraying accounts.` };
+    }
+    if (!s || typeof s.trips24h !== 'number') {
+      return { status: 'warning', detail: 'Tripwire returned no counters — the detection surface is unreadable rather than clean.' };
+    }
+    const firing = s.throttledNow > 0 || s.trips24h > 0;
+    const shape = `${s.threshold} distinct accounts failing from one address inside ${s.windowMinutes} min `
+      + `throttles that address for ${s.cooldownMinutes} min; it never locks an account or a legitimate user out`;
+    if (!firing) {
+      return {
+        status: 'healthy',
+        detail: `Tripwire armed and idle: ${shape}. No trips recorded by this process and no address is throttled now.`,
+      };
+    }
+    const last = s.last ? `${s.last.ip} (${s.last.accounts} accounts)` : 'an address';
+    return {
+      status: 'warning',
+      detail: `The tripwire is FIRING, which is the control working, not a defect: ${s.trips24h} trip(s) in 24h, `
+        + `${s.throttledNow} address(es) throttled now, most recent ${last}. Rule: ${shape}. `
+        + 'Each trip also raises a console event — review it for a pattern.',
+    };
+  },
+
   // ── Prompt injection (AI): user text must be neutralized before prompts ─
   prompt_injection: async () => {
     const g = require('./aiGuardrails');

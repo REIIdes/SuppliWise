@@ -88,6 +88,18 @@ server/uploads/
 # rather than inheriting someone else's proof of a height it never reached.
 server/uploads/.chain-head.*.anchor
 
+# `npm run backup` writes a complete EJSON dump of the database next to a copy of
+# the uploads folder — every member's health plan, profile and identifier, in the
+# working tree, one `git add -A` away from being published. This repo has already
+# had live secrets committed once, so the dump is treated as the most sensitive
+# thing in it. Ignored by shape rather than by listing files, because a backup
+# directory is created by whoever runs the command and its name is theirs to
+# choose. The drill receipt inside is only counts, and it goes with the dumps:
+# it names the database, which is configuration this file never tracks.
+backups/
+**/backups/
+**/*.ejson
+
 # Editor / tooling state
 .qodo/
 .vscode/

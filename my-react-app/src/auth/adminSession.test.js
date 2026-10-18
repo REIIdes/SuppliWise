@@ -235,13 +235,25 @@ test('a token renewal does not count as activity', () => {
   }
 });
 
-test('the middleware and the routes share ONE idle check', () => {
-  // The whole reason idleExceeded exists. Two copies of this decision drifted
-  // before, and both carried the same hole; a third copy would reintroduce it.
+test('the middleware and the routes share ONE session check', () => {
+  // The whole reason this decision lives in one function. Two copies drifted
+  // before and both carried the same hole; a third copy would reintroduce it.
+  // Sign-out revocation made the shared call `adminSessionBlock`, which answers
+  // both questions — idle AND "was this token minted before the last sign-out" —
+  // because a second site that only asked the idle question would silently
+  // resurrect a session the admin ended.
   for (const [name, source] of [['middleware', middlewareAuth], ['routes', authRoutes]]) {
     assert.ok(
-      /idleExceeded\(/.test(source),
-      `${name} should call the shared idle check`,
+      /adminSessionBlock\(/.test(source),
+      `${name} should call the shared session check`,
+    );
+    assert.ok(
+      !/idleExceeded\(/.test(source),
+      `${name} calls the idle check on its own, so it is making only half the decision`,
+    );
+    assert.ok(
+      /sessionsRevokedAt/.test(source),
+      `${name} must read the sign-out stamp, or a token issued before it still works`,
     );
     assert.ok(
       !/admin\.lastActivityAt\s*&&\s*Date\.now\(\)/.test(source),
@@ -249,7 +261,7 @@ test('the middleware and the routes share ONE idle check', () => {
     );
   }
   assert.ok(
-    /idleExceeded/.test(authRoutes) && /countsAsActivity/.test(authRoutes),
+    /countsAsActivity/.test(authRoutes),
     '/auth/admin-refresh must both check idleness and honour the renew flag',
   );
 });

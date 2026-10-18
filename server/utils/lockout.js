@@ -227,8 +227,10 @@ function noteIpAccountFailure(ip, accountId) {
     // Start the cooldown from scratch: the counter has done its job, and
     // keeping it would mean one early mistake keeps the address throttled for
     // the rest of the window.
+    const accounts = hit.emails.size;
     ipAccountHits.delete(cleanIp);
     recordOffense(stuffingKeyFor(cleanIp), { ip: cleanIp }, STUFFING_COOLDOWN_MS);
+    reportStuffingTrip({ ip: cleanIp, accounts });
     return true;
   }
   if (ipAccountHits.size > MAX_ENTRIES) {
@@ -508,6 +510,88 @@ function reportAccountLockout({ email, userId, alias, minutes, lockKey }) {
   });
 }
 
+// Trips the tripwire has caught, newest last, bounded.
+//
+// WHY THIS EXISTS AT ALL
+// `noteIpAccountFailure` is the only signal in this codebase that distinguishes
+// "someone forgot their password" from "one address is trying many accounts" —
+// and until now a trip only ever affected the attacker's own requests. It
+// throttled, and then told nobody: the detection that worked was invisible
+// unless an administrator happened to be looking at the panel at the exact
+// minute it fired, and a restart erased every trace of it.
+//
+// Bounded and in-process on purpose. This is a live instrument, not an audit
+// trail: the durable record goes to AdminEvent (below), which the Security
+// center already reads and pages people about. Keeping a second permanent copy
+// here would be a table to migrate for no extra assurance.
+const tripLog = [];
+const TRIP_LOG_MAX = 50;
+
+/**
+ * Announce a tripwire trip: once per address per half hour, to the console.
+ *
+ * Names the ADDRESS and the number of distinct accounts, and never the accounts
+ * themselves — the whole point of this trip is that the accounts are other
+ * people's, and an admin feed that listed which addresses were being sprayed
+ * would turn a detection log into a target list.
+ */
+function reportStuffingTrip({ ip, accounts }) {
+  const cleanIp = String(ip || '').trim();
+  if (!cleanIp) return;
+  tripLog.push({ at: Date.now(), ip: cleanIp, accounts });
+  if (tripLog.length > TRIP_LOG_MAX) tripLog.splice(0, tripLog.length - TRIP_LOG_MAX);
+  notifyOnce(`stuffing-notify:${cleanIp}`, 30 * 60 * 1000, async () => {
+    try {
+      const AdminEvent = require('../models/AdminEvent');
+      await AdminEvent.create({
+        type: 'security',
+        title: 'Credential-stuffing tripwire fired',
+        detail: `${cleanIp} failed sign-in against ${accounts} different accounts within `
+          + `${Math.round(IP_ACCOUNT_WINDOW_MS / 60000)} minutes. That address is now throttled for failed `
+          + `attempts for ${Math.round(STUFFING_COOLDOWN_MS / 60000)} minutes; nobody who knows their own `
+          + 'password is affected, and no account was locked. The accounts tried are deliberately not listed.',
+        link: 'security',
+        linkLabel: 'Open the Security center',
+      }).catch(() => {});
+    } catch { /* a detection notice must never break the request that detected */ }
+  });
+}
+
+/**
+ * What the tripwire has seen, for the Security center to read.
+ *
+ * `trips24h` counts from the in-process log, so it restarts with the process —
+ * stated rather than hidden, because a monitor that quietly implied it knew the
+ * whole history would be lying. `throttledNow` reads the live buckets, which is
+ * the part that is true regardless of when this process started.
+ */
+function tripwireStats(now = Date.now()) {
+  const windowMs = 24 * 60 * 60 * 1000;
+  let trips24h = 0;
+  let last = null;
+  for (const trip of tripLog) {
+    if (now - trip.at <= windowMs) trips24h += 1;
+    if (!last || trip.at > last.at) last = trip;
+  }
+  let throttledNow = 0;
+  for (const [key, entry] of buckets) {
+    if (key.startsWith(STUFFING_KEY_PREFIX) && now < entry.lockedUntil) throttledNow += 1;
+  }
+  return {
+    trips24h,
+    throttledNow,
+    threshold: IP_ACCOUNT_THRESHOLD,
+    windowMinutes: Math.round(IP_ACCOUNT_WINDOW_MS / 60000),
+    cooldownMinutes: Math.round(STUFFING_COOLDOWN_MS / 60000),
+    last: last ? { ...last } : null,
+  };
+}
+
+/** Forget every trip this process recorded (tests only). */
+function clearTripLog() {
+  tripLog.length = 0;
+}
+
 module.exports = {
   LADDER_MS,
   FAILS_TO_LOCK,
@@ -532,6 +616,9 @@ module.exports = {
   lockoutCheck,
   limitReachedHandler,
   lockoutStats,
+  reportStuffingTrip,
+  tripwireStats,
+  clearTripLog,
   notifyOnce,
   reportAccountLockout,
 };

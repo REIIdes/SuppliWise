@@ -131,7 +131,7 @@ function invalidateUserSessionCache(userId) {
 // just the numbers.
 const {
   ADMIN_HEARTBEAT_INTERVAL_MS,
-  idleExceeded,
+  adminSessionBlock,
 } = require('../utils/adminSession');
 
 // Throttled `lastActivityAt` writes for USER sessions.
@@ -258,18 +258,21 @@ const protect = async (req, res, next) => {
     if (!adminId || adminId === 'admin') return res.status(401).json({ message: 'Please sign in again.' });
     let admin;
     try {
-      admin = await AdminAccount.findById(adminId).select('alias enabled lastActivityAt mustChangePassword');
+      admin = await AdminAccount.findById(adminId).select('alias enabled lastActivityAt mustChangePassword sessionsRevokedAt');
     } catch (error) {
       // Lookup failure = outage, not a bad session — never sign admins out over it.
       return res.status(503).json({ message: 'The service is temporarily unavailable. Please try again.' });
     }
     if (!admin || !admin.enabled) return res.status(401).json({ message: 'Admin account is unavailable.' });
-    // The single shared implementation. This used to read
-    // `admin.lastActivityAt && ...`, which SKIPPED the check entirely whenever
-    // the stamp was null — so an account that had never been stamped was never
-    // idle-expired, and only the token's `exp` bounded it. `idleExceeded` falls
-    // back to the token's own issue time and fails closed.
-    if (idleExceeded(admin, decoded)) {
+    // One decision for every admin session rule — the idle window AND whether
+    // the account has signed out since this token was minted. Read
+    // `signedOutSince` in utils/adminSession.js for why the stateless admin
+    // token needed a stamp to end it.
+    const block = adminSessionBlock(admin, decoded);
+    if (block === 'signed_out') {
+      return res.status(401).json({ message: 'You signed out. Please sign in again.', code: 'ADMIN_SESSION_ENDED' });
+    }
+    if (block === 'idle') {
       return res.status(401).json({ message: 'Admin session expired after inactivity.' });
     }
     // ── Forced password change ────────────────────────────────────────────

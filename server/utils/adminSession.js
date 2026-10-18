@@ -178,6 +178,59 @@ function idleExceeded(admin, decoded, now = Date.now()) {
 }
 
 /**
+ * The instant a sign-out stamps into `sessionsRevokedAt`.
+ *
+ * A JWT's `iat` is whole seconds, so a stamp recorded at 12:00:00.400 cannot
+ * distinguish a token minted at .100 from one minted at .600 — both carry
+ * `iat` = 12:00:00. Rounding the stamp UP to the next second resolves that in
+ * the safe direction: the .100 token is provably dead the moment the operator
+ * clicks Sign out, even if they click it 90 milliseconds after signing in.
+ *
+ * The cost of rounding up is exactly one second of over-revocation, and it lands
+ * on the least risky case there is: a brand-new sign-in that happened inside the
+ * same second as the sign-out it followed. That costs an operator who is
+ * re-entering a password and a TOTP code a single retry, so it is not a
+ * user-visible glitch, while the window it closes was — an admin credential
+ * staying live after its owner signed out.
+ */
+function signoutStamp(now = Date.now()) {
+  return Math.floor(now / 1000) * 1000 + 1000;
+}
+
+/**
+ * Has this admin token been superseded by a sign-out?
+ *
+ * An admin credential is a stateless JWT: unlike a member token it carries no
+ * `sid` pointing at a session document, so clicking Sign out previously could
+ * only discard the client's copy — the token itself stayed valid for the rest of
+ * `ADMIN_TOKEN_LIFETIME` and anything still holding it (a copied string, another
+ * tab, curl) kept full administrative access. `sessionsRevokedAt` is the
+ * server's answer: a token is usable only if it was issued after the last
+ * sign-out. A token with no provable issue time loses.
+ */
+function signedOutSince(admin, decoded) {
+  const stamp = admin && admin.sessionsRevokedAt ? new Date(admin.sessionsRevokedAt).getTime() : NaN;
+  if (!Number.isFinite(stamp)) return false; // never signed out — nothing to compare against
+  const issued = decoded && decoded.iat ? decoded.iat * 1000 : NaN;
+  if (!Number.isFinite(issued)) return true;
+  return issued < stamp;
+}
+
+/**
+ * Why this admin session is being refused, or null when it is usable.
+ *
+ * THE single decision, for the same reason `idleExceeded` is: the middleware and
+ * the refresh endpoint each kept their own copy of the admin session rules and
+ * drifted. A caller that knows only `idleExceeded` would keep honouring a token
+ * its owner explicitly ended.
+ */
+function adminSessionBlock(admin, decoded, now = Date.now()) {
+  if (signedOutSince(admin, decoded)) return 'signed_out';
+  if (idleExceeded(admin, decoded, now)) return 'idle';
+  return null;
+}
+
+/**
  * Does a client request count as ACTIVITY (i.e. may it slide the idle window)?
  *
  * A pure token renewal must answer NO. The client re-issues its token on a
@@ -209,5 +262,8 @@ module.exports = {
   ADMIN_HEARTBEAT_INTERVAL_MS,
   idleReferenceMs,
   idleExceeded,
+  signoutStamp,
+  signedOutSince,
+  adminSessionBlock,
   countsAsActivity,
 };

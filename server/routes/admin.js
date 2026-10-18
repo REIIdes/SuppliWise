@@ -1928,6 +1928,8 @@ const runMonitorProbes = async (app) => {
           xxe_ssti:            ['XXE + SSTI', 'xxe'],
           access_control_default_deny: ['Access Control (Deny By Default)', 'authz'],
           rate_limit_lockout:  ['Auth Rate Limit + Lockout', 'bruteforce'],
+          credential_stuffing_tripwire: ['Credential-Stuffing Tripwire', 'tripwire'],
+          backup_currency:      ['Backup Currency + Restore Drill', 'backup'],
           prompt_injection:    ['Prompt Injection (AI)', 'ai'],
           pii_ai_prompts:      ['PII in AI Prompts', 'ai'],
           ai_quota:            ['AI Quota Abuse', 'ai'],

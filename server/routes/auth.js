@@ -19,7 +19,8 @@ const {
   ADMIN_TOKEN_LIFETIME,
   ADMIN_TOKEN_LIFETIME_SECONDS,
   ADMIN_HEARTBEAT_INTERVAL_MS,
-  idleExceeded,
+  adminSessionBlock,
+  signoutStamp,
   countsAsActivity,
 } = require('../utils/adminSession');
 const { protect, rejectSession } = require('../middleware/auth');
@@ -1098,13 +1099,20 @@ router.post('/admin-refresh', async (req, res) => {
     const adminId = decoded.adminId || decoded.id;
     if (!adminId || adminId === 'admin') return res.status(401).json({ message: 'Please sign in again.' });
     const AdminAccount = require('../models/AdminAccount');
-    const admin = await AdminAccount.findById(adminId).select('alias enabled lastActivityAt');
+    const admin = await AdminAccount.findById(adminId).select('alias enabled lastActivityAt sessionsRevokedAt');
     if (!admin || !admin.enabled) return res.status(401).json({ message: 'Admin account is unavailable.' });
-    // The SAME function the middleware uses. Two copies of this check is how
-    // they drifted apart in the first place, and both copies skipped the test
-    // entirely when `lastActivityAt` was null.
-    if (idleExceeded(admin, decoded)) {
-      return res.status(401).json({ message: 'Admin session expired after inactivity.' });
+    // The SAME decision the middleware makes — one implementation for the idle
+    // window and for "this account signed out after the token was minted".
+    // Renewing a token is exactly the operation that must not resurrect a
+    // session its owner ended, so this call site is the important one.
+    const block = adminSessionBlock(admin, decoded);
+    if (block) {
+      return res.status(401).json({
+        message: block === 'signed_out'
+          ? 'You signed out. Please sign in again.'
+          : 'Admin session expired after inactivity.',
+        code: block === 'signed_out' ? 'ADMIN_SESSION_ENDED' : 'ADMIN_SESSION_IDLE',
+      });
     }
     // Only genuine activity slides the window. A token renewal leaves it alone,
     // which is what keeps the idle timeout meaningful while the client's renewal
@@ -2083,14 +2091,32 @@ router.get('/me', protect, async (req, res) => {
 });
 
 // @route   POST /api/auth/logout
-// @desc    Revoke THIS session server-side (the session id inside the
-//          presented token). Scoped to the signed-in account + that session,
-//          so signing out Account A can never sign out Account B, and any
-//          copy of this token dies immediately (backend stays authoritative).
+// @desc    End THIS session server-side, for either kind of account, so the
+//          presented credential stops working immediately rather than when it
+//          happens to expire. Scoped to the signed-in account + its own
+//          session, so signing out Account A can never sign out Account B
+//          (backend stays authoritative).
+//
+//          Members carry a `sid` pointing at a Session document: revoke that
+//          document. Admins carry a stateless token with no session behind it,
+//          so ending theirs means stamping the account with the instant it
+//          signed out — utils/adminSession.js `signedOutSince` then refuses any
+//          admin token issued at or before that stamp. Before this, admin
+//          sign-out only discarded the client's copy and the credential stayed
+//          fully live for the rest of ADMIN_TOKEN_LIFETIME.
 // @access  Private
 router.post('/logout', protect, async (req, res) => {
   try {
-    if (req.user && req.user.role !== 'admin' && req.sessionId) {
+    if (req.user && req.user.role === 'admin') {
+      // `signoutStamp` rounds up to the next second because the token's `iat`
+      // has only second resolution — see utils/adminSession.js.
+      if (mongoose.isValidObjectId(req.user._id)) {
+        await AdminAccount.updateOne(
+          { _id: req.user._id },
+          { $set: { sessionsRevokedAt: new Date(signoutStamp()) } },
+        ).exec();
+      }
+    } else if (req.user && req.sessionId) {
       await revokeUserSession(req.user._id, req.sessionId);
     }
     res.json({ message: 'Signed out successfully.' });

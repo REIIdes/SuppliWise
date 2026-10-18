@@ -21,6 +21,14 @@ const adminAccountSchema = new mongoose.Schema({
   lastLoginAt: { type: Date, default: null },
   lastActivityAt: { type: Date, default: null },
 
+  // ── Sign-out is authoritative server-side ───────────────────────────────
+  // The instant this account last ended its session. An admin token is a stateless
+  // JWT with no session id behind it, so this is the only way "I signed out" can
+  // mean more than "my browser forgot the string": middleware/auth.js refuses any
+  // token issued before this stamp. See `signoutStamp` and `signedOutSince` in
+  // utils/adminSession.js for why the stamp is rounded up to the next second.
+  sessionsRevokedAt: { type: Date, default: null },
+
   // ── Forced password change on first sign-in ────────────────────────────
   // Set when the account's password was set by something other than the person
   // holding it: a generated hand-off value, a reset, an operator override. The
