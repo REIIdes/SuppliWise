@@ -100,6 +100,50 @@ router.post('/', protect, async (req, res) => {
     if (weight && (weight < 1 || weight > 500)) return res.status(400).json({ message: 'Weight must be between 1 and 500 kg.' });
     if (height && (height < 30 || height > 300)) return res.status(400).json({ message: 'Height must be between 30 and 300 cm.' });
 
+    // Identity fields are REQUIRED to save. An empty body used to persist as a
+    // 201 "assessment" with no numbers at all — NaN BMI downstream and a plan
+    // the engine cannot anchor. The client always sends these four.
+    const missing = (v) => v === undefined || v === null || v === '';
+    if (missing(age) || missing(gender) || missing(weight) || missing(height)) {
+      return res.status(400).json({ message: 'Age, gender, weight, and height are required.' });
+    }
+    if (!['Male', 'Female'].includes(gender)) {
+      return res.status(400).json({ message: 'Gender must be Male or Female.' });
+    }
+
+    // Multi-select fields must be arrays of short strings. The [String] schema
+    // silently CASTS a bare string ("nope" → ["nope"]) — garbage that then
+    // flows into the rule engine and mergeSelectedBundles — while objects or
+    // numbers inside the array throw a CastError → 500. Validate explicitly.
+    const strArrayOk = (v) => v === undefined || v === null ||
+      (Array.isArray(v) && v.length <= 100 && v.every((x) => typeof x === 'string' && x.length <= 200));
+    for (const [field, value] of Object.entries({ healthGoals, symptoms, medicalConditions, lifestyleHabits })) {
+      if (!strArrayOk(value)) {
+        return res.status(400).json({ message: `${field} must be an array of short strings.` });
+      }
+    }
+    // Plain text fields: an object/array/number reaches Mongoose castString
+    // and throws — reject at the boundary instead.
+    const textFields = {
+      activityLevel, dietType, stressLevel, sleepQuality, waterIntake,
+      pregnancyStatus, takingSupplements, recentBloodTest,
+      sunExposure: req.body.sunExposure, fitnessFocus: req.body.fitnessFocus,
+      proteinIntake: req.body.proteinIntake, recreationalDrugTypes,
+      currentMedications, allergies, currentSupplements: req.body.currentSupplements,
+      bloodTestResults: req.body.bloodTestResults,
+    };
+    for (const [field, value] of Object.entries(textFields)) {
+      if (value !== undefined && value !== null && typeof value !== 'string') {
+        return res.status(400).json({ message: `${field} must be text.` });
+      }
+    }
+    // Mixed accepts anything, but the severity scorer reads it as a map —
+    // arrays/strings/numbers there produce silent NaN scores.
+    if (symptomSeverity !== undefined && symptomSeverity !== null
+      && (typeof symptomSeverity !== 'object' || Array.isArray(symptomSeverity))) {
+      return res.status(400).json({ message: 'symptomSeverity must be an object.' });
+    }
+
     // Validate string field lengths
     const TEXT_MAX = 1000;
     const SHORT_MAX = 200;

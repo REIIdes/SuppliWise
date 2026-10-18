@@ -231,11 +231,7 @@ router.post('/admin/reviews/:userId/resolve', protect, adminOnly, async (req, re
   } catch (error) {
     console.error('[admin-resolve-medical-review] Error:', error.message);
     console.error('[admin-resolve-medical-review] Stack:', error.stack);
-    res.status(500).json({ 
-      message: 'Failed to resolve medical review.',
-      error: error.message,
-      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
+    res.status(500).json({ message: 'Failed to resolve medical review.' });
   }
 });
 
@@ -256,6 +252,17 @@ router.post('/confirm', protect, async (req, res) => {
       status: user.medicalReviewStatus,
       requested: user.medicalReviewRequested,
     });
+
+    // THE WHOLE POINT OF THE CONFIRM STEP: it lifts the block only after an
+    // administrator approved the review (admin resolve sets 'approved' and
+    // deliberately leaves the Priority flag up until the user confirms).
+    // Without this check, any member could POST /confirm directly and clear
+    // their own severe-case flag with no admin ever acting on it.
+    if (user.medicalReviewStatus !== 'approved') {
+      return res.status(403).json({
+        message: 'An administrator must approve your medical review before you can confirm and continue.',
+      });
+    }
 
     // Get all Priority assessments to check if there's anything to resolve
     const priorityAssessments = await Assessment.find({
@@ -334,11 +341,7 @@ router.post('/confirm', protect, async (req, res) => {
   } catch (error) {
     console.error('[medical-review-confirm] Error caught:', error.message);
     console.error('[medical-review-confirm] Stack:', error.stack);
-    res.status(500).json({ 
-      message: 'Failed to confirm medical review.',
-      error: error.message,
-      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
+    res.status(500).json({ message: 'Failed to confirm medical review.' });
   }
 });
 

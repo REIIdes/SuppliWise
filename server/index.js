@@ -420,8 +420,11 @@ app.use('/api/web3', userLimiter);
 app.use('/api/survey', userLimiter);
 // Health Assessment instrument registry + expert review submissions.
 app.use('/api/instrument', userLimiter);
-// AI condition-proposal ratification queue (admin-only routes inside).
+// AI learning log (admin-only routes inside).
 app.use('/api/proposals', userLimiter);
+// Severe-case medical review (request/status/confirm). Member writes that
+// change flag state — meter them with the ordinary user bucket.
+app.use('/api/medical-review', userLimiter);
 app.use('/api/admin', lockoutCheck, adminLimiter);
 
 // ── STAGE 2 — PARSE (only requests that passed metering reach here) ────────
