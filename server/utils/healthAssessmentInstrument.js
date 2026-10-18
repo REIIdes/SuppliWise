@@ -32,10 +32,19 @@ const SEVERITY_OPTIONS = ['Mild', 'Moderate', 'Severe'];
 const SEVERITY_ORDINAL = { Mild: 1, Moderate: 2, Severe: 3 };
 
 const GENERAL_SYMPTOMS = [
-  'Fatigue', 'Frequent Headaches', 'Brain Fog', 'Anxiety / Stress',
-  'Difficulty Sleeping', 'Low Energy', 'Digestive Discomfort',
-  'Muscle Weakness', 'Hair Thinning', 'Dry Skin', 'Low Mood',
-  'Frequent Colds / Low Immunity', 'Joint Stiffness', 'Low Appetite', 'Low Libido',
+  // Energy & Sleep
+  'Fatigue', 'Low Energy', 'Difficulty Sleeping', 'Waking Up Unrefreshed',
+  // Mind & Mood
+  'Brain Fog', 'Difficulty Concentrating', 'Anxiety / Stress',
+  'Feeling Tense or Overwhelmed', 'Irritability', 'Low Mood',
+  // Head & Senses
+  'Frequent Headaches', 'Eye Strain or Dry Eyes',
+  // Gut & Appetite
+  'Digestive Discomfort', 'Bloating or Acidity', 'Low Appetite',
+  // Muscles & Joints
+  'Muscle Weakness', 'Neck / Shoulder Tension', 'Muscle or Joint Soreness', 'Joint Stiffness',
+  // Skin, Hair & Immunity
+  'Hair Thinning', 'Dry Skin', 'Frequent Colds / Low Immunity',
 ];
 
 // Symptom pool shown when "None" conditions are selected (mirrors

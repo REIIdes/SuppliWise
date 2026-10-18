@@ -1301,7 +1301,7 @@ function buildMealRecs(symptoms, goals, conditions, a) {
   }
 
   // DINNER
-  const wantsSleep = goals.includes('Improve Sleep') || symptoms.some(s => /sleep|insomnia/i.test(s));
+  const wantsSleep = goals.includes('Improve Sleep') || symptoms.some(s => /sleep|insomnia|unrefreshed/i.test(s));
   if (isKeto || isCarnivore) {
     const d = noMeat ? 'roasted portobello mushrooms' : (noFishAll ? 'grilled chicken thighs' : 'baked salmon');
     meals.push({ meal: 'Dinner', suggestion: d.charAt(0).toUpperCase()+d.slice(1) + ' with sauteed zucchini and olive oil -- high-fat, low-carb dinner supporting ketone production.' });
@@ -1321,7 +1321,7 @@ function buildMealRecs(symptoms, goals, conditions, a) {
 
   // SNACK
   const wantsEnergy  = symptoms.some(s => /fatigue|energy/i.test(s)) || goals.includes('Increase Energy');
-  const wantsStress  = symptoms.some(s => /anxiety|stress/i.test(s)) || goals.includes('Stress Reduction');
+  const wantsStress  = symptoms.some(s => /anxiety|stress|tense|overwhelm|irritab/i.test(s)) || goals.includes('Stress Reduction');
   const wantsMuscle  = goals.includes('Muscle Gain') || goals.includes('Improve Strength');
   if (isDiabetic) {
     // diabetics need controlled-sugar snacks

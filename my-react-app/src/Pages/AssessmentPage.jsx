@@ -769,23 +769,42 @@ function Step2({ data, onChange, errors = {} }) {
 
 // ── Shared symptom/severity constants (used by Step3Combined) ─────────────
 
-// General symptoms shown when user selects None for medical conditions
+// General symptoms shown when user selects None for medical conditions.
+// Grouped by body-system theme so related items render side by side; "Low
+// Libido" was dropped from this free-standing list (it read oddly next to the
+// stress items) and remains available where it is clinically contextual: as a
+// condition-scoped symptom under Depression, Diabetes, Thyroid and
+// Hypertension. Keep in sync with GENERAL_SYMPTOMS in
+// server/utils/healthAssessmentInstrument.js.
 const GENERAL_SYMPTOMS = [
+  // Energy & Sleep
   'Fatigue',
-  'Frequent Headaches',
-  'Brain Fog',
-  'Anxiety / Stress',
-  'Difficulty Sleeping',
   'Low Energy',
+  'Difficulty Sleeping',
+  'Waking Up Unrefreshed',
+  // Mind & Mood
+  'Brain Fog',
+  'Difficulty Concentrating',
+  'Anxiety / Stress',
+  'Feeling Tense or Overwhelmed',
+  'Irritability',
+  'Low Mood',
+  // Head & Senses
+  'Frequent Headaches',
+  'Eye Strain or Dry Eyes',
+  // Gut & Appetite
   'Digestive Discomfort',
+  'Bloating or Acidity',
+  'Low Appetite',
+  // Muscles & Joints
   'Muscle Weakness',
+  'Neck / Shoulder Tension',
+  'Muscle or Joint Soreness',
+  'Joint Stiffness',
+  // Skin, Hair & Immunity
   'Hair Thinning',
   'Dry Skin',
-  'Low Mood',
   'Frequent Colds / Low Immunity',
-  'Joint Stiffness',
-  'Low Appetite',
-  'Low Libido',
 ];
 
 // Per-symptom severity descriptions — shown when a severity button is selected
@@ -794,6 +813,46 @@ const SEVERITY_DESCRIPTIONS = {
     Mild:     'Slightly tired by end of day but can manage daily tasks.',
     Moderate: 'Noticeable tiredness that slows you down during the day.',
     Severe:   'Exhausted most of the time, hard to get out of bed or function.',
+  },
+  'Waking Up Unrefreshed': {
+    Mild:     'Occasionally wake up groggy, but energy returns after breakfast.',
+    Moderate: 'Wake up unrefreshed most mornings and rely on caffeine to function.',
+    Severe:   'Never feel restored on waking, no matter how long you sleep.',
+  },
+  'Difficulty Concentrating': {
+    Mild:     'Focus slips occasionally, easily recoverable with fewer distractions.',
+    Moderate: 'Regularly lose track of tasks or re-read the same paragraph.',
+    Severe:   'Hard to sustain focus long enough to complete routine work.',
+  },
+  'Feeling Tense or Overwhelmed': {
+    Mild:     'Occasional pressure, mostly tied to a specific deadline or event.',
+    Moderate: 'Tension on most days, with trouble switching off after work.',
+    Severe:   'Constantly on edge, everyday demands feel unmanageable.',
+  },
+  Irritability: {
+    Mild:     'Shorter fuse than usual, but you catch yourself before reacting.',
+    Moderate: 'Frequent snaps or friction with people close to you.',
+    Severe:   'On edge most of the day; small things reliably set off a reaction.',
+  },
+  'Eye Strain or Dry Eyes': {
+    Mild:     'Eyes feel tired after long screen sessions, better with breaks.',
+    Moderate: 'Gritty or sore eyes most afternoons, sometimes with blurred vision.',
+    Severe:   'Persistent pain, watering, or blurred vision that limits screen use.',
+  },
+  'Bloating or Acidity': {
+    Mild:     'Occasional fullness or reflux after heavy or spicy meals.',
+    Moderate: 'Burning or distension several times a week, uncomfortable but brief.',
+    Severe:   'Daily bloating or reflux that disturbs meals or sleep.',
+  },
+  'Neck / Shoulder Tension': {
+    Mild:     'Tightness at the end of a long day at a desk, eased by stretching.',
+    Moderate: 'Recurring aching neck or shoulders needing massage most days.',
+    Severe:   'Constant tension with stiffness that limits head or arm movement.',
+  },
+  'Muscle or Joint Soreness': {
+    Mild:     'Mild soreness after activity, resolves within a day.',
+    Moderate: 'Achy muscles or joints on most days, noticeable on stairs or lifting.',
+    Severe:   'Persistent soreness that interferes with daily movement or sleep.',
   },
   'Shortness of Breath': {
     Mild:     'Occasional breathlessness during physical activity, resolves quickly with rest.',
