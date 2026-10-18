@@ -40,6 +40,7 @@ const web3Routes = require('./routes/web3');
 const medicalReviewRoutes = require('./routes/medicalReview');
 const surveyRoutes = require('./routes/survey');
 const instrumentRoutes = require('./routes/instrument');
+const proposalsRoutes = require('./routes/proposals');
 const { PICTURE_DIR } = require('./utils/pictures');
 const AdminAccount = require('./models/AdminAccount');
 // The one trusted-origin list, and the CSRF guard built on it. See the CORS
@@ -419,6 +420,8 @@ app.use('/api/web3', userLimiter);
 app.use('/api/survey', userLimiter);
 // Health Assessment instrument registry + expert review submissions.
 app.use('/api/instrument', userLimiter);
+// AI condition-proposal ratification queue (admin-only routes inside).
+app.use('/api/proposals', userLimiter);
 app.use('/api/admin', lockoutCheck, adminLimiter);
 
 // ── STAGE 2 — PARSE (only requests that passed metering reach here) ────────
@@ -501,6 +504,7 @@ app.use('/api/web3', web3Routes);
 app.use('/api/medical-review', medicalReviewRoutes);
 app.use('/api/survey', surveyRoutes);
 app.use('/api/instrument', instrumentRoutes);
+app.use('/api/proposals', proposalsRoutes);
 // The admin console's Chat stream is an EventSource, which cannot set an
 // Authorization header, so its ?token= has to be copied into the header BEFORE
 // anything under /api/admin authenticates: routes/admin.js registers

@@ -18,6 +18,13 @@
  *
  *   node scripts/conditionGapAnalysis.js            # aggregates + LLM ranking
  *   node scripts/conditionGapAnalysis.js --dry-run  # aggregates only, no spend
+ *   node scripts/conditionGapAnalysis.js --import   # queue the existing
+ *                                                   # ranked file, no spend
+ *
+ * The ranked candidates are NOT applied by this script. They are queued as
+ * pending ConditionProposal rows; a health professional must ratify each one
+ * (approve/reject with a comment) in the admin console before the condition
+ * can enter the instrument.
  *
  * PRIVACY
  * -------
@@ -39,6 +46,7 @@ const path = require('path');
 const mongoose = require('mongoose');
 
 const Assessment = require('../models/Assessment');
+const ConditionProposal = require('../models/ConditionProposal');
 const { completeWithFallback } = require('../utils/aiRouter');
 const { neutralize, fenceData, GUARDRAIL_CLAUSE } = require('../utils/aiGuardrails');
 const { MEDICAL_CONDITIONS, GENERAL_SYMPTOMS, CONDITION_SYMPTOMS } = require('../utils/healthAssessmentInstrument');
@@ -105,7 +113,26 @@ async function main() {
   const uri = process.env.MONGO_URI;
   if (!uri) throw new Error('MONGO_URI is not set — run this from the server .env.');
   await mongoose.connect(uri, { serverSelectionTimeoutMS: 20000 });
-  console.log('[gap] connected (read-only aggregation).');
+  console.log('[gap] connected.');
+
+  // ── Import-only mode: queue a previous run's ranked file ────────────────
+  // Same single write as a normal run, minus the read and the provider spend.
+  if (process.argv.includes('--import')) {
+    const file = path.join(__dirname, 'condition-gap-ranked.json');
+    const ranked = JSON.parse(fs.readFileSync(file, 'utf8'));
+    let scanned = 0;
+    try {
+      scanned = JSON.parse(fs.readFileSync(path.join(__dirname, 'condition-gap-report.json'), 'utf8')).assessmentsScanned || 0;
+    } catch { /* report absent — evidence count stays 0 */ }
+    const stats = await ConditionProposal.upsertFromRanking(ranked, {
+      script: 'conditionGapAnalysis --import',
+      runAt: new Date(),
+      assessmentsScanned: scanned,
+    });
+    console.log(`[gap] imported ${file}: ${stats.created} queued, ${stats.refreshed} refreshed, ${stats.skipped} already decided/invalid.`);
+    await mongoose.disconnect();
+    return;
+  }
 
   // ── 1. Aggregate over real submitted assessments ──────────────────────
   const recent = await Assessment.find({})
@@ -220,6 +247,16 @@ async function main() {
   fs.writeFileSync(ranked, JSON.stringify(parsed, null, 2));
   console.log(`[gap] LLM ranking written to ${ranked}:`);
   console.log(JSON.stringify(parsed, null, 2));
+
+  // ── 4. Queue the candidates for professional ratification ─────────────
+  // The script's only write. Nothing ships from here: each candidate lands
+  // as a pending proposal that an admin must approve or reject with a
+  // comment (routes/proposals.js) before it can enter the instrument.
+  const queued = await ConditionProposal.upsertFromRanking(parsed, {
+    runAt: new Date(),
+    assessmentsScanned: report.assessmentsScanned,
+  });
+  console.log(`[gap] proposals queued: ${queued.created} new, ${queued.refreshed} refreshed, ${queued.skipped} already decided.`);
   await mongoose.disconnect();
 }
 

@@ -392,7 +392,7 @@ test('no admin page depends on a user credential', () => {
   // session, so refusing to adopt one costs it nothing. If an admin page ever
   // starts importing a user-session helper, this is what says so — and the fix's
   // rationale has to be re-examined at that point rather than assumed.
-  const adminPages = ['AdminLogin.jsx', 'AdminDashboard.jsx', 'AdminChangePassword.jsx', 'AssessmentManagement.jsx'];
+  const adminPages = ['AdminLogin.jsx', 'AdminDashboard.jsx', 'AdminChangePassword.jsx', 'AssessmentManagement.jsx', 'ConditionProposals.jsx'];
   for (const file of adminPages) {
     const source = readFileSync(join(here, '..', 'Pages', file), 'utf8');
     assertSourceLacks(

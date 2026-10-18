@@ -17,6 +17,7 @@ import { downloadSecurityReport } from '../utils/securityReport';
 import { formatPhoneNumber, formatEmail } from '../utils/formatContactInfo';
 import './AdminDashboard.css';
 import AssessmentManagement from './AssessmentManagement';
+import ConditionProposals from './ConditionProposals';
 import SecurityStatus from '../Components/SecurityStatus/SecurityStatus';
 import AdminTopbar from '../Components/AdminTopbar/AdminTopbar';
 import AdminSubscriptionPanel from '../Components/AdminSubscriptionPanel/AdminSubscriptionPanel';
@@ -43,7 +44,7 @@ import ConfirmModal from '../Components/ConfirmModal/ConfirmModal';
 // answer. It sits next to 'subscriptions' because the two are the same reviewer
 // looking at the same member's money, and a member who paid and then wrote in
 // about it is one problem, not two.
-const tabs = ['overview', 'users', 'admins', 'subscriptions', 'chats', 'assessment-management', 'ai', 'security'];
+const tabs = ['overview', 'users', 'admins', 'subscriptions', 'chats', 'assessment-management', 'proposals', 'ai', 'security'];
 
 // The idle window is DEFINED by the server (server/utils/adminSession.js) and
 // applied there. These are the fallbacks used only until the first
@@ -284,6 +285,14 @@ const TAB_ICONS = {
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <circle cx="12" cy="12" r="3"/>
       <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+    </svg>
+  ),
+  // Hourglass over a line: an AI suggestion waiting on a professional verdict.
+  proposals: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M6 2h12M6 22h12"/>
+      <path d="M8 2v4l4 4 4-4V2"/>
+      <path d="M8 22v-4l4-4 4 4v4"/>
     </svg>
   ),
   profile: (
@@ -1470,6 +1479,7 @@ function AdminDashboard() {
     subscriptions: 'Subscription management',
     chats: 'Chat management',
     'assessment-management': 'Assessment Management',
+    proposals: 'AI Proposal Queue',
     ai: 'AI management',
     profile: 'Profile',
     security: 'Security',
@@ -1748,6 +1758,7 @@ function AdminDashboard() {
                   : tab === 'chats'            ? 'Chat management'
                   : tab === 'security'         ? 'Security center'
                   : tab === 'profile'          ? 'Administrator profile'
+                  : tab === 'proposals'        ? 'AI proposal queue'
                   : 'Assessment Management'}
               </h1>
             </div>
@@ -1786,6 +1797,7 @@ function AdminDashboard() {
           {tab === 'subscriptions'          && <div className="admin-tab-panel"><AdminSubscriptionRequests request={request} /></div>}
           {tab === 'chats'                   && <div className="admin-tab-panel"><AdminSupportChats request={request} secure={adminSecureChat} adminAccountId={adminAccountId} focusThreadId={focusThreadId} adminProfile={appearance} /></div>}
           {tab === 'assessment-management'  && <div className="admin-tab-panel"><AssessmentManagement users={allUsers} /></div>}
+          {tab === 'proposals'              && <div className="admin-tab-panel"><ConditionProposals /></div>}
           {tab === 'ai'                     && <div className="admin-tab-panel"><AiPanel ai={ai} onCheckNow={checkAiNow} checking={checkingAi} reload={aiReload} /></div>}
           {tab === 'security'               && <div className="admin-tab-panel"><SecurityStatus monitor={monitor} onDownloadReport={() => downloadReportRef.current()} detection={ai?.detection} focusMonitorKey={focusMonitorKey} /></div>}
           {tab === 'profile'                && <div className="admin-tab-panel"><ProfilePanel profile={profile} appearance={appearance} onSaveAppearance={saveAppearance} editOpen={editProfileOpen} onToggleEdit={() => setEditProfileOpen(v => !v)} form={profileForm} setForm={setProfileForm} message={profileMessage} onSubmit={changePassword} rotateOtp={rotateOtp} setRotateOtp={setRotateOtp} rotatedKey={rotatedKey} onRotate={rotateAuthenticator} /></div>}
