@@ -1921,6 +1921,7 @@ const runMonitorProbes = async (app) => {
           auth_bruteforce:     ['Auth Brute Force + Replay', 'bruteforce'],
           csrf_stateless:      ['CSRF (Stateless Auth)', 'csrf'],
           db_least_privilege:  ['Database Account Least Privilege', 'dbpriv'],
+          dependency_audit:    ['Dependency Advisories (npm audit)', 'deps'],
           ssrf_outbound:       ['SSRF (Outbound Requests)', 'ssrf'],
           command_injection:   ['Command Injection', 'cmdi'],
           insecure_deserialization: ['Insecure Deserialization', 'deser'],

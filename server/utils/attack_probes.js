@@ -278,6 +278,12 @@ const probes = {
   // cluster command on a dashboard refresh.
   db_least_privilege: async () => require('./dbPrivileges').leastPrivilegeReport(),
 
+  // ── Known-vulnerability census of the installed tree ──────────────
+  // "Keep everything patched" measured, not assumed. Cached (utils/
+  // dependencyAudit.js) because npm needs the network and a dashboard poll
+  // must not spawn it every 30 s.
+  dependency_audit: async () => require('./dependencyAudit').dependencyAudit(),
+
   // ── SSRF: no server-side outbound request may take its target from a client ─
   ssrf_outbound: async () => {
     const fs = require('fs');
@@ -309,13 +315,48 @@ const probes = {
   command_injection: async () => {
     const fs = require('fs');
     const roots = ['routes', 'middleware', 'utils', 'models'];
+    // One file is permitted to spawn, and only under the conditions asserted
+    // below: the Security Center's dependency census runs `npm audit`, which
+    // cannot be done any other way. It is a background monitor refresh, not a
+    // request handler — so the rule is not "no child_process" but "no
+    // request-reachable shell", and the exception carries the proof.
+    const SPAWN_ALLOWED = ['dependencyAudit.js'];
     const hits = [];
     for (const root of roots) {
       const dir = path.join(__dirname, '..', root);
       for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.js'))) {
         const src = fs.readFileSync(path.join(dir, file), 'utf8');
-        if (/require\((?:'node:)?child_process'|\bexecSync\(|\bspawnSync\(|\bshell:\s*true/.test(src)) {
-          hits.push(`${root}/${file}: shell execution`);
+        const usesShell = /require\((?:'node:)?child_process|\bexecSync\(|\bspawnSync\(|\bshell:\s*true/.test(src);
+        if (usesShell) {
+          if (SPAWN_ALLOWED.includes(file)) {
+            if (/\bexecSync\(|\bspawnSync\(|shell\s*:\s*true/.test(src)) {
+              hits.push(`${root}/${file}: allow-listed spawner switched to a shell or sync exec`);
+            }
+            // execFile(file, argv, options, cb) — the options literal is what
+            // has to stay shell-free, so the window around the call must reach
+            // past argv (a multi-line array) into it.
+            const calls = src.match(/execFile\([\s\S]{0,700}/g) || [];
+            // The argv may be prefixed by a spread of the invocation's own
+            // options, but the audit arguments themselves must stay a literal.
+            const argvFixed = /\[\s*(?:\.\.\.[A-Za-z_$][\w$]*\.args,\s*)?'audit',\s*'--json',\s*'--omit=dev'\s*\]/.test(src);
+            // The file may only spawn the node binary that started this
+            // process — never a `.cmd` by name. That distinction is the whole
+            // reason it needs no shell, so the allowance proves it: a literal
+            // `*.cmd` anywhere in its code (not its comments) voids it.
+            const codeOnly = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+            const throughNode = /cmd:\s*process\.execPath/.test(codeOnly)
+              && /execFile\(\s*[A-Za-z_$][\w$]*\.cmd\b/.test(codeOnly)
+              && !/['"`][^'"`\n]*\.cmd['"`]/.test(codeOnly);
+            if (!argvFixed || calls.length === 0) {
+              hits.push(`${root}/${file}: allow-listed spawner no longer runs a fixed, known argv`);
+            } else if (!throughNode) {
+              hits.push(`${root}/${file}: allow-listed spawner must exec the node binary, not a .cmd (Windows spawn EINVAL / shell)`);
+            } else if (calls.some(c => /shell\s*:/.test(c))) {
+              hits.push(`${root}/${file}: allow-listed spawner passed shell to execFile`);
+            }
+          } else {
+            hits.push(`${root}/${file}: shell execution`);
+          }
         }
         // `.exec()` here is the mongoose query executor, not a shell — match
         // only a bare global eval / Function constructor.
@@ -327,7 +368,7 @@ const probes = {
     if (hits.length > 0) {
       return { status: 'critical', detail: `Request-handling code can execute code/commands: ${hits.join(', ')}.` };
     }
-    return { status: 'healthy', detail: 'No shell, spawn, or dynamic code evaluation anywhere in routes/middleware/utils/models — user input is only ever data (mongoose filters, fs paths built from server-generated ids).' };
+    return { status: 'healthy', detail: 'No shell, spawn, or dynamic code evaluation in routes/middleware/utils/models — the one allow-listed spawner (the dependency census) runs a fixed argv with no shell and is not on a request path. User input is only ever data.' };
   },
 
   // ── Insecure deserialization ───────────────────────────────────────────
