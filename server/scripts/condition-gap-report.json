@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-10-18T12:37:34.979Z",
-  "assessmentsScanned": 8,
+  "generatedAt": "2026-10-18T14:51:25.537Z",
+  "assessmentsScanned": 9,
   "conditionsSelected": [
     [
       "Anxiety Disorder",
@@ -13,6 +13,10 @@
     [
       "None",
       2
+    ],
+    [
+      "Cancer (General)",
+      1
     ],
     [
       "GERD / Acid Reflux (Suan)",
@@ -35,6 +39,10 @@
     [
       "Panic Attacks",
       3
+    ],
+    [
+      "Low Energy",
+      2
     ],
     [
       "Heartburn / Sour Taste",
@@ -66,10 +74,6 @@
     ],
     [
       "Visual Aura",
-      1
-    ],
-    [
-      "Low Energy",
       1
     ],
     [

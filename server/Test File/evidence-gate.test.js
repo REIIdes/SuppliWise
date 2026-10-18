@@ -26,6 +26,7 @@ const {
   gateCandidate,
   gateRanked,
   gateVerdictEntry,
+  labelCollides,
   GATE_REVIEWER,
 } = require('../utils/evidenceGate');
 const DynamicCondition = require('../models/DynamicCondition');
@@ -221,6 +222,35 @@ test('registry collisions: built-ins refuse even their exact label; live rows re
   assert.ok(acceptedNames.includes('cancer (general)'),
     'verbatim re-proposal of a live label passes through so publishAccepted REFRESHES it');
   assert.equal(g.accepted.length, 2, 'prediabetes + the verbatim cancer refresh');
+});
+
+test('core-keyword containment catches reworded duplicates neither full label contains', () => {
+  const registry = {
+    builtin: ['Diabetes', 'Sleep Apnea (Snoring / Paused Breathing)', 'Chronic Kidney Disease', 'Kidney Stones'],
+    live: ['Chronic Fatigue / Fibromyalgia', 'Cancer (General)', 'Lung Disease (e.g., COPD, Pulmonary Fibrosis)'],
+  };
+  const g = gateRanked({
+    candidates: [
+      bundle({ name: 'Chronic Fatigue Syndrome (ME/CFS)' }),
+      bundle({ name: 'Lung Disease (Chronic Obstructive Pulmonary Disease)' }),
+      bundle({ name: 'Irritable Bowel Syndrome (IBS)' }),
+      bundle({ name: 'Diabetes Type 1' }),
+      bundle({ name: 'Diabetes Type 2' }),
+    ],
+  }, registry);
+  const refused = g.rejected.map((r) => r.candidate.label);
+  assert.ok(refused.includes('Chronic Fatigue Syndrome (ME/CFS)'),
+    'core {chronic, fatigue} ⊆ live {chronic, fatigue, fibromyalgia} — same option reworded');
+  assert.ok(refused.includes('Lung Disease (Chronic Obstructive Pulmonary Disease)'),
+    'parentheticals stripped: both labels reduce to core {lung}');
+  assert.ok(refused.includes('Diabetes Type 1') && refused.includes('Diabetes Type 2'),
+    'standalone built-in word "diabetes" collides; the two types still do not collide with EACH OTHER');
+  const acceptedNames = g.accepted.map((a) => a.label);
+  assert.ok(acceptedNames.includes('Irritable Bowel Syndrome (IBS)'), 'a genuinely new option still publishes');
+  assert.ok(!labelCollides('Diabetes Type 1', ['Diabetes Type 2']),
+    'digit-anchored differences survive the core rule');
+  assert.ok(!labelCollides('Kidney Stones', ['Chronic Kidney Disease']),
+    '{kidney, stones} vs {chronic, kidney} — partial overlap is NOT containment');
 });
 
 test('gateVerdictEntry writes an automated-reviewer audit row for both decisions', () => {

@@ -27,6 +27,27 @@ const {
 
 const clean = (v, max = 2000) => String(v ?? '').replace(/[\u200B-\u200F\u202A-\u202E]/g, '').trim().slice(0, max);
 
+// Words that carry no distinguishing clinical meaning in a condition label —
+// "Chronic Fatigue Syndrome" and "Chronic Fatigue" name the same option once
+// these are stripped, so removing them is what lets the core comparison below
+// see through rewording.
+const GENERIC_LABEL_WORDS = new Set([
+  'disease', 'diseases', 'syndrome', 'syndromes', 'disorder', 'disorders',
+  'condition', 'conditions', 'problem', 'problems', 'issue', 'issues',
+  'general', 'other', 'history', 'example', 'eg', 'type', 'acute',
+]);
+
+/**
+ * Distinguishing words of a label: lowercase, parentheticals dropped, generic
+ * filler removed. "Lung Disease (e.g., COPD, …)" and "Lung Disease (Chronic
+ * Obstructive …)" both reduce to {lung} — the same questionnaire option.
+ */
+function coreWords(label) {
+  const bare = String(label ?? '').toLowerCase().replace(/\([^)]*\)/g, ' ');
+  const toks = bare.replace(/[^a-z0-9]+/g, ' ').split(' ').filter((t) => t && (t.length >= 3 || /\d/.test(t)));
+  return new Set(toks.filter((t) => !GENERIC_LABEL_WORDS.has(t)));
+}
+
 /**
  * Would offering this label teach the user nothing, because the registry (or
  * another live bundle) already carries the same option — possibly worded
@@ -39,6 +60,7 @@ function labelCollides(label, registryLabels) {
   const a = String(label ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
   if (!a) return false;
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const coreA = coreWords(a);
   for (const raw of registryLabels || []) {
     const b = String(raw ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
     if (!b) continue;
@@ -49,6 +71,15 @@ function labelCollides(label, registryLabels) {
       && new RegExp(`(^|[^a-z0-9])${esc(needle)}([^a-z0-9]|$)`).test(hay);
     if (wordIn(a, b)) return raw;
     if (wordIn(b, a)) return raw;
+    // Core containment: neither full label contains the other, but one
+    // option's distinguishing words are a subset of the other's —
+    // "Chronic Fatigue Syndrome (ME/CFS)" vs "Chronic Fatigue / Fibromyalgia".
+    // An anchor word (≥4 letters) is required so digit-only cores never match.
+    const coreB = coreWords(b);
+    const subset = (x, y) => x.size > 0 && [...x].every((w) => y.has(w));
+    const smaller = coreA.size <= coreB.size ? coreA : coreB;
+    if (smaller.size && [...smaller].some((w) => w.length >= 4 && !/\d/.test(w))
+      && (subset(coreA, coreB) || subset(coreB, coreA))) return raw;
   }
   return false;
 }
