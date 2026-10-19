@@ -37,6 +37,12 @@ jobs:
     name: Server — syntax, tests, audit
     runs-on: ubuntu-latest
 
+    # Two runs of the test step were cancelled by Actions after the full six-hour
+    # job timeout — 359 minutes each, and nothing readable afterwards. The point of
+    # this number is not the number; it is that a hang has to cost minutes, not the
+    # account's monthly budget, and the step below names which suite hung.
+    timeout-minutes: 35
+
     # A real MongoDB so the database-backed suites run. testDbGuard refuses to
     # connect to anything but MONGO_TEST_URI and skips without it, so without
     # this service ~40 tests would report "skipped" and the job would still be
@@ -69,12 +75,61 @@ jobs:
       - name: Syntax check
         run: npm run check
 
+      # 20 minutes, then the runner stops it instead of the account. Two runs of
+      # this step were cancelled by Actions after the full 6-hour job timeout —
+      # 359 minutes each, with nothing to read afterwards. A hang is a bug in the
+      # suite, but it must never be able to cost six hours to say so.
+      #
+      # `node --test` directly, not `npm test`: timeout has to signal the process
+      # that owns the tests, not npm's wrapper, or the run survives its own kill.
       - name: Unit tests
+        id: unit_tests
         env:
           MONGO_TEST_URI: mongodb://127.0.0.1:27017/suppliwise_test
           MONGO_URI: mongodb://127.0.0.1:27017/suppliwise_app_unused
           JWT_SECRET: ci-run-only-not-a-real-secret-000000000000000000000000
-        run: npm test
+        run: timeout --kill-after=60s 1200s node --test "Test File/*.test.js"
+
+      # Runs only when the step above died, and answers the one question a merged
+      # TAP stream cannot: WHICH file. One process per suite, each with a 90-second
+      # budget — the slowest suite in the tree needs ~14s of that — so a suite that
+      # never settles is named in an annotation instead of being inferred from where
+      # the combined run stops. Two hits and the loop quits: the answer is already
+      # in the log, and the remaining hundred files cost nothing but time.
+      - name: Pinpoint the suite that hung or failed
+        if: failure() && steps.unit_tests.outcome == 'failure'
+        env:
+          MONGO_TEST_URI: mongodb://127.0.0.1:27017/suppliwise_test
+          MONGO_URI: mongodb://127.0.0.1:27017/suppliwise_app_unused
+          JWT_SECRET: ci-run-only-not-a-real-secret-000000000000000000000000
+        run: |
+          set +e
+          STARTED=$(date +%s)
+          hung=0
+          for file in "Test File"/*.test.js; do
+            out=$(mktemp)
+            timeout --kill-after=20s 90s node --test "$file" >"$out" 2>&1
+            code=$?
+            if [ "$code" -ne 0 ]; then
+              if [ "$code" -eq 124 ] || [ "$code" -eq 137 ]; then
+                echo "::error::${file} did not finish inside 90s (exit ${code}) — this is the suite that hangs the combined run."
+                hung=$((hung + 1))
+              else
+                echo "::error::${file} failed (exit ${code})."
+              fi
+              tail -n 30 "$out"
+            fi
+            rm -f "$out"
+            if [ "$hung" -ge 2 ]; then
+              echo "Two suites exceeded their budget individually — stopping the per-suite pass."
+              break
+            fi
+            if [ $(( $(date +%s) - STARTED )) -ge 600 ]; then
+              echo "Per-suite pass hit its own 10-minute budget — stopping here."
+              break
+            fi
+          done
+          echo "Per-suite pass complete. The job's status still comes from the combined run above."
 
       # Fails the job on any advisory. This is the step the audit lacked.
       - name: Dependency audit (server)
