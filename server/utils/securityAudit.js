@@ -497,11 +497,13 @@ const SECURITY_AUDIT = {
     // job hung twice and was cancelled only after the runner\'s six-hour job limit,
     // and a cancelled step\'s log is not readable without a token — so the step was
     // bounded to 20 minutes and given a follow-up that runs each suite on its own
-    // and annotates the one that does not settle. That named the culprit:
-    // flood-guard.test.js never resolved when the refused upload was closed with a
-    // clean FIN, because only the error path and a watchdog had a `resolve`.
-    // Verified here, not yet in CI — the next run is what closes this line.
-    continuousIntegration: 'PASS 2026-10-19 — client job (lint, 715 tests, vite build, audit) and the secret sweep are green in Actions run 39225035353; the server job\'s Unit tests step is the one still failing, bounded the same day and narrowed by the per-suite pinpoint step to flood-guard.test.js, fixed here and awaiting the next run',
+    // and annotates the one that does not settle. That named the culprit on its
+    // first run: flood-guard.test.js never resolved when the refused upload was
+    // closed with a clean FIN, because only the error path and a watchdog had a
+    // `resolve`; the same pass named mfa-transaction.test.js, whose mail assertion
+    // could not pass in a tree with no credentials. Both fixed, and the next run
+    // was green — the server job now takes 1.6 minutes.
+    continuousIntegration: 'PASS 2026-10-19 — Actions run 39232170080 (commit 2d91411) is green on all three jobs: Server 1.6 min with Unit tests and the dependency audit both successful and the per-suite pinpoint step skipped because nothing hung, Client 0.7 min, Secret sweep 0.1 min. Two earlier runs had burned the full six-hour job limit on the hang',
     productionBuild: 'PASS 2026-10-19 — npx vite build: 422 modules transformed, PWA v1.3.0 generateSW wrote dist/sw.js + workbox (96 precached entries)',
     lint: 'PASS 2026-10-19 — npx eslint . in my-react-app: 0 errors, 4 pre-existing react-hooks/exhaustive-deps warnings; .github/workflows/ci.yml Lint step fixed the same day (it passed --max-warnings=unlimited, which eslint rejects with exit 2 before linting anything)',
     // NOT a verdict any more. This line used to assert "npm audit: 0
@@ -526,7 +528,7 @@ const SECURITY_AUDIT = {
       + 'longer matched were corrected rather than re-worded. Where a claim was about a measurement (dependency '
       + 'advisories, TOTP math, session lifetimes) the measurement was re-taken.',
     changes: [
-      'verification.continuousIntegration added, with the six-hour CI hang reduced to a 20-minute bounded step that names the hanging suite — and with the honest caveat that the fix is measured locally and still has to be confirmed by the next run.',
+      'verification.continuousIntegration added, with the six-hour CI hang reduced to a bounded 20-minute step that names whichever suite hangs — and confirmed by the run after it, which was green on all three jobs.',
       'verification.unitTests and verification.syntaxCheck re-measured (1609/1609, 322 files) after two test-harness defects were fixed. Test File/e2eServer.js handed its test server `EMAIL_ENABLED=false` and described that as "never send real mail from a test run" — no code reads that variable, so a developer with credentials in `.env` really did send OTP mail while the suite ran, and CI, which has no `.env`, could deliver nothing and failed every email-based assertion. Test File/stubSmtp.js now runs a loopback capture transport, so the branch under test is reached on both machines and no mail can leave. The stub is itself covered by Test File/stub-smtp.test.js.',
       'L5 closed — /forgot-password cannot enumerate: one generic body for every address, no userId, constant-time padding on the no-account branch (utils/passwordReset.js).',
       'L6 closed — no code path mails a plaintext admin password; provisioning reads hashes from ADMIN_ACCOUNTS and mustChangePassword forces a change before the account is usable (utils/adminAccounts.js, routes/admin.js).',
