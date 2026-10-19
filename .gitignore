@@ -113,3 +113,11 @@ Temp/
 # its way to the PDFs; the PDFs themselves ARE deliverables and stay tracked.
 docs/_build/
 docs/__pycache__/
+
+# Local run scratch, named with a leading underscore by convention: the detached
+# boot logs a restart leaves behind, a minted admin token, a dumped Security
+# Center report, a one-off diagnostic. Every one of those holds something a
+# request can reach or a credential in the clear, and a broad `git add .` would
+# take them with it - so the convention itself is what is ignored. Two older
+# scratch scripts were already tracked and are untracked by this commit.
+**/_*

@@ -50,6 +50,7 @@ const { verifyTotpOnce } = require('../utils/totp');
 // guarantees it is always encrypted at rest and always migrated off the legacy
 // plaintext field on first use. No route touches `twoFactorSecret*` directly.
 const totpSecret = require('../utils/totpSecret');
+const adminTotp = require('../utils/adminTotp');
 // The MFA transaction: the server-side MFA_REQUIRED state that replaces a bare
 // user id at the second factor. See utils/mfaTransaction.js.
 const mfaTransaction = require('../utils/mfaTransaction');
@@ -265,7 +266,11 @@ const MAX_OTP_ATTEMPTS = otpChallenge.MAX_ATTEMPTS;
 // The MFA transaction that gates the session is minted independently and lasts
 // 10 minutes for the email path, so this does not shorten the sign-in window —
 // it only stops an unredeemed code from staying useful for as long.
-const OTP_TTL_MS = 5 * 60 * 1000;
+//
+// The number itself now lives in utils/otpChallenge.js so the security
+// dashboard can report the enforced window instead of a sentence written when
+// the window was different.
+const OTP_TTL_MS = otpChallenge.CODE_TTL_MS;
 
 // The same window in the unit the client needs, published on every response that
 // starts an OTP countdown.
@@ -431,7 +436,7 @@ const OTP_REJECTION_MESSAGE = 'That verification code is not valid.';
 
 // Rate limiting map for OTP requests
 const otpRateLimitMap = new Map(); // Format: { userId: lastRequestTime }
-const OTP_COOLDOWN_MS = 30000; // 30 seconds cooldown
+const OTP_COOLDOWN_MS = otpChallenge.RESEND_COOLDOWN_MS;
 
 // The answer given whenever /resend-login-otp cannot act: unknown account,
 // inside the cooldown, or a malformed id.
@@ -455,8 +460,32 @@ const generateToken = (id, claims = {}, options = {}) => {
   return jwt.sign({ id, ...claims }, process.env.JWT_SECRET, finalOptions);
 };
 
+// Proof that an administrator just passed the password step and still has to
+// pass the authenticator step. Bounded and swept, exactly like otpStore above:
+// an entry used to be removed only when it was spent, so a page left open, an
+// abandoned sign-in or a scripted flood of /admin-login kept growing this Map
+// for the life of the process — each entry holding a live second factor.
 const adminChallenges = new Map();
 const ADMIN_CHALLENGE_TTL_MS = 5 * 60 * 1000;
+const ADMIN_CHALLENGE_MAX = 1000;
+
+function pruneAdminChallenges() {
+  const now = Date.now();
+  for (const [id, entry] of adminChallenges) {
+    if (!entry || !(entry.expiresAt > now)) adminChallenges.delete(id);
+  }
+  // A flood of live challenges is a flood, not a backlog: refuse to hold more
+  // than the ceiling rather than trading memory for someone else's guesses.
+  if (adminChallenges.size <= ADMIN_CHALLENGE_MAX) return;
+  const byAge = [...adminChallenges.entries()].sort(
+    (a, b) => (a[1] && a[1].expiresAt) - (b[1] && b[1].expiresAt),
+  );
+  for (let i = 0; i < byAge.length && adminChallenges.size > ADMIN_CHALLENGE_MAX; i += 1) {
+    adminChallenges.delete(byAge[i][0]);
+  }
+}
+const adminChallengeSweeper = setInterval(pruneAdminChallenges, 60 * 1000);
+if (typeof adminChallengeSweeper.unref === 'function') adminChallengeSweeper.unref();
 
 function legacyAdminConfiguration() {
   return {
@@ -990,32 +1019,45 @@ router.post('/admin-login', async (req, res) => {
     });
   }
 
-  let account = await AdminAccount.findOne({ alias: str(alias).trim(), enabled: true }).select('+passwordHash +totpSecret');
-  if (!account) {
-    const legacy = legacyAdminConfiguration();
-    if (legacy.alias !== str(alias).trim() || !legacy.passwordHash || !legacy.totpSecret) return res.status(401).json({ message: 'Invalid admin credentials.' });
-    account = legacy;
-  }
-  const { verifyPassword, upgradeHashIfLegacy } = require('../utils/password');
-  const passwordMatches = await verifyPassword(password, account.passwordHash);
-  if (!passwordMatches) {
-    recordAccountFailure(aliasLockKey, lockMeta(req, req.ip));
-    noteIpAccountFailure(req.ip, alias);
-    return res.status(401).json({ message: 'Invalid admin credentials.' });
-  }
-  // Correct password resets strikes and ladder locks
-  clearAccountState(aliasLockKey);
-  // Transparent hash upgrade: legacy bcrypt → argon2id (DB accounts only)
+  // Everything below reads the database or the lockout store. Express 4 does
+  // NOT catch a rejected async handler, so a saturated pool here left the
+  // request with no response at all: the client aborts at 30 s and an operator
+  // reasonably reads that as the sign-in being broken.
   try {
-    if (account._id && account._id !== 'admin') {
-      const upgraded = await upgradeHashIfLegacy(password, account.passwordHash);
-      if (upgraded) await AdminAccount.findByIdAndUpdate(account._id, { passwordHash: upgraded }).exec();
+    // No seed here on purpose: the password step does not need it, and the
+    // challenge below must not be the thing that holds a live second factor in
+    // process memory for five minutes.
+    let account = await AdminAccount.findOne({ alias: str(alias).trim(), enabled: true }).select('+passwordHash');
+    if (!account) {
+      const legacy = legacyAdminConfiguration();
+      if (legacy.alias !== str(alias).trim() || !legacy.passwordHash || !legacy.totpSecret) return res.status(401).json({ message: 'Invalid admin credentials.' });
+      account = legacy;
     }
-  } catch { /* upgrade best-effort; login already succeeded */ }
+    const { verifyPassword, upgradeHashIfLegacy } = require('../utils/password');
+    const passwordMatches = await verifyPassword(password, account.passwordHash);
+    if (!passwordMatches) {
+      recordAccountFailure(aliasLockKey, lockMeta(req, req.ip));
+      noteIpAccountFailure(req.ip, alias);
+      return res.status(401).json({ message: 'Invalid admin credentials.' });
+    }
+    // Correct password resets strikes and ladder locks
+    clearAccountState(aliasLockKey);
+    // Transparent hash upgrade: legacy bcrypt → argon2id (DB accounts only)
+    try {
+      if (account._id && account._id !== 'admin') {
+        const upgraded = await upgradeHashIfLegacy(password, account.passwordHash);
+        if (upgraded) await AdminAccount.findByIdAndUpdate(account._id, { passwordHash: upgraded }).exec();
+      }
+    } catch { /* upgrade best-effort; login already succeeded */ }
 
-  const challengeId = crypto.randomBytes(24).toString('hex');
-  adminChallenges.set(challengeId, { accountId: account._id, alias: account.alias, totpSecret: account.totpSecret, mustChangePassword: !!account.mustChangePassword, expiresAt: Date.now() + ADMIN_CHALLENGE_TTL_MS });
-  return res.json({ requiresTwoFactor: true, challengeId, message: 'Authenticator verification required.' });
+    const challengeId = crypto.randomBytes(24).toString('hex');
+    pruneAdminChallenges();
+    adminChallenges.set(challengeId, { accountId: account._id, alias: account.alias, legacy: !account._id, mustChangePassword: !!account.mustChangePassword, expiresAt: Date.now() + ADMIN_CHALLENGE_TTL_MS });
+    return res.json({ requiresTwoFactor: true, challengeId, message: 'Authenticator verification required.' });
+  } catch (error) {
+    console.error('[auth POST /admin-login]', error.message);
+    return res.status(503).json({ message: 'Sign-in is temporarily unavailable. Please try again.' });
+  }
 });
 
 router.post('/verify-admin-2fa', async (req, res) => {
@@ -1041,15 +1083,51 @@ router.post('/verify-admin-2fa', async (req, res) => {
     });
   }
 
+  // The seed is read HERE, at the one moment it is needed — never carried on
+  // the challenge. A challenge used to hold the raw base32 seed for five
+  // minutes, so anything that could read this process's memory (a heap dump, a
+  // crash reporter, a debugger on a dev box) held a live second factor for an
+  // operator account, and revoking an authenticator mid-challenge did not
+  // revoke the challenge.
+  let seed = '';
+  let doc = null;
+  try {
+    if (challenge.legacy) {
+      seed = legacyAdminConfiguration().totpSecret;
+    } else {
+      // Re-read, including `enabled`: an account disabled after the password
+      // step must not be able to finish its way in.
+      doc = await AdminAccount.findById(challenge.accountId).select(adminTotp.SECRET_FIELDS);
+      if (!doc || doc.enabled !== true) {
+        adminChallenges.delete(challengeId);
+        return res.status(401).json({ message: 'Admin verification expired. Please sign in again.' });
+      }
+      seed = adminTotp.readSeed(doc);
+    }
+  } catch (error) {
+    console.error('[auth POST /verify-admin-2fa]', error.message);
+    return res.status(503).json({ message: 'Verification is temporarily unavailable. Please try again.' });
+  }
+
   // Scoped to the alias: administrators may share one authenticator seed, and a
   // secret-only key would let the first of them to sign in spend the 30-second
   // code for every other admin sharing it.
-  const verified = verifyTotpOnce(challenge.totpSecret, otp, challenge.alias);
+  const verified = verifyTotpOnce(seed, otp, challenge.alias);
   if (!verified) {
     // Three consecutive failures inside 15 min lock the alias — the same
     // bucket /admin-login checks, so a TOTP brute force also blocks retries.
     recordAccountFailure(adminOtpLockKey, lockMeta(req, req.ip));
     return res.status(401).json({ message: 'Invalid authenticator code.' });
+  }
+  if (doc) {
+    // Proven correct code = the moment we know this seed is real, which is the
+    // only safe moment to move it out of the plaintext field. Best-effort: a
+    // failed upgrade must not cost an operator their sign-in.
+    try {
+      if (adminTotp.migrateInPlace(doc)) await doc.save();
+    } catch (error) {
+      console.error('[auth POST /verify-admin-2fa] seed not sealed:', error.message);
+    }
   }
   clearAccountState(adminOtpLockKey);
   adminChallenges.delete(challengeId);
@@ -1059,7 +1137,9 @@ router.post('/verify-admin-2fa', async (req, res) => {
   // read: the challenge already fetched the account, and this route must not
   // mint a token for a stale view of it.
   const mustChangePassword = !!challenge.mustChangePassword;
-  if (account._id && account._id !== 'admin') await AdminAccount.findByIdAndUpdate(account._id, { lastLoginAt: new Date(), lastActivityAt: new Date() });
+  try {
+    if (account._id && account._id !== 'admin') await AdminAccount.findByIdAndUpdate(account._id, { lastLoginAt: new Date(), lastActivityAt: new Date() });
+  } catch { /* the stamp is informational; the session is already earned */ }
   // The flag rides on the RESPONSE, not just in the token. A JWT is immutable
   // once signed, so putting it in the payload would leave the client believing
   // "change required" for the life of the token even after the password is

@@ -76,12 +76,42 @@ test('a clean tree reads healthy and says which trees it checked', () => {
   }), npmReports({ vulnerabilities: {} }));
 });
 
-test('dev-tree findings stay out of the production verdict', () => {
-  // A vulnerable file watcher in the dev toolchain is not reachable by a
-  // request, and mixing the two would make the real signal ignorable. The flag
-  // is asserted from source because npm is not called here.
-  assert.match(auditSrc, /'--omit=dev'/);
-  assert.match(auditSrc, /Dev-tree findings are excluded/);
+test('dev-tree findings are named, and never mixed into the production verdict', async () => {
+  // Two questions with two different answers, which the row used to collapse
+  // into one by declaring dev dependencies irrelevant. That sentence is true of
+  // the running API and false of the machine that builds it: dev packages get
+  // installed and executed there, and an advisory among them is a fact anyone
+  // can verify with one command. So production findings alone decide `critical`,
+  // and the dev census is reported alongside — including the honest case where
+  // upstream has published no fixed release yet.
+  const calls = [];
+  const impl = (bin, args, opts, cb) => {
+    calls.push(args);
+    const withDev = !args.includes('--omit=dev');
+    cb(null, JSON.stringify({
+      vulnerabilities: withDev
+        ? { braces: { severity: 'high', fixAvailable: false } }
+        : {},
+    }), '');
+  };
+  await withFakeNpm(({ dependencyAudit }) => dependencyAudit().then((result) => {
+    assert.notEqual(result.status, 'critical', 'a dev-only advisory must not read as a production compromise');
+    assert.match(result.detail, /server\/braces \(high, no fixed release yet\)/);
+    assert.match(result.detail, /not reachable from a request/);
+  }), impl);
+  assert.ok(calls.some(a => a.includes('--omit=dev')), 'production census ran');
+  assert.ok(calls.some(a => !a.includes('--omit=dev')), 'dev census ran');
+
+  // And when production is NOT clean, the second census is skipped: the verdict
+  // is already the serious one, and this module runs npm over the network.
+  const second = [];
+  await withFakeNpm(({ dependencyAudit }) => dependencyAudit().then((result) => {
+    assert.equal(result.status, 'critical');
+  }), (bin, args, opts, cb) => {
+    second.push(args);
+    cb(null, JSON.stringify({ vulnerabilities: { express: { severity: 'high' } } }), '');
+  });
+  assert.equal(second.length, 2, 'one census per shipped tree, no dev pass behind a production finding');
 });
 
 test('the spawner never asks for a shell and resolves npm without one', () => {
@@ -136,11 +166,15 @@ test('the real spawn is the node binary with a fixed audit argv', () => {
     cb(null, JSON.stringify({ vulnerabilities: {} }), '');
   };
   return withFakeNpm(({ dependencyAudit }) => dependencyAudit().then(() => {
-    assert.equal(calls.length, 2, 'one audit per shipped package');
+    // Two shipped trees, each asked twice — production-only first, then the full
+    // tree — so four npm runs and not two.
+    assert.equal(calls.length, 4, 'one production census and one dev census per shipped package');
     for (const call of calls) {
       assert.equal(call.bin, process.execPath);
       assert.ok(call.args[1].endsWith('npm-cli.js'), `expected npm's CLI script, got ${call.args[1]}`);
-      assert.deepEqual(call.args.slice(2), ['audit', '--json', '--omit=dev']);
+      assert.deepEqual(call.args.slice(2, 4), ['audit', '--json'], 'argv is a fixed audit invocation');
+      assert.ok(call.args.length === 4 || call.args[4] === '--omit=dev',
+        `only the production pass omits dev, got ${call.args.slice(4).join(' ')}`);
       assert.equal(call.opts.shell, undefined);
       assert.ok(path.isAbsolute(call.opts.cwd));
     }
@@ -162,19 +196,29 @@ test('a poll never waits for the registry once a census exists', () => {
   return withFakeNpm(async ({ dependencyAudit }) => {
     const first = await dependencyAudit();
     assert.equal(first.status, 'healthy');
-    assert.equal(calls.length, 2, 'the cold census did run');
+    assert.equal(calls.length, 4, 'the cold census did run — production and dev, per tree');
 
     const started = Date.now();
     const second = await dependencyAudit();
     assert.equal(second, first, 'the cached census is the answer, not a promise to npm');
     assert.ok(Date.now() - started < 25, `a warm poll must be instant, took ${Date.now() - started} ms`);
-    assert.equal(calls.length, 2, 'and it spawned nothing to ask');
+    assert.equal(calls.length, 4, 'and it spawned nothing to ask');
 
     const third = await dependencyAudit();
     assert.equal(third, first, 'every later poll is the same');
-    assert.equal(calls.length, 2, 'still no second npm while the cache is inside its window');
+    assert.equal(calls.length, 4, 'still no second npm while the cache is inside its window');
   }, capture);
 });
+
+// A background refresh is a chain of awaits, so "one macrotask later" is not a
+// reliable point at which to count its spawns.
+const waitForCount = async (rows, wanted, ms = 500) => {
+  const until = Date.now() + ms;
+  while (rows.length < wanted && Date.now() < until) {
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  return rows.length;
+};
 
 test('an aged census is refreshed behind the request, never in front of it', () => {
   const calls = [];
@@ -185,7 +229,7 @@ test('an aged census is refreshed behind the request, never in front of it', () 
   const realNow = Date.now;
   return withFakeNpm(async ({ dependencyAudit }) => {
     const first = await dependencyAudit();
-    assert.equal(calls.length, 2, 'the cold census ran');
+    assert.equal(calls.length, 4, 'the cold census ran');
 
     // Six hours on, without waiting for them: the poll must answer from the
     // cache and start the refresh on its own.
@@ -193,8 +237,7 @@ test('an aged census is refreshed behind the request, never in front of it', () 
     try {
       const aged = await dependencyAudit();
       assert.equal(aged, first, 'the poll is served the census it has, not a wait for the one it is taking');
-      await new Promise((r) => setImmediate(r));
-      assert.equal(calls.length, 4, 'and the refresh really did go to npm in the background');
+      assert.equal(await waitForCount(calls, 8), 8, 'and the refresh really did go to npm in the background');
     } finally {
       Date.now = realNow;
     }
@@ -217,7 +260,7 @@ test('a census that could not run is retried soon; a clean one is not', () => {
     try {
       await dependencyAudit();
       await new Promise((r) => setImmediate(r));
-      assert.equal(clean.length, 2, '11 minutes past a CLEAN census is inside its six-hour window — nothing re-ran');
+      assert.equal(clean.length, 4, '11 minutes past a CLEAN census is inside its six-hour window — nothing re-ran');
     } finally {
       Date.now = realNow;
     }

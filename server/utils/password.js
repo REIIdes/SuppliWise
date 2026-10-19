@@ -48,6 +48,25 @@ function isBcrypt(hash) {
   return /^\$2[aby]?\$\d{2}\$/.test(String(hash || ''));
 }
 
+// bcrypt's cost is written INTO the hash ($2b$<cost>$…), so a stored hash can
+// announce a cost far below what is defensible offline — cost 04 makes a leaked
+// table crackable in minutes, and `isBcrypt` alone would call that legacy and
+// fine. Legacy bcrypt hashes still VERIFY at any cost (upgrading them silently
+// would lock people out), but the security dashboard is allowed to say which
+// accounts are behind, so strength is asked separately from format.
+const BCRYPT_MIN_COST = 10;
+
+/** bcrypt cost embedded in a hash, or null when it is not a bcrypt hash. */
+function bcryptCost(hash) {
+  const m = /^\$2[aby]?\$(\d{2})\$/.exec(String(hash || ''));
+  return m ? Number(m[1]) : null;
+}
+
+function isStrongBcrypt(hash) {
+  const cost = bcryptCost(hash);
+  return cost !== null && cost >= BCRYPT_MIN_COST;
+}
+
 // True when the stored hash is NOT argon2id (legacy bcrypt / unknown).
 function needsRehash(hash) {
   return !isArgon2id(hash);
@@ -111,10 +130,13 @@ async function burnPasswordCompare() {
 
 module.exports = {
   ARGON2_OPTS,
+  BCRYPT_MIN_COST,
   V2_PREFIX,
   sha3Pre,
   isArgon2id,
   isBcrypt,
+  bcryptCost,
+  isStrongBcrypt,
   needsRehash,
   hashPassword,
   verifyPassword,

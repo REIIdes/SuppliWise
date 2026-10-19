@@ -129,6 +129,15 @@ const targetUri = DB === 'default'
   ? source.get('MONGO_URI')
   : swapDb(source.get('MONGO_URI'), DB);
 
+// The at-rest data key, carried over with the same rule as the TOTP key: the
+// demo database already holds health blobs and wallet signing keys sealed under
+// whatever key the last run wrote, and minting a fresh one here would make them
+// undecryptable. server/utils/dataKey.js also keeps the two historical
+// JWT_SECRET-derived keys as decrypt-only candidates, so this deployment can set
+// an explicit key — separating data decryption from token signing, which is the
+// whole point — without orphaning anything written before the separation.
+const dataKey = existingEnv.get('HEALTH_DATA_KEY') || crypto.randomBytes(32).toString('base64');
+
 const overrides = {
   NODE_ENV: 'production',
   PORT: '5000',
@@ -164,6 +173,11 @@ const overrides = {
   // enrolled an authenticator in development loses Google Authenticator at
   // sign-in with no error anywhere — see the note above.
   TOTP_ENCRYPTION_KEY_PREVIOUS: totpPrevious.join(','),
+  // Set explicitly so data-at-rest decryption is NOT the signing secret's job.
+  // server/index.js warns in production when this is absent, because then the
+  // write key is HKDF(JWT_SECRET) and anyone holding the signing secret can open
+  // every stored health record and wallet key.
+  HEALTH_DATA_KEY: dataKey,
   // The default auth ceiling (20 requests / 15 min per IP) is unreachable for a
   // demo hosted behind one home ISP address. Signing in is a multi-call flow —
   // captcha, login, then the mandatory OTP verify — and a verification failure
@@ -238,6 +252,15 @@ console.log(JSON.stringify({
   adminHashLength: (env.get('ADMIN_PASSWORD_HASH') || '').length,
   authRequestsPerIpPer15Min: overrides.AUTH_RATE_LIMIT_MAX,
   totpPreviousKeyIds: totpPrevious.map(p => p.split('=')[0]),
+  // Key id (first 11 chars of SHA-256 of the key), never the key. Same rule as
+  // utils/dataKey.js fingerprint(), so this is comparable with what the app
+  // reports in the security panel.
+  healthDataKeyId: crypto
+    .createHash('sha256')
+    .update(Buffer.from(dataKey, 'base64'))
+    .digest('base64url')
+    .slice(0, 11),
+  healthDataKeyCarried: existingEnv.has('HEALTH_DATA_KEY'),
   duckdns: duck.size
     ? { subdomains: duck.get('SUBDOMAINS'), tokenLength: (duck.get('TOKEN') || '').length }
     : 'not configured — pass --sub=<name> --token=<token> or create deploy/.env.duckdns',

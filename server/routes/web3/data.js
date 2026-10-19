@@ -16,8 +16,8 @@ const User = require('../../models/User');
 const engine = require('../../blockchain/engine');
 const {
   hashPayload,
-  encrypt,
-  decrypt,
+  sealData,
+  openData,
   contentId,
   sign,
   stableStringify,
@@ -197,7 +197,7 @@ router.post('/storage/pin', async (req, res) => {
     if (data === undefined || data === null) return res.status(400).json({ message: 'Nothing to store.' });
     const plaintext = JSON.stringify(data);
     if (plaintext.length > 900000) return res.status(400).json({ message: 'Payload too large (max ~900KB).' });
-    const sealed = encrypt(plaintext, process.env.JWT_SECRET);
+    const sealed = sealData(plaintext);
     const cid = contentId(Buffer.from(sealed.ct, 'base64'));
     const doc = await StorageObject.findOneAndUpdate(
       { cid, owner: req.user._id },
@@ -220,7 +220,7 @@ router.get('/storage/:cid', async (req, res) => {
     if (!/^bafy[a-z2-7]+$/.test(cid)) return res.status(400).json({ message: 'Invalid content id.' });
     const doc = await StorageObject.findOne({ cid, owner: req.user._id }).lean();
     if (!doc) return res.status(404).json({ message: 'Object not found or not owned by you.' });
-    const plaintext = decrypt({ iv: doc.iv, ct: doc.ciphertext, tag: doc.tag }, process.env.JWT_SECRET);
+    const plaintext = openData({ iv: doc.iv, ct: doc.ciphertext, tag: doc.tag });
     // Integrity: the stored ciphertext must hash to the CID it claims.
     const recomputed = contentId(Buffer.from(doc.ciphertext, 'base64'));
     res.json({
@@ -243,7 +243,7 @@ router.post('/health/backup', async (req, res) => {
   try {
     const wallet = await engine.getWalletDoc(req.user._id);
     const snapshot = await buildHealthDigest(req.user._id);
-    const sealed = encrypt(JSON.stringify({ snapshot, did: wallet.did, at: Date.now() }), process.env.JWT_SECRET);
+    const sealed = sealData(JSON.stringify({ snapshot, did: wallet.did, at: Date.now() }));
     const cid = contentId(Buffer.from(sealed.ct, 'base64'));
     const doc = await StorageObject.findOneAndUpdate(
       { cid, owner: req.user._id, kind: 'health-backup' },
@@ -313,7 +313,7 @@ router.post('/data/shares', async (req, res) => {
     };
 
     // Encrypt + pin the dataset to decentralized storage (feature 8).
-    const sealed = encrypt(JSON.stringify(anonymized), process.env.JWT_SECRET);
+    const sealed = sealData(JSON.stringify(anonymized));
     const cid = contentId(Buffer.from(sealed.ct, 'base64'));
     await StorageObject.findOneAndUpdate(
       { cid, owner: req.user._id },
@@ -505,8 +505,18 @@ router.delete('/profile-shares/:id', async (req, res) => {
   }
 });
 
-// PUBLIC: read a shared health profile (doctor/nutritionist view). Only the
-// fields the sharing user explicitly exposes, gated by expiry + revocation.
+// PUBLIC: read a shared health profile (doctor/nutritionist view).
+//
+// What actually gates it, stated plainly because the shape of the answer matters:
+// the 128-bit random token in the URL, its expiry, and revocation. There is NO
+// field-level scoping — ShareLink stores a token, an owner, an expiry, a revoked
+// flag and a view count (models/Web3.js), nothing else — so opening a live link
+// discloses the fixed set below, not a subset someone chose when sharing. A
+// member who wants "only my adherence, not my medications" cannot get it here,
+// and this endpoint must not be described as if they could.
+//
+// Meters: `/api/web3` is behind the per-address limiter in index.js (120 req/min
+// in production), which is what bounds anyone trying to walk token space.
 async function publicShare(req, res) {
   try {
     const token = String(req.params.token || '');

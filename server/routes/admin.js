@@ -41,6 +41,7 @@ const {
 const speakeasy = require('speakeasy');
 const { protect, adminOnly } = require('../middleware/auth');
 const { verifyTotpOnce } = require('../utils/totp');
+const adminTotp = require('../utils/adminTotp');
 // Admin avatar/background bytes go to disk; the document keeps only the URL.
 // See utils/pictures.js.
 const { storePicture, safePictureValue } = require('../utils/pictures');
@@ -1749,7 +1750,20 @@ const runMonitorProbes = async (app) => {
     probe('email_otp', 'Email OTP (Login Security)', 'security', async () => {
       const configured = Boolean(process.env.EMAIL_USER && process.env.EMAIL_PASSWORD);
       if (!configured) return { status: 'critical', detail: 'EMAIL_USER / EMAIL_PASSWORD not set — OTP delivery is broken.' };
-      return { status: 'healthy', detail: `OTP delivery configured via ${process.env.EMAIL_USER}. Codes use crypto.randomInt (CSPRNG), 10-min TTL, 30-s resend cooldown.` };
+      // Read from the constants, not from prose that was written when the code
+      // was different: this row claimed a 10-minute code TTL while
+      // routes/auth.js OTP_TTL_MS had already been cut to 5. A dashboard that
+      // overstates a window is worse than one that says nothing, because
+      // someone will rely on the number.
+      const otpChallenge = require('../utils/otpChallenge');
+      const codeTtl = otpChallenge.CODE_TTL_MS ? `${Math.round(otpChallenge.CODE_TTL_MS / 60000)} min` : 'see routes/auth.js';
+      const cooldown = otpChallenge.RESEND_COOLDOWN_MS ? `${Math.round(otpChallenge.RESEND_COOLDOWN_MS / 1000)} s` : 'see routes/auth.js';
+      return {
+        status: 'healthy',
+        detail: `OTP delivery configured via ${process.env.EMAIL_USER}. Codes use crypto.randomInt (CSPRNG), `
+          + `${codeTtl} TTL, ${cooldown} resend cooldown, one verification attempt window each, and are stored `
+          + 'only as a digest — never as the code the mail contained.',
+      };
     }),
 
     // ── 3b. Google Authenticator (TOTP) ───────────────────────────────────
@@ -1879,20 +1893,45 @@ const runMonitorProbes = async (app) => {
 
     // ── 8. Password Hashing ───────────────────────────────────────────────
     probe('password_hashing', 'Password Hashing (argon2id)', 'password_hashing', async () => {
-      const hashOk = (h) => isArgon2id(h) || isBcrypt(h);
+      const { isStrongBcrypt } = require('../utils/password');
+      const hashOk = (h) => isArgon2id(h) || isStrongBcrypt(h);
       // Same parser the boot seeder uses. A bare split(',') here would read
       // `$argon2id$v=19$m=19456` as the hash and call the config sound while
       // the seeder could not actually load it.
       const { parseAdminAccounts } = require('../utils/adminAccounts');
-      const adminHashOk = hashOk(process.env.ADMIN_PASSWORD_HASH || '') ||
-        parseAdminAccounts(process.env.ADMIN_ACCOUNTS).some(account => hashOk(account.passwordHash));
-      // Minimal projection + lean: user docs carry MBs of base64 pictures —
-      // fetching the full document here stalled this probe for ~30 s.
-      const sampleUser = await User.findOne({ password: { $exists: true, $ne: null } }).select('password').lean();
-      const userHashOk = sampleUser ? hashOk(sampleUser.password || '') : true;
-      if (!adminHashOk) return { status: 'critical', detail: 'Admin password is not stored as an argon2id (or legacy bcrypt) hash — this is a critical misconfiguration.' };
-      if (!userHashOk) return { status: 'critical', detail: 'At least one user password is not stored as an argon2id (or legacy bcrypt) hash.' };
-      return { status: 'healthy', detail: 'All verified passwords use argon2id (19 MiB, 2 iterations); legacy bcrypt hashes ($2b, cost 12) still verify and transparently upgrade on next login. Plaintext passwords are never accepted or stored.' };
+      const envAccounts = parseAdminAccounts(process.env.ADMIN_ACCOUNTS);
+      const adminConfigured = hashOk(process.env.ADMIN_PASSWORD_HASH || '')
+        || (envAccounts.length > 0 && envAccounts.every(account => hashOk(account.passwordHash)));
+
+      // COUNTED ACROSS EVERY ACCOUNT, not sampled. This probe used to read one
+      // document and then state "All verified passwords use argon2id" — a
+      // sample of one is a sample of one, and the account that was still storing
+      // something else was simply not the one that got read. A `$regex` count is
+      // answered by an index-free scan of the hash prefix only, in the server,
+      // so it costs nothing per account and cannot miss one. The hashes
+      // themselves never leave the database.
+      // `$nin`, not two `$ne` keys: a duplicate object key silently replaces the
+      // first one, and then a null password counts as a hashed one.
+      const [total, argon, bcryptOk, bcryptWeak] = await Promise.all([
+        User.countDocuments({ password: { $exists: true, $nin: [null, ''] } }),
+        User.countDocuments({ password: { $regex: '^(?:sw2\\$)?\\$argon2id\\$' } }),
+        User.countDocuments({ password: { $regex: '^\\$2[aby]?\\$(?:1[0-9]|[2-9][0-9])\\$' } }),
+        User.countDocuments({ password: { $regex: '^\\$2[aby]?\\$0[0-9]\\$' } }),
+      ]);
+      const other = total - argon - bcryptOk - bcryptWeak;
+
+      if (!adminConfigured) return { status: 'critical', detail: 'No admin credential in this environment is stored as an argon2id (or bcrypt cost 10+) hash — and `[].every()` is true, so an empty ADMIN_ACCOUNTS must never read as "hashing is fine".' };
+      if (other > 0) {
+        return { status: 'critical', detail: `${other} of ${total} member password(s) are neither argon2id nor bcrypt — a format this application does not mint (plaintext, or a truncated write). Those accounts need a forced reset.` };
+      }
+      if (bcryptWeak > 0) {
+        return { status: 'warning', detail: `${bcryptWeak} of ${total} member(s) still hold a legacy bcrypt hash at cost < 10, which is fast enough to crack offline if the table leaked. They upgrade to argon2id on their next successful sign-in; nothing rewrites them by force.` };
+      }
+      if (total === 0) return { status: 'warning', detail: 'No member accounts exist yet, so member hashing cannot be measured. Admin config hashes are argon2id/cost-10+ bcrypt.' };
+      return {
+        status: 'healthy',
+        detail: `All ${total} member password(s) counted in the database: ${argon} argon2id (19 MiB, 2 iterations, SHA3-512 pre-hash), ${bcryptOk} legacy bcrypt at cost 10+ which still verifies and upgrades transparently on next sign-in. Plaintext is never accepted or stored.`,
+      };
     }),
 
     // ── 9. Salting ────────────────────────────────────────────────────────
@@ -1908,6 +1947,75 @@ const runMonitorProbes = async (app) => {
       const rounds = match ? parseInt(match[1], 10) : null;
       const roundNote = rounds ? `Legacy bcrypt salt rounds: ${rounds} (2^${rounds} = ${Math.pow(2, rounds).toLocaleString()} iterations).` : 'Admin hashes use argon2id with a unique 128-bit random salt each.';
       return { status: 'healthy', detail: `argon2id embeds a unique 128-bit random salt per hash — rainbow table attacks are prevented. ${roundNote} Users: argon2id (19 MiB, 2 iterations) enforced on registration.` };
+    }),
+
+    // ── 9b. Can the sealed second factors still be opened? ─────────────────
+    // The failure this measures is the silent one. routes/auth.js falls back to an
+    // emailed code when an authenticator seed will not decrypt, because the
+    // alternative is locking a real member out of their own account — which is
+    // right for ONE account with a half-finished setup, and wrong for TEN THOUSAND
+    // caused by a rotated TOTP_ENCRYPTION_KEY. In that case every enrolled
+    // authenticator on the system quietly stops being a second factor, sign-ins
+    // keep succeeding, and nothing anywhere says so.
+    //
+    // Only counts leave the database: a seed, an envelope, and the key itself are
+    // never read into this response.
+    probe('seal_integrity', 'Sealed Authenticator Seeds Open', 'crypto', async () => {
+      const { decrypt } = require('../utils/secretBox');
+      const adminTotp = require('../utils/adminTotp');
+      const keyInfo = require('../utils/secretBox').describe();
+
+      // Bounded scan. Envelopes are ~120 bytes, so this reads cheap documents and
+      // AES-GCM-authenticates them in microseconds each; the ceiling exists so a
+      // million-account database cannot make a dashboard refresh depend on it.
+      const SEAL_SCAN_MAX = 5000;
+      const [members, admins] = await Promise.all([
+        User.find({ twoFactorSecretEnc: { $nin: [null, ''] } }).select('twoFactorSecretEnc').limit(SEAL_SCAN_MAX).lean(),
+        AdminAccount.find({ $or: [{ totpSecretEnc: { $nin: [null, ''] } }, { totpSecret: { $nin: [null, ''] } }] })
+          .select(adminTotp.SECRET_FIELDS).limit(100).lean(),
+      ]);
+
+      const sealed = (v) => { try { return decrypt(v) !== null; } catch { return false; } };
+      const unopenable = members.filter((u) => !sealed(u.twoFactorSecretEnc)).length;
+      const adminUnopenable = admins.filter((a) => a.totpSecretEnc && !sealed(a.totpSecretEnc)).length;
+      const adminPlaintext = admins.filter((a) => !a.totpSecretEnc && a.totpSecret).length;
+
+      if (!keyInfo.available) {
+        return { status: 'critical', detail: 'No secret-box key is available, so no sealed authenticator seed can be opened. Set TOTP_ENCRYPTION_KEY.' };
+      }
+      // Reported here because this row is the crypto-separation row, and the gap
+      // is the same class of problem: one secret doing two jobs.
+      const dataInfo = require('../utils/dataKey').describe();
+      const dataNote = dataInfo.configured
+        ? `Data at rest (health blobs, wallet keys) uses its own key ${dataInfo.activeKeyId}.`
+        : `Data at rest (health blobs, wallet keys) is STILL derived from JWT_SECRET — set HEALTH_DATA_KEY so 'forge a token' and 'read every health record' stop being the same capability. Existing ciphertext keeps opening under the old key.`;
+      if (unopenable > 0 || adminUnopenable > 0) {
+        return {
+          status: 'critical',
+          detail: `${unopenable} member seed(s) and ${adminUnopenable} admin seed(s) are sealed under a key this `
+            + `process cannot open (active key ${keyInfo.activeKeyId}, source ${keyInfo.source}). Those accounts `
+            + 'are now falling back to an emailed code WITHOUT their authenticator — a second factor that looks '
+            + 'enabled and is not enforced. Restore the previous key via TOTP_ENCRYPTION_KEY_PREVIOUS=... '
+            + dataNote,
+        };
+      }
+      if (admins.length >= 100 || members.length >= SEAL_SCAN_MAX) {
+        return { status: 'warning', detail: `All ${members.length} member and ${admins.length} admin envelope(s) in the first scan opened, but the scan hit its ceiling — the rest were not measured. ` + dataNote };
+      }
+      if (adminPlaintext > 0) {
+        return {
+          status: 'warning',
+          detail: `${adminPlaintext} admin account(s) still hold their authenticator seed in the legacy plaintext `
+            + 'field (an operator seed readable by anyone who can read the collection). It seals itself the next '
+            + 'time that administrator signs in correctly; nothing else has to be done. ' + dataNote,
+        };
+      }
+      return {
+        status: 'healthy',
+        detail: `All ${members.length} sealed member seed(s) and ${admins.length - adminPlaintext} sealed admin `
+          + `seed(s) authenticate and open under key ${keyInfo.activeKeyId} (source ${keyInfo.source}). `
+          + 'An envelope that fails its GCM tag is counted above, never logged. ' + dataNote,
+      };
     }),
 
     // ── 10–15. Attack-surface probes (behavioral self-tests) ─────────────
@@ -1934,6 +2042,7 @@ const runMonitorProbes = async (app) => {
           pii_ai_prompts:      ['PII in AI Prompts', 'ai'],
           ai_quota:            ['AI Quota Abuse', 'ai'],
           jwt_security:        ['JWT Strength + Lifetime', 'jwt'],
+          seal_integrity:      ['Sealed Authenticator Seeds Open', 'crypto'],
           headers_security:    ['Security Headers', 'misconfig'],
           email_enumeration:   ['Email Enumeration', 'misconfig'],
           sensitive_data:      ['Sensitive Data Exposure', 'misconfig'],
@@ -1973,20 +2082,9 @@ const runMonitorProbes = async (app) => {
         // a truncation means blocks are MISSING (data loss / restore from backup),
         // whereas a linkage break means the history was ALTERED (investigation).
         // Reporting both as one "FAILED" string is what made this unusable during
-        // an incident.
-        const what = v.kind === 'truncation'
-          ? 'blocks are missing from the chain (truncation) — restore from backup before trusting any anchored digest'
-          : v.kind === 'tip-rewrite'
-            ? 'the tip block was replaced — history was altered after the fact'
-            : 'block linkage or a committed payload was altered';
-        const q = ledger.quarantined;
-        return {
-          status: 'critical',
-          detail: `Chain integrity FAILED at block ${v.brokenAt} (${v.reason}) — ${what}. `
-            + 'All affected accounts have been notified automatically and were NOT blocked: every feature '
-            + 'keeps working and transactions keep completing. '
-            + recovery,
-        };
+        // an incident. The wording lives in utils/chainAlarm.js so every branch of
+        // it is reachable from a test instead of only from a tampered chain.
+        return require('../utils/chainAlarm').chainIntegrityFailure(v, ledger.quarantined);
       }
       // $sum of the per-block tx array sizes rather than $unwind + $count: same
       // answer, a fraction of the server-side work on a large collection.
@@ -2103,22 +2201,6 @@ const runMonitorProbes = async (app) => {
       ]);
       if (missingKey > 0) {
         return { status: 'critical', detail: `${missingKey} wallet(s) are missing their AES-256-GCM key envelope — signing keys cannot be exported for those accounts.` };
-        const recovery = q
-          ? `${q.affectedBlocks} block(s) are affected. `
-            + 'The ledger stops writing on top of the damage and re-syncs automatically: it discards '
-            + `the untrustworthy region from #${q.brokenAt} onward, rewinds its host head anchor and opens `
-            + `a new verified chain segment (last provably-good block: #${q.brokenAt - 1}). `
-            + (q.unrecoverable
-              // Truncation cannot be undone by discarding: the missing blocks ARE the
-              // evidence. The chain still recovers on its own, but restoring a backup
-              // remains the only way to recover the DISCARDED records themselves, so this
-              // is stated as outstanding work rather than as a blocker.
-              ? 'NOTE: blocks are missing, so those records can only come back from a backup restore — '
-                + 'the automatic re-sync continues the chain without them. '
-              : '')
-            + 'Force it now with POST /api/admin/security/chain/repair (confirm: "DISCARD-BROKEN-BLOCKS"), '
-            + 'or let the next transaction trigger it. '
-          : '';
       }
       return { status: 'healthy', detail: `${userWallets} user wallet(s) + ${systemWallets} system wallet(s) (treasury/escrow/inventory). ed25519 signing keys stored only inside AES-256-GCM envelopes — plaintext keys are never persisted. One-time welcome airdrop on first access.` };
     }),
@@ -2812,7 +2894,7 @@ router.patch('/profile/password', async (req, res) => {
     if (!verdict.ok) return res.status(400).json({ message: verdict.message, passwordChecks: verdict.checks });
 
     if (!mongoose.isValidObjectId(req.user._id)) return res.status(409).json({ message: 'Please sign in again before changing the admin password.' });
-    const account = await AdminAccount.findById(req.user._id).select('+passwordHash +totpSecret');
+    const account = await AdminAccount.findById(req.user._id).select(`+passwordHash ${adminTotp.SECRET_FIELDS}`);
     if (!account) return res.status(404).json({ message: 'Admin account not found.' });
     const { verifyPassword, hashPassword } = require('../utils/password');
 
@@ -2835,8 +2917,13 @@ router.patch('/profile/password', async (req, res) => {
     if (newPassword === currentPassword) return res.status(400).json({ message: 'Choose a password different from your current one.' });
     if (await verifyPassword(newPassword, account.passwordHash)) return res.status(400).json({ message: 'Choose a password different from your current one.' });
 
-    const verified = verifyTotpOnce(account.totpSecret, otp, account.alias);
+    // Sealed seed, read only for this comparison (utils/adminTotp.js). Proven
+    // correct here, so this save also takes the opportunity to move a legacy
+    // plaintext seed into the envelope — the same lazy-upgrade the member flow
+    // uses, and the only safe moment to do it.
+    const verified = verifyTotpOnce(adminTotp.readSeed(account), otp, account.alias);
     if (!verified) return res.status(400).json({ message: 'Invalid authenticator code.', code: 'OTP_INVALID' });
+    adminTotp.migrateInPlace(account);
 
     account.passwordHash = await hashPassword(newPassword);
     account.passwordChangedAt = new Date();
@@ -2875,11 +2962,14 @@ router.post('/profile/authenticator/rotate', async (req, res) => {
   try {
     const { otp } = req.body || {};
     if (!mongoose.isValidObjectId(req.user._id)) return res.status(409).json({ message: 'Please sign in again before rotating your authenticator key.' });
-    const account = await AdminAccount.findById(req.user._id).select('+totpSecret');
+    const account = await AdminAccount.findById(req.user._id).select(adminTotp.SECRET_FIELDS);
     if (!account) return res.status(404).json({ message: 'Admin account not found.' });
-    if (!/^\d{6}$/.test(String(otp || '')) || !verifyTotpOnce(account.totpSecret, otp, account.alias)) return res.status(401).json({ message: 'Invalid current authenticator code.' });
+    if (!/^\d{6}$/.test(String(otp || '')) || !verifyTotpOnce(adminTotp.readSeed(account), otp, account.alias)) return res.status(401).json({ message: 'Invalid current authenticator code.' });
     const secret = speakeasy.generateSecret({ name: `SuppliWise Admin (${account.alias})`, issuer: 'SuppliWise' });
-    account.totpSecret = secret.base32;
+    // writeSeed seals the new key AND clears the legacy plaintext field, so
+    // rotating an authenticator genuinely forgets the old seed instead of
+    // leaving it readable in the database.
+    adminTotp.writeSeed(account, secret.base32);
     await account.save();
     res.json({ qrCode: await require('qrcode').toDataURL(secret.otpauth_url), secret: secret.base32, message: 'New authenticator key generated. Add it before signing out.' });
   } catch (error) {

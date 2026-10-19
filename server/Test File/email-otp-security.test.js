@@ -49,13 +49,17 @@ const PASSWORD = 'Secret123';
 // before looking anything up.
 const MFA_TOKEN = 'test-only-transaction-aaaaaaaaaaaaaaaaaaaaaaaa';
 
-// The window routes/auth.js enforces, read from source rather than restated.
-// A literal here would be a third copy that could drift from the other two.
+// The window routes/auth.js enforces. It now lives in utils/otpChallenge.js and
+// auth.js binds it by name, so reading the module is reading the enforcement —
+// the previous version of this line scraped a literal out of auth.js, which was
+// a third copy of the number with extra steps.
 const OTP_TTL_MS = (() => {
   const source = require('fs').readFileSync(require.resolve('../routes/auth'), 'utf8');
-  const declared = source.match(/const OTP_TTL_MS = (\d+) \* 60 \* 1000;/);
-  assert.ok(declared, 'OTP_TTL_MS must be declared in server/routes/auth.js');
-  return Number(declared[1]) * 60 * 1000;
+  assert.match(source, /const OTP_TTL_MS = otpChallenge\.CODE_TTL_MS;/,
+    'auth.js must take the window from the module that defines it, not restate it');
+  const ttl = otpChallenge.CODE_TTL_MS;
+  assert.ok(Number.isFinite(ttl) && ttl > 0, 'and the module must actually export it');
+  return ttl;
 })();
 
 // The suite's HTTP server binds to loopback, so this is the address every
@@ -373,15 +377,13 @@ test('expiry is enforced by the server, not trusted from the client', () => {
 });
 
 test('the email tells the user the TTL the server actually enforces', () => {
-  // routes/auth.js enforces OTP_TTL_MS; utils/email.js states OTP_TTL_MINUTES.
-  // They must agree, or the mail makes a promise the server does not keep.
-  const authSource = require('fs').readFileSync(
-    require.resolve('../routes/auth'), 'utf8'
-  );
-  const declared = authSource.match(/const OTP_TTL_MS = (\d+) \* 60 \* 1000;/);
-  assert.ok(declared, 'OTP_TTL_MS must be declared as minutes so it can be compared');
+  // utils/otpChallenge.js owns the window, routes/auth.js enforces it, and
+  // utils/email.js states it to the person reading the message. All three must
+  // agree, or the mail makes a promise the server does not keep — which is worse
+  // than a short window, because a user waiting on a code they were told was
+  // still valid stops trying.
   assert.equal(
-    Number(declared[1]),
+    OTP_TTL_MS / 60000,
     emailUtils.OTP_TTL_MINUTES,
     'the enforced TTL and the TTL advertised in the email have drifted apart'
   );

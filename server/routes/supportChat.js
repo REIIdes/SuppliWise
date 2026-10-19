@@ -883,7 +883,12 @@ router.post('/:id/secure', async (req, res) => {
       thread: toThreadView(updated, selfParticipant),
     });
   } catch (error) {
-    await releaseThreadSealingClaim(ChatThread, req.params.id, sealingClaim);
+    // Cleanup, never a second way to fail: this awaited call was the first
+    // statement of the catch, so a database blip here meant no response was
+    // sent at all AND the thread stayed permanently claimed. See the same
+    // change in routes/adminSupportChats.js.
+    releaseThreadSealingClaim(ChatThread, req.params.id, sealingClaim)
+      .catch((err) => console.error('[support-chat] sealing claim not released:', err.message));
     if (error instanceof ChatInputError) return res.status(400).json({ message: error.message });
     console.error('[support-chat POST /:id/secure]', error.message);
     return res.status(500).json({ message: 'Could not encrypt this conversation.' });

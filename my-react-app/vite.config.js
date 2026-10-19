@@ -145,6 +145,12 @@ export const securityHeaders = {
   'Content-Security-Policy': "frame-ancestors 'none'",
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
+  // The app never asks the browser for a camera, a microphone, a location, a
+  // payment handler or a USB device — so it should not be able to take one on
+  // this origin, whether through a bug here or through something embedded.
+  // Copied into deploy/nginx.conf, which is what actually answers production
+  // requests; the two lists must stay in step.
+  'Permissions-Policy': "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
 }
 
 // https://vite.dev/config/

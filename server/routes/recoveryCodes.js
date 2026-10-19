@@ -38,6 +38,7 @@ const SecurityEvent = require('../models/SecurityEvent');
 const UserNotification = require('../models/UserNotification');
 const MfaTransaction = require('../models/MfaTransaction');
 const mfa = require('../utils/mfaTransaction');
+const { asyncRoute } = require('../utils/asyncRoute');
 const { AUTH_METHODS, publicUser, publicPictures, completeSignIn } = require('../utils/authFlow');
 const {
   accountKey, lockRemainingMs, recordAccountFailure, clearOffenses, lockMeta,
@@ -159,7 +160,7 @@ router.post('/regenerate', protect, manageLimiter, requireStepUp, (req, res) =>
  *    them would make this an account-enumeration oracle AND a code-space
  *    oracle.
  */
-router.post('/verify', redeemLimiter, async (req, res) => {
+router.post('/verify', redeemLimiter, asyncRoute(async (req, res) => {
   const body = req.body || {};
   const token = str(body.mfaTransaction);
   const code = str(body.code);
@@ -226,13 +227,16 @@ router.post('/verify', redeemLimiter, async (req, res) => {
   const used = await BackupCode.consume(user._id, code);
   if (!used) {
     recordAccountFailure(lockKey, lockMeta(req, req.ip));
+    // Evidence for the operator, not a gate on the answer: a failed write logs
+    // and the refusal still goes out. Awaiting it bare meant a database hiccup
+    // turned "that recovery code is not valid" into a request nobody answered.
     await SecurityEvent.write({
       user: user._id, type: 'mfa-failure', success: false,
       ip: req.ip, userAgent: req.get('user-agent'),
       location: user.lastLoginLocation || '',
       reason: 'Recovery code rejected',
       meta: { factor: 'backup-code', outcome: 'mismatch' },
-    });
+    }).catch((error) => console.error('[recovery-codes/verify] mfa-failure event not recorded:', error.message));
     return refuse('That recovery code is not valid.');
   }
 
@@ -284,6 +288,6 @@ router.post('/verify', redeemLimiter, async (req, res) => {
     remainingCodes: await BackupCode.countRemaining(user._id),
     ...(rememberToken ? { rememberToken } : {}),
   });
-});
+}));
 
 module.exports = router;

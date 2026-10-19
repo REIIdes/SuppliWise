@@ -146,9 +146,41 @@ function encrypt(plaintext, secret) {
 }
 
 function decrypt({ iv, ct, tag }, secret) {
-  const decipher = crypto.createDecipheriv('aes-256-gcm', cipherKey(secret), Buffer.from(iv, 'base64'));
+  return decryptRaw({ iv, ct, tag }, cipherKey(secret));
+}
+
+function decryptRaw({ iv, ct, tag }, key) {
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64'));
   decipher.setAuthTag(Buffer.from(tag, 'base64'));
   return Buffer.concat([decipher.update(Buffer.from(ct, 'base64')), decipher.final()]).toString('utf8');
+}
+
+// ── Data at rest, under its OWN key ───────────────────────────────────────
+// `encrypt(plaintext, process.env.JWT_SECRET)` is how member health blobs and
+// wallet signing keys used to be sealed — the token-minting secret, hashed. One
+// leak then bought both forgery and decryption, and the decryption half never
+// goes away. These two take no secret argument at all, so a caller cannot reach
+// for JWT_SECRET again by accident, and every existing envelope still opens:
+// utils/dataKey.js tries the dedicated key first and the pre-separation legacy
+// key last, so this is a change of exposure, not a data-loss event.
+function sealData(plaintext) {
+  const key = require('../utils/dataKey').primary();
+  if (!key) throw new Error('No data-at-rest key available (set HEALTH_DATA_KEY, or JWT_SECRET for development).');
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const ct = Buffer.concat([cipher.update(String(plaintext), 'utf8'), cipher.final()]);
+  return {
+    iv: iv.toString('base64'),
+    ct: ct.toString('base64'),
+    tag: cipher.getAuthTag().toString('base64'),
+  };
+}
+
+/** Open a `sealData` envelope. Throws when no known key authenticates it. */
+function openData(envelope) {
+  const opened = require('../utils/dataKey').openWith(envelope, (key) => decryptRaw(envelope, key));
+  if (!opened) throw new Error('This envelope does not authenticate under any configured data key.');
+  return opened.plaintext;
 }
 
 // IPFS-style content identifier: CIDv1-looking, derived purely from bytes —
@@ -184,6 +216,8 @@ module.exports = {
   verify,
   encrypt,
   decrypt,
+  sealData,
+  openData,
   contentId,
   base32Encode,
   dayKey,

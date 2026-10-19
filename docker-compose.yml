@@ -45,6 +45,20 @@ services:
       - ./deploy/.env:/app/.env:ro
     networks: [app]
     restart: unless-stopped
+    # ── Baseline container hardening for the two processes that answer
+    # strangers ────────────────────────────────────────────────────────────
+    # `init` gives each a real PID 1 so a SIGTERM from `docker stop` reaches the
+    # process instead of leaving it to be killed after the timeout, and
+    # no-new-privileges means a process that got code execution cannot use a
+    # setuid helper on the filesystem to escalate inside the container. Both are
+    # free here: neither Node nor nginx needs to raise privileges to do its job.
+    #
+    # Deliberately NOT applied to the duckdns service — that image is a
+    # linuxserver/s6 rootless switcher (PUID/PGID), and this pair is the usual
+    # way such an image stops coming up at all.
+    init: true
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5000/api/health"]
       interval: 30s
@@ -65,14 +79,41 @@ services:
       api:
         condition: service_healthy
     ports:
-      # 0.0.0.0:8080 on the host, so other devices on the network can reach it.
-      - "8080:80"
+      # Loopback only, and that restriction is load-bearing for more than
+      # tidiness. deploy/nginx.conf forwards the caller's X-Forwarded-For
+      # UNCHANGED, because Caddy is the only hop and its rightmost entry is the
+      # true connecting address — the API trusts exactly one hop, so anything a
+      # client injects to the left of it is ignored. Publish this on 0.0.0.0 and
+      # that reasoning has a second door: a device that connects to :8080
+      # directly never passed Caddy, so its own forged X-Forwarded-For becomes
+      # the trusted entry, which is a chosen IP for rate limiting, for the
+      # lockout ladder and for "where did this sign-in come from".
+      #
+      # What this costs: a phone on the LAN can no longer open
+      # http://<this-machine>:8080. Use the site's own address instead — the
+      # tunnel and Caddy both reach nginx over the internal `app` network, and
+      # the HTTPS origin is what the app needs for a service worker anyway
+      # (a plain-http origin cannot register one, so the LAN page was never the
+      # full app). `curl http://127.0.0.1:8080` from this machine still works.
+      - "127.0.0.1:8080:80"
     networks: [app]
     restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
 
   # Keeps the A record pointed at this machine's current IP. PLDT residential
   # addresses change on reconnect, and without this the certificate is fine while
   # the hostname quietly follows the old address.
+  #
+  # These two images stay on `:latest` while the ones that serve code (nginx,
+  # caddy, node) are pinned, and that is a decision rather than an oversight:
+  # both exist only to keep up with somebody else's service — DuckDNS's API and
+  # Cloudflare's tunnel protocol, which enforces a minimum client version. A
+  # pinned copy of those does not fail loudly, it stops updating or stops
+  # connecting some weeks later, and the first symptom is a certificate that
+  # silently follows a dead IP. The images that carry OUR code are the ones worth
+  # freezing.
   duckdns:
     image: ghcr.io/linuxserver/duckdns:latest
     container_name: suppliwise-duckdns

@@ -42,6 +42,7 @@ const UserNotification = require('../models/UserNotification');
 const BackupCode = require('../models/BackupCode');
 const MfaTransaction = require('../models/MfaTransaction');
 const totpSecret = require('../utils/totpSecret');
+const { asyncRoute } = require('../utils/asyncRoute');
 const { verifyTotpOnce } = require('../utils/totp');
 const mfa = require('../utils/mfaTransaction');
 const { AUTH_METHODS, publicUser, publicPictures, completeSignIn } = require('../utils/authFlow');
@@ -356,7 +357,7 @@ router.post('/disable', protect, setupLimiter, requireStepUp, async (req, res) =
  * (it always goes through /auth/login first); an attacker holding only a code
  * and a user id does not.
  */
-router.post('/verify', verifyLimiter, async (req, res) => {
+router.post('/verify', verifyLimiter, asyncRoute(async (req, res) => {
   const body = req.body || {};
   const token = str(body.mfaTransaction);
   const code = str(body.otp).trim();
@@ -421,13 +422,16 @@ router.post('/verify', verifyLimiter, async (req, res) => {
   const secret = totpSecret.readSecret(user);
   if (!secret || !verifyTotpOnce(secret, code, String(user._id))) {
     recordAccountFailure(lockKey, lockMeta(req, req.ip));
+    // The event is evidence for the operator; the 401 is the answer the caller
+    // needs. A failure to write one must never swallow the other, so this is
+    // logged and dropped rather than awaited into the response path.
     await SecurityEvent.write({
       user: user._id, type: 'mfa-failure', success: false,
       ip: req.ip, userAgent: req.get('user-agent'),
       location: user.lastLoginLocation || '',
       reason: 'Authenticator code rejected at sign-in',
       meta: { factor: 'totp', outcome: 'mismatch' },
-    });
+    }).catch((error) => console.error('[totp/verify] mfa-failure event not recorded:', error.message));
     return refuse('That verification code is not valid.');
   }
 
@@ -467,7 +471,7 @@ router.post('/verify', verifyLimiter, async (req, res) => {
     mfaVerified: true,
     ...(rememberToken ? { rememberToken } : {}),
   });
-});
+}));
 
 module.exports = router;
 module.exports.TOTP_OPTIONS = TOTP_OPTIONS;

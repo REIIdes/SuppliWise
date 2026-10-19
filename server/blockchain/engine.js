@@ -7,8 +7,8 @@ const {
 const ledger = require('./ledger');
 const {
   generateIdentity,
-  encrypt,
-  decrypt,
+  sealData,
+  openData,
   hashPayload,
   dayKey,
   round2,
@@ -172,7 +172,7 @@ async function ensureWalletForUser(userId) {
       did: `did:suppliwise:${userId}`,
       address: identity.address,
       publicKey: identity.publicKey,
-      privateKeyEnc: encrypt(identity.privateKey, process.env.JWT_SECRET),
+      privateKeyEnc: sealData(identity.privateKey),
       balance: 0,
       staked: 0,
       earnedTotal: 0,
@@ -238,7 +238,7 @@ async function walletView(wallet, userId) {
 
 function decryptPrivateKey(wallet) {
   if (!wallet.privateKeyEnc) throw new EngineError('NO_KEY', 'No signing key on this wallet.');
-  return decrypt(wallet.privateKeyEnc, process.env.JWT_SECRET);
+  return openData(wallet.privateKeyEnc);
 }
 
 // ── Token movements ────────────────────────────────────────────────────────

@@ -643,7 +643,18 @@ router.post('/login/verify', verifyLimiter, async (req, res) => {
   // credential id exist" and "which origin does this deployment trust".
   const refuse = async (outcome, { user = null, type = 'passkey-login-failed', status = 401, message = 'That passkey could not be verified. Please try again.' } = {}) => {
     if (user) {
-      await recordFailure({ user, req, type, reason: 'Passkey sign-in refused', outcome });
+      // Recording is EVIDENCE, not a gate. This used to be a bare await, so a
+      // database hiccup while writing the event rejected the helper from inside
+      // the handler's own `catch` — nothing could catch that, the request went
+      // unanswered, and the client's 30-second abort turned "your passkey did
+      // not verify" into an outage. The refusal is what the caller needs; the
+      // event is what the operator needs, and one failing must not take the
+      // other down.
+      try {
+        await recordFailure({ user, req, type, reason: 'Passkey sign-in refused', outcome });
+      } catch (error) {
+        console.error('[passkeys/login/verify] refusal event could not be recorded:', error.message);
+      }
     }
     return res.status(status).json({ message });
   };

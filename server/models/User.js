@@ -448,7 +448,22 @@ userSchema.virtual('age').get(function() {
 });
 
 // Ensure virtuals are included in JSON
-userSchema.set('toJSON', { virtuals: true });
+userSchema.set('toJSON', {
+  virtuals: true,
+  // A member document is returned to a client in more than one place, and
+  // `password` is NOT `select: false` — every auth read needs the hash to
+  // verify a sign-in, so putting it behind a projection would mean editing the
+  // whole login path and forgetting one. Forgetting one is the actual risk, so
+  // the credential fields are deleted at the only boundary that matters:
+  // whatever leaves the process. A response can then carry an argon2id hash
+  // only if some code writes it into a plain object by hand.
+  transform(doc, ret) {
+    delete ret.password;
+    delete ret.twoFactorSecret;
+    delete ret.twoFactorSecretEnc;
+    return ret;
+  },
+});
 userSchema.set('toObject', { virtuals: true });
 
 // Pre-save hook to set name field from firstName + lastName for backward compatibility

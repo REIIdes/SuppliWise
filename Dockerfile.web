@@ -15,7 +15,12 @@ ARG VITE_API_URL=/api
 ENV VITE_API_URL=${VITE_API_URL}
 RUN npm run build
 
-FROM nginx:alpine
+# Pinned, not `nginx:alpine`: an unpinned base means the image that answers the
+# public today is not the one that was reviewed, and a tag publisher who decides
+# to move `latest` (or a compromised registry) changes the reverse proxy that
+# stands in front of every member. Verified to exist in the registry when this
+# line was written.
+FROM nginx:1.31-alpine
 COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 80

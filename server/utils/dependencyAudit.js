@@ -54,10 +54,21 @@ function npmCli() {
   return candidates.find(existsSync) || candidates[0];
 }
 
-function auditOne(dir) {
+// Both forms are fixed literals, chosen by a boolean, never assembled from
+// anything a caller supplies. The command-injection probe in
+// utils/attack_probes.js is what enforces that from the outside, and the audit
+// argv is the entire reason this file is allowed to import child_process at all.
+const AUDIT_ARGS_PROD = Object.freeze(['audit', '--json', '--omit=dev']);
+const AUDIT_ARGS_ALL = Object.freeze(['audit', '--json']);
+
+function auditOne(dir, { includeDev = false } = {}) {
   return new Promise((resolve) => {
     const spawn = npmInvocation();
-    execFile(spawn.cmd, [...spawn.args, 'audit', '--json', '--omit=dev'], {
+    // The production tree is the one a request can reach, so it decides the
+    // verdict. The dev tree is asked separately and only when production is
+    // clean — see auditAll — because its answer is a different kind of fact.
+    const argv = includeDev ? AUDIT_ARGS_ALL : AUDIT_ARGS_PROD;
+    execFile(spawn.cmd, [...spawn.args, ...argv], {
       cwd: dir,
       encoding: 'utf8',
       timeout: 120000,
@@ -73,7 +84,18 @@ function auditOne(dir) {
         const json = JSON.parse(body);
         const found = Object.entries(json.vulnerabilities || {})
           .filter(([, v]) => SEVERITY_RANK[v.severity] >= 1)
-          .map(([name, v]) => ({ name, severity: v.severity }))
+          .map(([name, v]) => ({
+            name,
+            severity: v.severity,
+            // npm reports `false` when no release fixes the advisory, `true` for
+            // a direct bump, and an OBJECT naming the move — whose
+            // `isSemVerMajor` says the only answer is a major jump. All three are
+            // kept, because the honest sentence differs between "patch it",
+            // "there is nothing to patch to yet", and "the only upstream change
+            // is a rewrite of the toolchain".
+            fixable: Boolean(v.fixAvailable),
+            majorOnly: Boolean(v.fixAvailable && v.fixAvailable.isSemVerMajor),
+          }))
           .sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity]);
         resolve({ ok: true, found });
       } catch {
@@ -127,10 +149,43 @@ async function auditAll() {
   const partial = blocked.length > 0
     ? ` (${blocked.map(b => b.name).join(', ')} unmeasured: ${blocked.map(b => b.reason).join(', ')})`
     : '';
+
+  // Production is clean, so ask the second question: is the TOOLING patched?
+  //
+  // The row used to answer this by declaring dev dependencies irrelevant —
+  // "nothing in a dev dependency is loaded by a request" — which is true of the
+  // running API and false of the deployment. Dev packages are installed and
+  // executed on the machine that builds this app, and an advisory there is a
+  // fact a reviewer can verify with one command. Saying "excluded" instead of
+  // naming it is how a control stops being believed.
+  const devParts = await Promise.all(visible.map(async (p) => ({ ...p, ...(await auditOne(p.dir, { includeDev: true })) })));
+  // Nothing reaches here unless the production census came back empty, so every
+  // finding in the full tree is by definition dev-only.
+  const devFound = devParts.flatMap(p => (p.ok ? p.found : []).map(v => ({ pkg: p.name, ...v })));
+
+  if (devFound.length > 0) {
+    // "Actionable" means an upgrade that is not a major jump: for this tree the
+    // alternative npm offers for the file-watcher advisories is downgrading
+    // nodemon from 3.x to 1.14, which no one should take. Calling that "a fix is
+    // available" would leave a permanent warning telling the operator to do
+    // something worse than the gap they have.
+    const actionable = devFound.filter(v => v.fixable && !v.majorOnly);
+    const label = (v) => `${v.pkg}/${v.name} (${v.severity}`
+      + (v.fixable ? (v.majorOnly ? ', only fix is a major jump' : ', fix available') : ', no fixed release yet') + ')';
+    return {
+      status: actionable.length > 0 ? 'warning' : 'healthy',
+      detail: `Zero advisories in the production trees of ${here}${partial}. Dev-tree findings: `
+        + `${devFound.map(label).join(', ')} — not reachable from a request, but they do run on the machine `
+        + 'that builds and tests this app'
+        + (actionable.length > 0
+          ? '. Patch the ones with a fix available before the next build.'
+          : '. None has an upgrade to move to that is not a rewrite of the toolchain, so each is an accepted, named gap rather than an unpatched one.'),
+    };
+  }
+
   return {
     status: 'healthy',
-    detail: `npm audit (production trees only) reports zero advisories for ${here}` + partial + elsewhere
-      + '. Dev-tree findings are excluded: nothing in a dev dependency is loaded by a request.',
+    detail: `npm audit reports zero advisories in the production AND dev trees of ${here}` + partial + elsewhere + '.',
   };
 }
 

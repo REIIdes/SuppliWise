@@ -5,12 +5,12 @@
 # official binary. This is xcaddy's one job — re-link Caddy with the extra
 # module. Nothing here needs an ACME HTTP-01 listener, which is why port 80 is
 # optional and a non-standard public port is workable.
-FROM caddy:2-builder AS builder
+FROM caddy:2.11-builder AS builder
 
 RUN xcaddy build \
     --with github.com/caddy-dns/duckdns
 
-FROM caddy:2-alpine
+FROM caddy:2.11-alpine
 
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy
 

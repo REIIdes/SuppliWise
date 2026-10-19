@@ -56,6 +56,7 @@ const secretBox = require('./utils/secretBox');
 // TLS material and the https/http decision. Opt-in via TLS_ENABLED; see
 // utils/tls.js for why that is not automatic.
 const tls = require('./utils/tls');
+const compressionPolicy = require('./utils/compressionPolicy');
 
 const app = express();
 
@@ -133,6 +134,42 @@ if (process.env.NODE_ENV === 'production' && secretKey.source !== 'TOTP_ENCRYPTI
   );
 }
 
+// 2b. The data-at-rest key (member health blobs, wallet signing keys).
+//
+// NOT a boot refusal, and deliberately so: ciphertext written before this
+// separation exists is real data that people need back, so utils/dataKey.js keeps
+// the legacy derivation in its candidate list and everything opens. Refusing to
+// boot would turn a key-hygiene gap into an outage. What it does instead is say,
+// every start, that the signing secret and the data secret are still the same
+// secret — and routes/admin.js `seal_integrity` reports the same fact to the
+// Security Center, where it is impossible to lose.
+if (process.env.NODE_ENV === 'production') {
+  const dataKeyInfo = require('./utils/dataKey').describe();
+  if (!dataKeyInfo.configured) {
+    console.warn(
+      '[boot] HEALTH_DATA_KEY is not set, so data at rest is encrypted under a key derived from JWT_SECRET. '
+      + 'Anyone who can forge a session token can also open every stored health record and wallet key. '
+      + 'Generate one with `openssl rand -base64 32` — existing ciphertext keeps working under it, because the '
+      + 'old key stays in the decrypt list.',
+    );
+  }
+  // The same coupling, one layer over: the ledger checkpoint seal falls back to
+  // JWT_SECRET when CHAIN_SEAL_KEY is unset. The seal is what makes "everything
+  // up to block N verified" unforgeable by someone who can only write to the
+  // database — so while it shares a secret with token signing, whoever holds
+  // JWT_SECRET can forge a clean checkpoint as well as a session. Warned, not
+  // refused: changing the seal key makes every persisted checkpoint re-hash from
+  // genesis, which is safe but expensive, and it is the operator's call when to
+  // pay that.
+  if (!String(process.env.CHAIN_SEAL_KEY || '').trim()) {
+    console.warn(
+      '[boot] CHAIN_SEAL_KEY is not set, so ledger checkpoint seals are keyed with JWT_SECRET. '
+      + 'Set it to an independent secret (`openssl rand -base64 32`) to separate token forgery from '
+      + 'ledger-seal forgery; expect one re-hash from genesis after the change.',
+    );
+  }
+}
+
 // 3. WebAuthn. A passkey ceremony needs a real RP ID and real https origins.
 //    A localhost fallback here produces credentials that work on one developer's
 //    machine and nowhere else, and the only symptom is real users failing to
@@ -183,14 +220,11 @@ app.use(helmet({
 // Compress all responses. AI recommendation payloads can be ~500KB uncompressed;
 // gzip typically reduces them to ~50KB. This is a major latency win for
 // mobile users on slow connections.
-app.use(compression({
-  level: 6, // balanced between CPU and compression ratio
-  threshold: 1024, // only compress responses > 1KB
-  filter: (req, res) => {
-    if (req.headers['x-no-compression']) return false;
-    return compression.filter(req, res);
-  },
-}));
+//
+// The policy — including why a Server-Sent Events response must never be
+// deflated — lives in utils/compressionPolicy.js so it can be exercised over
+// real HTTP instead of asserted from a comment.
+app.use(compression(compressionPolicy.options()));
 
 // Middleware
 // CORS, from ONE trusted-origin list shared with the CSRF guard below.
@@ -394,7 +428,16 @@ const adminLimiter = rateLimit({
 app.use('/api', requestFloodGuard);
 app.use('/api/auth/me', sessionLimiter);
 app.use('/api/auth', lockoutCheck, authLimiter);
-app.use('/api/assessment', userLimiter);
+// ── Mounts that carry admin-gated handlers inside them ─────────────────────
+// These keep their non-escalating user bucket (a member reading their own
+// assessment must never climb the brute-force ladder), but they now HONOUR a
+// network lockout instead of ignoring one. Without lockoutCheck here, an
+// address already hard-stopped from /api/auth and /api/admin could still walk
+// through this side door to /api/assessment/user/:userId, /api/proposals,
+// /api/instrument/validation, /api/survey/validation or
+// /api/medical-review/admin/reviews and read the same admin data. Honouring
+// the lockout is not escalation: nothing on this path creates a lockout.
+app.use('/api/assessment', lockoutCheck, userLimiter);
 // Subscription state is polled/streamed by every open session — use the
 // non-escalating session bucket so it can never trip lockouts.
 app.use('/api/subscription', sessionLimiter);
@@ -420,14 +463,17 @@ app.use('/api/security', userLimiter);
 app.use('/api/web3', userLimiter);
 // Evaluation questionnaires (SUS / efficiency / satisfaction). Small,
 // infrequent submissions — ordinary user bucket, never the escalating one.
-app.use('/api/survey', userLimiter);
+// /validation inside is admin-only, so the network lockout applies here too.
+app.use('/api/survey', lockoutCheck, userLimiter);
 // Health Assessment instrument registry + expert review submissions.
-app.use('/api/instrument', userLimiter);
+// GET /live-extensions and POST /review are admin-only.
+app.use('/api/instrument', lockoutCheck, userLimiter);
 // AI learning log (admin-only routes inside).
-app.use('/api/proposals', userLimiter);
+app.use('/api/proposals', lockoutCheck, userLimiter);
 // Severe-case medical review (request/status/confirm). Member writes that
-// change flag state — meter them with the ordinary user bucket.
-app.use('/api/medical-review', userLimiter);
+// change flag state — meter them with the ordinary user bucket. The
+// /admin/reviews paths inside are admin-only, so this mount honours a lockout.
+app.use('/api/medical-review', lockoutCheck, userLimiter);
 app.use('/api/admin', lockoutCheck, adminLimiter);
 
 // ── STAGE 2 — PARSE (only requests that passed metering reach here) ────────
@@ -668,7 +714,16 @@ mongoose
     // into three fragments and the seeder silently ensured only the legacy one.
     // See utils/adminAccounts.js for the delimiter rule.
     const accounts = require('./utils/adminAccounts').configuredAdminAccounts();
-    return Promise.all(accounts.map(account => AdminAccount.updateOne({ alias: account.alias }, { $setOnInsert: account }, { upsert: true })))
+    // Sealed before they reach the database: an account created by this seeder
+    // has never held its authenticator seed in plaintext, so "set a new cluster
+    // from .env" does not quietly re-create the exposure that old documents
+    // still have. utils/adminTotp.js owns the envelope and the lazy upgrade.
+    const { sealAccount } = require('./utils/adminTotp');
+    return Promise.all(accounts.map(account => AdminAccount.updateOne(
+      { alias: account.alias },
+      { $setOnInsert: sealAccount(account) },
+      { upsert: true },
+    )))
       // Alias-only log (never secrets/hashes): proves every admin account
       // exists after boot on any device, so a fresh clone + .env self-heals.
       .then((results) => {

@@ -115,9 +115,22 @@ const isConfigured = () => status().configured;
  * this second check exists because the function is also reachable in tests and
  * tooling that do not go through boot.
  */
+let devSmsWarned = false;
+
 async function consoleTransport({ to, body, purpose }) {
   if (process.env.NODE_ENV === 'production') {
     return { ok: false, reason: 'development-transport-disabled' };
+  }
+  // `SMS_PROVIDER=console` / `ALLOW_DEV_SMS_RESPONSE=true` are opt-ins, so this
+  // line is normally a developer reading their own test code. The exception that
+  // matters is the deployment that never set NODE_ENV: index.js's refusal is
+  // `=== 'production'`, so an unset mode slips past it and this would quietly
+  // write live sign-in codes into a shared log forever. Say so loudly, once.
+  if (!['development', 'test'].includes(process.env.NODE_ENV) && !devSmsWarned) {
+    devSmsWarned = true;
+    console.warn('[SMS:console] *** the development SMS transport is armed with NODE_ENV='
+      + (process.env.NODE_ENV || '(unset)') + '. Live verification codes are being written to this log. '
+      + 'Set NODE_ENV=production (or unset SMS_PROVIDER / ALLOW_DEV_SMS_RESPONSE) before this host serves real users. ***');
   }
   // The only place the full recipient and the full body are ever written down.
   console.log(`[SMS:console] to=${to} purpose=${purpose || 'unknown'}\n[SMS:console] ${body}`);

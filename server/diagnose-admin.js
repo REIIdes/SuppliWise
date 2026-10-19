@@ -11,6 +11,7 @@ for (const line of fs.readFileSync(envPath, 'utf8').split(/\r?\n/)) {
 const mongoose = require('mongoose');
 const speakeasy = require('speakeasy');
 const adminAccounts = require('./utils/adminAccounts');
+const adminTotp = require('./utils/adminTotp');
 
 (async () => {
   const accounts = adminAccounts.configuredAdminAccounts();
@@ -30,17 +31,25 @@ const adminAccounts = require('./utils/adminAccounts');
   const now = Date.now();
 
   for (const cfg of accounts) {
-    const rec = await AdminAccount.findOne({ alias: cfg.alias }).select('alias enabled totpSecret passwordHash mustChangePassword lastLoginAt');
+    const rec = await AdminAccount.findOne({ alias: cfg.alias })
+      .select(`alias enabled passwordHash mustChangePassword lastLoginAt ${adminTotp.SECRET_FIELDS}`);
     if (!rec) {
       console.log(`[${cfg.alias}] NOT IN DATABASE (seeder will insert from .env on next boot)`);
       continue;
     }
-    const secretMatch = String(rec.totpSecret || '') === String(cfg.totpSecret);
+    // `readSeed` unseals `totpSecretEnc` and falls back to the legacy plaintext
+    // field, so this compares SEEDS, not storage formats. Reading
+    // `rec.totpSecret` directly would report MISMATCH for every account that has
+    // signed in since the seeds were encrypted — a diagnostic that cries wolf is
+    // a diagnostic nobody runs.
+    const dbSeed = adminTotp.readSeed(rec);
+    const secretMatch = String(dbSeed || '') === String(cfg.totpSecret);
     const hashMatch = String(rec.passwordHash || '') === String(cfg.passwordHash);
     const codeEnv = speakeasy.totp({ secret: cfg.totpSecret, encoding: 'base32' });
-    const codeDb = rec.totpSecret ? speakeasy.totp({ secret: String(rec.totpSecret), encoding: 'base32' }) : '(none)';
+    const codeDb = dbSeed ? speakeasy.totp({ secret: String(dbSeed), encoding: 'base32' }) : '(none)';
     console.log(`[${cfg.alias}]`);
     console.log(`   enabled=${rec.enabled} mustChangePassword=${!!rec.mustChangePassword} lastLoginAt=${rec.lastLoginAt || 'never'}`);
+    console.log(`   seed stored: ${adminTotp.storageState(rec).sealed ? 'sealed envelope (totpSecretEnc)' : (dbSeed ? '*** PLAINTEXT (legacy field) ***' : 'NONE')}`);
     console.log(`   totpSecret: .env vs DB -> ${secretMatch ? 'MATCH' : '*** MISMATCH ***'}`);
     console.log(`   passwordHash: .env vs DB -> ${hashMatch ? 'MATCH' : '*** MISMATCH (DB hash wins at login) ***'}`);
     console.log(`   code from .env seed now: ${codeEnv}   code from DB seed now: ${codeDb}`);

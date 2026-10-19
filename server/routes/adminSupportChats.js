@@ -920,7 +920,15 @@ router.post('/:id/secure', async (req, res) => {
       thread: toThreadView(updated, participantFor(req)),
     });
   } catch (error) {
-    await releaseThreadSealingClaim(ChatThread, req.params.id, sealingClaim);
+    // Cleanup, not a second chance to fail. This was the FIRST statement of the
+    // catch and it is `await`ed, so a database blip here rejected inside the
+    // error path: no response was ever sent (the client hangs 30 s and reports
+    // an outage), and worse — the thread stayed claimed, so the "Encrypt
+    // conversation" button was dead for that conversation until a restart.
+    // Nothing about answering the caller depends on the claim being released,
+    // so it is fire-and-forget with the failure logged.
+    releaseThreadSealingClaim(ChatThread, req.params.id, sealingClaim)
+      .catch((err) => console.error('[admin/chats] sealing claim not released:', err.message));
     if (error instanceof ChatInputError) return res.status(400).json({ message: error.message });
     console.error('[admin/chats POST /:id/secure]', error.message);
     return res.status(500).json({ message: 'Could not encrypt this conversation.' });
@@ -1043,7 +1051,12 @@ router.post('/:id/assign', async (req, res) => {
     if (!mongoose.isValidObjectId(req.params.id)) {
       return res.status(400).json({ message: 'Invalid conversation.' });
     }
-    const alias = String(req.body?.alias ?? req.user.alias ?? '').trim().slice(0, 60);
+    // The operator is who their verified credential says they are. This used to
+    // take `req.body.alias` first, so any signed-in admin could stamp a
+    // colleague's name onto a conversation — and the assignee chip is the only
+    // attribution this channel has. POST /:id/reopen already derived the alias
+    // from the session; this now matches it.
+    const alias = String(req.user.alias || 'Administrator').trim() || 'Administrator';
     const updated = await ChatThread.findOneAndUpdate(
       { _id: req.params.id },
       { $set: { assignedTo: alias } },

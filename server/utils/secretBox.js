@@ -98,7 +98,14 @@ function envFingerprint() {
   return [
     process.env.TOTP_ENCRYPTION_KEY || '',
     process.env.TOTP_ENCRYPTION_KEY_PREVIOUS || '',
-    String(process.env.JWT_SECRET || '').length,
+    // The FULL secret, not its length. This key is derived from JWT_SECRET when
+    // no explicit TOTP key is set, so a fingerprint that only counted
+    // characters let a rotated secret of the same length keep serving the OLD
+    // cached key: new envelopes were written under a key no longer derivable
+    // from the environment, and every one of them failed to decrypt afterwards.
+    // The value is hashed rather than inlined because this string is compared
+    // and logged-adjacent; it must never carry the secret itself.
+    crypto.createHash('sha256').update(String(process.env.JWT_SECRET || '')).digest('base64url').slice(0, 16),
     process.env.NODE_ENV || '',
   ].join(ENV_SEP);
 }
@@ -151,11 +158,31 @@ function loadKeys() {
   // Decrypt-only predecessors. Entries may be written as "kid=BASE64" for
   // readability, but each key is always STORED under its own fingerprint, so a
   // mislabelled or duplicated entry still decrypts correctly.
+  //
+  // A bare key with no `kid=` label is accepted too. It used to be skipped
+  // outright (`if (at <= 0) continue`), which made the single most likely way
+  // someone writes a rotated key — TOTP_ENCRYPTION_KEY_PREVIOUS=<old base64> —
+  // a silent no-op: the envelope keeps naming its old key id, the old key never
+  // loads, and the account falls back to the emailed code with nothing in the
+  // log to say why.
+  //
+  // The naive version of that fix — "no '=' means bare" — is wrong, because a
+  // standard base64 32-byte key ENDS in '=' padding. So the label is split off
+  // first and the whole entry is retried as raw key material when that leaves
+  // nothing usable, which parses both shapes without guessing which one an
+  // operator wrote.
   for (const pair of String(process.env.TOTP_ENCRYPTION_KEY_PREVIOUS || '').split(',')) {
-    const at = pair.indexOf('=');
-    if (at <= 0) continue;
-    const key = parseKeyMaterial(pair.slice(at + 1));
-    if (key) keys.set(keyId(key), key);
+    const entry = String(pair || '').trim();
+    if (!entry) continue;
+    const at = entry.indexOf('=');
+    const options = at <= 0 ? [entry] : [entry.slice(at + 1), entry];
+    for (const candidate of options) {
+      const key = parseKeyMaterial(candidate);
+      if (key) {
+        keys.set(keyId(key), key);
+        break;
+      }
+    }
   }
 
   cached = { keys, source, primaryId };

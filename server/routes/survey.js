@@ -1,7 +1,9 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const { protect, adminOnly } = require('../middleware/auth');
 const SurveyResponse = require('../models/SurveyResponse');
+const Assessment = require('../models/Assessment');
 const { INSTRUMENTS, scoreInstrument } = require('../utils/surveyInstruments');
 const { describeInstrument, mean, sampleStandardDeviation } = require('../utils/surveyStats');
 
@@ -39,13 +41,29 @@ router.post('/respond', protect, async (req, res) => {
     const result = scoreInstrument(instrument, values);
     if (result.error) return res.status(400).json({ message: result.error });
 
+    // The assessment this questionnaire is about is stored so the admin report
+    // can tie feedback to a run. It used to be stored verbatim from the body,
+    // which let any member attach — and, in a joined report, imply — another
+    // member's assessment id. Only accept an id that names THIS account's own
+    // assessment; anything else is rejected rather than quietly dropped,
+    // because a silently ignored field reads to the client as "saved".
+    let linkedAssessmentId = null;
+    if (assessmentId !== undefined && assessmentId !== null && assessmentId !== '') {
+      if (!mongoose.isValidObjectId(String(assessmentId))) {
+        return res.status(400).json({ message: 'That assessment reference is not valid.' });
+      }
+      const owns = await Assessment.exists({ _id: assessmentId, user: req.user._id });
+      if (!owns) return res.status(403).json({ message: 'That assessment is not yours.' });
+      linkedAssessmentId = assessmentId;
+    }
+
     const doc = await SurveyResponse.create({
       user: req.user._id,
       instrument: result.instrument.id,
       values,
       reversed: result.reversed,
       score: result.score,
-      assessmentId: assessmentId || null,
+      assessmentId: linkedAssessmentId,
     });
     return res.status(201).json({ ok: true, instrument: doc.instrument, score: doc.score });
   } catch (err) {

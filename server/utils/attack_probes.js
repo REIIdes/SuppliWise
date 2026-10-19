@@ -408,9 +408,14 @@ const probes = {
             // has to stay shell-free, so the window around the call must reach
             // past argv (a multi-line array) into it.
             const calls = src.match(/execFile\([\s\S]{0,700}/g) || [];
-            // The argv may be prefixed by a spread of the invocation's own
-            // options, but the audit arguments themselves must stay a literal.
-            const argvFixed = /\[\s*(?:\.\.\.[A-Za-z_$][\w$]*\.args,\s*)?'audit',\s*'--json',\s*'--omit=dev'\s*\]/.test(src);
+            // The audit arguments are the whole reason this file may spawn
+            // anything, so they must remain two literal, frozen arrays — one for
+            // the production tree, one for the full tree — selected by a
+            // boolean. An assembled argv would be the hole this guard exists to
+            // close, however reasonable the assembling code looks today.
+            const argvFixed = /const AUDIT_ARGS_PROD = Object\.freeze\(\['audit',\s*'--json',\s*'--omit=dev'\]\)/.test(src)
+              && /const AUDIT_ARGS_ALL = Object\.freeze\(\['audit',\s*'--json'\]\)/.test(src)
+              && /const argv = includeDev \? AUDIT_ARGS_ALL : AUDIT_ARGS_PROD;/.test(src);
             // The file may only spawn the node binary that started this
             // process — never a `.cmd` by name. That distinction is the whole
             // reason it needs no shell, so the allowance proves it: a literal
@@ -760,20 +765,75 @@ Object.assign(probes, {
     }
   },
 
-  // ── JWT security: strong secret + bounded 12 h lifetime ────────────────
+  // ── JWT security: measured against the running verifier ─────────────────
+  // WHAT THIS USED TO BE: sign a token with the app's own secret, ask jsonwebtoken
+  // what lifetime it gave it, and report "tokens expire 12 h after issue; verified
+  // by decode". That checks a call made two lines above — it cannot fail, and the
+  // 12 h it asserted is not a number this application uses anywhere (admin tokens
+  // live 15 min and slide; member tokens deliberately carry no `exp`). A row that
+  // cannot go red is not a control.
+  //
+  // So the checks below are aimed at the DEPLOYED verifier over HTTP: the
+  // signature, the algorithm and the clock are rejected by the middleware, not by
+  // a copy of the middleware written inside the probe.
   jwt_security: async () => {
     const jwt = require('jsonwebtoken');
+    const adminSession = require('./adminSession');
     const secret = process.env.JWT_SECRET || '';
     if (!secret || secret.length < 32 || /suppliwise_jwt_secret_key_change_in_production/.test(secret)) {
       return { status: 'critical', detail: 'JWT_SECRET missing, short, or still the placeholder.' };
     }
-    const t = jwt.sign({ probe: 1 }, secret, { expiresIn: '12h' });
-    const d = jwt.decode(t);
-    const lifetimeOk = d && (d.exp - d.iat) === 12 * 3600;
-    if (!lifetimeOk) {
-      return { status: 'warning', detail: 'Token lifetime differs from the 12 h policy.' };
+
+    const b64u = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+    // Hand-built, so the claims are EXACTLY the ones under test. Left to
+    // jsonwebtoken, `expiresIn` overwrites a supplied `iat` and derives `exp`
+    // from the current clock, so a "deliberately expired" token is only as
+    // expired as the milliseconds between here and the request — and a token
+    // that is merely old is not an attack, it is a valid credential.
+    const crypto = require('crypto');
+    const nowSec = Math.floor(Date.now() / 1000);
+    const hs256 = (payload) => {
+      const head = b64u({ alg: 'HS256', typ: 'JWT' });
+      const body = b64u(payload);
+      const sig = crypto.createHmac('sha256', secret).update(`${head}.${body}`).digest('base64url');
+      return `${head}.${body}.${sig}`;
+    };
+    const forged = [
+      ['an unsigned (alg:none) token', `${b64u({ alg: 'none', typ: 'JWT' })}.${b64u({ id: '65b0000000000000000000f0' })}.`],
+      ['a token signed with the wrong secret', jwt.sign({ id: '65b0000000000000000000f0' }, 'a-strictly-wrong-secret-value-that-is-long-enough', { algorithm: 'HS256' })],
+      ['an expired admin token', hs256({
+        id: '65b0000000000000000000f0', role: 'admin', alias: 'probe',
+        adminId: '65b0000000000000000000f0', iat: nowSec - 7200, exp: nowSec - 3600,
+      })],
+    ];
+
+    const accepted = [];
+    for (const [label, token] of forged) {
+      try {
+        const r = await selfFetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } });
+        // 401/403 is the answer we want. Anything else — especially a 200 — means
+        // the running middleware took this token seriously.
+        if (r.status < 400) accepted.push(`${label} was accepted (HTTP ${r.status})`);
+      } catch (e) {
+        return { status: 'warning', detail: `Self-check unreachable (${e.name || e.message}) — the JWT verifier could not be exercised.` };
+      }
     }
-    return { status: 'healthy', detail: `HMAC secret ${secret.length} chars; tokens expire 12 h after issue; verified by decode.` };
+    if (accepted.length) {
+      return { status: 'critical', detail: `The live verifier accepted: ${accepted.join('; ')}.` };
+    }
+
+    // Reported as facts, read from the modules that enforce them rather than
+    // restated here, so this row cannot drift from the code it describes.
+    return {
+      status: 'healthy',
+      detail: `HMAC secret ${secret.length} chars (HS256 pinned by the middleware). Live verifier rejected an `
+        + 'alg:none token, a wrong-secret token and an expired admin token over HTTP. Admin sessions: '
+        + `${adminSession.ADMIN_TOKEN_LIFETIME_MINUTES} min, slid forward on activity, bounded by `
+        + `${adminSession.ADMIN_IDLE_MINUTES} min idle AND revoked at sign-out (sessionsRevokedAt). `
+        + 'Member tokens carry no `exp` by design: a session ends when it is replaced, revoked or the account is '
+        + 'disabled — so a stolen member token is worthless the moment its session record is, and revocation is '
+        + 'instant rather than at the end of a lifetime.',
+    };
   },
 
   // ── Security headers: helmet output on live responses ──────────────────
@@ -810,16 +870,52 @@ Object.assign(probes, {
     }
   },
 
-  // ── Sensitive-data exposure: auth layer must strip secrets ─────────────
+  // ── Sensitive-data exposure: what a real document looks like on the way out ─
+  // WHAT THIS USED TO BE: `User.findOne().select('-password -profilePicture
+  // -bannerPicture')` and then check whether the fields it had just excluded
+  // were present. The projection was written by the probe, so the probe was
+  // measuring its own query, and it could not have failed even if every route in
+  // the API serialized raw hashes.
+  //
+  // What is actually dangerous is a document REACHING a response, so this reads a
+  // real account the way a careless route would (no secret exclusions — only the
+  // multi-megabyte picture payloads, which are big, not secret) and then runs it
+  // through the model's own serialization boundary, the same `toJSON` that every
+  // `res.json(user)` passes through. If a credential survives THAT, exposure is a
+  // one-line mistake away in any route that returns a user.
   sensitive_data: async () => {
     const User = require('../models/User');
-    const doc = await User.findOne().select('-password -profilePicture -bannerPicture').lean();
-    if (!doc) return { status: 'healthy', detail: 'No users yet — nothing to expose; projection excludes secrets by default.' };
-    const leaked = ['password', 'profilePicture', 'bannerPicture', 'twoFactorSecret'].filter(k => doc[k] !== undefined);
-    if (leaked.length > 0) {
-      return { status: 'critical', detail: `Auth projection leaks: ${leaked.join(', ')}.` };
+    const doc = await User.findOne({ password: { $exists: true } })
+      .select('-profilePicture -bannerPicture')
+      .lean();
+    if (!doc) return { status: 'warning', detail: 'No member account exists yet, so nothing could be measured.' };
+
+    // The same path res.json takes: hydrated document -> JSON. `lean()` would
+    // skip toJSON entirely, so the probe rebuilds the document it just read.
+    const asClientWouldSee = JSON.parse(JSON.stringify(new User(doc).toJSON()));
+    const leaked = ['password', 'twoFactorSecret', 'twoFactorSecretEnc']
+      .filter((k) => asClientWouldSee[k] !== undefined && asClientWouldSee[k] !== '');
+    if (leaked.length) {
+      return {
+        status: 'critical',
+        detail: `A member document still carries ${leaked.join(', ')} after serialization — any route that `
+          + 'returns a user hands out credentials. models/User.js must delete them in its toJSON transform.',
+      };
     }
-    return { status: 'healthy', detail: 'Auth-layer projection strips password, pictures, and 2FA secrets from every request.' };
+
+    // Honest about the half it cannot prove: the hash IS loaded by ordinary reads
+    // (sign-in has to compare it), so an internal `console.log(user)` or a
+    // hand-built response object can still expose it. What is guaranteed is the
+    // boundary, which is what a client can receive.
+    const rawHasPassword = doc.password !== undefined;
+    return {
+      status: 'healthy',
+      detail: 'A real member document serialized through models/User.js toJSON carries no password hash and no '
+        + 'authenticator seed, so a route returning a user cannot leak either. Two seeds are additionally '
+        + '`select: false` (absent unless a query asks for them by name). Note: the password hash IS loaded by '
+        + `auth reads (${rawHasPassword ? 'as this probe saw' : 'though this account had none'}), so logs and `
+        + 'hand-built responses still have to be checked by review — this row covers the response boundary, not the process.',
+    };
   },
 });
 

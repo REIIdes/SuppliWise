@@ -226,3 +226,72 @@ test('a previous key still decrypts, so rotation is not an outage', () => {
     secretBox._resetCache();
   }
 });
+
+/**
+ * The same rotation, written the way an operator actually writes it.
+ *
+ * `TOTP_ENCRYPTION_KEY_PREVIOUS` used to parse only `kid=<base64>` pairs, so the
+ * natural thing — paste the old key with no label — was skipped silently. The
+ * envelope still named the old key id, the old key never loaded, and the only
+ * symptom was that enrolled accounts fell back to emailed codes with nothing in
+ * the log to explain it.
+ */
+test('a previous key with no kid= label still loads', () => {
+  const prev = process.env.TOTP_ENCRYPTION_KEY;
+  const prevList = process.env.TOTP_ENCRYPTION_KEY_PREVIOUS;
+  try {
+    const oldKey = crypto.randomBytes(32).toString('base64');
+    process.env.TOTP_ENCRYPTION_KEY = oldKey;
+    secretBox._resetCache();
+    const sealedUnderOld = secretBox.encrypt(SEED);
+
+    process.env.TOTP_ENCRYPTION_KEY = crypto.randomBytes(32).toString('base64');
+    process.env.TOTP_ENCRYPTION_KEY_PREVIOUS = oldKey;
+    secretBox._resetCache();
+
+    assert.equal(secretBox.decrypt(sealedUnderOld), SEED,
+      'a bare key in the PREVIOUS list must be adopted under its own fingerprint');
+  } finally {
+    if (prev === undefined) delete process.env.TOTP_ENCRYPTION_KEY; else process.env.TOTP_ENCRYPTION_KEY = prev;
+    if (prevList === undefined) delete process.env.TOTP_ENCRYPTION_KEY_PREVIOUS; else process.env.TOTP_ENCRYPTION_KEY_PREVIOUS = prevList;
+    secretBox._resetCache();
+  }
+});
+
+/**
+ * The cache is invalidated by key CONTENT, not by key shape.
+ *
+ * With no explicit TOTP key, the seed key is derived from `JWT_SECRET`. The
+ * cache used to be fingerprinted on that secret's LENGTH, so rotating it to a
+ * same-length secret — which is exactly what `openssl rand -base64 32` and a
+ * copy-paste fixup produce — kept serving the previous key. New envelopes were
+ * then sealed under a key no longer derivable from the environment, and every
+ * one of them failed to read back. Nothing was wrong with the crypto; the
+ * answer was simply the wrong key, held too long.
+ */
+test('the derived key is reloaded when JWT_SECRET changes to a same-length value', () => {
+  const prevKey = process.env.TOTP_ENCRYPTION_KEY;
+  const prevSecret = process.env.JWT_SECRET;
+  const prevEnv = process.env.NODE_ENV;
+  try {
+    delete process.env.TOTP_ENCRYPTION_KEY;
+    process.env.NODE_ENV = 'development';
+    // Two distinct secrets, identical length, so any length-based fingerprint
+    // would consider them interchangeable.
+    process.env.JWT_SECRET = 'A'.repeat(43);
+    secretBox._resetCache();
+    const sealedHere = secretBox.encrypt(SEED);
+    assert.equal(secretBox.decrypt(sealedHere), SEED, 'precondition: same secret reads back');
+
+    process.env.JWT_SECRET = 'B'.repeat(43);
+    // Deliberately NO _resetCache here — the fingerprint alone must notice.
+    assert.equal(secretBox.decrypt(sealedHere), null,
+      'a secret swap must drop the cached key, not reuse it and keep writing unreadable envelopes');
+    assert.equal(secretBox.describe().source, 'derived-from-JWT_SECRET');
+  } finally {
+    if (prevKey === undefined) delete process.env.TOTP_ENCRYPTION_KEY; else process.env.TOTP_ENCRYPTION_KEY = prevKey;
+    if (prevSecret === undefined) delete process.env.JWT_SECRET; else process.env.JWT_SECRET = prevSecret;
+    if (prevEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = prevEnv;
+    secretBox._resetCache();
+  }
+});

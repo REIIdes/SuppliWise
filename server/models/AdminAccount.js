@@ -4,7 +4,15 @@ const chatEncryptionKeySchema = require('./chatEncryptionKeySchema');
 const adminAccountSchema = new mongoose.Schema({
   alias: { type: String, required: true, unique: true, trim: true },
   passwordHash: { type: String, required: true, select: false },
-  totpSecret: { type: String, required: true, select: false },
+  // The authenticator seed, SEALED (AES-256-GCM) — see utils/adminTotp.js.
+  // `totpSecret` is the pre-encryption field: still read, and upgraded in place
+  // on first use, but never written by new code. Neither field is `required`:
+  // an account can legitimately be mid-migration with only one of the two, and
+  // a schema that demanded both would refuse the very documents the migration
+  // is trying to fix. Whether an operator can actually sign in is decided by
+  // utils/adminTotp.readSeed(), which is the one place that knows.
+  totpSecretEnc: { type: String, default: '', select: false },
+  totpSecret: { type: String, default: '', select: false },
   enabled: { type: Boolean, default: true },
   // Selfie / banner the admin picks in Settings → Edit profile. Stored as
   // base64 data URLs exactly like the member-facing User pictures, so no

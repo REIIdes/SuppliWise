@@ -189,7 +189,19 @@ router.post('/', protect, async (req, res) => {
   // ── 1. Storage, before anything that can spend money ──────────────────────
   // Memory, then Mongo. This is the whole cost argument for the feature: past
   // the first tap of one supplement by one reader, this is a read.
-  const stored = await readGuide({ nameKey, profileKey: key });
+  //
+  // A read that cannot be answered is treated as a MISS. That costs one
+  // regeneration in the case where the guide actually exists — the thing this
+  // endpoint exists to avoid — but the alternative was an unguarded await in
+  // front of the route's only try/catch, so every storage hiccup rejected the
+  // handler, nobody answered the request, and the reader's button simply hung.
+  // Logged, because a double charge should be visible rather than silent.
+  let stored = null;
+  try {
+    stored = await readGuide({ nameKey, profileKey: key });
+  } catch (error) {
+    console.error('[supplement_detail] guide cache unreadable:', error.message);
+  }
   if (stored) return res.json({ ...stored, cached: true });
 
   // ── 2. One generation per reader per supplement, however many taps ────────

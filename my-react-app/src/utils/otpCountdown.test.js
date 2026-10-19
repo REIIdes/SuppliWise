@@ -189,13 +189,18 @@ test('the client window matches the window the server enforces', async () => {
   const { fileURLToPath } = await import('node:url');
   const path = await import('node:path');
 
-  const authSource = readFileSync(
-    path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../server/routes/auth.js'),
-    'utf8',
-  );
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const read = (rel) => readFileSync(path.resolve(here, rel), 'utf8');
 
-  const declared = authSource.match(/const OTP_TTL_MS = (\d+) \* 60 \* 1000;/);
-  assert.ok(declared, 'OTP_TTL_MS must still be declared in server/routes/auth.js');
+  // The number moved to utils/otpChallenge.js so the security dashboard can
+  // report the enforced window instead of a sentence written when the window was
+  // different; auth.js binds it by name. Both halves are checked, because a
+  // literal that exists in auth.js but is never used would be just as misleading.
+  const otpSource = read('../../../server/utils/otpChallenge.js');
+  const declared = otpSource.match(/const CODE_TTL_MS = (\d+) \* 60 \* 1000;/);
+  assert.ok(declared, 'CODE_TTL_MS must be declared in server/utils/otpChallenge.js');
+  assert.match(read('../../../server/routes/auth.js'), /const OTP_TTL_MS = otpChallenge\.CODE_TTL_MS;/,
+    'server/routes/auth.js must enforce the shared constant, not its own copy');
 
   const serverMinutes = Number(declared[1]);
   assert.equal(
