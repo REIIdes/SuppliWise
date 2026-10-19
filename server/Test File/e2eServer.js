@@ -32,6 +32,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 
 const { connectTestDb, validateTestUri } = require('./testDbGuard');
+const { startStubSmtp, stubSmtpEnv } = require('./stubSmtp');
 
 const SERVER_ENTRY = path.join(__dirname, '..', 'index.js');
 
@@ -84,6 +85,12 @@ async function startTestServer(options = {}) {
   const verdict = validateTestUri();
   if (!verdict.ok) return { ok: false, reason: verdict.reason };
 
+  // Every suite that boots a server gets its own capture transport, on loopback,
+  // for the life of the suite. See stubSmtp.js for why the EMAIL_ENABLED flag this
+  // replaced guarded nothing.
+  const mail = await startStubSmtp();
+  const releaseMail = () => mail.stop();
+
   // The server needs MONGO_URI — that is what it reads. Pointing it at the test
   // database is the entire point; the suite's own connection already is.
   const env = {
@@ -112,8 +119,9 @@ async function startTestServer(options = {}) {
     // otherwise leave a localhost entry behind, and the developer's next
     // http://localhost:5000 would be refused with nothing naming the cause.
     TLS_ENABLED: 'false',
-    // Never bind a shared port, and never send real mail from a test run.
-    EMAIL_ENABLED: 'false',
+    // Never send real mail from a test run: the only host the child's transporter
+    // can reach is the capture server started above, on loopback.
+    ...stubSmtpEnv(mail.port),
     ...(options.env || {}),
   };
   // The requested port is a PREFERENCE, not a reservation, and this distinction
@@ -150,7 +158,16 @@ async function startTestServer(options = {}) {
   let lastReason = '';
 
   for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
-    const port = await freePort((options.port || 5099) + attempt);
+    let port;
+    try {
+      port = await freePort((options.port || 5099) + attempt);
+    } catch (err) {
+      // Throwing out of here skips every `ok:false` path below, so the capture
+      // transport would stay open for the rest of the suite — an unsettled handle
+      // in the parent, which is precisely what keeps `node --test` from exiting.
+      await releaseMail();
+      throw err;
+    }
     env.PORT = String(port);
 
     const child = spawn(process.execPath, [SERVER_ENTRY], {
@@ -200,6 +217,7 @@ async function startTestServer(options = {}) {
         // A bind failure means the port was taken between the check and the
         // bind. Anything else is a real fault and retrying would only hide it.
         if (/\bEADDRINUSE\b/.test(output) && attempt < ATTEMPTS - 1) break;
+        await releaseMail();
         return { ok: false, reason: lastReason };
       }
       if (!announced) {
@@ -213,14 +231,21 @@ async function startTestServer(options = {}) {
           ok: true,
           base: `http://127.0.0.1:${port}`,
           port,
-          stop: () => new Promise((resolve) => {
-            if (child.exitCode !== null) { resolve(); return; }
-            child.once('exit', () => resolve());
-            child.kill('SIGTERM');
-            // Escalate if it ignores SIGTERM, so a stuck child cannot hold the
-            // port for the next run.
-            setTimeout(() => { if (child.exitCode === null) child.kill('SIGKILL'); }, 4000);
-          }),
+          stop: async () => {
+            // The transport goes down with the server it was serving, in both
+            // directions: an unsettled listening socket in the parent is an open
+            // handle, and an open handle is a `node --test` process that never
+            // exits — which is how a CI step burns its whole budget.
+            const stopChild = () => new Promise((resolve) => {
+              if (child.exitCode !== null) { resolve(); return; }
+              child.once('exit', () => resolve());
+              child.kill('SIGTERM');
+              // Escalate if it ignores SIGTERM, so a stuck child cannot hold the
+              // port for the next run.
+              setTimeout(() => { if (child.exitCode === null) child.kill('SIGKILL'); }, 4000);
+            });
+            await Promise.all([releaseMail(), stopChild()]);
+          },
         };
       }
       // eslint-disable-next-line no-await-in-loop
@@ -233,6 +258,7 @@ async function startTestServer(options = {}) {
     // Retrying is still correct: something else may hold the port.
   }
 
+  await releaseMail();
   return { ok: false, reason: `${lastReason} (after ${ATTEMPTS} ports)` };
 }
 

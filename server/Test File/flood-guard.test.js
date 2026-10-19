@@ -57,7 +57,14 @@ async function startGuard({ budgetBytes, limitBytes }) {
   return {
     server,
     port,
-    close: () => new Promise((resolve) => server.close(resolve)),
+    // `server.close()` waits for every connection it still holds, and the refused
+    // upload above is a request that never completed — idle-connection cleanup does
+    // not cover it. Destroying the connections first is what makes the teardown
+    // finish, and the suite is done with them by then anyway.
+    close: () => {
+      server.closeAllConnections?.();
+      return new Promise((resolve) => server.close(resolve));
+    },
   };
 }
 
@@ -65,13 +72,32 @@ async function startGuard({ budgetBytes, limitBytes }) {
  * Raw client that announces a large body and keeps pushing it, while reading
  * whatever the server sends back. Returns how the socket ended and everything
  * that was received.
+ *
+ * EVERY terminal path resolves, once. The version before this note resolved only
+ * from 'error' and from a watchdog that bailed out as soon as `ended` was set, so
+ * a server that refused the upload and then closed the socket with a clean FIN
+ * left the promise unsettled forever — the test never returned, `node --test`
+ * never got its exit, and the CI step hung until the runner's job limit killed
+ * it. Windows almost always answers that teardown with ECONNRESET, which is why
+ * it passed locally and hung on the Linux runner: the FIN path existed all along,
+ * it just had no resolve attached to it.
  */
 function pushLargeBody(port, declaredBytes, pushBytes) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const socket = net.connect(port, '127.0.0.1');
     let received = '';
     let ended = null; // 'fin' when the server closes cleanly, 'reset' on RST
     let pushed = 0;
+    let settled = false;
+    let watchdog = null;
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (watchdog) clearTimeout(watchdog);
+      socket.destroy();
+      resolve({ ended: ended || 'none', received, pushed });
+    };
 
     socket.on('connect', () => {
       socket.write(
@@ -93,19 +119,17 @@ function pushLargeBody(port, declaredBytes, pushBytes) {
 
     socket.on('data', (d) => { received += d.toString('latin1'); });
     socket.on('end', () => { ended = ended || 'fin'; });
-    socket.on('close', (hadError) => { if (!ended) ended = hadError ? 'reset' : 'fin'; });
-    socket.on('error', (err) => {
-      if (ended) return;
-      ended = err.code === 'ECONNRESET' ? 'reset' : `error:${err.code}`;
-      resolve({ ended, received, pushed });
+    socket.on('close', (hadError) => {
+      if (!ended) ended = hadError ? 'reset' : 'fin';
+      finish();
     });
-    // Resolve as soon as the verdict is unambiguous.
-    setTimeout(() => {
-      if (!ended) {
-        socket.destroy();
-        resolve({ ended: ended || 'none', received, pushed });
-      }
-    }, 3000);
+    socket.on('error', (err) => {
+      if (!ended) ended = err.code === 'ECONNRESET' ? 'reset' : `error:${err.code}`;
+      finish();
+    });
+    // A server that neither answers nor closes is the failure this guards, so the
+    // watchdog is a bound on the WAIT, not a second way to settle early.
+    watchdog = setTimeout(finish, 3000);
   });
 }
 
@@ -156,7 +180,7 @@ test('rejectOversized answers 413 from Content-Length, without reading the body'
   }
 });
 
-test('REGRESSION: a refused oversized upload delivers the COMPLETE 413 to the client', async () => {
+test('REGRESSION: a refused oversized upload delivers the COMPLETE 413 to the client', { timeout: 30000 }, async () => {
   // THE REAL INVARIANT: whatever the socket teardown looks like, the client must
   // receive the whole refusal — status line, headers, and a body matching the
   // declared Content-Length. A reset that discards the response is a bug; a reset
@@ -191,7 +215,7 @@ test('REGRESSION: a refused oversized upload delivers the COMPLETE 413 to the cl
   }
 });
 
-test('bodyBudget releases its reservation when the client aborts mid-upload', async () => {
+test('bodyBudget releases its reservation when the client aborts mid-upload', { timeout: 30000 }, async () => {
   // An aborted upload must not leak its reservation. If it did, the budget would
   // drain and the server would shed 503 forever — a self-inflicted DoS.
   const guard = await startGuard({ budgetBytes: 64 * 1024, limitBytes: 64 * 1024 });
