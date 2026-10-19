@@ -32,7 +32,7 @@ const { encrypt, decrypt, isEnvelope } = require('./secretBox');
 const SECRET_FIELDS = '+twoFactorSecret +twoFactorSecretEnc';
 
 /**
- * The account's TOTP seed as plaintext, for `speakeasy` only.
+ * The account's TOTP seed as plaintext, for the TOTP verifier only.
  *
  * Returns '' when there is no usable secret — including when the stored value
  * exists but will not decrypt (wrong key, tampered ciphertext). Collapsing

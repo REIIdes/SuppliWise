@@ -23,7 +23,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
-const speakeasy = require('speakeasy');
+const rfc = require('../utils/totpRfc');
 
 require('dotenv').config();
 
@@ -63,7 +63,7 @@ test('MFA transaction — the second factor is no longer sufficient on its own',
   /** An account with a working authenticator, plus its plaintext seed. */
   const seed = async (overrides = {}) => {
     const email = `mfa_${Date.now()}_${Math.random().toString(36).slice(2, 8)}@example.com`;
-    const secret = speakeasy.generateSecret({ length: 20 }).base32;
+    const secret = rfc.generateSecret({ length: 20 }).base32;
     const user = await User.create({
       firstName: 'Mfa', lastName: 'Probe', name: 'Mfa Probe',
       email, password: PASSWORD, dateOfBirth: '1990-01-01', gender: 'Male',
@@ -95,7 +95,7 @@ test('MFA transaction — the second factor is no longer sufficient on its own',
       const key = `${ctx.user._id}:${offset}`;
       if (!spent.has(key)) {
         spent.add(key);
-        return speakeasy.totp({ secret: ctx.secret, encoding: 'base32', counter: Math.floor(Date.now() / 30000) + offset });
+        return rfc.totp({ secret: ctx.secret, encoding: 'base32', counter: Math.floor(Date.now() / 30000) + offset });
       }
     }
     throw new Error('every usable TOTP step is spent — seed a new account');

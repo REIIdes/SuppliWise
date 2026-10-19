@@ -33,6 +33,10 @@ const SECURITY_AUDIT = {
     'Phase 6 — Second-pass review of every diff for regressions and API-contract drift.',
   ],
 
+  // Re-counted 2026-10-19: L5, L6 and I4 left `openItems` for `remediations`
+  // because the code closed them. `openOrAccepted` counts the four entries that
+  // are genuinely still open or deliberately tolerated (L3, L7, I1, I2); I3 is
+  // listed as half-closed in its own `status` and is not counted twice.
   counts: {
     total: 30,
     critical: 2,
@@ -40,8 +44,8 @@ const SECURITY_AUDIT = {
     medium: 9,
     low: 7,
     informational: 4,
-    remediatedInCode: 23,
-    openOrAccepted: 7,
+    remediatedInCode: 26,
+    openOrAccepted: 4,
   },
 
   // The two findings that dominate everything else: live credentials were
@@ -161,31 +165,33 @@ const SECURITY_AUDIT = {
     'L1  middleware/auth.js + routes/auth.js — every jwt.verify pins algorithms:["HS256"].',
     'L2  routes/auth.js — /login, /forgot-password, /reset-password, /resend-* and /request-email-otp added to the sensitive limiter.',
     'L4  server/index.js — TRUST_PROXY configuration supported and documented.',
+    'L5  (closed 2026-10-19) utils/passwordReset.js requestReset() + routes/auth.js — every reset request answers HTTP 200 with one generic body and never returns a userId; the unknown-account branch burns the same randomBytes work as the sending branch so the response time carries no signal either. The legacy /forgot-password alias delegates to that same service, so the two paths cannot disagree.',
+    'L6  (closed 2026-10-19) utils/adminAccounts.js + utils/email.js — admin accounts are provisioned from ADMIN_ACCOUNTS password HASHES in the environment, and nothing in this repository mails a password: utils/email.js is the only sender and never names one. routes/admin.js clears mustChangePassword only after the holder has set their own password, which is the forced-change flow this item asked for. The authenticator SEED is still handed to the person pairing a device — that is what pairing is — and it is encrypted at rest (utils/secretBox.js).',
+    'I4  (closed 2026-10-19) utils/totpRfc.js — speakeasy is gone: RFC 6238/HMAC now lives in this repository and axios had already been dropped. Both are absent from server/ and my-react-app/ package.json, and Test File/totp-rfc6238.test.js fails if either is required by runtime code again.',
   ],
 
   // Findings that are deliberately NOT closed by a code change, plus the
   // ones only an operator can finish. Hiding these would be dishonest.
+  //
+  // Re-checked 2026-10-19 against the code as it now stands. L5, L6 and I4 used
+  // to be on this list and are not any more — they were closed by real changes,
+  // and leaving them here would have understated the code. L3's text was
+  // corrected because the numbers it quoted (a 5-minute token, a 3:30 idle kill)
+  // are not what the server enforces. See `reverification` below for what each
+  // claim was checked against.
   openItems: [
     {
       id: 'L3',
       severity: 'low',
       title: 'Admin bearer token stored in localStorage',
       note:
-        'Mitigated by the new CSP, a 5-minute token TTL and the 3:30 admin idle kill, but localStorage is still ' +
-        'script-readable. A full fix means moving the admin credential to an httpOnly, SameSite cookie — an API ' +
-        'contract change that needs its own test pass.',
-    },
-    {
-      id: 'L5',
-      severity: 'low',
-      title: 'forgot-password still returns a userId for unknown-vs-known accounts',
-      note: 'Responses are generic, but a successful response carries a userId an unknown address does not.',
-    },
-    {
-      id: 'L6',
-      severity: 'low',
-      title: 'Admin provisioning email carries a plaintext password and TOTP seed',
-      note: 'Intentional first-run delivery over TLS. Rotate on first sign-in and consider a forced-change flow.',
+        'Mitigated by the CSP, a ' +
+        'sliding admin token (utils/adminSession.js: ADMIN_TOKEN_LIFETIME_MINUTES, default 15 min, bounded by ' +
+        'ADMIN_IDLE_MINUTES, default 10 min idle, and revoked outright at sign-out via sessionsRevokedAt), but ' +
+        'localStorage is still script-readable. A full fix means moving the admin credential to an httpOnly, ' +
+        'SameSite cookie — an API contract change that needs its own test pass. ' +
+        'The "5-minute TTL / 3:30 idle kill" this note used to quote were the old numbers and are not what the ' +
+        'server enforces.',
     },
     {
       id: 'L7',
@@ -227,12 +233,6 @@ const SECURITY_AUDIT = {
         + 'The audit step is the one that matters: it would have caught the nodemailer advisories in F1 below on the '
         + 'day they were published. I3 is otherwise only half-closed — there is still no container and no automated '
         + 'dependency-update bot.',
-    },
-    {
-      id: 'I4',
-      severity: 'informational',
-      title: 'speakeasy is unmaintained; axios is a dependency with no importer',
-      note: 'Both are low risk. speakeasy is only used for TOTP math; consider otplib or a maintained RFC-6238 lib.',
     },
   ],
 
@@ -477,35 +477,118 @@ const SECURITY_AUDIT = {
       syntaxCheck: 'PASS — npm run check',
       lint: 'PASS — eslint: 0 errors',
       productionBuild: 'PASS — vite build, PWA service worker generated',
-      dependencyAudit: 'PASS — npm audit: 0 vulnerabilities (server and client, prod + dev)',
+      // A measurement of that day, not a standing fact — the dev tree has since
+      // taken advisories upstream (nodemon -> chokidar -> braces) that have no
+      // in-range fix. The live number is the dependency_audit monitor row.
+      dependencyAudit: 'PASS 2026-10-01 — npm audit: 0 vulnerabilities (server and client, prod + dev)',
       liveBrowser: 'PASS — app renders, routes guard correctly, CSP observed enforcing, no app console errors',
       secretSweep: 'PASS — no hash or TOTP-seed shaped values in tracked docs; server/.env is untracked',
     },
   },
 
+  // Measurements of the 2026-09-23 pass, then of the 2026-10-19 pass below.
+  // Dates are part of the claim: an undated "PASS" is how F1's stale
+  // "0 vulnerabilities" survived for a week.
   verification: {
-    unitTests: 'PASS — node --test "Test File/*.test.js"',
-    syntaxCheck: 'PASS — npm run check',
-    productionBuild: 'PASS — vite build (287 modules, PWA service worker generated)',
-    lint: 'PASS — eslint: 0 errors (4 pre-existing react-hooks warnings)',
-    dependencyAudit: 'PASS — npm audit: 0 vulnerabilities (server and client, prod + dev)',
-    devServers: 'PASS — API and Vite dev server both answering 200 after the changes',
+    unitTests: 'PASS 2026-10-19 — node --test "Test File/*.test.js": 1606/1606, 0 failed, 0 skipped',
+    clientTests: 'PASS 2026-10-19 — npm test in my-react-app: 715/715, 0 failed, 0 skipped',
+    syntaxCheck: 'PASS 2026-10-19 — npm run check: Syntax OK, 320 source file(s)',
+    productionBuild: 'PASS 2026-10-19 — npx vite build: 422 modules transformed, PWA v1.3.0 generateSW wrote dist/sw.js + workbox (96 precached entries)',
+    lint: 'PASS 2026-10-19 — npx eslint . in my-react-app: 0 errors, 4 pre-existing react-hooks/exhaustive-deps warnings; .github/workflows/ci.yml Lint step fixed the same day (it passed --max-warnings=unlimited, which eslint rejects with exit 2 before linting anything)',
+    // NOT a verdict any more. This line used to assert "npm audit: 0
+    // vulnerabilities" as a standing fact, which is the exact failure mode F1
+    // documents: the sentence stays green while the tree rots. The number is
+    // measured live by the `dependency_audit` monitor (utils/dependencyAudit.js
+    // asks npm about both shipped trees, production-only and full, caches the
+    // answer, and reports an audit it could not run as a warning rather than a
+    // healthy). Read that row; do not read this line.
+    dependencyAudit: 'MEASURED LIVE by the dependency_audit monitor — utils/dependencyAudit.js, both shipped trees, prod + dev',
+    devServers: 'PASS 2026-10-19 — the API on :5000 was restarted from this tree and both https://localhost:5000/api/health and https://localhost:5173/ answer 200; its stderr carries the one real finding, the db_least_privilege critical',
+  },
+
+  // ── Re-verification of the record itself, 2026-10-19 ──────────────────────
+  //
+  // Every openItems/verification claim above was read against the code as it
+  // stands today, not against what the audit remembered. What changed:
+  reverification: {
+    date: '2026-10-19',
+    method:
+      'Each surviving claim was traced to the file and line that is supposed to enforce it, and the ones that no '
+      + 'longer matched were corrected rather than re-worded. Where a claim was about a measurement (dependency '
+      + 'advisories, TOTP math, session lifetimes) the measurement was re-taken.',
+    changes: [
+      'L5 closed — /forgot-password cannot enumerate: one generic body for every address, no userId, constant-time padding on the no-account branch (utils/passwordReset.js).',
+      'L6 closed — no code path mails a plaintext admin password; provisioning reads hashes from ADMIN_ACCOUNTS and mustChangePassword forces a change before the account is usable (utils/adminAccounts.js, routes/admin.js).',
+      'I4 closed — speakeasy replaced in-repo by utils/totpRfc.js and removed from the dependency tree; axios had already gone.',
+      'L3 corrected — the admin token is 15 minutes sliding with a 10-minute idle bound and outright revocation at sign-out (utils/adminSession.js), not the "5-minute TTL / 3:30 kill" this record quoted.',
+      'verification.dependencyAudit demoted from an assertion to a pointer at the live dependency_audit monitor.',
+      'manualActions[0] is now executable. It has said "rotate JWT_SECRET" since 2026-09-23 and stayed undone for a mechanical reason: one accepted key means the restart that installs the new secret invalidates every token already issued, so rotation always looked more dangerous than deferral. utils/jwtKeyring.js now verifies against JWT_SECRET plus any key retained in JWT_SECRET_PREVIOUS_KEYS, and the jwt_secret_rotation monitor reports whether a rotation would lose data (the encryption keys fall back to this secret) and when the retained key can safely be deleted. Rotating is still an operator action — but it is now an action rather than an outage.',
+    ],
+    totpReplacement: {
+      why:
+        'speakeasy has had no release since 2019 and its base32/HMAC behaviour is exactly what an enrolment is '
+        + 'pinned to. Replacing it is only safe if the codes stay identical, so the swap was measured, not assumed.',
+      evidence:
+        'Test File/totp-rfc6238.test.js pins golden codes captured from speakeasy 2.0.0 against the seeds already '
+        + 'in production, including the 52-char seed whose base32 decode keeps a left-aligned partial byte — the '
+        + 'one difference that would have silently locked every enrolled admin out. RFC 6238 Appendix B vectors, '
+        + 'the ±1-step window, the window cap, malformed-token refusal and non-base32-secret refusal are all '
+        + 'asserted. The file also fails the suite if any runtime file requires speakeasy again or either manifest '
+        + 'declares it.',
+      acceptedRisk:
+        'The dev dependency tree still reports advisories (nodemon -> chokidar -> braces). They are not reachable '
+        + 'from a request: nodemon is a file watcher run by the developer, never by the deployed API, which starts '
+        + 'with plain node and installs --omit=dev. There is no in-range fix — npm audit fix resolves nothing, and '
+        + 'its "fixAvailable" is a semver-major DOWNGRADE to nodemon 1.14.10, while nodemon@latest still depends on '
+        + 'chokidar ^3.5.2, the vulnerable line. The dependency_audit monitor reports this split honestly instead '
+        + 'of hiding it, which is why it is recorded here as accepted rather than fixed.',
+    },
+    liveMonitor:
+      'MEASURED 2026-10-19 — GET /api/admin/security/monitor?fresh=1 on this tree: 59 rows, 55 healthy, 1 warning, '
+      + '3 critical, no probe error and no timeout. The warning is backup_currency (no dump, no drill). The three '
+      + 'criticals are all real and all operator-side: db_least_privilege (the Atlas user holds atlasAdmin, not '
+      + 'readWrite on one database); seal_integrity (ONE member seed, envelope key w-n00ezVF7e, was sealed under a '
+      + 'key no current secret can derive — see the manual action below); and jwt_secret_rotation (the health-data '
+      + 'key and the seed-sealing key still fall back to JWT_SECRET, so the URGENT rotation would orphan stored '
+      + 'ciphertext unless HEALTH_DATA_KEY_PREVIOUS and TOTP_ENCRYPTION_KEY_PREVIOUS are declared first).',
   },
 
   manualActions: [
-    'URGENT: rotate JWT_SECRET — the old value is permanently in public git history and must be treated as burned.',
+    'URGENT: rotate JWT_SECRET — the old value is permanently in public git history and must be treated as burned. '
+    + 'How, without an outage: put the NEW value in JWT_SECRET and the OLD one in JWT_SECRET_PREVIOUS_KEYS, then '
+    + 'restart (server/index.js resolves both into the keyring and jwt.verify gets every candidate, so tokens '
+    + 'signed before the restart keep working through the overlap). Once everyone has signed in again, delete '
+    + 'JWT_SECRET_PREVIOUS_KEYS on the next deploy — that second step is what actually retires the burned secret, '
+    + 'and it is the step that gets forgotten.',
     'URGENT: change all six admin passwords (they were published in plaintext).',
-    'URGENT: regenerate all six TOTP seeds and re-enrol them in each authenticator app.',
+    'URGENT: regenerate all six TOTP seeds and re-enrol them in each authenticator app. '
+    + 'PARTIAL as of 2026-10-15: five of the six were re-seeded — they had been stored comma-glued together and '
+    + 'could not be signed into at all — and the new keys were emailed to their owners. Re-enrolment is still on '
+    + 'those owners, so until each has paired the new seed, "regenerated" does not mean "usable".',
     'URGENT: revoke and reissue the Gmail App Password (published in Security_Fixes_and_Analysis.md).',
     'Purge secrets from git history (history rewrite) — or assume they are known, since the remote is public.',
     'Decide whether this repository should be public at all.',
     'OPERATIONAL: if this API runs behind a reverse proxy or load balancer, set TRUST_PROXY=true — otherwise every client resolves to the proxy address and IP lockouts bucket all users together.',
     'OPERATIONAL: `npm run serve:prod` (my-react-app) serves the built dist/ with X-Frame-Options and Content-Security-Policy: frame-ancestors \'none\' as real headers. If you deploy dist/ to some OTHER host — Netlify, Vercel, nginx, Cloudflare — that host must send the same headers; copy them from `securityHeaders` in my-react-app/vite.config.js so the policy stays one policy.',
     'Keep the new CI green. `npm audit` is now a gate, which is the only reason the nodemailer advisories were caught at all; do not let it be skipped or made non-blocking.',
+    'OPERATIONAL: one member authenticator seed (envelope key w-n00ezVF7e) was sealed under a key that no secret '
+    + 'this machine holds can derive — it predates the current JWT_SECRET and is not the deploy stack key either, so '
+    + 'it is unrecoverable, not merely unconfigured. That account signs in today on the emailed code alone while its '
+    + 'app still shows 2FA as enabled. Either restore the old JWT_SECRET into TOTP_ENCRYPTION_KEY_PREVIOUS if one is '
+    + 'kept offline, or have that member turn 2FA off and re-pair it. Do not clear the field for them: that is their '
+    + 'second factor, not a stale row to tidy away. seal_integrity reports critical until one of the two happens.',
+    'OPERATIONAL: the admin database user should hold `readWrite` on ONE database. It currently holds broader '
+    + 'privileges on the cluster, which is why db_least_privilege reports critical — an application credential that '
+    + 'can write to other databases turns any SQL-style injection into a cluster-wide problem. This is an Atlas '
+    + 'setting, not a code change.',
+    'OPERATIONAL: take a backup and PROVE it restores (`npm run backup` then `npm run backup:drill`). '
+    + 'backup_currency reports a warning because no drill receipt exists yet; an undrilled dump is a hypothesis, '
+    + 'and this project has already lost ledger history to exactly that assumption.',
   ],
 
   disclaimer:
-    'This audit covers the application source in this repository as reviewed on 2026-09-23. It is not a penetration ' +
+    'This audit covers the application source in this repository as reviewed on 2026-09-23, and re-read against the ' +
+    'code on 2026-10-19 (see `reverification`). It is not a penetration ' +
     'test and does not certify the system as secure or "100% protected". Infrastructure, the database cluster, the ' +
     'dependency supply chain, third-party APIs, and social-engineering vectors were out of scope. Several findings ' +
     'remain open until the manual rotations above are completed, and secrets that have ever been committed must be ' +

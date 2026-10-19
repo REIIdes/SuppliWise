@@ -16,7 +16,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
-const speakeasy = require('speakeasy');
+const rfc = require('../utils/totpRfc');
 
 require('dotenv').config();
 
@@ -83,7 +83,7 @@ test('TOTP and recovery codes — enrolment, removal and the recovery path', { s
     return { status: r.status, data };
   });
 
-  const codeFor = (secret, offset = 0) => speakeasy.totp({
+  const codeFor = (secret, offset = 0) => rfc.totp({
     secret, encoding: 'base32', counter: Math.floor(Date.now() / 30000) + offset,
   });
 
@@ -443,7 +443,7 @@ test('TOTP and recovery codes — enrolment, removal and the recovery path', { s
   await t.test('a pre-encryption account keeps working and is upgraded on use', async () => {
     // The migration property: no account loses its authenticator to this
     // change, and none of them has to do anything for it to happen.
-    const legacy = speakeasy.generateSecret({ length: 20 }).base32;
+    const legacy = rfc.generateSecret({ length: 20 }).base32;
     const ctx = await seed({
       twoFactorEnabled: true, twoFactorMethod: 'authenticator',
       twoFactorSecretEnc: '', twoFactorSecret: legacy,

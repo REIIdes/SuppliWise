@@ -41,8 +41,7 @@
   "jsonwebtoken": "^9.0.2",
   "mongoose": "^8.3.4",
   "nodemailer": "^10.0.13",
-  "qrcode": "^1.5.4",
-  "speakeasy": "^2.0.0"
+  "qrcode": "^1.5.4"
  },
  "devDependencies": {
   "cbor": "^10.0.12",

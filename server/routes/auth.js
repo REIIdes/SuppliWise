@@ -2,8 +2,9 @@ const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
+const jwtKeyring = require('../utils/jwtKeyring');
 const crypto = require('crypto');
-const speakeasy = require('speakeasy');
+const totpRfc = require('../utils/totpRfc');
 const QRCode = require('qrcode');
 const User = require('../models/User');
 const AdminAccount = require('../models/AdminAccount');
@@ -1171,7 +1172,7 @@ router.post('/admin-refresh', async (req, res) => {
     if (!token) return res.status(401).json({ message: 'Admin session missing. Please sign in again.' });
     let decoded;
     try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+      decoded = jwtKeyring.verify(token);
     } catch {
       return res.status(401).json({ message: 'Admin session expired. Please sign in again.' });
     }
@@ -1694,7 +1695,7 @@ router.post('/setup-2fa', protect, async (req, res) => {
       });
     }
 
-    const secret = speakeasy.generateSecret({ name: `SuppliWise (${user.email})`, issuer: 'SuppliWise' });
+    const secret = totpRfc.generateSecret({ name: `SuppliWise (${user.email})`, issuer: 'SuppliWise' });
     // Encrypted immediately, activated only by /verify-2fa. The legacy
     // plaintext field is cleared, so a new seed never lands in it.
     totpSecret.writeSecret(user, secret.base32);
@@ -2438,7 +2439,7 @@ router.post('/request-email-otp', async (req, res) => {
 
   try {
     const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+    const decoded = jwtKeyring.verify(token);
     // Same session rules as `protect`: signature + session exists + belongs
     // to this account + unrevoked + still the account's current session.
     const check = await verifyUserSession(decoded);
@@ -2509,7 +2510,7 @@ router.post('/verify-email-otp', async (req, res) => {
 
   try {
     const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+    const decoded = jwtKeyring.verify(token);
     const check = await verifyUserSession(decoded);
     if (!check.ok) return rejectSession(res, check);
     const user = await User.findById(decoded.id);
@@ -2584,7 +2585,7 @@ router.put('/profile', async (req, res) => {
 
   try {
     const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+    const decoded = jwtKeyring.verify(token);
     const check = await verifyUserSession(decoded);
     if (!check.ok) return rejectSession(res, check);
     const user = await User.findById(decoded.id);

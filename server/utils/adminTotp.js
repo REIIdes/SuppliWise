@@ -33,7 +33,7 @@ const secretBox = require('./secretBox');
 const SECRET_FIELDS = '+totpSecret +totpSecretEnc';
 
 /**
- * The seed in plaintext, for `speakeasy` only — '' when there is none or it
+ * The seed in plaintext, for the TOTP verifier only — '' when there is none or it
  * will not open. Collapsing those two is deliberate (same reasoning as
  * utils/totpSecret.readSecret: telling them apart is a decryption oracle for
  * anything that can drive a setup route).

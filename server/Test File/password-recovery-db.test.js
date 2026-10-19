@@ -141,19 +141,17 @@ test('a malformed code is a 400 that reveals nothing about the account', { skip:
 });
 
 test('an authenticator code mints a grant, and the same code cannot be replayed', { skip: skipIfNoDb }, async () => {
-  const speakeasy = require('speakeasy');
+  const rfc = require('../utils/totpRfc');
   const user = await makeUser({ twoFactorEnabled: true, twoFactorMethod: 'authenticator' });
 
-  // speakeasy v2 exposes generateSecret at the top level; the older
-  // `speakeasy.authenticator.generateSecret` shape does not exist in it.
-  const secret = speakeasy.generateSecret().base32;
+  const secret = rfc.generateSecret().base32;
   // Written the way the app stores it: encrypted, via the one helper that owns it.
   const { writeSecret } = require('../utils/totpSecret');
   const doc = await User.findById(user._id);
   writeSecret(doc, secret);
   await doc.save();
 
-  const code = speakeasy.totp({ secret, encoding: 'base32' });
+  const code = rfc.totp({ secret, encoding: 'base32' });
 
   const first = await recovery.withAuthenticatorCode({ email: EMAIL, code, req: fakeReq() });
   assert.equal(first.status, 200);

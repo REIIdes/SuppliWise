@@ -9,7 +9,7 @@ for (const line of fs.readFileSync(envPath, 'utf8').split(/\r?\n/)) {
   if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
 }
 const mongoose = require('mongoose');
-const speakeasy = require('speakeasy');
+const totpRfc = require('./utils/totpRfc');
 const adminAccounts = require('./utils/adminAccounts');
 const adminTotp = require('./utils/adminTotp');
 
@@ -45,8 +45,8 @@ const adminTotp = require('./utils/adminTotp');
     const dbSeed = adminTotp.readSeed(rec);
     const secretMatch = String(dbSeed || '') === String(cfg.totpSecret);
     const hashMatch = String(rec.passwordHash || '') === String(cfg.passwordHash);
-    const codeEnv = speakeasy.totp({ secret: cfg.totpSecret, encoding: 'base32' });
-    const codeDb = dbSeed ? speakeasy.totp({ secret: String(dbSeed), encoding: 'base32' }) : '(none)';
+    const codeEnv = totpRfc.totp({ secret: cfg.totpSecret, encoding: 'base32' });
+    const codeDb = dbSeed ? totpRfc.totp({ secret: String(dbSeed), encoding: 'base32' }) : '(none)';
     console.log(`[${cfg.alias}]`);
     console.log(`   enabled=${rec.enabled} mustChangePassword=${!!rec.mustChangePassword} lastLoginAt=${rec.lastLoginAt || 'never'}`);
     console.log(`   seed stored: ${adminTotp.storageState(rec).sealed ? 'sealed envelope (totpSecretEnc)' : (dbSeed ? '*** PLAINTEXT (legacy field) ***' : 'NONE')}`);

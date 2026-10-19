@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { BASE_URL, parseJSON } from '../../api';
 import './MedicalReviewsPanel.css';
 
-function MedicalReviewsPanel({ request, onRefreshRequest }) {
+function MedicalReviewsPanel({ onRefreshRequest }) {
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -40,10 +40,9 @@ function MedicalReviewsPanel({ request, onRefreshRequest }) {
 
   const loadReviews = async () => {
     try {
-      setLoading(true);
-      setError('');
       const data = await directRequest('/medical-review/admin/reviews');
       setReviews(data.reviews || []);
+      setError('');
     } catch (err) {
       console.error('Failed to load medical reviews:', err);
       setError(err.message || 'Failed to load medical reviews');
@@ -53,6 +52,7 @@ function MedicalReviewsPanel({ request, onRefreshRequest }) {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- loadReviews is async: every write lands after the fetch settles, and the interval below needs the same un-memoized loader
     loadReviews();
     // Auto-refresh every 30 seconds
     const interval = setInterval(loadReviews, 30000);

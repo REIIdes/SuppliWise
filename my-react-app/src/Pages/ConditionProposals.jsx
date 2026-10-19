@@ -113,7 +113,6 @@ const ConditionProposals = () => {
   const [filter, setFilter] = useState('all');
 
   const load = useCallback(async () => {
-    setLoading(true);
     try {
       const json = await request('');
       setData(json);
@@ -125,6 +124,13 @@ const ConditionProposals = () => {
     }
   }, []);
 
+  // loading starts true on mount, so only the click flips it — inside load() that write would be synchronous in the effect.
+  const reload = useCallback(() => {
+    setLoading(true);
+    load();
+  }, [load]);
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- load is async: every write lands after request('') settles
   useEffect(() => { load(); }, [load]);
 
   const proposals = useMemo(() => {
@@ -148,7 +154,7 @@ const ConditionProposals = () => {
             button here.
           </p>
         </div>
-        <button type="button" className="cp-btn cp-btn--ghost" onClick={load} disabled={loading}>
+        <button type="button" className="cp-btn cp-btn--ghost" onClick={reload} disabled={loading}>
           {loading ? 'Reloading…' : 'Reload'}
         </button>
       </header>

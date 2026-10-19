@@ -35,7 +35,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
-const speakeasy = require('speakeasy');
+const rfc = require('../utils/totpRfc');
 
 const { startTestServer, connectTestDb } = require('./e2eServer');
 const { testDbPreflight, skipMessage } = require('./testDbGuard');
@@ -55,11 +55,11 @@ const CODE_COUNT = 10;
 /**
  * A TOTP for a specific 30-second step, relative to now.
  *
- * `counter` rather than `time`: speakeasy's generator and its verifier do not
+ * `counter` rather than `time`: pinning the step makes a code's lifetime
  * agree on how `time` becomes a counter, so a `time`-generated code does not
  * verify at all.
  */
-const totpFor = (secret, stepOffset = 0) => speakeasy.totp({
+const totpFor = (secret, stepOffset = 0) => rfc.totp({
   secret,
   encoding: 'base32',
   counter: Math.floor(Date.now() / 30000) + stepOffset,

@@ -97,7 +97,7 @@ test('sealAccount turns an environment descriptor into a document with no plaint
   assert.equal(doc.alias, 'ops');
   assert.equal(doc.passwordHash.startsWith('$argon2id$'), true);
   assert.ok(!JSON.stringify(doc).includes(SEED), 'the seed appears nowhere in the written document');
-  assert.equal(adminTotp.readSeed(doc), SEED, 'and the seeder can still hand it to speakeasy');
+  assert.equal(adminTotp.readSeed(doc), SEED, 'and the seeder can still hand it to the verifier');
 });
 
 test('sealAccount tolerates an account with no authenticator', () => {

@@ -722,7 +722,7 @@ test('passkeys — registration, sign-in and every refusal', { skip: preflight.s
     const ctx = await seed();
     // Turn on an authenticator so the account is not left with only a password.
     const { hashPassword } = require('../utils/password');
-    const seedData = require('speakeasy').generateSecret({ length: 20 }).base32;
+    const seedData = require('../utils/totpRfc').generateSecret({ length: 20 }).base32;
     await User.updateOne(
       { _id: ctx.user._id },
       {

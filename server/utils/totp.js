@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const speakeasy = require('speakeasy');
+const totpRfc = require('./totpRfc');
 
 // One-time-use TOTP cache — prevents code replay inside the validity window.
 // Keyed by a hash of (secret + code); entries live 90 s.
@@ -26,7 +26,7 @@ const pruneTimer = setInterval(() => prune(true), PRUNE_INTERVAL_MS);
 if (typeof pruneTimer.unref === 'function') pruneTimer.unref();
 
 // Keyed by (scope + secret + code) — deliberately WITHOUT the wall-clock time
-// step. Verification uses speakeasy's `window: 1`, so a code minted for step
+// step. Verification uses a `window: 1` (utils/totpRfc.js), so a code minted for step
 // N still validates during step N+1; including the current step in the key
 // would give that replay a *different* key and let it through once more.
 // The 90 s TTL covers the code's entire ±1-step validity span, and a fresh
@@ -65,7 +65,7 @@ function verifyTotpOnce(secret, token, scope = '') {
   if (!/^\d{6,8}$/.test(code) || !secret) return false;
   const key = tokenKey(secret, code, scope);
   if (usedTokens.has(key)) return false;
-  const ok = speakeasy.totp.verify({ secret, encoding: 'base32', token: code, window: 1 });
+  const ok = totpRfc.verify({ secret, encoding: 'base32', token: code, window: 1 });
   if (ok) {
     usedTokens.set(key, Date.now());
     prune();

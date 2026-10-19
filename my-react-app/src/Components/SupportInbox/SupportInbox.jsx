@@ -375,7 +375,6 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
   const [supportActive, setSupportActive] = useState(false);
   const [activeId, setActiveId] = useState(null);
   const [active, setActive] = useState(null);   // { thread, messages[] }
-  const [adminProfiles, setAdminProfiles] = useState({}); // { authorName: profilePicture }
   const [loaded, setLoaded] = useState(false);
   // `loaded` already distinguishes "has never finished a load" from "refreshing",
   // and the first load does not set state synchronously — so a second
@@ -522,10 +521,7 @@ export default function SupportInbox({ initialCategory = 'other', startComposing
       if (token !== threadToken.current) return;
       setActive({ thread: data.thread, messages: rows });
       if (typeof data.supportActive === 'boolean') setSupportActive(data.supportActive);
-      if (data.adminProfiles) setAdminProfiles(data.adminProfiles);
-      
-      console.log('[SupportInbox] Admin profiles received:', data.adminProfiles);
-      
+
       // Opening it marks it read server-side, so the local badge is cleared
       // rather than waiting for the next poll to agree. The decrement is driven
       // by what the thread ACTUALLY had (read from the ref, not from inside a

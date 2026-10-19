@@ -4,7 +4,7 @@ import Navbar from '../Components/Navbar/Navbar';
 import Toast from '../Components/Toast/Toast';
 import ConfirmModal from '../Components/ConfirmModal/ConfirmModal';
 import MedicalAttentionModal from '../Components/MedicalAttentionModal/MedicalAttentionModal';
-import { getDashboard, updateIntake, updateIntakeBulk, getToken, getStoredUser, getMyProfile, setStoredUser, getPriorityStatus, getMedicalReviewStatus, requestMedicalReview, confirmMedicalReview } from '../api';
+import { getDashboard, updateIntake, updateIntakeBulk, getToken, getStoredUser, getMyProfile, setStoredUser, getPriorityStatus, getMedicalReviewStatus, confirmMedicalReview } from '../api';
 import { subscribeDashboardRefresh } from '../utils/dashboardRefresh';
 import useSubscription from '../hooks/useSubscription';
 import useNow from '../hooks/useNow';
@@ -193,7 +193,6 @@ function DashboardPage() {
   // Medical review state
   const [showMedicalModal, setShowMedicalModal] = useState(false);
   const [medicalReviewStatus, setMedicalReviewStatus] = useState('none');
-  const [medicalAdminNotes, setMedicalAdminNotes] = useState('');
   const [prioritySymptoms, setPrioritySymptoms] = useState([]);
   // Priority Review is a premium entitlement. The API only reports it while the
   // plan includes it, and this guard makes the UI follow a downgrade in the
@@ -345,10 +344,8 @@ function DashboardPage() {
           getMedicalReviewStatus(),
         ]);
         
-        // Always set medical review status and notes when available
         if (reviewData) {
           setMedicalReviewStatus(reviewData.medicalReviewStatus || 'none');
-          setMedicalAdminNotes(reviewData.medicalReviewNotes || '');
         }
         
         if (priorityData.blocked) {
@@ -581,20 +578,6 @@ function DashboardPage() {
     setShowNewAssessmentConfirm(false);
     // When explicitly confirming to abandon current supplements, then clear draft
     navigate('/assessment', { state: { clearDraft: true } });
-  };
-
-  // Handle medical review request
-  const handleMedicalReviewRequest = async () => {
-    try {
-      await requestMedicalReview();
-      setMedicalReviewStatus('pending');
-      setMarkTakenToastKey(prev => prev + 1);
-      setMarkTakenToastMessage('Medical review request submitted successfully. An administrator will review your case shortly.');
-    } catch (error) {
-      console.error('Failed to request medical review:', error);
-      setMarkTakenToastKey(prev => prev + 1);
-      setMarkTakenToastMessage('Failed to submit medical review request. Please try again.');
-    }
   };
 
   // Handle "Learn More" on priority banner - open medical modal

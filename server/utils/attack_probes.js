@@ -11,7 +11,7 @@ const { sanitizeTextField } = require('./sanitize');
 const { scrubKeys } = require('./sanitize');
 const { verifyTotpOnce } = require('./totp');
 const mongoose = require('mongoose');
-const speakeasy = require('speakeasy');
+const totpRfc = require('./totpRfc');
 
 // A successful traversal must be observable without returning any source text
 // to the dashboard. This marker exists in this runtime file, which is outside
@@ -242,8 +242,8 @@ const probes = {
   // ── Auth brute force + TOTP replay: codes are single-use + throttled ───
   auth_bruteforce: async () => {
     // Behavioral replay test with a throwaway secret (never touches real users)
-    const secret = speakeasy.generateSecret({ length: 20 }).base32;
-    const code = speakeasy.totp({ secret, encoding: 'base32' });
+    const secret = totpRfc.generateSecret({ length: 20 }).base32;
+    const code = totpRfc.totp({ secret, encoding: 'base32' });
     const first = verifyTotpOnce(secret, code, 'probe:replay');
     const replay = verifyTotpOnce(secret, code, 'probe:replay');
     if (!first || replay) {
@@ -283,6 +283,85 @@ const probes = {
   // dependencyAudit.js) because npm needs the network and a dashboard poll
   // must not spawn it every 30 s.
   dependency_audit: async () => require('./dependencyAudit').dependencyAudit(),
+
+  // ── Can JWT_SECRET actually be rotated, and has it been? ──────────
+  // "URGENT: rotate JWT_SECRET — it is in public git history" has been the first
+  // manual action on this audit since 2026-09-23, and it is still undone. The
+  // reason is mechanical, not careless: with one accepted key, a restart mid-
+  // rotation invalidates every token in every browser at once, so the safe
+  //-looking option is always to defer. utils/jwtKeyring.js fixes the mechanics;
+  // this row answers the two things an operator cannot otherwise see — whether
+  // rotation would lose data (the encryption keys fall back to this secret) and
+  // whether a retained key is still carrying live sessions, which decides when
+  // it can be deleted. A burned key left in the overlap list is still a working
+  // key, so "rotated" would be a claim with no evidence behind it.
+  jwt_secret_rotation: async () => {
+    const keyring = require('./jwtKeyring');
+    const state = keyring.rotationState();
+    if (!state.signing) {
+      return { status: 'critical', detail: 'JWT_SECRET is unset, so no token in this deployment can be verified.' };
+    }
+
+    // secretBox.describe() reads the same environment that can make it THROW at
+    // require time (a production process with no explicit TOTP_ENCRYPTION_KEY),
+    // and a monitor row must report that fact rather than become an error row.
+    const sourceOf = (module) => {
+      try {
+        return require(module).describe().source || 'none';
+      } catch (error) {
+        return `unreadable (${error.message})`;
+      }
+    };
+    const dataKeySource = sourceOf('./dataKey');
+    const sealKeySource = sourceOf('./secretBox');
+    const unreadable = [['HEALTH_DATA_KEY', dataKeySource], ['TOTP_ENCRYPTION_KEY', sealKeySource]]
+      .filter(([, source]) => /^unreadable/.test(source) || source === 'none')
+      .map(([label, source]) => `${label}: ${source}`);
+    if (unreadable.length > 0) {
+      return {
+        status: 'warning',
+        detail: `The encryption keys that share fate with JWT_SECRET cannot be read: ${unreadable.join('; ')}. `
+          + 'Until they resolve to an explicit key, rotating the signing secret has an unmeasured blast radius.',
+      };
+    }
+
+    const safety = keyring.rotationSafety({ dataKeySource, sealKeySource });
+    if (safety.losesData) {
+      return {
+        status: 'critical',
+        detail: `Rotating JWT_SECRET now would make existing data unreadable: ${safety.blockers.join('; ')}. `
+          + 'Separate those keys from the signing secret before the rotation, not after.',
+      };
+    }
+
+    if (state.deprecatedKeyIds.length === 0) {
+      return {
+        status: 'warning',
+        detail: `Signing key ${state.currentKeyId}, and it is the ONLY key this server accepts — so a rotation is `
+          + 'still an outage and still gets deferred. Set the outgoing secret in JWT_SECRET_PREVIOUS_KEYS at the '
+          + 'same deploy that installs the new JWT_SECRET; sessions then finish on their own terms and nothing '
+          + 'is cut off.',
+      };
+    }
+
+    const riding = state.acceptances.filter((row) => row.accepted > 0);
+    const last = riding.map((row) => row.lastAt).sort().pop();
+    if (riding.length === 0) {
+      return {
+        status: 'warning',
+        detail: `Rotation in progress, and the overlap is now empty: ${state.deprecatedKeyIds.length} retained key(s) `
+          + `(${state.deprecatedKeyIds.join(', ')}) have accepted nothing since this process started. Delete `
+          + 'JWT_SECRET_PREVIOUS_KEYS on the next deploy — a key that is still listed is a key that still works, '
+          + 'and the one being retired is in public git history.',
+      };
+    }
+    return {
+      status: 'warning',
+      detail: `Rotation in progress: ${riding.length} retained key(s) still carrying live sessions, `
+        + `${riding.reduce((n, row) => n + row.accepted, 0)} token(s) accepted under them since boot, last at `
+        + `${last}. Keep JWT_SECRET_PREVIOUS_KEYS until this number stops moving, then remove it.`,
+    };
+  },
 
   // ── Is there anything to restore, and has restoring it ever been proven? ──
   // Filesystem facts only — no database reads — so this is safe to ask on every
@@ -461,34 +540,65 @@ const probes = {
       return { status: 'critical', detail: `Deserialization/parse library with known gadget risk installed: ${present.join(', ')}.` };
     }
     // Tokens are the only serialized object this API accepts from a client, so
-    // the algorithm set is the entire deserialization trust boundary — and it
-    // has to be pinned at EVERY verify site, not just the middleware one.
-    const verifyFiles = [];
+    // the algorithm set is the entire deserialization trust boundary. Since
+    // 2026-10-19 it is pinned in exactly one place — utils/jwtKeyring.js, which
+    // also holds the rotation window — so the census is now two questions: is
+    // that one place still pinned, and did anybody open a second door?
+    const scanned = [];
     const walkVerify = (dir) => {
       for (const entry of fs.readdirSync(path.join(root, dir), { withFileTypes: true })) {
         const abs = path.join(root, dir, entry.name);
         if (entry.isDirectory()) { if (!entry.name.startsWith('node_modules')) walkVerify(`${dir}/${entry.name}`); }
-        else if (entry.name.endsWith('.js')) verifyFiles.push({ rel: `${dir}/${entry.name}`, abs });
+        else if (entry.name.endsWith('.js')) scanned.push({ rel: `${dir}/${entry.name}`, abs });
       }
     };
     walkVerify('routes'); walkVerify('middleware'); walkVerify('utils');
-    const unpinned = [];
-    let sites = 0;
-    for (const { rel, abs } of verifyFiles) {
+
+    const keyringPath = path.join(root, 'utils', 'jwtKeyring.js');
+    if (!fs.existsSync(keyringPath)) {
+      return { status: 'critical', detail: 'utils/jwtKeyring.js is missing, so nothing can rotate JWT_SECRET safely.' };
+    }
+    const keyringSrc = fs.readFileSync(keyringPath, 'utf8');
+    // The pin must be the keyring's own constant, applied to every candidate
+    // key: a loop over N secrets that lets the caller name the algorithms is a
+    // wider trust boundary than the single pinned secret it replaced.
+    const keyringPins = /const ALGORITHMS = \['HS256'\]/.test(keyringSrc)
+      && /algorithms:\s*ALGORITHMS/.test(keyringSrc)
+      && /algorithms:\s*_ignored|const \{ algorithms: _ignored/.test(keyringSrc);
+
+    const bypassing = [];
+    let routedThroughKeyring = 0;
+    for (const { rel, abs } of scanned) {
+      if (rel === 'utils/jwtKeyring.js') continue;
       const src = fs.readFileSync(abs, 'utf8');
       for (const line of src.split('\n')) {
-        if (!/jwt\.verify\(/.test(line) || /^\s*(\/\/|\*)/.test(line)) continue;
-        sites += 1;
-        if (!/algorithms/.test(line)) unpinned.push(rel);
+        if (/^\s*(\/\/|\*)/.test(line)) continue;
+        if (/jwt\.verify\(/.test(line)) bypassing.push(rel);
+        if (/jwtKeyring\.verify\(/.test(line)) routedThroughKeyring += 1;
       }
     }
-    if (sites === 0) {
-      return { status: 'critical', detail: 'No jwt.verify call sites found — the census is broken, not secure.' };
+
+    if (bypassing.length > 0) {
+      return {
+        status: 'critical',
+        detail: `JWT verifiers outside utils/jwtKeyring.js: ${[...new Set(bypassing)].join(', ')}. `
+          + 'A second door re-opens the outage that stops JWT_SECRET being rotated at all — every verifier must '
+          + 'go through the keyring.',
+      };
     }
-    if (unpinned.length > 0) {
-      return { status: 'critical', detail: `Unpinned jwt.verify (algorithm could be 'none' or swapped): ${[...new Set(unpinned)].join(', ')}.` };
+    if (!keyringPins) {
+      return { status: 'critical', detail: 'utils/jwtKeyring.js no longer pins HS256 for every candidate key (finding L1).' };
     }
-    return { status: 'healthy', detail: `Trusted-types only: JSON over Bearer tokens, no native/serialized object graphs, no XML/YAML parser installed. All ${sites} jwt.verify sites pin HS256; step-up tokens are HMAC-signed JWTs.` };
+    if (routedThroughKeyring === 0) {
+      return { status: 'critical', detail: 'No jwtKeyring.verify call sites found — the census is broken, not secure.' };
+    }
+    return {
+      status: 'healthy',
+      detail: `Trusted-types only: JSON over Bearer tokens, no native/serialized object graphs, no XML/YAML parser `
+        + `installed. All ${routedThroughKeyring} verify sites go through utils/jwtKeyring.js, which pins HS256 for `
+        + 'every candidate key and carries the JWT_SECRET_PREVIOUS_KEYS rotation window; step-up tokens are '
+        + 'HMAC-signed JWTs.',
+    };
   },
 
   // ── XXE + SSTI: no XML parser, no server-side template engine ──────────

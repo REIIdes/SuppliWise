@@ -138,46 +138,6 @@ const ACTIVITY_LABELS = {
   Very:      'Very Active (6–7 days/week)',
 };
 
-// Map generic food category words to specific examples
-const FOOD_SPECIFICS = {
-  'fatty fish':       'fatty fish (salmon, tuna, sardines, mackerel)',
-  'leafy greens':     'leafy greens (spinach, kale, Swiss chard)',
-  'leafy green':      'leafy greens (spinach, kale, Swiss chard)',
-  'nuts':             'nuts (almonds, cashews, walnuts, pumpkin seeds)',
-  'dairy':            'dairy (Greek yogurt, cheddar cheese, whole milk)',
-  'dairy products':   'dairy (Greek yogurt, cheddar cheese, whole milk)',
-  'citrus':           'citrus (oranges, grapefruit, kiwi)',
-  'citrus fruits':    'citrus (oranges, grapefruit, kiwi)',
-  'legumes':          'legumes (lentils, chickpeas, black beans)',
-  'whole grains':     'whole grains (oats, brown rice, quinoa)',
-  'lean meats':       'lean meats (chicken breast, turkey, lean beef)',
-  'lean meat':        'lean meats (chicken breast, turkey, lean beef)',
-  'red meat':         'red meat (beef, lamb, bison)',
-  'shellfish':        'shellfish (oysters, clams, crab, shrimp)',
-  'seeds':            'seeds (pumpkin seeds, sunflower seeds, chia seeds)',
-  'berries':          'berries (blueberries, strawberries, raspberries)',
-  'cruciferous vegetables': 'cruciferous vegetables (broccoli, Brussels sprouts, cauliflower)',
-  'organ meats':      'organ meats (beef liver, chicken liver)',
-  'fermented foods':  'fermented foods (kefir, kimchi, sauerkraut, miso)',
-};
-
-function expandFoodText(text) {
-  if (!text) return text;
-  // Strip sentence fragments first
-  let cleaned = text
-    .replace(/,?\s*(such as|which are|are naturally|naturally rich|found in|including)[^,;]*/gi, '')
-    .replace(/,?\s*are\s+[a-z].*$/gi, '')
-    .trim()
-    .replace(/,\s*$/, '');
-  cleaned = cleaned || text;
-  // Then expand generic category words
-  for (const [key, expanded] of Object.entries(FOOD_SPECIFICS)) {
-    const regex = new RegExp(`\\b${key}\\b`, 'gi');
-    cleaned = cleaned.replace(regex, expanded);
-  }
-  return cleaned;
-}
-
 // ── Client-side evidence/foods/sideEffects fallback ───────────────────────
 // Mirrors the server-side inferEvidence/inferFoods/inferSideEffects so that
 // old DB records (saved before server enrichment was added) still show data.

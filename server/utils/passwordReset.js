@@ -16,6 +16,7 @@
 
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
+const jwtKeyring = require('./jwtKeyring');
 
 const User = require('../models/User');
 const PasswordResetToken = require('../models/PasswordResetToken');
@@ -517,7 +518,7 @@ async function verifyCodeForUser({ userId, code, req } = {}) {
 async function completeWithGrant({ resetToken, newPassword, req } = {}) {
   let userId = '';
   try {
-    const payload = jwt.verify(str(resetToken), process.env.JWT_SECRET, { algorithms: ['HS256'] });
+    const payload = jwtKeyring.verify(str(resetToken));
     if (payload.purpose !== 'password-reset' || !payload.sub) throw new Error('wrong purpose');
     userId = str(payload.sub);
   } catch {

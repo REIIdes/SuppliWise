@@ -30,7 +30,7 @@
  */
 const express = require('express');
 const rateLimit = require('express-rate-limit');
-const speakeasy = require('speakeasy');
+const totpRfc = require('../utils/totpRfc');
 const QRCode = require('qrcode');
 
 const { protect } = require('../middleware/auth');
@@ -97,9 +97,11 @@ function loadUser(id) {
  * security change; doing it with nothing but a session token would let a
  * hijacked session start replacing the account's authenticator.
  *
- * Generates the seed with speakeasy (a maintained TOTP library — the HMAC and
- * the base32 are not hand-rolled), returns the otpauth URI as a QR code, and
- * stores the seed ENCRYPTED but INACTIVE.
+ * Generates the seed with utils/totpRfc.js — RFC 6238 implemented in this
+ * repository, pinned by the specification's own test vectors and by codes
+ * captured from the library it replaced (Test File/totp-rfc6238.test.js), so
+ * neither the HMAC nor the base32 is ad hoc. Returns the otpauth URI as a QR
+ * code, and stores the seed ENCRYPTED but INACTIVE.
  *
  * The seed is returned exactly once, here, and never again. It is not written
  * to any browser storage, not logged, and not included in any later response.
@@ -121,7 +123,7 @@ router.post('/setup', protect, setupLimiter, requireStepUp, async (req, res) => 
       });
     }
 
-    const secret = speakeasy.generateSecret({
+    const secret = totpRfc.generateSecret({
       name: `${ISSUER} (${user.email})`,
       issuer: ISSUER,
       length: 20,

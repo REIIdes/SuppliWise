@@ -700,22 +700,8 @@ router.get('/:id', async (req, res) => {
     // see announceAdmins for the refetch loop this avoids.
     announceAdmins(req, { kind: 'read', thread: thread._id, by: 'user' }, req.user._id);
 
-    // Fetch admin profiles who have replied in this thread for avatar display
-    const AdminAccount = require('../models/AdminAccount');
-    const adminAliases = [...new Set(
-      messages
-        .filter(m => m.author === 'admin' && m.authorName)
-        .map(m => m.authorName)
-    )];
-    const adminProfiles = {};
-    if (adminAliases.length > 0) {
-      const admins = await AdminAccount.find({ alias: { $in: adminAliases } })
-        .select('alias profilePicture')
-        .lean();
-      admins.forEach(admin => {
-        adminProfiles[admin.alias] = admin.profilePicture || '';
-      });
-    }
+    // Admin avatars are deliberately NOT sent here: nothing in the member
+    // inbox renders them, and an operator's picture is not member data.
 
     return res.json({
       thread: toThreadView({ ...thread, unreadByUser: 0 }, memberParticipant(req)),
@@ -725,8 +711,6 @@ router.get('/:id', async (req, res) => {
       // Fresh presence for the thread header, so a deep-linked open does not
       // wait for the next list poll to answer "is support here?".
       supportActive: isSupportActive(),
-      // Admin profiles for avatar display
-      adminProfiles,
     });
   } catch (error) {
     console.error('[support-chat GET /:id]', error.message);

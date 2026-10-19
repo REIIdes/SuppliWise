@@ -207,7 +207,7 @@ async function withRecoveryCode({ email, code, req } = {}) {
  * `verifyTotpOnce` is replay-protected per account: a code that has already been
  * spent against THIS account is refused, and the cache is keyed by
  * (scope, secret, code) precisely so two accounts sharing one seed cannot
- * consume each other's codes. Using the plain speakeasy call instead would let a
+ * consume each other's codes. Calling utils/totpRfc.verify directly would let a
  * user who mistypes once have to wait out the clock for no good reason, and
  * would allow a captured code to be replayed inside its own validity window.
  *

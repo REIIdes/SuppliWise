@@ -14,13 +14,13 @@
  */
 const test = require('node:test');
 const assert = require('node:assert');
-const speakeasy = require('speakeasy');
+const rfc = require('../utils/totpRfc');
 
 const { verifyTotpOnce } = require('../utils/totp');
 
 test('a code is accepted once and a replay of it is refused', () => {
-  const secret = speakeasy.generateSecret({ length: 20 }).base32;
-  const code = speakeasy.totp({ secret, encoding: 'base32' });
+  const secret = rfc.generateSecret({ length: 20 }).base32;
+  const code = rfc.totp({ secret, encoding: 'base32' });
   const scope = 'test:' + Math.random();
 
   assert.strictEqual(verifyTotpOnce(secret, code, scope), true, 'first use must succeed');
@@ -31,8 +31,8 @@ test('a code is accepted once and a replay of it is refused', () => {
 test('the same code is accepted once for EACH account sharing a seed', () => {
   // This is the regression: with a secret-only cache key, the second account
   // was refused because the first had already spent the code.
-  const secret = speakeasy.generateSecret({ length: 20 }).base32;
-  const code = speakeasy.totp({ secret, encoding: 'base32' });
+  const secret = rfc.generateSecret({ length: 20 }).base32;
+  const code = rfc.totp({ secret, encoding: 'base32' });
   const tag = 'test:' + Math.random();
 
   assert.strictEqual(verifyTotpOnce(secret, code, tag + ':a'), true);
@@ -52,10 +52,10 @@ test('the same code is accepted once for EACH account sharing a seed', () => {
 
 test('an account cannot reuse a code spent on a different seed', () => {
   const tag = 'test:' + Math.random();
-  const secretA = speakeasy.generateSecret({ length: 20 }).base32;
-  const secretB = speakeasy.generateSecret({ length: 20 }).base32;
-  const codeA = speakeasy.totp({ secret: secretA, encoding: 'base32' });
-  const codeB = speakeasy.totp({ secret: secretB, encoding: 'base32' });
+  const secretA = rfc.generateSecret({ length: 20 }).base32;
+  const secretB = rfc.generateSecret({ length: 20 }).base32;
+  const codeA = rfc.totp({ secret: secretA, encoding: 'base32' });
+  const codeB = rfc.totp({ secret: secretB, encoding: 'base32' });
 
   // Same scope, different seed: the seeds must stay part of the key, otherwise
   // scoping alone would let a code spent on one account block another.
@@ -66,8 +66,8 @@ test('an account cannot reuse a code spent on a different seed', () => {
 });
 
 test('a wrong code is refused and does not consume anything', () => {
-  const secret = speakeasy.generateSecret({ length: 20 }).base32;
-  const real = speakeasy.totp({ secret, encoding: 'base32' });
+  const secret = rfc.generateSecret({ length: 20 }).base32;
+  const real = rfc.totp({ secret, encoding: 'base32' });
   const wrong = String((Number(real) + 1) % 1000000).padStart(6, '0');
   const scope = 'test:' + Math.random();
 
@@ -79,7 +79,7 @@ test('a wrong code is refused and does not consume anything', () => {
 });
 
 test('malformed input is refused without throwing', () => {
-  const secret = speakeasy.generateSecret({ length: 20 }).base32;
+  const secret = rfc.generateSecret({ length: 20 }).base32;
   const scope = 'test:' + Math.random();
   for (const bad of ['', '   ', null, undefined, 'abcdef', '12345', '123456789', 123456, {}]) {
     assert.strictEqual(verifyTotpOnce(secret, bad, scope), false, 'must refuse ' + JSON.stringify(bad));
@@ -90,8 +90,8 @@ test('malformed input is refused without throwing', () => {
 test('an omitted scope still refuses a replay (back-compat default)', () => {
   // Callers that have not been updated must not lose replay protection - the
   // documented fallback is the previous secret-only behaviour.
-  const secret = speakeasy.generateSecret({ length: 20 }).base32;
-  const code = speakeasy.totp({ secret, encoding: 'base32' });
+  const secret = rfc.generateSecret({ length: 20 }).base32;
+  const code = rfc.totp({ secret, encoding: 'base32' });
   assert.strictEqual(verifyTotpOnce(secret, code), true);
   assert.strictEqual(verifyTotpOnce(secret, code), false, 'replay must be refused even with no scope');
 });

@@ -2348,15 +2348,6 @@ function AssessmentPage() {
     return () => { cancelled = true; };
   }, []);
 
-  // Update mode prefills reconstruct symptom keys synchronously, before this
-  // bundle can arrive — re-prefix the plain leftovers once it lands.
-  // prefixDynamicSymptoms returns the same object when nothing matches, so
-  // this never loops.
-  useEffect(() => {
-    if (liveConditions.length === 0) return;
-    setFormData((prev) => prefixDynamicSymptoms(prev, liveConditions));
-  }, [liveConditions]);
-
   const [formData, setFormData] = useState(() => {
     // Update mode: load existing assessment data
     if (isUpdateMode && updateAssessmentData) {
@@ -2384,6 +2375,16 @@ function AssessmentPage() {
   });
 
   const [isReadOnly] = useState(routeReadOnly);
+
+  // Update mode prefills reconstruct symptom keys synchronously, before this
+  // bundle can arrive — re-prefix the plain leftovers once it lands.
+  // prefixDynamicSymptoms returns the same object when nothing matches, so
+  // this never loops.
+  useEffect(() => {
+    if (liveConditions.length === 0) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the fetched condition bundle is an external system; re-prefixing the prefilled keys is the sync, and it runs once per bundle
+    setFormData((prev) => prefixDynamicSymptoms(prev, liveConditions));
+  }, [liveConditions]);
 
   /* ── The assessment is closed during the dead hours ──────────────────────
      Between midnight and 4:00 AM the whole form is locked, not just its submit
@@ -2823,7 +2824,7 @@ function AssessmentPage() {
           recommendations = await getRecommendations(payload);
         } catch (aiErr) {
           console.error('AI recommendation error in update mode:', aiErr.message);
-          throw new Error('Failed to generate new recommendations. Your existing assessment remains unchanged.');
+          throw new Error('Failed to generate new recommendations. Your existing assessment remains unchanged.', { cause: aiErr });
         }
       }
       

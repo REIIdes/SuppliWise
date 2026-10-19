@@ -407,8 +407,8 @@ async function textbeeTransport({ to, body }) {
  *
  * Uses the global `fetch` rather than the Twilio SDK: this is one POST with
  * three form fields, and an SDK would add a dependency tree to a repository that
- * currently reaches for raw libraries everywhere else (`nodemailer`, `speakeasy`
- * are used because they do real work; this would not be).
+ * currently reaches for a raw library only where one does real work
+ * (`nodemailer`).
  */
 async function twilioTransport({ to, body }) {
   const sid = String(process.env.TWILIO_ACCOUNT_SID || '').trim();

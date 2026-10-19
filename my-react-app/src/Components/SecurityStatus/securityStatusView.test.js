@@ -346,7 +346,7 @@ test('every attack probe the server registers has a complete row', () => {
   const serverSrc = fs.readFileSync(
     path.resolve(HERE, '..', '..', '..', '..', 'server', 'utils', 'attack_probes.js'), 'utf8');
 
-  const probeKeys = [...serverSrc.matchAll(/^  ([a-z0-9_]+): async \(?/gm)].map(m => m[1]);
+  const probeKeys = [...serverSrc.matchAll(/^ {2}([a-z0-9_]+): async \(?/gm)].map(m => m[1]);
   assert.ok(probeKeys.length >= 18,
     `only ${probeKeys.length} probe keys parsed — the extractor drifted, not the dashboard`);
 

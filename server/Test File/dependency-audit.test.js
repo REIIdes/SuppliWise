@@ -7,16 +7,15 @@
  * drive it with npm replaced, without touching the network.
  */
 
-import test from 'node:test';
-import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-import Module from 'node:module';
-import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const Module = require('node:module');
 
-const require = createRequire(import.meta.url);
-const SERVER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// CommonJS like every other file here: `npm run check` compiles this tree as
+// scripts, so an ES module in it is a file the syntax gate cannot read.
+const SERVER = path.resolve(__dirname, '..');
 const AUDIT = path.join(SERVER, 'utils', 'dependencyAudit.js');
 const auditSrc = fs.readFileSync(AUDIT, 'utf8');
 // Prose can name the very constructs these tests forbid, so the source

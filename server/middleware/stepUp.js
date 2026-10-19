@@ -44,6 +44,7 @@
  * is never written to localStorage or sessionStorage.
  */
 const jwt = require('jsonwebtoken');
+const jwtKeyring = require('../utils/jwtKeyring');
 
 const STEP_UP_TTL_MS = 5 * 60 * 1000;
 const STEP_UP_PURPOSE = 'step-up';
@@ -87,7 +88,7 @@ function requireStepUp(req, res, next) {
 
   let claims;
   try {
-    claims = jwt.verify(raw, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+    claims = jwtKeyring.verify(raw);
   } catch {
     // Expired, tampered, or signed with something else — one answer for all
     // three, so this cannot be used to probe which.
@@ -116,7 +117,7 @@ function hasStepUp(req) {
   const raw = presented(req);
   if (!raw) return false;
   try {
-    const claims = jwt.verify(raw, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+    const claims = jwtKeyring.verify(raw);
     if (claims.purpose !== STEP_UP_PURPOSE) return false;
     if (String(claims.id) !== String(req.user._id)) return false;
     if (String(claims.sid || '') !== String(req.sessionId || '')) return false;

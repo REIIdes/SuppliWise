@@ -100,9 +100,11 @@ jobs:
       - run: npm ci
 
       # Warnings are allowed on purpose: the repo carries a few known, pre-existing
-      # react-hooks/exhaustive-deps warnings that are not regressions. Errors are not.
+      # react-hooks/exhaustive-deps warnings that are not regressions. Errors are not,
+      # and eslint exits non-zero on those by itself — --max-warnings takes a number,
+      # so passing "unlimited" here would fail the step before linting anything.
       - name: Lint
-        run: npx eslint . --max-warnings=unlimited
+        run: npx eslint .
 
       - run: npm test
 

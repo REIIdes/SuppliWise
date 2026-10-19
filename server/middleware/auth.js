@@ -1,4 +1,4 @@
-const jwt = require('jsonwebtoken');
+const jwtKeyring = require('../utils/jwtKeyring');
 const AdminAccount = require('../models/AdminAccount');
 const {
   verifyUserSession,
@@ -232,10 +232,10 @@ const protect = async (req, res, next) => {
 
   let decoded;
   try {
-    // `algorithms` is pinned: without it a token signed with a different
-    // (and, on some configurations, `none`) algorithm could be accepted.
-    // Every token this server mints is HS256.
-    decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+    // HS256 is pinned by the keyring itself, and the secret it checks against is
+    // whatever this process is currently signing with — plus any key deliberately
+    // left in JWT_SECRET_PREVIOUS_KEYS while JWT_SECRET is being rotated.
+    decoded = jwtKeyring.verify(token);
   } catch (error) {
     if (error.name === 'TokenExpiredError') {
       // Only admin tokens carry `exp`. A user session does not expire by time —

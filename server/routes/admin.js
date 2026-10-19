@@ -38,7 +38,7 @@ const {
   listValueMonthly,
   activationOf,
 } = require('../utils/overviewAnalytics');
-const speakeasy = require('speakeasy');
+const totpRfc = require('../utils/totpRfc');
 const { protect, adminOnly } = require('../middleware/auth');
 const { verifyTotpOnce } = require('../utils/totp');
 const adminTotp = require('../utils/adminTotp');
@@ -1771,7 +1771,7 @@ const runMonitorProbes = async (app) => {
       const adminTotpOk = Boolean(process.env.ADMIN_TOTP_SECRET || process.env.ADMIN_ACCOUNTS);
       const usersWithTotp = await User.countDocuments({ twoFactorEnabled: true });
       if (!adminTotpOk) return { status: 'critical', detail: 'Admin TOTP secret not configured — admin 2FA is broken.' };
-      return { status: 'healthy', detail: `Admin TOTP configured via speakeasy (HMAC-SHA1, 30s window). ${usersWithTotp} user(s) have Google Authenticator enabled.` };
+      return { status: 'healthy', detail: `Admin TOTP verified by utils/totpRfc.js (RFC 6238, HMAC-SHA1, 30 s step, ±1 step accepted). ${usersWithTotp} user(s) have Google Authenticator enabled.` };
     }),
 
     // ── 4. Database Connectivity ──────────────────────────────────────────
@@ -2042,6 +2042,7 @@ const runMonitorProbes = async (app) => {
           pii_ai_prompts:      ['PII in AI Prompts', 'ai'],
           ai_quota:            ['AI Quota Abuse', 'ai'],
           jwt_security:        ['JWT Strength + Lifetime', 'jwt'],
+          jwt_secret_rotation: ['JWT Secret Rotation Window', 'jwt'],
           seal_integrity:      ['Sealed Authenticator Seeds Open', 'crypto'],
           headers_security:    ['Security Headers', 'misconfig'],
           email_enumeration:   ['Email Enumeration', 'misconfig'],
@@ -2965,7 +2966,7 @@ router.post('/profile/authenticator/rotate', async (req, res) => {
     const account = await AdminAccount.findById(req.user._id).select(adminTotp.SECRET_FIELDS);
     if (!account) return res.status(404).json({ message: 'Admin account not found.' });
     if (!/^\d{6}$/.test(String(otp || '')) || !verifyTotpOnce(adminTotp.readSeed(account), otp, account.alias)) return res.status(401).json({ message: 'Invalid current authenticator code.' });
-    const secret = speakeasy.generateSecret({ name: `SuppliWise Admin (${account.alias})`, issuer: 'SuppliWise' });
+    const secret = totpRfc.generateSecret({ name: `SuppliWise Admin (${account.alias})`, issuer: 'SuppliWise' });
     // writeSeed seals the new key AND clears the legacy plaintext field, so
     // rotating an authenticator genuinely forgets the old seed instead of
     // leaving it readable in the database.

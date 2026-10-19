@@ -20,7 +20,7 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const jwt = require('jsonwebtoken');
-const speakeasy = require('speakeasy');
+const totpRfc = require('./utils/totpRfc');
 const mongoose = require('mongoose');
 const User = require('./models/User');
 const Session = require('./models/Session');
@@ -116,10 +116,10 @@ const signInWithAuthenticator = async (email, base32, remember = false) => {
 // First use never waits; a reuse inside the same 30 s step waits ≤30 s.
 const usedTotpCodes = [];
 const freshTotp = async (base32Secret) => {
-  let code = speakeasy.totp({ secret: base32Secret, encoding: 'base32' });
+  let code = totpRfc.totp({ secret: base32Secret, encoding: 'base32' });
   for (let guard = 0; guard < 90 && usedTotpCodes.includes(code); guard += 1) {
     await new Promise((r) => setTimeout(r, 1000));
-    code = speakeasy.totp({ secret: base32Secret, encoding: 'base32' });
+    code = totpRfc.totp({ secret: base32Secret, encoding: 'base32' });
   }
   usedTotpCodes.push(code);
   return code;

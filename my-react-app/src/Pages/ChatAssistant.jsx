@@ -506,7 +506,7 @@ export default function ChatAssistant() {
       const data = await listChatThreads();
       if (version !== conversationVersionRef.current) return;
       setThreads(Array.isArray(data?.threads) ? data.threads.slice(0, 7) : []);
-    } catch (err) {
+    } catch {
       // History is a convenience: a failed load must never
       // break the chat itself, so the menu just stays empty.
       if (version !== conversationVersionRef.current) return;
@@ -642,7 +642,7 @@ export default function ChatAssistant() {
       const data = await listArchivedThreads();
       if (version !== conversationVersionRef.current) return;
       setArchivedThreads(Array.isArray(data?.threads) ? data.threads : []);
-    } catch (err) {
+    } catch {
       if (version !== conversationVersionRef.current) return;
       setArchivedThreads([]);
     } finally {
