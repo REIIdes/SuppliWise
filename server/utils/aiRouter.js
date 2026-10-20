@@ -86,6 +86,7 @@ const DEFAULT_PROVIDER = 'openrouter';
 const DEFAULT_PROVIDER_ENV = 'AI_DEFAULT_PROVIDER';
 
 const { AI_PROVIDERS, resolveKey, resolveModel, resolveEndpoints } = require('./aiProviders');
+const { normalizeModelText } = require('./modelText');
 
 /**
  * The routing table. `purpose` is the vocabulary call sites speak; the admin
@@ -102,25 +103,41 @@ const AI_ROUTES = [
     label: 'Assessment recommendations',
     detail: 'Generates the personalised supplement plan from a completed assessment.',
     provider: DEFAULT_PROVIDER,
+    // The plan a member receives is this call plus `planGrounding` on top of it;
+    // with no declared standby the whole AI layer is offline as soon as the
+    // default account runs out of credit, and the deterministic baseline engine
+    // alone answers a question that was asked with a free-tier key sitting
+    // configured two rows away. Grounding bounds what a standby model may say,
+    // so the degradation is a plainer plan, never an unverifiable one.
+    fallback: 'groq',
   },
   {
     purpose: 'chat',
     label: 'AI chat assistant',
     detail: 'Answers health and SuppliWise questions in the results-screen assistant.',
     provider: 'anthropic',
-    // Chat is the one user-facing feature with a fallback, and it needs one.
+    // Chat is the feature a member is sitting there watching, so its chain has
+    // to reach past one provider — and a chain of two turned out not to be a
+    // chain. Every key in this deployment is valid, configured and reported
+    // healthy by the probes, while the accounts behind them answer "credit
+    // balance is too low" (Anthropic, HTTP 400), "this account never purchased
+    // credits" (OpenRouter, HTTP 402) and "no credits remaining" (OpenAI,
+    // HTTP 429). Funding is invisible to a configuration check, so a single
+    // declared fallback meant the member got the canned apology twice while a
+    // funded free-tier key served nothing.
     //
-    // A provider key can be perfectly valid and still unable to serve a single
-    // completion — Anthropic answers an exhausted balance as a 400, and the
-    // model-list probe cannot see it. Moving chat to a provider in that state
-    // without a fallback would put every user on the canned offline reply until
-    // the account is funded, which is a far worse failure than using the second
-    // provider for a while. The primary is still Anthropic: the fallback is
-    // only reached when the primary genuinely cannot answer.
+    // Groq is therefore NAMED here rather than discovered at request time: the
+    // router walks only what this table declares, so every provider a chat turn
+    // can reach stays visible on the admin card instead of the router quietly
+    // deciding that a health answer may come from anywhere. A weaker model
+    // carrying a turn is a billing fact an operator acts on, and `attempts`
+    // records it — not a silent substitution.
     //
-    // The other four health features keep their existing fallbacks (a rule-based
-    // clinical engine / basicClean / offlineFallback) and do NOT need this.
-    fallback: DEFAULT_PROVIDER,
+    // The other generation features declare a standby for the same reason; the
+    // detection purposes keep their rule-based fallbacks, and `priorityFlagging`
+    // names no provider at all — see its note for why a free-tier model must not
+    // be the reason a member is escalated.
+    fallback: [DEFAULT_PROVIDER, 'groq'],
   },
   {
     purpose: 'polish',
@@ -137,14 +154,19 @@ const AI_ROUTES = [
     // Its own fallback, for the same reason chat has one: a valid key can still
     // be unable to answer (exhausted credit is a 400 the health probe cannot
     // see), and a description that never gets polished is a degraded product
-    // rather than a degraded feature.
-    fallback: DEFAULT_PROVIDER,
+    // rather than a degraded feature. Both OpenAI and the default are unfunded
+    // in this deployment, so the chain ends at the one key that answers today.
+    fallback: [DEFAULT_PROVIDER, 'groq'],
   },
   {
     purpose: 'supplementDetail',
     label: 'Supplement detail mode',
     detail: 'Writes the personalised guide shown for a single supplement.',
     provider: DEFAULT_PROVIDER,
+    // Same reason as assessment: this text is grounded against the evidence
+    // registry before it is shown, so a standby produces a plainer guide rather
+    // than an unverified one, and "no guide at all" is the alternative.
+    fallback: 'groq',
   },
   {
     purpose: 'systemDetection',
@@ -157,6 +179,12 @@ const AI_ROUTES = [
     label: 'Priority assessment flagging',
     detail: 'Second opinion on a submitted assessment, looking for clinical concern the rule engine missed. It can only escalate a flag, never clear one.',
     provider: 'anthropic',
+    // Deliberately no declared standby, unlike the generation features. This
+    // purpose can only ADD a Priority flag to a member's record, so routing it
+    // to a cheaper model when the primary cannot answer would mean a weaker
+    // model deciding who gets reviewed by a human — and Anthropic being out of
+    // credit is not a clinical fact about the member. The rule engine's verdict
+    // stands alone instead, which is the same outcome as this call abstaining.
   },
 ];
 
@@ -183,6 +211,30 @@ const PRIMARY_BUDGET_FLOOR_MS = 5000;
  */
 function providerByKey(key) {
   return PROVIDER_BY_KEY.get(String(key || '')) || null;
+}
+
+/**
+ * The providers a purpose declares it may fall back to, in order.
+ *
+ * `fallback` is a key or a list of keys. A list exists because one fallback is
+ * not a fallback: chat's declared fallback is the default provider, and a
+ * default that cannot serve — a valid key on an account with no credit, which
+ * no configuration probe can see — left the assistant on its canned apology
+ * while a funded key sat unused three providers away. The chain stays
+ * DECLARED rather than inferred, so the invariant that the router only walks
+ * what the table names still holds, and the admin card still shows every
+ * provider a request could reach.
+ *
+ * @param {{fallback?: string|string[]}} route
+ * @returns {string[]}
+ */
+function declaredFallbacks(route) {
+  const raw = route && route.fallback !== undefined && route.fallback !== null ? route.fallback : [];
+  return [...new Set(
+    (Array.isArray(raw) ? raw : [raw])
+      .map((key) => String(key || '').trim())
+      .filter((key) => key && key !== route.provider),
+  )];
 }
 
 /**
@@ -384,10 +436,12 @@ function resolveChain(purpose, { env = process.env } = {}) {
     return [];
   }
   const chain = [resolveTarget(purpose, { env })];
-  if (route.fallback && route.fallback !== route.provider) {
-    // Resolved through the same path, so a fallback cannot be a different kind
-    // of target than a primary (same validation, same model resolution).
-    const fallback = resolveTarget(purpose, { env, providerOverride: route.fallback });
+  // Every declared fallback, in declared order, through the same resolution as
+  // the primary — so a fallback cannot be a different kind of target (same
+  // validation, same model resolution), and the table remains the only place
+  // that decides which providers a purpose may reach.
+  for (const key of declaredFallbacks(route)) {
+    const fallback = resolveTarget(purpose, { env, providerOverride: key });
     if (fallback.ok) chain.push(fallback);
   }
 
@@ -403,7 +457,7 @@ function resolveChain(purpose, { env = process.env } = {}) {
   // held to the same standard: a missing key or an unselected model is not
   // usable, and the chain stays empty so the error names the real problem.
   const fallbackKey = defaultProviderKey(env);
-  if (fallbackKey === route.provider) return [];   // already tried above
+  if (fallbackKey === route.provider || declaredFallbacks(route).includes(fallbackKey)) return [];
   const target = resolveTarget(purpose, { env, providerOverride: fallbackKey });
   // Tagged, and deliberately NOT inferred downstream by comparing provider
   // names. `chat` nominates Anthropic and falls back to OpenRouter, so it also
@@ -426,6 +480,13 @@ function resolveChain(purpose, { env = process.env } = {}) {
  * Both tolerate a missing body, and OpenAI also tolerates the reasoning-style
  * field some gateways populate instead of `content`.
  *
+ * The text is returned normalised to ASCII (see utils/modelText.js). A vendor's
+ * sampler decides whether it emits `can't` or the curly-quoted form, and every
+ * guard downstream — the curative-claim, refusal and dose patterns in
+ * planGrounding.js — is written with an ASCII apostrophe. Normalising here, at
+ * the seam where a completion first becomes a string in this codebase, is what
+ * stops a correct medical disclaimer from being rewritten as an unverified claim.
+ *
  * @param {unknown} data
  * @param {'openai'|'anthropic'} [wire]
  * @returns {string}
@@ -433,17 +494,18 @@ function resolveChain(purpose, { env = process.env } = {}) {
 function readCompletionText(data, wire = 'openai') {
   if (wire === 'anthropic') {
     const blocks = data && Array.isArray(data.content) ? data.content : [];
-    return blocks
-      .filter((block) => block && block.type === 'text' && typeof block.text === 'string')
-      .map((block) => block.text)
-      .join('')
-      .trim();
+    return normalizeModelText(
+      blocks
+        .filter((block) => block && block.type === 'text' && typeof block.text === 'string')
+        .map((block) => block.text)
+        .join(''),
+    ).trim();
   }
   const message = data && data.choices && data.choices[0] && data.choices[0].message;
   if (!message) return '';
   const content = typeof message.content === 'string' ? message.content : '';
   const reasoning = typeof message.reasoning === 'string' ? message.reasoning : '';
-  return (content || reasoning || '').trim();
+  return normalizeModelText(content || reasoning || '').trim();
 }
 
 /**
@@ -485,6 +547,47 @@ function detectCreditExhausted(status, bodyText) {
     && !text.includes('insufficient_credit')) return null;
   return 'The key is accepted but the account has no credit — add credit in Plans & Billing. '
     + `Every call fails until you do (HTTP ${status}).`;
+}
+
+/**
+ * The provider's own reason, in the error the operator reads.
+ *
+ * Every non-2xx used to be reported as "Provider answered HTTP 413." — a number
+ * with no noun. The body was already being read (for the credit check above) and
+ * then thrown away, so a rejection that Groq explains in plain English ("This
+ * model's maximum prompt length is 8192 tokens") arrived here as three digits and
+ * a full stop. Diagnosing that required replaying the request by hand against the
+ * endpoint, which is not a thing an on-call operator will do at 2 a.m.
+ *
+ * The excerpt is bounded, single-lined, and credential-scrubbed: a gateway error
+ * page can echo request headers, and an AI log line must never be the place a key
+ * surfaces. JSON bodies are unwrapped to `error.message`/`error.type` first,
+ * because that is the sentence the provider wrote for a human.
+ *
+ * @param {string} bodyText
+ * @returns {string} a detail clause, or '' when there is nothing to say
+ */
+function providerErrorDetail(bodyText) {
+  const raw = String(bodyText || '');
+  if (!raw.trim()) return '';
+  let message = '';
+  try {
+    const parsed = JSON.parse(raw);
+    const err = parsed && parsed.error ? parsed.error : parsed;
+    if (err && typeof err === 'object') {
+      message = [err.type, err.message, err.detail].filter((x) => typeof x === 'string' && x).join(': ');
+    }
+    if (!message && typeof err === 'string') message = err;
+  } catch {
+    message = raw.replace(/<[^>]*>/g, ' ');
+  }
+  const oneLine = normalizeModelText(message)
+    .replace(/\s+/g, ' ')
+    .trim()
+    // Any credential shape a proxy might have echoed back, plus bare long tokens.
+    .replace(/(?:sk|pk|key|token|secret|bearer|authorization|api[-_]?key)[-"'\s]*[:=]?\s*[A-Za-z0-9_\-]{6,}/gi, '[redacted]')
+    .slice(0, 200);
+  return oneLine ? ` — ${oneLine}` : '';
 }
 
 /**
@@ -542,9 +645,9 @@ async function completeWithTarget(target, {
   json = false,
   extraBody = null,
 } = {}) {
-  const failure = (error, latencyMs = null) => ({
+  const failure = (error, latencyMs = null, creditExhausted = false) => ({
     ok: false, data: null, text: '', provider: target.provider,
-    model: target.model, latencyMs, error,
+    model: target.model, latencyMs, error, creditExhausted,
   });
 
   if (!target.ok) return failure(target.error);
@@ -666,7 +769,18 @@ async function completeWithTarget(target, {
           bodyText = (await response.text()).slice(0, 600);
         } catch { /* body unreadable; fall through to the generic message */ }
         const credit = detectCreditExhausted(response.status, bodyText);
-        return { error: credit || `Provider answered HTTP ${response.status}.`, latencyMs: Date.now() - started };
+        // Tagged as well as phrased. The sentence is for a log line; the flag is
+        // for the caller that has to decide whether this provider is worth
+        // dialling again — and `providerHealth` below reads the flag rather than
+        // pattern-matching a message an operator may one day reword.
+        if (credit) {
+          return { error: credit, latencyMs: Date.now() - started, creditExhausted: true, status: response.status };
+        }
+        return {
+          error: `Provider answered HTTP ${response.status}${providerErrorDetail(bodyText) || '.'}`,
+          latencyMs: Date.now() - started,
+          status: response.status,
+        };
       }
 
       const data = await response.json();
@@ -698,7 +812,7 @@ async function completeWithTarget(target, {
     outcome = await send(buildBody({ withJsonMode: false }));
   }
 
-  if (outcome.error) return failure(outcome.error, outcome.latencyMs);
+  if (outcome.error) return failure(outcome.error, outcome.latencyMs, outcome.creditExhausted === true);
 
   const text = outcome.text || '';
   if (!text) return failure('Provider returned an empty completion.', outcome.latencyMs);
@@ -748,6 +862,52 @@ async function complete(purpose, options = {}) {
 }
 
 /**
+ * What each purpose's most recent call actually did, and which providers have
+ * answered "no credit" since boot.
+ *
+ * Held in memory because it is a live operational signal, not a history: the
+ * question it answers is "is a member getting a canned reply RIGHT NOW", and a
+ * database table would answer it with last week's outage. Nothing here is
+ * request content — no prompt, no reply, no member — only which key served and
+ * what it said about its own balance.
+ *
+ * This exists because an unfunded provider is invisible to every configuration
+ * check the product has: the key loads, the model list resolves, the routing
+ * card is green, and the account answers HTTP 400/402/429 the first time a real
+ * question is asked. Without a record of THAT, the only place the outage appears
+ * is a stderr line nobody tails, and the AI features look broken at random.
+ */
+const purposeOutcomes = new Map();
+const creditFailures = new Map();
+
+function recordPurposeOutcome(purpose, target, result) {
+  purposeOutcomes.set(purpose, {
+    purpose,
+    provider: target.provider,
+    model: target.model,
+    ok: result.ok === true,
+    error: result.ok === true ? null : String(result.error || 'the provider returned nothing'),
+    at: new Date().toISOString(),
+  });
+  if (result.ok === true || result.creditExhausted !== true) return;
+  const prior = creditFailures.get(target.provider)
+    || { provider: target.provider, model: target.model, count: 0, lastAt: null };
+  prior.count += 1;
+  prior.model = target.model;
+  prior.lastAt = new Date().toISOString();
+  creditFailures.set(target.provider, prior);
+}
+
+/**
+ * @returns {{purposes: Array<{purpose: string, provider: string, model: string|null,
+ *                             ok: boolean, error: string|null, at: string}>,
+ *            creditBlocked: Array<{provider: string, model: string|null, count: number, lastAt: string}>}}
+ */
+function providerHealth() {
+  return { purposes: [...purposeOutcomes.values()], creditBlocked: [...creditFailures.values()] };
+}
+
+/**
  * Walk a purpose's provider chain until one answers.
  *
  * The fallback is only reached when the primary genuinely cannot answer — no
@@ -773,20 +933,20 @@ async function completeWithFallback(purpose, options = {}) {
     // primary sends an operator to fix one key and hit the identical wall on
     // the next one — the error names a fix that does not actually fix it.
     const reasons = [resolveTarget(purpose, { env })];
-    let declaredFallback = null;
+    let declared = [];
     try {
-      declaredFallback = routeFor(purpose).fallback || null;
+      declared = declaredFallbacks(routeFor(purpose));
     } catch { /* unknown purpose; the primary reason already says so */ }
-    if (declaredFallback && declaredFallback !== reasons[0].provider) {
-      reasons.push(resolveTarget(purpose, { env, providerOverride: declaredFallback }));
+    for (const key of declared) {
+      reasons.push(resolveTarget(purpose, { env, providerOverride: key }));
     }
     // The default provider is also what would serve this request if it were
     // configured, so its key is part of the fix and belongs in the message.
-    // Deduplicated against the two above, because for the health features the
+    // Deduplicated against the ones above, because for the health features the
     // default IS the primary and naming it twice would read as a second
     // provider being tried.
     const fallbackKey = defaultProviderKey(env);
-    if (fallbackKey !== reasons[0].provider && fallbackKey !== declaredFallback) {
+    if (fallbackKey !== reasons[0].provider && !declared.includes(fallbackKey)) {
       reasons.push(resolveTarget(purpose, { env, providerOverride: fallbackKey }));
     }
     return {
@@ -805,6 +965,9 @@ async function completeWithFallback(purpose, options = {}) {
       ...options,
       timeoutMs: splitTimeout(remaining, options.timeoutMs || DEFAULT_TIMEOUT_MS),
     });
+    // Recorded for BOTH outcomes: a purpose whose last call succeeded is the
+    // evidence an operator needs to see as much as a failure.
+    recordPurposeOutcome(purpose, target, result);
     if (result.ok) {
       return {
         ...result,
@@ -841,7 +1004,7 @@ async function completeWithFallback(purpose, options = {}) {
 function describeRouting({ env = process.env } = {}) {
   return AI_ROUTES.map((route) => {
     const provider = providerByKey(route.provider);
-    const fallback = route.fallback ? providerByKey(route.fallback) : null;
+    const fallbacks = declaredFallbacks(route).map(providerByKey).filter(Boolean);
 
     // The chain is the router's own resolution, so this cannot drift from it.
     // `viaDefault` is set by `resolveChain` itself — see the note there on why it
@@ -874,9 +1037,12 @@ function describeRouting({ env = process.env } = {}) {
       // the difference between "unreachable" and "unreachable, at this address".
       baseUrl: effectiveProvider ? resolveEndpoints(effectiveProvider, env).baseUrl : null,
       // Surfaced so the panel can name the fallback rather than letting an
-      // operator assume the primary is the only thing that can answer.
-      fallback: fallback ? fallback.key : null,
-      fallbackLabel: fallback ? fallback.label : null,
+      // operator assume the primary is the only thing that can answer. The whole
+      // declared chain is published, because a chain of two is exactly the case
+      // where naming only the first one hides that BOTH can be unfunded.
+      fallback: fallbacks.length ? fallbacks[0].key : null,
+      fallbackLabel: fallbacks.map((entry) => entry.label).join(', ') || null,
+      fallbacks: fallbacks.map((entry) => ({ key: entry.key, label: entry.label })),
     };
   });
 }
@@ -890,6 +1056,7 @@ module.exports = {
   PRIMARY_BUDGET_FLOOR_MS,
   providerByKey,
   routeFor,
+  declaredFallbacks,
   resolveTarget,
   resolveChain,
   splitTimeout,
@@ -897,8 +1064,10 @@ module.exports = {
   wasTruncated,
   parseJsonObject,
   detectCreditExhausted,
+  providerErrorDetail,
   complete,
   completeWithTarget,
   completeWithFallback,
+  providerHealth,
   describeRouting,
 };

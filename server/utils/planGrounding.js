@@ -63,6 +63,9 @@ const {
   MEDICAL_CONDITIONS,
   ITEMS,
 } = require('./healthAssessmentInstrument');
+// Every guard in this file is written in ASCII; provider text is normalised to
+// ASCII at the seam so `can’t` cannot be misread as an unqualified claim.
+const { normalizeModelText } = require('./modelText');
 
 // The instrument owns the option list; this reads it instead of copying it, so
 // a goal added to the questionnaire is a goal the verifier knows about.
@@ -1191,9 +1194,25 @@ const CLAIM_REWRITES = [
     ', though side effects do happen'],
   [/\bguaranteed\s+to\b/gi, 'likely to'],
   [/\bguaranteed\b/gi, 'promised'],
-  [/\bguarantees?\b/gi, 'promises'],
+  // Singular and plural are separate rules. One `guarantees?` rewrite turned
+  // "isn't a guarantee" into "isn't a promises" — a repaired claim in a broken
+  // sentence, and the live gate caught it in what a member would have read.
+  [/\bguarantees\b/gi, 'promises'],
+  [/\bguarantee\b/gi, 'promise'],
   [/\bmiracle\b/gi, 'much-promoted'],
 ];
+
+/**
+ * A hedge, not a claim: "the evidence isn't a guarantee", "no supplement is a
+ * proven cure".
+ *
+ * The rewrite table above exists to soften an ASSERTION. Denying one is the
+ * app already saying less than the model did, so rewriting it adds nothing to
+ * member safety and takes something away from the sentence — and a noun rewrite
+ * inside a denial cannot even stay grammatical. Denied hedges are therefore
+ * masked out alongside denied curative claims and restored untouched.
+ */
+const NEGATED_HEDGE = /\b(?:do(?:e)?s?\s+not|doesn'?t|did\s+not|didn'?t|can(?:not|\s+not|'?t)|will\s+not|won'?t|is\s+not|isn'?t|are\s+not|aren'?t|was\s+not|wasn'?t|were\s+not|weren'?t|have\s+not|haven'?t|has\s+not|hasn'?t|not|no|never|hardly|scarcely|rarely)\s+(?:(?:a|an|any|much|really|truly|just|also|simply)\s+){0,3}(?:guarantees?|guaranteed|proof|proven|certainty|promise[s]?|cures?)\b/gi;
 
 /**
  * A denied curative claim — the shape of this app's own disclaimer, "does not
@@ -1212,10 +1231,16 @@ const NEGATED_CURATIVE = /\b(?:do(?:e)?s?\s+not|doesn'?t|will\s+not|cannot|can'?
 function downgradeAbsoluteClaims(text) {
   const raw = String(text == null ? '' : text);
   const protectedPhrases = [];
-  const value0 = raw.replace(NEGATED_CURATIVE, (whole) => {
-    protectedPhrases.push(whole);
-    return `\u0001${protectedPhrases.length - 1}\u0001`;
-  });
+  const mask = (value) => value
+    .replace(NEGATED_CURATIVE, (whole) => {
+      protectedPhrases.push(whole);
+      return `\u0001${protectedPhrases.length - 1}\u0001`;
+    })
+    .replace(NEGATED_HEDGE, (whole) => {
+      protectedPhrases.push(whole);
+      return `\u0001${protectedPhrases.length - 1}\u0001`;
+    });
+  const value0 = mask(raw);
   let value = value0;
   const repairs = [];
   for (const [re, to] of CLAIM_REWRITES) {
@@ -1648,7 +1673,9 @@ function tidyProse(text) {
 function verifyProse(text, options = {}) {
   if (typeof text !== 'string' || !text.trim()) return { value: text, repairs: [] };
   const repairs = [];
-  let value = text;
+  // Normalised before ANY guard runs, so a vendor's typography cannot decide
+  // which rules fire. See utils/modelText.js.
+  let value = normalizeModelText(text);
 
   const ids = stripUnverifiableIdentifiers(value, options);
   for (const detail of ids.removed) repairs.push({ kind: 'identifier', detail });

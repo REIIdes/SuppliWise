@@ -310,6 +310,53 @@ test('verifyProse reports each category it repaired and stays idempotent', () =>
   assert.equal(second.value, first.value);
 });
 
+test('a vendor\'s typography cannot decide whether a true denial survives', () => {
+  // Live incident, 2026-10-20: the chat accuracy gate failed `refuse-reminders`
+  // because Groq's model answers with U+2019. Every negation guard in this file is
+  // `can'?t` / `doesn'?t`, so `doesn’t include reminders … can’t send one` matched
+  // NONE of them, read as an un-negated capability claim, and the verifier rewrote
+  // a correct answer into boilerplate the member then read.
+  const denial = 'The SuppliWise app doesn\u2019t include reminder notifications, so it can\u2019t send you a reminder at 8 a.m.';
+  const out = verifyProse(denial, { ctx: ctxFor(NO_MEDS, 'remind me at 8am') });
+  assert.deepEqual(out.repairs, [], `a correct denial must not be edited: ${JSON.stringify(out.repairs)}`);
+  assert.equal(
+    out.value,
+    "The SuppliWise app doesn't include reminder notifications, so it can't send you a reminder at 8 a.m.",
+  );
+  assert.equal(
+    ship('Magnesium can\u2019t cure your migraine, but it may help.', NO_MEDS, 'magnesium for migraine'),
+    "Magnesium can't cure your migraine, but it may help.",
+  );
+
+  // And the normalisation must not weaken a guard: the same claim in curly quotes
+  // is still the same claim, so it is still downgraded.
+  const curly = 'Turmeric \u201Ccures\u201D inflammation.';
+  assert.notEqual(ship(curly), curly, 'a smart-quoted curative verb must still be caught');
+  assert.match(ship(curly), /may|can help|support/i, ship(curly));
+});
+
+test('a denial of a guarantee is a hedge the verifier leaves alone', () => {
+  // Live gate, 2026-10-20: Groq answered a citation question with "The evidence
+  // isn't a guarantee, but many people find…". The rewrite table turned the noun
+  // into its plural replacement and shipped "isn't a promises" to the member. A
+  // denied guarantee already asserts less than the model did, so there is nothing
+  // for the pass to protect against — and no grammatical replacement exists.
+  for (const sentence of [
+    "The evidence isn't a guarantee, but many people find magnesium helps.",
+    "This doesn't guarantee anything, and that is the honest position.",
+    'There is no guarantee that it works for you specifically.',
+    'They are not promises, only early signals.',
+  ]) {
+    assert.equal(ship(sentence, NO_MEDS, 'magnesium evidence'), sentence, sentence);
+  }
+
+  // The assertion half still downgrades, and now agrees in number with the
+  // article it sits next to.
+  assert.equal(ship('It guarantees better sleep.'), 'It promises better sleep.');
+  assert.equal(ship('This supplement is a guarantee of results.'), 'This supplement is a promise of results.');
+  assert.match(ship('Ashwagandha is guaranteed to lower cortisol.'), /likely to lower cortisol/);
+});
+
 test('verifyDocumentDeep reaches nested guide fields and skips the owned ones', () => {
   const guide = {
     name: 'Magnesium Glycinate',

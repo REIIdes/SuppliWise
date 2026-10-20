@@ -148,6 +148,24 @@ test('the chat grounding row asks the retriever a real question, and can go red'
   assert.match(body, /feedbackStats\(\)/, 'the learning loop is asked whether it is being fed');
 });
 
+test('the provider billing row reports what the last call did, and can go red', () => {
+  // Every other AI row asks whether a key is CONFIGURED. That is the question
+  // that stayed green through an outage where three funded-looking accounts had
+  // no credit and members got the canned apology — so this row must read the
+  // router's record of real calls, and must not dial a provider of its own
+  // (a probe that spends member quota to test quota is a second outage).
+  const body = probeBody(ADMIN_SRC, "probe('ai_provider_billing'", "probe('delete_account'");
+  assert.ok(ADMIN_SRC.includes("probe('ai_provider_billing'"), 'the row exists at all');
+  assert.match(body, /providerHealth\(\)/, 'it reads what actually answered, not what the env file claims');
+  assert.match(body, /creditBlocked/, 'and an account that said "no credit" is named');
+  assert.match(body, /status: 'critical'/, 'total provider failure is red');
+  assert.match(body, /status: 'warning'/, 'and a standby carrying the traffic is visible, not quiet');
+  assert.doesNotMatch(body, /completeWithFallback\(|complete\(/,
+    'the probe must not spend a completion to learn what the last completion did');
+  // The signal has to exist: a purpose that never ran must not be reported healthy.
+  assert.match(body, /No AI call has run since boot/, 'silence is reported as silence');
+});
+
 test('every probe in this file is reachable from the dashboard', () => {
   // A probe that is written but never registered is how a control stops being
   // believed: the row either goes missing or stays on a stale verdict.

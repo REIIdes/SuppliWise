@@ -39,11 +39,14 @@ const {
   DEFAULT_TIMEOUT_MS,
   PRIMARY_BUDGET_FLOOR_MS,
   routeFor,
+  declaredFallbacks,
   resolveTarget,
   resolveChain,
   splitTimeout,
   completeWithFallback,
+  providerHealth,
   readCompletionText,
+  providerErrorDetail,
   parseJsonObject,
   complete,
   describeRouting,
@@ -132,6 +135,22 @@ test('the long-form health content features stay on the default provider', () =>
   }
 });
 
+/**
+ * `fallback` accepts a key or a list, so one normalizer has to do the whole job:
+ * keep declaration order, drop blanks, drop the primary (a provider cannot be
+ * its own fallback), and dedupe — because a chain that names OpenRouter twice
+ * spends the same failing account twice and reports two attempts that were one.
+ */
+test('the declared fallback chain is ordered, deduplicated and never names the primary', () => {
+  assert.deepEqual(declaredFallbacks({ provider: 'anthropic', fallback: 'openrouter' }), ['openrouter']);
+  assert.deepEqual(declaredFallbacks({ provider: 'anthropic', fallback: ['openrouter', 'groq'] }), ['openrouter', 'groq']);
+  assert.deepEqual(declaredFallbacks({ provider: 'openrouter', fallback: ['groq', 'openrouter', 'groq'] }), ['groq']);
+  assert.deepEqual(declaredFallbacks({ provider: 'groq', fallback: ['', null, undefined, '  openai ', 'openai'] }), ['openai']);
+  assert.deepEqual(declaredFallbacks({ provider: 'groq' }), []);
+  assert.deepEqual(declaredFallbacks({ provider: 'groq', fallback: 'groq' }), [],
+    'a purpose may not be routed to itself as a rescue');
+});
+
 test('description polish runs on OpenAI, keeping it off the default', () => {
   // The spread. Before this, ONE provider took assessment + chat + polish +
   // detail plus every fallback, so all of that traffic shared a single quota
@@ -140,20 +159,27 @@ test('description polish runs on OpenAI, keeping it off the default', () => {
   // shortest one, so a nano-class model on a different provider is both the
   // better fit and the load the default no longer carries.
   assert.equal(routeFor('polish').provider, 'openai');
-  // Its own fallback, for the same reason chat has one: a valid key can still be
-  // unable to answer (exhausted credit is a 400 the health probe cannot see),
-  // and an unpolished description is a degraded product, not a broken feature.
-  assert.equal(routeFor('polish').fallback, DEFAULT_PROVIDER);
+  // Its own fallback chain, for the same reason chat has one: a valid key can
+  // still be unable to answer — this deployment's OpenAI key answers an exhausted
+  // balance with a 429 the health probe cannot see — and an unpolished
+  // description is a degraded product, not a broken feature.
+  assert.deepEqual(declaredFallbacks(routeFor('polish')), [DEFAULT_PROVIDER, 'groq']);
 });
 
-test('chat runs on Anthropic, and keeps a fallback so it cannot go dark', () => {
+test('chat runs on Anthropic, and keeps a fallback chain so it cannot go dark', () => {
   assert.equal(routeFor('chat').provider, 'anthropic');
-  // The fallback is the property that matters. Anthropic answers an exhausted
+  // The chain is the property that matters. Anthropic answers an exhausted
   // balance with a 400, and the model-list health probe cannot see that — so
   // without a fallback, moving chat there would put every user on the canned
   // offline reply until the account is funded.
-  assert.equal(routeFor('chat').fallback, 'openrouter');
-  assert.notEqual(routeFor('chat').fallback, routeFor('chat').provider,
+  //
+  // One fallback was one short. Every key in this deployment is valid, and three
+  // of the four accounts behind them have no credit, so a chain of
+  // Anthropic→OpenRouter could dead-end while a funded free-tier key sat
+  // configured and unused. Groq is DECLARED, not discovered at request time, so
+  // the router still walks only what this table names.
+  assert.deepEqual(declaredFallbacks(routeFor('chat')), ['openrouter', 'groq']);
+  assert.ok(!declaredFallbacks(routeFor('chat')).includes(routeFor('chat').provider),
     'a provider cannot be its own fallback');
 });
 
@@ -325,6 +351,21 @@ test('a completion reads content, then reasoning, then nothing', () => {
   assert.equal(readCompletionText({ choices: [] }), '');
   assert.equal(readCompletionText(null), '');
   assert.equal(readCompletionText({}), '');
+});
+
+test('a completion arrives in ASCII whatever the vendor sent', () => {
+  // Groq emits U+2019 where Anthropic emits '. Every guard downstream is written
+  // `can'?t`, and a curly quote is a word boundary — so un-normalised, "it can’t
+  // send a reminder" reads as an un-negated "it can send a reminder" and the
+  // verifier rewrites a correct disclaimer. Normalising at this seam is the only
+  // place that has to remember it.
+  const curly = "It can\u2019t send a reminder, doesn\u2019t sync watches\u2009PMID:\u202f33417003 \u200B\u2026";
+  const plain = "It can't send a reminder, doesn't sync watches PMID: 33417003 ...";
+  assert.equal(readCompletionText({ choices: [{ message: { content: curly } }] }), plain);
+  assert.equal(readCompletionText({ content: [{ type: 'text', text: curly }] }, 'anthropic'), plain);
+  // Already-ASCII text is untouched, so the normalizer cannot silently re-word a
+  // provider that was behaving.
+  assert.equal(readCompletionText({ choices: [{ message: { content: plain } }] }), plain);
 });
 
 test('a JSON reply is parsed out of a fence or a preamble', () => {
@@ -778,11 +819,14 @@ test('a purpose with no fallback has a single-entry chain', () => withCleanEnv((
   process.env.ANTHROPIC_API_KEY = 'sk-ant-real';
   process.env.GROQ_API_KEY = 'gsk-real';
   process.env.OPENAI_API_KEY = 'sk-oai-real';
-  // (`polish` is excluded deliberately — it DOES declare a fallback. The two
-  // user-facing features that most need one, chat and polish, are the two that
-  // have it; the rest degrade to their deterministic engines, which is a
-  // complete and supported way to run.)
-  for (const purpose of ['assessment', 'supplementDetail', 'systemDetection', 'priorityFlagging']) {
+  // The two purposes that must stay single-provider. `systemDetection` degrades
+  // to the rule engine, and `priorityFlagging` declares no standby on purpose: it
+  // can only ADD a Priority flag, so a cheaper model must not become the reason a
+  // member is escalated when the primary account runs out of credit.
+  // (The generation features — chat, polish, assessment, supplementDetail — each
+  // declare a funded standby, because a plainer answer grounded by the app's own
+  // checks beats no answer.)
+  for (const purpose of ['systemDetection', 'priorityFlagging']) {
     assert.equal(resolveChain(purpose).length, 1, `${purpose} should not have a fallback`);
   }
 }));
@@ -908,6 +952,69 @@ test('an unfunded primary falls through and the source names the real provider',
     assert.equal(result.attempts[1].ok, true);
   }));
 
+test('the router remembers which provider served each purpose and which one is unbilled', () =>
+  withCleanEnv(async () => {
+    // The outage this branch was cut for was invisible to every configuration
+    // check in the product: the keys loaded, the routes resolved, the cards were
+    // green, and the accounts answered "no credit" only when a member asked
+    // something. `providerHealth` is the router's own record of what the last real
+    // call did, so the Security Center can report that instead of the env file.
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-real';
+    process.env.OPENROUTER_API_KEY = 'sk-or-real';
+    process.env.GROQ_API_KEY = 'gsk-real';
+    stubFetch(async (url) => (String(url).includes('anthropic') || String(url).includes('openrouter')
+      ? { status: 400, ok: false, text: async () => '{"error":{"message":"Your credit balance is too low to access the Anthropic API."}}' }
+      : completionResponse('served')));
+
+    const result = await completeWithFallback('chat', { messages: [{ role: 'user', content: 'hi' }] });
+    assert.equal(result.ok, true);
+
+    const health = providerHealth();
+    const chat = health.purposes.find((p) => p.purpose === 'chat');
+    assert.ok(chat, 'the purpose that just ran must be reported');
+    assert.equal(chat.ok, true);
+    assert.equal(chat.provider, 'groq', 'the record names who ACTUALLY answered, not who was configured');
+
+    const blocked = health.creditBlocked.find((b) => b.provider === 'anthropic');
+    assert.ok(blocked, 'an account that answered "no credit" must be listed as blocked');
+    assert.ok(blocked.count >= 1 && blocked.lastAt, 'with how often and when, so the row can say since-when');
+    // A provider that served must NOT be listed, or the row would report the
+    // standby carrying the product as though it were broken too.
+    assert.equal(health.creditBlocked.some((b) => b.provider === 'groq'), false);
+    assert.equal(health.purposes.some((p) => p.purpose === 'noSuchPurpose'), false,
+      'a purpose that never ran is not claimed to be healthy');
+  }));
+
+test('a chain of unfunded providers is walked to the funded one', () =>
+  withCleanEnv(async () => {
+    // The shape of the outage this branch was cut for: three valid keys, two dead
+    // accounts, and the member reading "I'm having a bit of trouble right now"
+    // because the walk stopped at the second provider.
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-real';
+    process.env.OPENROUTER_API_KEY = 'sk-or-real';
+    process.env.GROQ_API_KEY = 'gsk-real';
+    const calls = stubFetch(async (url) => {
+      if (String(url).includes('anthropic')) {
+        return { status: 400, ok: false, text: async () => '{"error":{"message":"Your credit balance is too low to access the Anthropic API."}}' };
+      }
+      if (String(url).includes('openrouter')) {
+        return { status: 402, ok: false, text: async () => '{"error":{"message":"Insufficient credits. This account never purchased credits."}}' };
+      }
+      return completionResponse('answer from the free tier');
+    });
+
+    const result = await completeWithFallback('chat', { messages: [{ role: 'user', content: 'hi' }] });
+
+    assert.equal(result.ok, true, 'a funded key in the declared chain must serve the turn');
+    assert.equal(result.provider, 'groq');
+    assert.equal(result.text, 'answer from the free tier');
+    assert.equal(calls.length, 3, 'the walk must reach the third provider, not stop at the second');
+    assert.deepEqual(result.attempts.map((a) => a.provider), ['anthropic', 'openrouter', 'groq']);
+    assert.match(result.attempts[0].error, /no credit/i);
+    assert.match(result.attempts[1].error, /no credit/i);
+    assert.equal(result.attempts[2].ok, true);
+  }));
+
 test('an exhausted chain reports every provider it tried, and why', () =>
   withCleanEnv(async () => {
     process.env.ANTHROPIC_API_KEY = 'sk-ant-real';
@@ -920,6 +1027,48 @@ test('an exhausted chain reports every provider it tried, and why', () =>
     assert.deepEqual(result.attempts.map((a) => a.provider), ['anthropic', 'openrouter']);
   }));
 
+test('a rejection names the reason the provider gave, scrubbed and bounded', () => {
+  // Measured 2026-10-20: the assessment prompt is 8,128 tokens and Groq's free
+  // tier allows 8,000/minute. Every one of those calls answered HTTP 413 and the
+  // app reported "Provider answered HTTP 413." — so a limit the provider explained
+  // in one sentence took a hand-written probe against the endpoint to find.
+  assert.equal(
+    providerErrorDetail('{"error":{"type":"limit","message":"tokens per minute (TPM): Limit 8000, Requested 8128"}}'),
+    ' — limit: tokens per minute (TPM): Limit 8000, Requested 8128',
+  );
+  assert.equal(providerErrorDetail(''), '');
+  assert.equal(providerErrorDetail('   '), '');
+  const html = `<html><body><p>${'x'.repeat(400)}</p></body></html>`;
+  const detail = providerErrorDetail(html);
+  assert.ok(detail.startsWith(' — x'), detail.slice(0, 20));
+  assert.ok(detail.length <= 203, `an error page must not become the log line (${detail.length})`);
+  // A gateway page that echoes the request must not put a key in a log or a
+  // monitor row.
+  assert.doesNotMatch(
+    providerErrorDetail('{"error":{"message":"Authorization: Bearer sk-abcdef1234567890 was rejected"}}'),
+    /sk-abcdef|Bearer sk/,
+  );
+});
+
+test('the reason a funded standby refused is kept in the attempt list', () =>
+  withCleanEnv(async () => {
+    process.env.OPENROUTER_API_KEY = 'sk-or-real';
+    process.env.GROQ_API_KEY = 'gsk-real';
+    stubFetch(async (url) => {
+      if (String(url).includes('openrouter')) {
+        return { status: 402, ok: false, text: async () => '{"error":{"message":"Insufficient credits. This account never purchased credits."}}' };
+      }
+      return { status: 413, ok: false, text: async () => '{"error":{"type":"tokens","message":"tokens per minute (TPM): Limit 8000, Requested 8128"}}' };
+    });
+
+    const result = await completeWithFallback('assessment', { messages: [{ role: 'user', content: 'plan' }], json: true });
+
+    assert.equal(result.ok, false, 'a primary with no credit and a standby over its rate limit is a failure, not an answer');
+    assert.deepEqual(result.attempts.map((a) => a.provider), ['openrouter', 'groq']);
+    assert.match(result.attempts[1].error, /HTTP 413/, result.attempts[1].error);
+    assert.match(result.attempts[1].error, /TPM.*8128/, 'the provider\'s own sentence must reach the caller');
+  }));
+
 test('an entirely unconfigured chain names every key that is missing', () =>
   withCleanEnv(async () => {
     // Naming only the primary would send an operator to fix one key and hit the
@@ -928,7 +1077,8 @@ test('an entirely unconfigured chain names every key that is missing', () =>
     assert.equal(result.ok, false);
     assert.match(result.error, /ANTHROPIC_API_KEY/);
     assert.match(result.error, /OPENROUTER_API_KEY/);
-    assert.equal(result.attempts.length, 2);
+    assert.match(result.error, /GROQ_API_KEY/, 'every provider the chain can reach is part of the fix');
+    assert.equal(result.attempts.length, 3);
   }));
 
 test('an Anthropic chat body lifts system out and merges same-role turns', () =>

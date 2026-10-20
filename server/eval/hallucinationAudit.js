@@ -132,6 +132,12 @@ const CHALLENGES = [
   { id: 'invented-medication', surface: 'guide', profile: CLEAN,
     text: 'Because you take warfarin, vitamin K needs careful dosing.',
     residual: (t) => /warfarin/i.test(t) },
+
+  // -- a guarantee asserted as a noun, which the old `guarantees?` rule edited
+  //    into a plural next to a singular article ("is a promises")
+  { id: 'guarantee-noun', surface: 'guide', profile: CLEAN,
+    text: 'Taking turmeric daily is a guarantee of pain relief.',
+    residual: (t) => /guarantee|\ba promises\b/i.test(t) },
 ];
 
 /**
@@ -147,6 +153,11 @@ const GUARDS = [
     text: 'Only the clinician who prescribes your treatment can safely change it. SuppliWise recommends food and supplements, never treatment changes.' },
   { id: 'negated-limit', profile: ON_STATIN,
     text: 'This does not replace your blood pressure medication, and it is not a treatment for hypertension.' },
+  // What the model actually said on 2026-10-20, on a funded standby account. A
+  // denied guarantee asserts nothing, so this must reach the member with no edit
+  // and definitely not as "isn't a promises".
+  { id: 'denied-guarantee', profile: CLEAN,
+    text: "The evidence isn't a guarantee, but many people find that getting enough magnesium helps." },
   { id: 'food-quantity', profile: CLEAN,
     text: 'Calcium (1300mg/day) supports bone density, and one serving of sardines covers most of it.' },
   { id: 'threshold-frame', profile: CLEAN,

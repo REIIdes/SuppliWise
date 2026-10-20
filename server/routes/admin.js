@@ -20,7 +20,7 @@ const ChatMessage = require('../models/ChatMessage');
 const { isArgon2id, isBcrypt } = require('../utils/password');
 const { SECURITY_AUDIT } = require('../utils/securityAudit');
 const { getAiProviders, oldestCheck, isEnvStale, checkAiProvider, AI_PROVIDERS } = require('../utils/aiProviders');
-const { describeRouting } = require('../utils/aiRouter');
+const { describeRouting, providerHealth } = require('../utils/aiRouter');
 const AiChatThread = require('../models/AiChatThread');
 const { feedbackStats } = require('../utils/chatLearning');
 const { buildCorpus } = require('../utils/ragCorpus');
@@ -1925,6 +1925,54 @@ const runMonitorProbes = async (app) => {
         return { status: 'warning', detail: `${notes.join('; ')}. Adaptation needs members to rate answers; nothing is tuning the ranking yet.` };
       }
       return { status: 'healthy', detail: `${corpus.length} curated note(s); dose and absence retrievals verified live. ${notes.join('; ')}.` };
+    }),
+
+    // An API key that loads is not an API key that answers. Every other AI row in
+    // this panel is a configuration check — the key parses, the model is
+    // selected, the route resolves — and all of them stayed green through an
+    // outage where three of the four accounts behind those keys had no credit and
+    // members were reading the canned "I'm having a bit of trouble" reply.
+    //
+    // So this one reports what the last real call DID, taken from the router's own
+    // record rather than a fresh probe request: a synthetic completion would spend
+    // member quota to answer a question the traffic already answered.
+    probe('ai_provider_billing', 'AI Provider Billing', 'openrouter', async () => {
+      const { purposes, creditBlocked } = providerHealth();
+      const blocked = creditBlocked
+        .map((b) => `${b.provider} (${b.count}×${b.lastAt ? ` since ${b.lastAt.slice(0, 10)}` : ''})`)
+        .join(', ');
+      const served = purposes.filter((p) => p.ok).map((p) => `${p.purpose} via ${p.provider}`);
+
+      if (!purposes.length) {
+        return {
+          status: 'warning',
+          detail: 'No AI call has run since boot, so no key has proved it can answer. Send one chat message or assessment and refresh — an unfunded account is invisible until a real request reaches it.',
+        };
+      }
+
+      if (!served.length) {
+        return {
+          status: 'critical',
+          detail: `Every AI purpose's last call failed${blocked ? ` — ${blocked} answered "no credit"` : ''}. Members are being served canned replies; this is billing, not code.`,
+        };
+      }
+
+      if (creditBlocked.length) {
+        return {
+          status: 'warning',
+          detail: `${served.length}/${purposes.length} purpose(s) answering, but ${blocked} returned "no credit" — a funded standby is carrying that traffic. Add credit or the chain keeps degrading to it.`,
+        };
+      }
+
+      const failed = purposes.filter((p) => !p.ok);
+      if (failed.length) {
+        return {
+          status: 'warning',
+          detail: `${failed.map((f) => `${f.purpose} (${f.provider}: ${f.error})`).join('; ')}. Other purposes answered.`,
+        };
+      }
+
+      return { status: 'healthy', detail: `${purposes.length} purpose(s) served since boot: ${served.join(', ')}.` };
     }),
 
     // ── 8. Delete Account ────────────────────────────────────────────────

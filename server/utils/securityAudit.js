@@ -623,31 +623,44 @@ const SECURITY_AUDIT = {
   // Dates are part of the claim: an undated "PASS" is how F1's stale
   // "0 vulnerabilities" survived for a week.
   verification: {
-    unitTests: 'PASS 2026-10-20 — npm test ("node --test Test File/*.test.js"): 1532 passed, 0 failed, 56 skipped (1588 run). The 56 are the ten pre-existing suites gated on MONGO_TEST_URI — they skip the same way in CI, which is why the count reads differently from a run that has a second database',
-    clientTests: 'PASS 2026-10-20 — npm test in my-react-app: 715/715, 0 failed, 0 skipped, re-taken after the ai_chat_grounding row was registered in the Security Center display maps',
-    syntaxCheck: 'PASS 2026-10-20 — npm run check: Syntax OK, 344 source file(s)',
+    unitTests: 'PASS 2026-10-20 — npm test ("node --test Test File/*.test.js"): 1545 passed, 0 failed, 56 skipped (1601 run). The 56 are the ten pre-existing suites gated on MONGO_TEST_URI — they skip the same way in CI, which is why the count reads differently from a run that has a second database',
+    clientTests: 'PASS 2026-10-20 — npm test in my-react-app: 715/715, 0 failed, 0 skipped, re-taken after the ai_provider_billing row was registered in the Security Center display maps',
+    syntaxCheck: 'PASS 2026-10-20 — npm run check: Syntax OK, 346 source file(s)',
     // F13 is a claim about generated content, so it is measured two ways: the
     // citations the app itself asserts (static, against NCBI), and the plans the
     // model actually returns (live, before and after the grounding gate).
     citationRegistry: 'PASS 2026-10-20 — node eval/citationAudit.js: 65 registry entries, 48 asserted PMIDs, 0 failing at NCBI. `npm run eval:citations` is the same check',
-    liveAssessment: 'PASS 2026-10-20 — node eval/aiBenchmark.js --live --runs=1 against the routed assessment model (openrouter deepseek-v4-flash): all 4 profiles at citationGrounding 100.0%, patientFactGrounding 100.0%, dosageSafety 100.0%, orderCompliance 100.0%, schemaValidity 100.0%, overall 97.2 average, benchmark exit clean. The gate caught one unproven citation on the senior-statin profile before the member could see it ("Fiber (Psyllium Husk) — names no authoritative source": citation-replaced, plus two field-normalised rows); the other three profiles arrived clean (violations=0). Offline baseline re-run the same day: 4 profiles, all thresholds met',
+    liveAssessment: 'MEASURED 2026-10-20 while OpenRouter still had credit — node eval/aiBenchmark.js --live --runs=1 '
+      + 'against the routed assessment model (openrouter deepseek-v4-flash): all 4 profiles at citationGrounding '
+      + '100.0%, patientFactGrounding 100.0%, dosageSafety 100.0%, orderCompliance 100.0%, schemaValidity 100.0%, '
+      + 'overall 97.2 average, benchmark exit clean. The gate caught one unproven citation on the senior-statin '
+      + 'profile before the member could see it ("Fiber (Psyllium Husk) — names no authoritative source": '
+      + 'citation-replaced, plus two field-normalised rows); the other three profiles arrived clean (violations=0). '
+      + 'NOT re-taken since the accounts went unfunded, and it cannot be: the funded standby (groq) refuses the '
+      + 'assessment prompt at HTTP 413 because the prompt is 8,128 tokens and that key\'s free tier allows 8,000 '
+      + 'tokens/minute, so AI-generated plans are currently served by the rule engine and this row\'s number is a '
+      + 'measurement of a paid account, not of today\'s traffic. Offline baseline re-run the same day: 4 profiles, all '
+      + 'thresholds met',
     // The two claims this pass exists to make true, measured the same way:
     // a suite for the loop that decides what the app learns, and a suite for
     // the layer that decides what it does with a member\'s own history.
     // F14 is the same claim about the paragraph rather than the plan row, so it
     // is measured the same two ways: a fixed adversarial set the verifier must
     // pass without network, and the routed model on the baited questions.
-    proseGrounding: 'PASS 2026-10-20 — Test File/prose-grounding.test.js: 36/36. One case per rule: registration '
+    proseGrounding: 'PASS 2026-10-20 — Test File/prose-grounding.test.js: 38/38. One case per rule: registration '
       + 'numbers and bare PubMed hosts stripped while an allowlisted registry link stays whole, three named-drug '
       + 'treatment changes refused, two negated warnings and one interaction warning preserved untouched, cure and '
       + 'certainty claims hedged with the subject kept, effect sizes in minutes and percentages stripped while a '
       + 'dose ceiling quoted as a threshold survives, prose doses clamped to the published range with each amount '
       + 'bound to the nutrient next to it and gram-scale food bulks left alone, invented lab values and medications '
       + 'stripped while the member\'s own reported ones are licensed, possessive conditions checked, and a deleted '
-      + 'clause proven not to fuse the sentences around it. The last case in the file runs eval/hallucinationAudit.js '
+      + 'clause proven not to fuse the sentences around it, a vendor\'s curly-quoted refusal proven to survive the '
+      + 'pass untouched while the same claim in smart quotes is still downgraded, and a denied guarantee ("the '
+      + 'evidence isn\'t a guarantee") proven to reach the member unedited and never as "isn\'t a promises". The last '
+      + 'case in the file runs eval/hallucinationAudit.js '
       + 'itself, so the gate cannot rot without the suite going red',
-    hallucinationAudit: 'PASS 2026-10-20 — npm run eval:hallucination: 1,189 offline cases, 0 shipped violations '
-      + '(19/19 canned hallucinations repaired, 11/11 true sentences untouched, 4/4 shipped rule-engine baselines '
+    hallucinationAudit: 'PASS 2026-10-20 — npm run eval:hallucination: 1,191 offline cases, 0 shipped violations '
+      + '(19/19 canned hallucinations repaired, 12/12 true sentences untouched, 4/4 shipped rule-engine baselines '
       + 'needing zero repair, 1,152/1,152 combined texts identical when verified a second time). '
       + '`npm run eval:hallucination:live` ran the 7 baited probes against the routed model (openrouter '
       + 'deepseek-v4-flash) and shipped 0 of 9 raw violations: 2 on the chat treatment-change question, 1 on the '
@@ -662,12 +675,16 @@ const SECURITY_AUDIT = {
     // and live, with a floor nobody can quietly lower.
     chatAccuracy: 'PASS 2026-10-20 — npm run eval:chat: 131/131 offline = 100.0% against a 90% floor, measured per '
       + 'category and overall (answer 30/30, refusal 10/10, identity 10/10, adaptation 2/2, citation 48/48, expansion '
-      + '19/19, scorer 12/12). npm run eval:chat:live asks the routed model (openrouter deepseek-v4-flash) 12 questions '
-      + 'through the real prompt and scores RAW and SHIPPED separately: 12/12 raw, 12/12 shipped — every live reply '
-      + 'reached the member with zero verifier edits, which is the state this whole pass exists to reach, and the '
-      + 'stronger of the two numbers because a reply that needed repairing is a reply the prompt failed to ground. A '
+      + '19/19, scorer 12/12). npm run eval:chat:live asks the routed model 12 questions '
+      + 'through the real prompt and scores RAW and SHIPPED separately: 11/12 raw (91.7%), 12/12 shipped (100.0%), '
+      + 'no-reply=0 — every reply reached the member correct, one draft needed a verifier edit first, and the case '
+      + 'that failed on the previous run (a curly-quoted refusal) is the bug recorded under modelTextNormalisation. '
+      + 'The run that produced this number is served by groq, the funded standby, so it is the honest current state of '
+      + 'the product rather than the state the prompts were tuned against; the verifier repaired 2 of 12 drafts. A '
       + 'run where fewer than 60% of the live cases get any reply is itself a failure, so a provider outage cannot be '
-      + 'reported as accuracy. `--threshold=` and `--case=id,id` are there so the floor can be argued about and a '
+      + 'reported as accuracy, and CHAT_EVAL_PACE_MS (default 20000) spaces the twelve calls so Groq\'s free-tier rate '
+      + 'limit cannot be misread as an accuracy failure. `--threshold=` and `--case=id,id` are there so the floor can '
+      + 'be argued about and a '
       + 'failing case re-run without re-paying for the eleven that passed',
     retrievalGrounding: 'PASS 2026-10-20 — Test File/rag-retrieval.test.js: 13/13 over utils/ragCorpus.js (165 '
       + 'documents built synchronously from what the app already publishes) + utils/ragRetriever.js (BM25 k1 1.4 / b '
@@ -693,15 +710,49 @@ const SECURITY_AUDIT = {
       + 'retrieval read as an empty Map, so every published weight applied to nothing while the assistant kept '
       + 'answering merrily. The last case asserts both halves of that seam: a Map raises the score of the note it '
       + 'points at (16.788 → 26.86 on a real query), the un-awaited Promise changes nothing at all, and the route awaits',
-    aiMonitorRow: 'PASS 2026-10-20 — Test File/monitor-probe-honesty.test.js: 10/10 with ai_chat_grounding added to the '
+    aiMonitorRow: 'PASS 2026-10-20 — Test File/monitor-probe-honesty.test.js: 11/11 with ai_chat_grounding and ai_provider_billing added to the '
       + 'Security Center (registered in Components/SecurityStatus/SecurityStatus.jsx as its own labelled, grouped, '
       + 'ordered row). The row does not report that a provider key loaded: it asks the retriever a question whose '
       + 'answer the app curates and demands that the curated dose document came back, checks that the '
       + '"feature does not exist" note still reaches a does-it-have-X prompt, and reports how many of the last 200 '
       + 'threads\' replies needed a verifier edit. Three of those are critical states, and the test forbids the probe '
       + 'from reading transcript text — turn metadata only',
+    providerChain: 'PASS 2026-10-20 — Test File/ai-routing.test.js 66/66 + ai-default-provider.test.js 15/15. The incident '
+      + 'this pins is a member reading the app\'s own offline apology twice, because the chat chain was Anthropic → '
+      + 'OpenRouter: two valid keys on two accounts with no credit, and Groq\'s funded free tier served nothing. The '
+      + 'router\'s documented boundary is deliberately NOT broken — the default provider stays a configuration-time '
+      + 'stand-in and a provider that fails at request time still does not silently reach it (ai-default-provider.test.js '
+      + 'asserts exactly that). What changed is that a route may declare a LIST of standbys instead of one: chat and '
+      + 'polish name [openrouter, groq], assessment and supplementDetail name groq, and systemDetection plus '
+      + 'priorityFlagging stay single-provider on purpose, because a weaker model must not become the reason a member '
+      + 'is escalated when the primary account runs dry. A chain of unfunded providers is now walked to the funded one: '
+      + 'a 400 credit-low, then a 402 never-purchased, then a completion, asserting provider=groq and three recorded '
+      + 'attempts — so the failure is visible in the attempt list rather than swallowed. A refused provider now also '
+      + 'carries its own sentence rather than a bare status: providerErrorDetail unwraps `error.message`, flattens an '
+      + 'HTML gateway page, bounds it to 200 characters and redacts anything shaped like a key, which is how the '
+      + '8,128-token assessment prompt was finally identifiable as a Groq free-tier TPM refusal instead of "HTTP 413."',
+    providerBillingMonitor: 'PASS 2026-10-20 — utils/aiRouter.js now keeps the last real outcome per purpose and every '
+      + 'credit-shaped failure it can name (Anthropic "credit balance is too low", OpenRouter "never purchased '
+      + 'credits", OpenAI 429 insufficient_quota) in providerHealth(); routes/admin.js renders it as the '
+      + 'ai_provider_billing row, registered in Components/SecurityStatus/SecurityStatus.jsx. Warning when no AI call '
+      + 'has run since boot, critical when every purpose\'s last call failed, warning when a standby is carrying '
+      + 'traffic because a primary is out of credit. Test File/monitor-probe-honesty.test.js 11/11 pins all three '
+      + 'states and forbids the probe from dialling a provider itself — billing outages are invisible to a '
+      + 'configuration probe, so the row reports what the last call DID rather than claiming a key is funded',
+    modelTextNormalisation: 'PASS 2026-10-20 — utils/modelText.js, applied at the two seams that face outward: '
+      + 'readCompletionText, where provider bytes become app text, and verifyProse, which also re-reads transcripts '
+      + 'stored before this existed. Found by the live gate rather than by a test: Groq emits U+2019 where Anthropic '
+      + 'emits ASCII, every negation guard in planGrounding.js is written can\'?t / doesn\'?t, and a curly quote is a '
+      + 'word boundary — so "it can\u2019t send you a reminder" matched NO negation, read as an unqualified capability '
+      + 'claim, and the verifier rewrote a correct refusal into boilerplate the member then read. Test File/'
+      + 'model-text.test.js 4/4 pins the fold set (typographic quotes, non-breaking and figure dashes, thin and '
+      + 'non-breaking spaces, zero-width characters, ellipsis) and proves a dose, an IU figure, a percentage and an '
+      + 'accented word come back byte-identical: a spelling change, never a meaning change. En and em dash are '
+      + 'deliberately NOT folded — the app writes an em dash in its own boilerplate and DOSE_NUMBER and CLAUSE_SPLIT '
+      + 'already enumerate [-–—], and folding them broke verifyProse\'s idempotence contract, which the '
+      + 'eval/hallucinationAudit.js sweep caught before it shipped',
     selfLearning: 'PASS 2026-10-20 — Test File/condition-learning.test.js: 23/23. It pins the thresholds (24 h AND 25 unseen assessments, from the durable AiLearningRun ledger rather than process memory), the atomic lease that stops two processes spending the same quota, the kill switch, the no-file-writes rule for the scheduled path, the fact that index.js arms it, and that member contact fragments cannot reach a provider through an aggregate term',
-    memberAdaptation: 'PASS 2026-10-20 — Test File/member-history.test.js: 23/23, plus plan-grounding 38/38, chat-safety 10/10, supplement-guide-store 35/35, ai-routing 60/60. Covers the resubmit-vs-reassessment window, adherence corrected to the member\'s own clock, escalation on a first-time symptom, the never-demote rule, and the fenced history block being read as data after the answers it is compared against',
+    memberAdaptation: 'PASS 2026-10-20 — Test File/member-history.test.js: 23/23, plus plan-grounding 38/38, chat-safety 10/10, supplement-guide-store 35/35, ai-routing 66/66. Covers the resubmit-vs-reassessment window, adherence corrected to the member\'s own clock, escalation on a first-time symptom, the never-demote rule, and the fenced history block being read as data after the answers it is compared against',
 
     // GitHub Actions is where this record stops being a local claim. The server
     // job hung twice and was cancelled only after the runner\'s six-hour job limit,
@@ -817,7 +868,7 @@ const SECURITY_AUDIT = {
     + 'what the model returns is visible as repairs the gate had to make. It spends API tokens, so run it on demand, '
     + 'not on every commit.',
     'OPERATIONAL (F14): `npm run eval:hallucination` (server/) is the prose-side gate and needs no network. It hands '
-    + 'the verifier 19 canned hallucinations and 11 sentences that are true, every shipped baseline plan, and 1,152 '
+    + 'the verifier 19 canned hallucinations and 12 sentences that are true, every shipped baseline plan, and 1,152 '
     + 'combined texts to prove a second pass changes nothing, then exits non-zero if a hallucination survives, a true '
     + 'sentence is damaged, or the verifier is not idempotent. When a member reports an inaccurate answer, add it to '
     + 'CHALLENGES; when curated copy is wrongly rewritten, add it to GUARDS. A rule with no case pinned to it gets '
@@ -836,6 +887,19 @@ const SECURITY_AUDIT = {
     + 'production-side view of the same two invariants: it re-asks a curated dose question and a does-it-have-X question '
     + 'on every monitor refresh and goes critical when either document stops reaching the prompt, and warns when the '
     + 'reply-repair rate climbs or nobody has voted in thirty days, which is the learning loop being armed but not fed.',
+    'OPERATIONAL (AI provider billing): three accounts this machine holds keys for hold no credit — Anthropic answers '
+    + 'HTTP 400 "credit balance is too low", OpenRouter 402 "never purchased credits", OpenAI 429 '
+    + 'insufficient_quota — so every generated answer is currently served by Groq\'s free tier, which is funded but '
+    + 'holds 8,000 tokens per minute on service tier `on_demand`. That limit shapes what the free tier can do: chat '
+    + 'fits and answers (a long reply can still trip 429 about once every 20 seconds, so pace it), and the assessment '
+    + 'prompt does not — measured at 8,128 tokens, it is refused with HTTP 413 before the model sees it, which is why '
+    + 'AI-generated plans are not working today and the rule engine is answering them. Funding Groq alone will not '
+    + 'bring plan generation back; OpenRouter, Anthropic or OpenAI will. Add credit to one of those, or set '
+    + 'AI_DEFAULT_PROVIDER=groq and accept free-tier chat plus rule-engine plans. Until then the router walks to the '
+    + 'funded standby instead of dead-ending, ai_provider_billing says which account is out, the provider\'s own '
+    + 'rejection sentence is carried in the attempt list rather than a bare status code, and '
+    + '`npm run eval:chat:live` paces itself (CHAT_EVAL_PACE_MS, default 20000) so a rate limit cannot be misread as '
+    + 'an accuracy failure.',
     'OPERATIONAL (the self-learning loop): it is armed from API boot (index.js → utils/conditionLearning.schedule()) '
     + 'and needs no operator to remember it, which is exactly why it needs watching rather than trusting. Read the '
     + 'ai_learning row in the admin Security Center: it says how many assessments are new since the last cycle, how '

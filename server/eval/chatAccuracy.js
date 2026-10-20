@@ -478,7 +478,17 @@ async function runLive() {
   let scored = 0;
   let noReply = 0;
 
-  for (const c of cases) {
+  // Paced, not burst. This gate now runs through whatever provider is actually
+  // funded, and a free tier answers a dozen requests fired back to back with a
+  // 429 — which the harness would record as "no reply", turn a real measurement
+  // into 6 of 12, and report the accuracy of a rate limit. Twenty seconds sits
+  // inside the per-minute allowance even when a reply runs to the full token
+  // budget, so the run takes a few minutes instead of pretending to be instant.
+  // `CHAT_EVAL_PACE_MS` overrides it for a provider that answers faster.
+  const LIVE_PACE_MS = Math.max(0, Number(process.env.CHAT_EVAL_PACE_MS) || 20000);
+
+  for (const [index, c] of cases.entries()) {
+    if (index > 0) await new Promise((resolve) => setTimeout(resolve, LIVE_PACE_MS));
     const { system, references, identity } = promptFor(c.user, c.profile, c.q);
     const result = await completeWithFallback('chat', {
       messages: [{ role: 'system', content: system }, { role: 'user', content: c.q }],
