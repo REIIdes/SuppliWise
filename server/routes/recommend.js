@@ -12,6 +12,7 @@ const { registeredEvidence, extractPmids } = require('../utils/supplementEvidenc
 const { groundPlan, doseEntry, NEUTRAL_TRIGGER, rejectReason } = require('../utils/planGrounding');
 const { loadMemberHistory, applyAdaptation } = require('../utils/memberHistory');
 const { answerSignature, alignPlanToSpine, validateModelPlan, selectionKey } = require('../utils/planSelection');
+const { canonicaliseAnswers } = require('../utils/answerCanonical');
 const Assessment = require('../models/Assessment');
 
 // Kept on the route's public surface because existing probes import it from
@@ -111,6 +112,60 @@ function nameNutrientTokens(name) {
     .filter((part) => part.length > 0);
 }
 
+/**
+ * A medication the member named changes what must be written on a row, whoever
+ * chose that row. The rule engine states these cautions inside whichever branch
+ * happens to emit the nutrient, and the preventive pool only carries the one its
+ * own table knows about, so an algae omega-3 selected for a vegan on warfarin
+ * could still print "None identified". This pass runs over the finished spine so
+ * the caution is a property of the plan, not of the code path that built a row.
+ */
+const MEDICATION_CAUTIONS = [
+  {
+    on: /warfarin|coumadin|blood thinner|anticoagulant|apixaban|eliquis|rivaroxaban|xarelto|clopidogrel|plavix|aspirin/i,
+    says: /blood thinner|warfarin|INR/i,
+    names: /omega-3|fish oil|algae|krill|vitamin k2|\bk2\b|nattokinase|vitamin e|curcumin|turmeric|ginger|garlic|ginkgo|dong quai/i,
+    caution: 'May add to the effect of a blood thinner - keep to the stated dose and have your doctor monitor INR',
+  },
+  {
+    on: /levothyroxine|synthroid|eltroxin|euthyrox|thyroid hormone|thyroid medication/i,
+    says: /thyroid/i,
+    names: /calcium|iron|zinc|magnesium/i,
+    caution: 'Take 4+ hours apart from thyroid medication - this nutrient blocks its absorption if timed together',
+  },
+  {
+    on: /metformin|glucophage|insulin|glipizide|sulfonylurea/i,
+    says: /blood sugar|glucose|hypoglycemi/i,
+    names: /berberine|chromium|alpha-lipoic|fenugreek|cinnamon|bitter melon/i,
+    caution: 'Can lower blood sugar alongside this medication - monitor glucose when starting and tell your doctor',
+  },
+  {
+    on: /ssri|snri|sertraline|fluoxetine|escitalopram|citalopram|paroxetine|antidepressant|trazodone/i,
+    says: /serotonin|antidepressant/i,
+    names: /st john|5-htp|tryptophan|sam-e/i,
+    caution: 'Acts on serotonin - do not combine with an antidepressant without prescriber approval',
+  },
+];
+
+function applyMedicationCautions(rows, medicationsText) {
+  const meds = String(medicationsText || '');
+  if (!meds) return rows;
+  for (const row of rows) {
+    const name = String(row.name || '');
+    for (const rule of MEDICATION_CAUTIONS) {
+      if (!rule.on.test(meds) || !rule.names.test(name)) continue;
+      const current = String(row.interactions || '');
+      // "None identified" is a claim about interactions, not a caution, so a
+      // stated medication replaces it rather than stacking underneath it.
+      if (rule.says.test(current)) continue;
+      row.interactions = (!current || /none identified/i.test(current))
+        ? rule.caution
+        : `${current} - ${rule.caution}`;
+    }
+  }
+  return rows;
+}
+
 /** Whether this member's own answers rule a preventive row out. */
 function preventiveRowIsBlocked(item, a) {
   const name = String(item.name).toLowerCase();
@@ -153,9 +208,24 @@ function preventiveRowIsBlocked(item, a) {
  * after the reply arrives.
  */
 function buildPlanSpine(baseRecs, a, { target = SPINE_TARGET_COUNT } = {}) {
-  const spine = (Array.isArray(baseRecs) ? baseRecs : [])
-    .filter((r) => r && typeof r.name === 'string' && r.name.trim())
-    .map((r) => ({ ...r }));
+  // Two engine branches can reach the same nutrient for one member — the anemia
+  // branch emits "Iron Bisglycinate + Vitamin C" while a depletion branch emits
+  // "Iron Bisglycinate" — and a member who follows both takes one nutrient twice.
+  // That is a dosing error, not a fuller plan, so the spine keeps one row per
+  // nutrient class: the more urgent of the two, or the first if they tie.
+  const rank = { High: 0, Medium: 1, Low: 2 };
+  const bestByClass = new Map();
+  for (const row of (Array.isArray(baseRecs) ? baseRecs : [])) {
+    if (!row || typeof row.name !== 'string' || !row.name.trim()) continue;
+    const classId = classifySupplement(row.name);
+    if (!classId) { bestByClass.set(`name:${selectionKey(row.name)}`, { ...row }); continue; }
+    const existing = bestByClass.get(`class:${classId}`);
+    const next = { ...row };
+    if (!existing || (rank[next.priority] ?? 1) < (rank[existing.priority] ?? 1)) {
+      bestByClass.set(`class:${classId}`, next);
+    }
+  }
+  const spine = [...bestByClass.values()];
 
   const keys = new Set(spine.map((r) => selectionKey(r.name)));
   const classes = new Set(spine.map((r) => classifySupplement(r.name)).filter(Boolean));
@@ -207,6 +277,7 @@ function buildPlanSpine(baseRecs, a, { target = SPINE_TARGET_COUNT } = {}) {
     if (classId) classes.add(classId);
   }
 
+  applyMedicationCautions(spine, a.currentMedications);
   return orderForPresentation(spine);
 }
 
@@ -231,6 +302,10 @@ router.post('/', protect, async (req, res) => {
   // to be a `const` inside the block, which meant the degraded path threw
   // "liveDynamic is not defined" and the member got a 500 instead of a plan.
   let liveDynamic = [];
+  // Canonical answers, also declared outside the try: an assessment that throws
+  // halfway must be rescued from the same answers the main path was reading, or
+  // the retry after an outage would be scored against a different profile.
+  const answers = canonicaliseAnswers(req.body);
   try {
     const a = req.body;
 
@@ -246,10 +321,11 @@ router.post('/', protect, async (req, res) => {
     if (a.bloodTestResults && a.bloodTestResults.length > TEXT_MAX)
       return res.status(400).json({ message: `Blood test results must be ${TEXT_MAX} characters or fewer.` });
     
-    // Preprocess user text inputs
-    const processedMedications = sanitizeMedicalField(a.currentMedications);
-    const processedAllergies = sanitizeMedicalField(a.allergies);
-    const processedSupplements = sanitizeMedicalField(a.currentSupplements);
+    // Preprocess user text inputs. Read from the canonical copy so the string the
+    // safety checks see is the one the rules are scored against.
+    const processedMedications = sanitizeMedicalField(answers.currentMedications);
+    const processedAllergies = sanitizeMedicalField(answers.allergies);
+    const processedSupplements = sanitizeMedicalField(answers.currentSupplements);
 
     // AI-published conditions (60s-cached): the learned knowledge enters BOTH
     // paths — section 9 of the prompt KB for the LLM, and a deterministic
@@ -269,8 +345,8 @@ router.post('/', protect, async (req, res) => {
     // offered is decided by rules, not by sampling. It is also the degraded path
     // and the source that refills a slot when grounding deletes a row, so a
     // member never gets an 11-item plan because a model invented a supplement.
-    const spineProfile = { ...a, currentMedications: processedMedications, allergies: processedAllergies };
-    const engineRows = enforcePlanConsistency(generateClinicalFallback(req.body, liveDynamic));
+    const spineProfile = { ...answers, currentMedications: processedMedications, allergies: processedAllergies };
+    const engineRows = enforcePlanConsistency(generateClinicalFallback(answers, liveDynamic));
     engineRows.recommendations = buildPlanSpine(engineRows.recommendations, spineProfile);
     engineRows.dailySchedule = buildDailySchedule(engineRows.recommendations);
     const clinicalPlan = enforcePlanConsistency(engineRows);
@@ -284,7 +360,7 @@ router.post('/', protect, async (req, res) => {
     let member = { block: null, previous: null, delta: { newlyReported: [], resolved: [], hasBaseline: false }, adherence: { percent: null } };
     try {
       member = await loadMemberHistory(req.user?._id, {
-        ...a,
+        ...answers,
         currentMedications: processedMedications,
         allergies: processedAllergies,
         currentSupplements: processedSupplements,
@@ -299,7 +375,7 @@ router.post('/', protect, async (req, res) => {
     // through a sampling model is the single largest source of "I submitted the
     // same thing and got a different plan", and it costs a generation to do it.
     // Only the digest is compared; no answer text is logged or sent to the query.
-    const signature = answerSignature(a, { liveDynamic });
+    const signature = answerSignature(answers, { liveDynamic });
     try {
       const prior = await Assessment.findOne({
         user: req.user?._id,
@@ -320,7 +396,7 @@ router.post('/', protect, async (req, res) => {
     // so the benchmark harness (eval/aiBenchmark.js) scores the exact prompt
     // the product sends. Free-text fields are sanitised before interpolation.
     const prompt = buildAssessmentPrompt({
-      ...a,
+      ...answers,
       currentMedications: processedMedications,
       allergies: processedAllergies,
       currentSupplements: processedSupplements,
@@ -424,11 +500,11 @@ router.post('/', protect, async (req, res) => {
       aiResult.recommendations = aiResult.recommendations.map(rec => ({
         ...rec,
         evidence:    rec.evidence    || inferEvidence(rec.name),
-        foods:       dietAdjustFoods(rec.foods || inferFoods(rec.name), a.dietType),
+        foods:       dietAdjustFoods(rec.foods || inferFoods(rec.name), answers.dietType),
         sideEffects: rec.sideEffects || inferSideEffects(rec.name),
       }));
       // Ensure seekingSupport is injected if user listed drugs (AI may omit it)
-      const hasRecDrugs = (a.lifestyleHabits || []).includes('Recreational Drugs');
+      const hasRecDrugs = (answers.lifestyleHabits || []).includes('Recreational Drugs');
       if (hasRecDrugs && (!aiResult.seekingSupport || !aiResult.seekingSupport.include)) {
         aiResult.seekingSupport = buildSeekingSupport();
       }
@@ -438,7 +514,7 @@ router.post('/', protect, async (req, res) => {
       // leaves the server, and `plan.grounding` records what was changed.
       // It runs BEFORE the consistency gate so a backfilled row is ordered too.
       const grounded = groundPlan(aiResult, {
-        ...a,
+        ...answers,
         currentMedications: processedMedications,
         allergies: processedAllergies,
         currentSupplements: processedSupplements,
@@ -469,7 +545,7 @@ router.post('/', protect, async (req, res) => {
     // not a licence to skip verification. It adapts on the same terms, so a
     // degraded plan and an AI plan treat a newly-reported symptom identically.
     const engineGrounded = groundPlan(clinicalPlan, {
-      ...a,
+      ...answers,
       currentMedications: processedMedications,
       allergies: processedAllergies,
       currentSupplements: processedSupplements,
@@ -484,8 +560,8 @@ router.post('/', protect, async (req, res) => {
     console.error('Recommend route error:', error.message);
     // Same spine as every other path, so a member whose request threw halfway
     // through is not handed a shorter or differently-ordered plan.
-    const rescue = enforcePlanConsistency(generateClinicalFallback(req.body, liveDynamic));
-    rescue.recommendations = buildPlanSpine(rescue.recommendations, req.body || {});
+    const rescue = enforcePlanConsistency(generateClinicalFallback(answers, liveDynamic));
+    rescue.recommendations = buildPlanSpine(rescue.recommendations, answers || {});
     rescue.dailySchedule = buildDailySchedule(rescue.recommendations);
     return res.json(sanitizeStrings(enforcePlanConsistency(rescue)));
   }
