@@ -1,6 +1,7 @@
 'use strict';
 
 const { buildCorpus, planDocs, dynamicConditionDocs, tokens } = require('./ragCorpus');
+const { matchedAnchors } = require('./languageAnchors');
 
 /**
  * BM25 OVER THE APP'S OWN KNOWLEDGE — WHY IT LOOKS LIKE THIS.
@@ -30,6 +31,15 @@ const { buildCorpus, planDocs, dynamicConditionDocs, tokens } = require('./ragCo
  *    the absence of a document is indistinguishable from a weak match, and a model
  *    with no evidence of absence fills it with a confident, plausible, wrong path
  *    through a Settings screen that does not exist.
+ *
+ * 3. THE QUERY IS ANCHORED BEFORE IT IS RANKED. Every alias trigger above is English, so
+ *    a member writing "hirap po akong matulog" would match none of them and receive an
+ *    ungrounded answer — a retrieval miss that looks like a model failure. `anchored()`
+ *    appends this app's own English vocabulary for what the member said
+ *    (utils/languageAnchors.js) and nothing else: the alias table, the document text and
+ *    the evidence notes all keep their English, so a note can still only ever say what it
+ *    was written and checked to say. For an English question no anchor fires and this
+ *    function is byte-identical to the question it was handed.
  */
 
 const K1 = 1.4;
@@ -138,6 +148,18 @@ function expandQuestion(question) {
   return { terms: [...out], matched };
 }
 
+/**
+ * `expandQuestion` for a member who is not writing English: the anchor pass adds the
+ * English trigger words the alias table needs, and reports which anchors fired so the
+ * accuracy gate can tell "retrieved nothing" from "retrieved via a Filipino anchor".
+ */
+function anchored(question) {
+  const raw = String(question || '');
+  const fired = matchedAnchors(raw, ['retrieval', 'health', 'app']);
+  if (!fired.length) return { ids: [], text: raw };
+  return { ids: fired.map((f) => f.id), text: `${raw} ${fired.map((f) => f.en).join(' ')}` };
+}
+
 function baseScore(entry, queryTerms, idx) {
   let score = 0;
   for (const t of queryTerms) {
@@ -210,12 +232,17 @@ const DOSE_QUESTION = /\b(how much|what dose|dosage|dose|mg|mcg|iu per day|maxim
  * @param {{assessment?: object, live?: Array, priors?: Map|object, limit?: number, extraDocs?: Array}} [options]
  */
 function retrieve(question, options = {}) {
+  // A member writing Filipino or Taglish gets the same retrieval as a member writing
+  // English, because the query arrives carrying this app's own English vocabulary for
+  // what they said (utils/languageAnchors.js). Nothing downstream changes for English:
+  // no anchor fires on English text, so `query === question` there.
+  const { ids: anchorIds, text: query } = anchored(question);
   // Per-request documents — the member's own plan rows and the conditions the
   // learning loop published — join the corpus BEFORE the statistics are taken, so a
   // plan note competes for the top slot on the same scale as everything else.
   const extras = [...(options.extraDocs || []), ...planDocs(options.assessment), ...dynamicConditionDocs(options.live)];
   const idx = extras.length ? makeIndex([...buildCorpus(), ...extras]) : getIndex();
-  const { terms: expandedTerms, matched } = expandQuestion(question);
+  const { terms: expandedTerms, matched } = expandQuestion(query);
   const terms = discriminative(expandedTerms, idx);
   const limit = Math.max(1, Math.min(Number(options.limit) || 6, 12));
 
@@ -223,9 +250,9 @@ function retrieve(question, options = {}) {
   const inPlan = planNames(options.assessment);
   const reported = reportedLabels(options.assessment);
   const priors = options.priors instanceof Map ? options.priors : new Map(Object.entries(options.priors || {}));
-  const namedTokens = new Set(tokens(question));
-  const rawLower = ` ${String(question || '').toLowerCase()} `;
-  const doseQuestion = DOSE_QUESTION.test(String(question || ''));
+  const namedTokens = new Set(tokens(query));
+  const rawLower = ` ${query.toLowerCase()} `;
+  const doseQuestion = DOSE_QUESTION.test(query);
 
   const scored = all.map((entry) => {
     let score = baseScore(entry, terms, idx);
@@ -261,7 +288,7 @@ function retrieve(question, options = {}) {
   const chosen = [...named, ...fill].map(shape);
 
   // Forced sections: absence must always be visible, whatever it scored.
-  if (FEATURE_QUESTION.test(String(question || ''))) {
+  if (FEATURE_QUESTION.test(query)) {
     const present = new Set(chosen.map((d) => d.id));
     const forced = buildCorpus().filter((d) => d.never || d.id === 'app:exists');
     for (const doc of forced) {
@@ -270,7 +297,7 @@ function retrieve(question, options = {}) {
     }
   }
 
-  return { docs: chosen, queryTerms: terms, expanded: matched, candidates: scored.slice(0, 20).map((r) => ({ id: r.doc.id, score: Number(r.score.toFixed(3)) })) };
+  return { docs: chosen, queryTerms: terms, expanded: matched, anchored: anchorIds, candidates: scored.slice(0, 20).map((r) => ({ id: r.doc.id, score: Number(r.score.toFixed(3)) })) };
 }
 
 const MAX_REFERENCE_CHARS = 3200;
@@ -312,6 +339,7 @@ module.exports = {
   retrieve,
   referencesBlock,
   expandQuestion,
+  anchored,
   ALIASES,
   FEATURE_QUESTION,
 };

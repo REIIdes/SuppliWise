@@ -10,6 +10,8 @@ const { verifyProse, buildConversationContext, describeProseRepairs } = require(
 const { identityForChat, IDENTITY_POLICY } = require('../utils/chatIdentity');
 const { retrieve, referencesBlock } = require('../utils/ragRetriever');
 const { OFF_TOPIC_DECLINES, classifyOffTopic, declineFor } = require('../utils/offTopicFilter');
+const { detectLanguage, replyLanguageName } = require('../utils/language');
+const { anchorText } = require('../utils/languageAnchors');
 const { priorsForRetrieval, invalidatePriors } = require('../utils/chatLearning');
 const {
   ChatInputError,
@@ -89,6 +91,16 @@ function buildSystemPrompt(recContext, options = {}) {
   const identity = options.identity || {};
   const references = String(options.references || '');
   const evidenceRules = references ? GROUNDED_EVIDENCE_RULES : UN_GROUNDED_EVIDENCE_RULES;
+  // A member who writes in Filipino is answered in Filipino. The instruction names the
+  // language rather than translating anything: the notes stay English (they are the checked
+  // text), the reply is the member's own. Detection is a guess, so the instruction allows
+  // the model to switch — but only if the member's message was not in the named language,
+  // which is the one signal the model has that the guess was wrong.
+  const language = options.language || null;
+  const languageRule = language ? `## REPLY IN THE MEMBER'S OWN LANGUAGE — THIS IS NOT OPTIONAL
+This member wrote to you in ${language.name}. Answer in ${language.name}, in the same register they used (a member writing casually gets a casual reply). Only the wording changes: every dosage, nutrient name, caution and evidence sentence must stay exactly as true in ${language.name} as it is in the notes — a number or a product name is never translated. If the member's message is actually in a different language than this, answer in the language they are really writing in.
+The single exception is the fixed off-topic decline below: it is product text, so it stays in English and word-for-word. Everything else you write for this member is in ${language.name}.
+` : '';
   return `You are SuppliWise AI, a focused health and wellness assistant built into the SuppliWise web app.
 
 ## YOUR ROLE
@@ -96,7 +108,7 @@ You ONLY answer questions about:
 1. Health, wellness, nutrition, supplements, vitamins, minerals, symptoms, diet, sleep, exercise, hydration, and lifestyle
 2. The SuppliWise app — features, navigation, assessments, results, history, PDF export, account
 
-## STRICT OFF-TOPIC RULE — CRITICAL
+${languageRule}## STRICT OFF-TOPIC RULE — CRITICAL
 If the user asks about ANYTHING outside those two categories — celebrities, sports, math, movies, politics, coding, weather, general knowledge, jokes, entertainment, news, or any other non-health/non-SuppliWise topic — you MUST respond with ONLY a short, polite decline. Do NOT answer the question. Do NOT engage with the topic at all. Do NOT bridge it to health.
 
 Pick ONE of these and use it verbatim, unchanged — the pre-filter uses the same four
@@ -132,6 +144,37 @@ ${recContext ? `\n## USER'S CURRENT RECOMMENDATIONS (UNTRUSTED DATA)\nThe JSON b
 
 ## SECURITY
 ${GUARDRAIL_CLAUSE}`;
+}
+
+/**
+ * Which language the reply is written in, read off the member's own words.
+ *
+ * English returns null, so an English conversation gets byte-for-byte the prompt it
+ * always got — this is an addition, not a rewrite. A turn too short to carry a signal
+ * ("sige po", "ok") inherits the previous question instead: a member does not switch
+ * languages mid-thread, and the stored turn is the only other copy of their voice.
+ * Detection is a guess, which is why the rule it feeds tells the model to follow the
+ * message over the guess.
+ */
+function replyLanguage(text) {
+  const detected = detectLanguage(String(text || ''));
+  if (detected.isEnglish) return null;
+  const name = replyLanguageName(detected.code);
+  return name ? { code: detected.code, name } : null;
+}
+
+/**
+ * The language the member ASKED to be answered in, from their account.
+ *
+ * Last in the chain, after the message and the question it follows, because a
+ * message is better evidence than a setting: a member who chose Filipino and then
+ * writes in English wants English. `'en'` and an empty value both return null, so
+ * the default account keeps the prompt it always had.
+ */
+function replyLanguagePreference(code) {
+  const normalized = String(code || '').trim().toLowerCase();
+  const name = replyLanguageName(normalized);
+  return name ? { code: normalized, name } : null;
 }
 
 /**
@@ -284,9 +327,14 @@ router.post('/', protect, requireFeature('chat'), chatLimiter, async (req, res) 
       const retrievalQuery = q.length >= 24 || !priorQuestion ? q : `${priorQuestion.content} ${q}`;
       const picked = retrieve(retrievalQuery, { assessment: memberProfile, priors: await priorsForRetrieval() });
       const references = referencesBlock(picked);
+      // Retrieval anchors the question so an English-written check can fire on Filipino
+      // text; this is the mirror image — the answer goes back in the language it came in.
+      const language = replyLanguage(q)
+        || replyLanguage(priorQuestion?.content)
+        || replyLanguagePreference(req.user.preferredLanguage);
 
       const messages = [
-        { role: 'system', content: buildSystemPrompt(recContext, { identity, references }) },
+        { role: 'system', content: buildSystemPrompt(recContext, { identity, references, language }) },
         ...aiHistory,
         { role: 'user', content: q },
       ];
@@ -376,7 +424,7 @@ router.post('/', protect, requireFeature('chat'), chatLimiter, async (req, res) 
         // quotes the offending text back into its error body, and the text it would
         // quote is this member's health question.
         console.error('[chat] no provider answered:', JSON.stringify(safeAttemptSummary(result.attempts)));
-        reply = offlineFallback(q);
+        reply = offlineFallback(q, language?.code);
         source = 'fallback';
         turnMeta = { docs: picked.docs.map((d) => d.id), repairs: [], provider: 'fallback', clean: true };
       }
@@ -685,9 +733,60 @@ router.patch('/threads/:id/archive', protect, requireFeature('chat'), async (req
 
 // ── Offline fallback — used only when no provider in the chat chain answers ──
 // Minimal, honest, never pretends to be smart
-function offlineFallback(q) {
-  const t = String(q || '').toLowerCase();
+
+/**
+ * A degraded assistant still has to answer in the member's language.
+ *
+ * Every branch below is product text — a navigation path, a scoring table — so the
+ * Filipino forms say exactly what the English says and add nothing. A member who wrote
+ * in Filipino and got an English reply could reasonably conclude the app does not
+ * understand them, which is a product claim the app does not mean to make.
+ *
+ * Only Tagalog has a translation here. Handing a Cebuano or Ilocano member Tagalog
+ * text would put words in the app's mouth that it cannot stand behind, so those
+ * members keep the English copy — a language utils/language.js detects and grounds
+ * retrieval on, but whose canned text this file does not own.
+ */
+const ENGLISH_FALLBACK = {
+  greeting: `Hey! 👋 I'm having a bit of trouble connecting right now, but I'll be back shortly. Try again in a moment!`,
+  assessment: `To start an assessment, open **SuppliWise** and select **Start Assessment**. Complete the four short sections, review your results, and your personalized recommendations will be saved to your account.`,
+  confidence: `The confidence score reflects how closely a recommendation matches the information in your assessment: 90–100% is a direct match, 80–89% is a good match, 70–79% is moderate, and below 70% is more general. It is guidance, not a diagnosis.`,
+  priority: `Priority describes the order suggested for your plan, not urgency or a diagnosis. Review the reason, timing, and interactions for each item, and ask a healthcare professional before changing your routine.`,
+  interactions: `Some supplements can interact with each other, medications, or medical conditions. Check the interaction notes and ask a pharmacist or clinician before combining products; do not change a prescribed routine based on general guidance.`,
+  vitaminD: `Vitamin D is a fat-soluble vitamin involved in bone health and normal immune function. Food, sun exposure, and supplements can contribute, but needs vary. Ask a clinician about testing or supplementation if you have a condition, take medication, or are pregnant.`,
+  logout: `To log out, go to your **Profile Settings** (click your avatar/name in the top-right navbar), then click the red **"Log Out"** button at the bottom.`,
+  history: `Click the **clock icon** in the top-right navbar to view your History page with all past assessments.`,
+  unavailable: `I'm having trouble connecting to my AI right now. Please try again in a moment — I'll have a full answer for you shortly!`,
+  generic: `I'm having a bit of trouble right now. Please try again in a moment! 🙏`,
+};
+
+const FILIPINO_FALLBACK = {
+  greeting: 'Hey! 👋 May problema sa koneksyon ko ngayon, pero babalik agad ako. Subukan ulit sandali lang!',
+  assessment: 'Para magsimula, buksan ang **SuppliWise** at piliin ang **Start Assessment**. Kumpletuhin ang apat na maiikling bahagi, tingnan ang mga resulta, at i-save ang mga recommendation para sa iyo sa account mo.',
+  confidence: 'Ang confidence score ay nagpapakita kung gaano kahalapit ang recommendation sa impormasyon ng assessment mo: 90–100% ay direktang tugma, 80–89% ay magandang tugma, 70–79% ay katamtaman, at below 70% ay mas pangkalahatan. Gabay lamang ito, hindi diagnosis.',
+  priority: 'Ang priority ay tungkol sa sunod-sunod ng plano mo, hindi urgency o diagnosis. Basahin ang dahilan, timing, at interactions ng bawat item, at magtanong sa healthcare professional bago baguhin ang gawi mo.',
+  interactions: 'May mga supplements na maaaring mag-interact sa isa’t isa, sa gamot, o sa medical condition. Tingnan ang interaction notes at magtanong sa pharmacist o clinician bago pagsamahin ang mga produkto; huwag baguhin ang nakaresetang gamot dahil sa pangkalahatang payo.',
+  vitaminD: 'Ang Vitamin D ay fat-soluble na vitamin na may kinalaman sa kalusugan ng buto at sa normal na immune function. Maaari itong galingin sa pagkain, sa araw, at sa supplements, ngunit nag-iiba ang pangangailangan. Magtanong sa clinician tungkol sa testing o supplementation kung may condition ka, umiinom ka ng gamot, o buntis ka.',
+  logout: 'Para mag-log out, puntahan ang **Profile Settings** (i-click ang avatar o pangalan mo sa navbar sa kanang itaas), pagkatapos i-click ang pulang **"Log Out"** button sa ibaba.',
+  history: 'I-click ang **clock icon** sa navbar sa kanang itaas para buksan ang History page at makita lahat ng nakaraang assessment.',
+  unavailable: 'May problema sa koneksyon ng AI ko ngayon. Pakisubukan ulit sandali lang — may buong sagot agad ako para sa iyo!',
+  generic: 'May kaunting problema ako ngayon. Pakisubukan ulit sandali lang! 🙏',
+};
+
+function offlineFallback(q, languageCode) {
+  // Anchored first, appended last. Every branch below is either `^`-anchored or a
+  // `\b`-bounded word test, so adding English at the END can only ever make a Filipino
+  // message reach the branch its English equivalent would reach — it can never steal a
+  // branch from an English message, because no anchor fires on English text
+  // (utils/languageAnchors.js). Without this, a member writing "paano mag-log out" got
+  // the generic connection error while the same member writing "how do I log out" got
+  // the Profile Settings instructions.
+  const t = anchorText(String(q || '').toLowerCase(), ['app', 'health', 'retrieval']);
   const has = (pattern) => pattern.test(t);
+  // Which product copy this member gets. Tagalog only, for the reason documented on
+  // FILIPINO_FALLBACK; every other language — including the other Philippine ones,
+  // whose retrieval this route still grounds — keeps English.
+  const copy = (languageCode === 'fil' || languageCode === 'fil_taglish') ? FILIPINO_FALLBACK : ENGLISH_FALLBACK;
 
   // Word boundaries, for the reason utils/offTopicFilter.js documents at length:
   // an anchored `/^hi/` answered "his ferritin is low" with a greeting, and
@@ -700,48 +799,50 @@ function offlineFallback(q) {
   const APP_WORDS = /\b(?:app|suppliwise|dashboard|assessments?|results?|reports?|pdf|account|profile|settings?|subscription|package|login|log\s?out|sign\s?in|sign\s?out|history|reminders?|notifications?|recommendations?)\b/;
 
   if (/^(?:hi|hey|hello|sup|yo|wassup|hiya)\b/.test(t)) {
-    return `Hey! 👋 I'm having a bit of trouble connecting right now, but I'll be back shortly. Try again in a moment!`;
+    return copy.greeting;
   }
 
   if (/\bassessment\b/.test(t)) {
-    return `To start an assessment, open **SuppliWise** and select **Start Assessment**. Complete the four short sections, review your results, and your personalized recommendations will be saved to your account.`;
+    return copy.assessment;
   }
 
   if (/\bconfidence\b|\bscore\b|\bpercentage\b|%\b/.test(t)) {
-    return `The confidence score reflects how closely a recommendation matches the information in your assessment: 90–100% is a direct match, 80–89% is a good match, 70–79% is moderate, and below 70% is more general. It is guidance, not a diagnosis.`;
+    return copy.confidence;
   }
 
   if (/\bpriority\b/.test(t)) {
-    return `Priority describes the order suggested for your plan, not urgency or a diagnosis. Review the reason, timing, and interactions for each item, and ask a healthcare professional before changing your routine.`;
+    return copy.priority;
   }
 
   if (/\b(?:mix|combine)\s+supplements?\b|\btake\b.{0,24}\btogether\b/.test(t)) {
-    return `Some supplements can interact with each other, medications, or medical conditions. Check the interaction notes and ask a pharmacist or clinician before combining products; do not change a prescribed routine based on general guidance.`;
+    return copy.interactions;
   }
 
   if (/\bvitamin\s?d(?:1|2|3)?\b/.test(t)) {
-    return `Vitamin D is a fat-soluble vitamin involved in bone health and normal immune function. Food, sun exposure, and supplements can contribute, but needs vary. Ask a clinician about testing or supplementation if you have a condition, take medication, or are pregnant.`;
+    return copy.vitaminD;
   }
 
   if (/\blog\s?out\b|\bsign\s?out\b/.test(t)) {
-    return `To log out, go to your **Profile Settings** (click your avatar/name in the top-right navbar), then click the red **"Log Out"** button at the bottom.`;
+    return copy.logout;
   }
 
   // "history" names a page, but "a history of palpitations" is a member describing
   // their condition, and sending that to the History page would be a non-answer to
   // a health question.
   if (/\bhistory\b/.test(t) && !/\b(?:history of|family history|medical history)\b/.test(t)) {
-    return `Click the **clock icon** in the top-right navbar to view your History page with all past assessments.`;
+    return copy.history;
   }
 
   if (has(HEALTH_WORDS) || has(APP_WORDS)) {
-    return `I'm having trouble connecting to my AI right now. Please try again in a moment — I'll have a full answer for you shortly!`;
+    return copy.unavailable;
   }
 
-  return `I'm having a bit of trouble right now. Please try again in a moment! 🙏`;
+  return copy.generic;
 }
 
 module.exports = router;
 module.exports.buildSystemPrompt = buildSystemPrompt;
+module.exports.replyLanguage = replyLanguage;
+module.exports.replyLanguagePreference = replyLanguagePreference;
 module.exports.offlineFallback = offlineFallback;
 module.exports.atSentenceEnd = atSentenceEnd;

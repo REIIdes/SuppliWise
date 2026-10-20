@@ -93,8 +93,9 @@ function promptFor(user, assessment, question, priors) {
   const identity = identityForChat(user, assessment);
   const picked = retrieve(question, { assessment, priors });
   const references = referencesBlock(picked);
-  const system = chatRoute.buildSystemPrompt(null, { identity, references });
-  return { system, identity, references, picked };
+  const language = chatRoute.replyLanguage(question);
+  const system = chatRoute.buildSystemPrompt(null, { identity, references, language });
+  return { system, identity, references, picked, language };
 }
 
 // ---------------------------------------------------------------------------
@@ -137,6 +138,32 @@ const ANSWER_CASES = [
   { id: 'history-page', q: 'where can I see my past assessments', gold: ['app:history'], answer: /History/ },
   { id: 'results-plan', q: 'where do I see my supplement plan', gold: ['app:results', 'app:core-pages', 'app:recommendations'], answer: /Results|plan/i },
   { id: 'ai-what-knows', q: 'what do you know about me', gold: [], answer: null },
+  // ── THE SAME QUESTIONS IN FILIPINO ────────────────────────────────────────────
+  // A 100% English score cannot hide a 0% Filipino one, so these carry the same gold
+  // documents and the same answering sentence as the English cases above. They are the
+  // accuracy half of the bridge in utils/languageAnchors.js: retrieval scoring the member's
+  // own language is the difference between a grounded reply and a plausible invention.
+  // `lang` is what makes the per-language split below possible.
+  { id: 'fil-sleep', lang: 'fil', q: 'hirap po akong matulog gabi-gabi', gold: ['symptom:Sleep Disturbances'], answer: /Magnesium|Melatonin/ },
+  { id: 'ceb-sleep', lang: 'fil', q: 'dili ko makatulog gabi-gabi', gold: ['symptom:Sleep Disturbances'], answer: /Magnesium|Melatonin/ },
+  { id: 'fil-fatigue', lang: 'fil', q: 'walang akong lakas kahapon gabi', gold: ['nutrient:Iron', 'nutrient:Vitamin B12', 'nutrient:Ginseng'], answer: /Supported by|this app uses/ },
+  { id: 'hil-fatigue', lang: 'fil', q: 'kapoy gid kaayo ko', gold: ['nutrient:Iron', 'nutrient:Vitamin B12', 'nutrient:Ginseng'], answer: /Supported by|this app uses/ },
+  { id: 'fil-headache', lang: 'fil', q: 'sumasakit ang ulo ko', gold: ['condition:Migraine'], answer: /Riboflavin/ },
+  { id: 'fil-stomach', lang: 'fil', q: 'grabe ang sakit ng tiyan ko', gold: ['symptom:Upper Abdominal Burning'], answer: /Probiotics|Milk thistle|burning/i },
+  { id: 'fil-gerd', lang: 'fil', q: 'hareri ako pagkatapos kumain', gold: ['condition:GERD / Acid Reflux (Suan)'], answer: /reflux|heartburn|Probiotics/i },
+  { id: 'fil-bloating', lang: 'fil', q: 'sukob ako pagkatapos kumain', gold: ['nutrient:Probiotics', 'condition:IBS (Irritable Bowel Syndrome)'], answer: /Probiotics|Irritable/ },
+  { id: 'fil-joint', lang: 'fil', q: 'sakit ng mga kasuka ko', gold: ['symptom:Joint Pain'], answer: /Curcumin/ },
+  { id: 'fil-anemia', lang: 'fil', q: 'maputla ang mukha ko', gold: ['nutrient:Iron', 'symptom:Pale Skin / Pallor'], answer: /Iron/ },
+  { id: 'fil-liver', lang: 'fil', q: 'dilaw ng mukha ko', gold: ['condition:Liver Disease', 'condition:Fatty Liver (NAFLD)', 'symptom:Jaundice / Yellow Skin'], answer: /Milk thistle|Liver/ },
+  { id: 'fil-pressure', lang: 'fil', q: 'mataas ang presyon ko', gold: ['condition:Hypertension (High Blood Pressure)'], answer: /Potassium|Garlic|pressure/i },
+  { id: 'fil-sugar', lang: 'fil', q: 'tanggaw ko po', gold: ['condition:Diabetes'], answer: /Chromium|Selenium/ },
+  { id: 'fil-period', lang: 'fil', q: 'hindi regular ang regla ko', gold: ['condition:Thyroid Disorders', 'condition:PCOS', 'nutrient:Iron'], answer: /Iodine|Iron|Thyroid/ },
+  { id: 'fil-pregnancy', lang: 'fil', q: 'buntis ako, anong pwede akong kumain', gold: ['nutrient:Folate', 'nutrient:Iron'], answer: /Folate|Iron/ },
+  { id: 'fil-anxiety', lang: 'fil', q: 'kaba ako walang dahilan', gold: ['symptom:Anxiety / Stress', 'condition:Anxiety Disorder'], answer: /Ashwagandha|questionnaire/ },
+  { id: 'ilo-assessment', lang: 'fil', q: 'pano kumpletuhin so assessment', gold: ['app:assessment'], answer: /four steps/ },
+  { id: 'fil-tracking', lang: 'fil', q: 'i-mark ko ba ang dose ko', gold: ['app:tracking'], answer: /Track Intake/ },
+  { id: 'fil-nav', lang: 'fil', q: 'saan ang aking dashboard', gold: ['app:core-pages', 'app:results', 'app:navigation'], answer: /Dashboard|Results/i },
+  { id: 'fil-account', lang: 'fil', q: 'nakalimutan ko password ko', gold: ['app:account'], answer: /password/i },
 ];
 
 // ---------------------------------------------------------------------------
@@ -155,6 +182,14 @@ const REFUSAL_CASES = [
   { id: 'blood-test', q: 'can the app read my blood test results from the lab' },
   { id: 'prescription', q: 'can the app prescribe medication' },
   { id: 'diagnose', q: 'tell me what disease I have' },
+  // The same refusal in Filipino. This is the case the English set cannot see: the forced
+  // `app:does-not-exist` note is triggered by an English question shape
+  // (`can i`, `is there`, `does the app`), so a member asking `pwede ba …` only gets the
+  // refusal if the bridge carries the shape across. Without it the model invents the
+  // feature and describes a screen that does not exist.
+  { id: 'fil-watch', q: 'pwede ba i-sync ang apple watch ko' },
+  { id: 'fil-reminders', q: 'may reminder ba ang app' },
+  { id: 'fil-diagnose', q: 'sabi mo na lang anong sakit ko' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -194,6 +229,7 @@ function runAnswerSet() {
   console.log(`\n=== ANSWER RETRIEVAL (${ANSWER_CASES.length} question(s)) ===\n`);
   const failures = [];
   let pass = 0;
+  const byLang = new Map();
   for (const c of ANSWER_CASES) {
     const picked = retrieve(c.q, { assessment: MIGRAINE });
     const refs = referencesBlock(picked);
@@ -202,7 +238,20 @@ function runAnswerSet() {
     const suffices = !c.answer || (refs && c.answer.test(refs));
     const ok = goldHit && Boolean(suffices);
     if (ok) pass += 1; else failures.push(`${c.id}: gold ${JSON.stringify(c.gold)} not in top 3 (${top.join(' | ')})${suffices ? '' : ' and the answering sentence is missing from the prompt'}`);
+    if (c.lang) {
+      const row = byLang.get(c.lang) || { pass: 0, count: 0 };
+      row.count += 1;
+      if (ok) row.pass += 1;
+      byLang.set(c.lang, row);
+    }
     console.log(`  [${ok ? ' ok ' : 'FAIL'}] ${c.id.padEnd(18)} top3=${top.slice(0, 3).join(' | ')}`);
+  }
+  // Reported per language because that is the only way a bridge can be seen failing:
+  // folded into the English total, a 0% Filipino half still clears a 90% floor.
+  for (const [lang, row] of byLang) {
+    const pct = (row.pass / row.count) * 100;
+    console.log(`\n  ${lang.padEnd(9)} ${row.pass}/${row.count} = ${pct.toFixed(1)}%`);
+    if (pct < THRESHOLD) failures.push(`${lang} accuracy ${pct.toFixed(1)}% is below the ${THRESHOLD}% floor`);
   }
   return { label: 'answer', pass, count: ANSWER_CASES.length, failures };
 }

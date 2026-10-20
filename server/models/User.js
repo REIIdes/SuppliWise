@@ -107,6 +107,25 @@ const userSchema = new mongoose.Schema(
       default: '',
       maxlength: 64,
     },
+    // ── AI reply language ────────────────────────────────────────────────
+    // Chat answers in whatever language the message arrived in
+    // (utils/language.js); this is what a turn falls back to when its own
+    // words carry no detectable language — "ok thanks", "sige po". Plans and
+    // supplement guides stay English on purpose: their prose is checked by
+    // English safety rules (utils/planGrounding.js), so reading this field
+    // there would produce text nothing validates. See the note at the top of
+    // routes/supplement_detail.js.
+    //
+    // A display preference only — never used to authorise, filter or rank
+    // anything — and empty means "answer me the way the app always has",
+    // which is English. The list is written out rather than derived from
+    // REPLY_LANGUAGE so the schema stays independent of a util;
+    // Test File/language-detection.test.js fails the day the two disagree.
+    preferredLanguage: {
+      type: String,
+      enum: ['', 'en', 'fil', 'fil_taglish', 'ceb', 'hil', 'bik', 'ilo', 'kap', 'pag', 'war'],
+      default: '',
+    },
     twoFactorEnabled: {
       type: Boolean,
       default: false,

@@ -110,7 +110,21 @@ function buildProseContext(ctx, patientProfile) {
   }, patientProfile || '');
 }
 
-/** The personalized prompt. Hoisted so it is one string, not rebuilt per request. */
+/**
+ * The personalized prompt. Hoisted so it is one string, not rebuilt per request.
+ *
+ * WHY THIS WRITER AND THE PLAN GENERATOR BOTH STAY IN ENGLISH
+ * ------------------------------------------------------------
+ * Ask-AI answers in the member's own language (routes/chat.js), and this guide
+ * does not. That is deliberate, not an unfinished translation: a guide is a
+ * document the safety layer then reads. `utils/planGrounding.js` and the
+ * evidence gate check the generated prose against English phrase rules —
+ * interaction wording, dose ranges, forbidden claims — so a guide written in
+ * Tagalog would pass as text those rules cannot see, and "cannot see" here
+ * reads as "nothing blocked it". Localizing this surface means localizing the
+ * validator first, in the same change, not adding a language line to the prompt
+ * and hoping the model stays safe in a language no rule covers.
+ */
 const PERSONALIZED_PROMPT = (name, profile) => `You are an expert clinical nutritionist and pharmacologist. A patient has been recommended "${name}" based on their health assessment. Write a detailed, personalized supplement guide tailored specifically to this patient.
 
 ${evidenceBlock(name)}

@@ -145,3 +145,69 @@ test('a reply cut off by max_tokens ends at a sentence, and a short one is kept 
   assert.equal(atSentenceEnd(mostlyIncomplete), mostlyIncomplete);
   assert.equal(atSentenceEnd(''), '');
 });
+
+// ---------------------------------------------------------------------------
+// Reply language: the member's own language, all the way to the canned reply
+// ---------------------------------------------------------------------------
+
+const fs = require('node:fs');
+const path = require('node:path');
+const { replyLanguage } = require('../routes/chat');
+
+test('a member who writes in Filipino is told to answer in Filipino, and an English one is not', () => {
+  const fil = replyLanguage('hirap po akong matulog gabi-gabi');
+  assert.equal(fil?.name, 'Filipino (Tagalog)');
+  const prompt = buildSystemPrompt(null, { language: fil });
+  assert.match(prompt, /REPLY IN THE MEMBER'S OWN LANGUAGE/);
+  assert.match(prompt, /Answer in Filipino \(Tagalog\)/);
+  // The fixed decline is product text the pre-filter compares against, so the rule has
+  // to exempt it — otherwise the two layers ask the model for opposite sentences.
+  assert.match(prompt, /stays in English/);
+
+  assert.doesNotMatch(buildSystemPrompt(null), /REPLY IN THE MEMBER'S OWN LANGUAGE/);
+  assert.equal(replyLanguage('how much magnesium should I take a day'), null);
+});
+
+test('a turn too short to carry a language inherits the question it follows', () => {
+  // A bare "ok thanks" after a Tagalog question is still a Tagalog conversation;
+  // detection cannot see it, the previous turn can, and the route composes the two.
+  assert.equal(replyLanguage('ok thanks'), null);
+  const inherited = replyLanguage('ok thanks') || replyLanguage('hirap po akong matulog');
+  assert.equal(inherited?.code, 'fil');
+});
+
+test('the chat route hands the member language to the prompt and to the offline reply', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '../routes/chat.js'), 'utf8');
+  assert.match(src, /buildSystemPrompt\(recContext, \{ identity, references, language \}\)/);
+  assert.match(src, /offlineFallback\(q, language\?\.code\)/);
+});
+
+const FALLBACK_TRIGGERS = [
+  'hi', 'how do I start an assessment', 'what does the confidence score mean',
+  'what does priority mean', 'can I mix supplements', 'what is vitamin D',
+  'how do I log out', 'how do I see my history', 'what magnesium do I need', 'qwertyuiop',
+];
+
+test('the Filipino fallback translates the wording, never a product label', () => {
+  for (const q of FALLBACK_TRIGGERS) {
+    const en = offlineFallback(q);
+    const fil = offlineFallback(q, 'fil');
+    assert.notEqual(fil, en, `"${q}" stayed English`);
+    // A member reading "pindutin ang Naka-save na Plano" cannot find the button,
+    // because the button says Saved Plan. Names, paths and the score bands are copied.
+    for (const m of en.matchAll(/\*\*([^*]+)\*\*|"([^"]+)"/g)) {
+      const label = m[1] || m[2];
+      assert.ok(fil.includes(label), `"${label}" vanished from the Filipino copy of "${q}"`);
+    }
+    for (const band of en.match(/\d+[–-]\d+%|\d+%/g) || []) {
+      assert.ok(fil.includes(band), `${band} was rewritten in "${q}"`);
+    }
+  }
+});
+
+test('only Tagalog gets translated copy, so no dialect member is handed someone else’s language', () => {
+  const en = offlineFallback('how do I log out');
+  assert.equal(offlineFallback('paano mag-log out', 'ceb'), en);
+  assert.equal(offlineFallback('paano mag-log out', 'ilo'), en);
+  assert.equal(offlineFallback('how do I log out', 'fil_taglish'), offlineFallback('how do I log out', 'fil'));
+});

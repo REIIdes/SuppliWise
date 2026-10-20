@@ -29,6 +29,8 @@
  * off-topic question twice does not print a different canned sentence.
  */
 
+const { hasHealthAnchor } = require('./languageAnchors');
+
 /**
  * Veto vocabulary: if any of these appears as a whole word the filter abstains and
  * the message goes to the model, which has the member's plan, the retrieved notes
@@ -83,6 +85,25 @@ const HEALTH_HINTS = [
   .map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
 
 const HEALTH_VETO = new RegExp(`\\b(?:${HEALTH_HINTS.join('|')})\\b`, 'i');
+
+/**
+ * The same veto, in the languages this product's members actually write.
+ *
+ * HEALTH_HINTS is English, so every rule above was unreachable for a Filipino message —
+ * and unreachable in the wrong direction: an English off-topic rule cannot fire on
+ * Tagalog either, so the filter abstains and the message goes to the model. That is the
+ * safe outcome, and it is why this is not a fix for a bug members hit. It is here for the
+ * case where a Taglish message DOES carry an English off-topic trigger word inside
+ * Filipino grammar ("annoying ba ang anime ko?" reads as entertainment to a word-anchored
+ * English rule), and for the day a rule is added in another language: utils/languageAnchors.js
+ * is the single place that knows what a health word looks like in Filipino, and consulting
+ * it keeps this module's own rule — never decline a message about health — true in every
+ * language instead of only in English.
+ *
+ * This can only ever ADD abstention, never a decline. That asymmetry is the design rule
+ * this file exists for.
+ */
+const isHealthText = (text) => HEALTH_VETO.test(text) || hasHealthAnchor(text);
 
 /**
  * Off-topic shape, one entry per category the route used to keep inline.
@@ -158,7 +179,7 @@ function hashOf(text) {
 function classifyOffTopic(message) {
   const text = String(message || '').replace(/\s+/g, ' ').trim().toLowerCase();
   if (!text) return { offTopic: false, rule: null };
-  if (HEALTH_VETO.test(text)) return { offTopic: false, rule: 'health-topic' };
+  if (isHealthText(text)) return { offTopic: false, rule: 'health-topic' };
   for (const rule of OFF_TOPIC_RULES) {
     if (rule.pattern.test(text)) return { offTopic: true, rule: rule.id };
   }

@@ -13,7 +13,28 @@ const { groundPlan, doseEntry, NEUTRAL_TRIGGER, rejectReason } = require('../uti
 const { loadMemberHistory, applyAdaptation } = require('../utils/memberHistory');
 const { answerSignature, alignPlanToSpine, validateModelPlan, selectionKey } = require('../utils/planSelection');
 const { canonicaliseAnswers } = require('../utils/answerCanonical');
+// The free-text rules in this file are written in English because that is what a
+// questionnaire option looks like; a member typing their own words writes Tagalog.
+// anchorText appends the English equivalent of a Filipino symptom phrase
+// (utils/languageAnchors.js) so the same complaint reaches the same branch here that
+// it would have reached in English. Appended, never substituted: the member’s own
+// sentence is still the text that gets stored, shown and polished.
+const { anchorText } = require('../utils/languageAnchors');
+const { CRISIS_PHRASES } = require('../utils/severity');
 const Assessment = require('../models/Assessment');
+
+/**
+ * True when the member's own words name a mental-health crisis.
+ *
+ * The list is severity.js's, not a local regex: the critical tier and the
+ * consult-doctor flag must agree on what a crisis sounds like, and they used to
+ * be written twice — once here as `suicid|self.harm|hopeless|want to die`, once
+ * there — so "I want to harm myself" cleared both.
+ */
+function mentionsCrisis(text) {
+  const lower = String(text || '').toLowerCase();
+  return CRISIS_PHRASES.some((phrase) => lower.includes(phrase));
+}
 
 // Kept on the route's public surface because existing probes import it from
 // here; the implementation now lives in utils/assessmentPrompt.js.
@@ -1104,7 +1125,7 @@ function generateClinicalFallback(a, liveDynamic = []) {
 
   // -- Free-text feeling description keyword parser --
   if (a.feelingDescription && a.feelingDescription.trim()) {
-    const fd = a.feelingDescription.toLowerCase();
+    const fd = anchorText(a.feelingDescription.toLowerCase(), ['health', 'safety']);
 
     if (/back\s*pain|backache|spine|lower back|upper back/.test(fd)) {
       if (!recs.find(r => r.name.includes('Magnesium')))
@@ -1307,11 +1328,11 @@ function buildResult(a, recs, lifestyleAdvice, actionPlan, warnings, avoidList, 
   ].filter(Boolean).join(' ');
 
   // -- Consult doctor triggers --
-  const fd = (a.feelingDescription || '').toLowerCase();
+  const fd = anchorText((a.feelingDescription || '').toLowerCase(), ['health', 'safety']);
   const consultTriggers = [
     { test: /chest\s*pain|heart\s*attack|palpitation/.test(fd), reason: 'Reported chest pain or heart-related symptoms require immediate medical evaluation.' },
     { test: /rapid\s*weight\s*loss|losing weight fast|unexplained weight/.test(fd), reason: 'Unexplained rapid weight loss should be evaluated by a physician.' },
-    { test: /suicid|self.harm|hopeless|want to die/.test(fd), reason: 'Reported mental health crisis symptoms require immediate professional support.' },
+    { test: mentionsCrisis(fd), reason: 'Reported mental health crisis symptoms require immediate professional support.' },
     { test: symptoms.includes('Anxiety/Stress') && conditions.length > 1, reason: 'Multiple medical conditions combined with anxiety symptoms warrant physician oversight.' },
     { test: conditions.includes('Heart Disease') || conditions.includes('Kidney Disease'), reason: 'Your medical conditions require physician supervision before starting any supplement regimen.' },
   ];

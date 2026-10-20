@@ -59,6 +59,9 @@
 
 const { analyzeSeverity } = require('./severity');
 const { completeWithFallback } = require('./aiRouter');
+const {
+  OVERRIDE_PHRASES, ROLE_HIJACK, ROLE_HIJACK_PH, DAN_MODE, EXFIL_PHRASES,
+} = require('./aiGuardrails');
 
 /** A verdict from this layer is reused while the submission is unchanged. */
 const FLAGGING_TTL_MS = 5 * 60 * 1000;
@@ -149,14 +152,23 @@ function redactPatientText(text) {
  * instruction. It stays DATA — quoted inside a JSON payload — but the phrases
  * are defanged so they cannot steer the model, mirroring the neutralizer the
  * recommendation prompts already use.
+ *
+ * It used to mirror that neutralizer with its own, shorter copy of the phrase
+ * list — and the copy fell behind twice: once on the Taglish splice ("limutan
+ * mo na lang ang mga previous instructions" reached the triage model intact)
+ * and once on the exfil verbs. So it now imports the rules themselves from
+ * utils/aiGuardrails.js: one list, two call sites, and no way for this one to
+ * silently be the weaker of the two again.
  */
 function neutralizeInstructionOverride(text) {
   return String(text || '')
     .replace(/<\/?patient_data>/gi, '')
     .replace(/\[\/?INST\]/gi, '')
-    .replace(/ignore (all )?(previous|prior|above) instructions?/gi, '[instruction-like text removed]')
-    .replace(/disregard (all )?(previous|prior|above)/gi, '[instruction-like text removed]')
-    .replace(/you are now /gi, '[instruction-like text removed] ')
+    .replace(OVERRIDE_PHRASES, '[instruction-like text removed]')
+    .replace(ROLE_HIJACK, '[instruction-like text removed] ')
+    .replace(ROLE_HIJACK_PH, '[instruction-like text removed]')
+    .replace(EXFIL_PHRASES, '[instruction-like text removed]')
+    .replace(DAN_MODE, '[instruction-like text removed]')
     .replace(/system prompt/gi, '[instruction-like text removed]')
     .replace(/```/g, '')
     .trim();

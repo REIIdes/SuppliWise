@@ -25,6 +25,7 @@ const {
   countsAsActivity,
 } = require('../utils/adminSession');
 const { protect, rejectSession } = require('../middleware/auth');
+const { REPLY_LANGUAGE, replyLanguageName } = require('../utils/language');
 const {
   issueUserSession,
   verifyUserSession,
@@ -2164,6 +2165,9 @@ router.get('/me', protect, async (req, res) => {
       // Drives the "Last password changed" readout in Account Security.
       passwordChangedAt: user.passwordChangedAt || null,
       hasVisitedDashboard: user.hasVisitedDashboard,
+      // The AI surfaces with no message to read from answer in this (routes/chat.js,
+      // routes/supplement_detail.js). Empty is English.
+      preferredLanguage: user.preferredLanguage || '',
     });
   } catch (error) {
     console.error('[me]', error.message);
@@ -2417,6 +2421,42 @@ router.post('/two-factor-method', protect, async (req, res) => {
   } catch (error) {
     console.error('[two-factor-method]', error.message);
     res.status(500).json({ message: 'Something went wrong. Please try again later.' });
+  }
+});
+
+// @route   POST /api/auth/language
+// @desc    Remember which language the AI answers this member in
+// @access  Private
+// Chat already reads the language out of each message (utils/language.js), so this
+// is not a chat setting — it is the fallback for the turns where the member's own
+// words carry no detectable language, like a follow-up that is only "ok thanks".
+// Plans and supplement guides are deliberately NOT covered by it: their prose is
+// checked by English safety rules (utils/planGrounding.js), and the reason is
+// written out in routes/supplement_detail.js. Empty means English, which is what
+// every account had before this field existed.
+router.post('/language', protect, async (req, res) => {
+  try {
+    if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
+    const code = String(req.body?.code ?? '').trim().toLowerCase();
+    const allowed = ['', 'en', ...Object.keys(REPLY_LANGUAGE)];
+    if (!allowed.includes(code)) {
+      return res.status(400).json({ message: 'That language is not available yet.' });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(401).json({ message: 'Your session is no longer valid. Please sign in again.' });
+    user.preferredLanguage = code;
+    await user.save();
+
+    res.json({
+      message: code && code !== 'en'
+        ? `The AI assistant will answer you in ${replyLanguageName(code)}.`
+        : 'The AI assistant will answer you in English.',
+      preferredLanguage: code,
+    });
+  } catch (error) {
+    console.error('[language]', error.message);
+    res.status(500).json({ message: 'Could not save that preference. Please try again.' });
   }
 });
 

@@ -7,7 +7,18 @@
  *  - generic AI warning word "severe" matching every disclaimer
  *  - underlying condition alone (e.g. depression/anxiety) triggering flag
  *  - "None" placeholder values not being ignored
+ *
+ * MULTILINGUAL: every needle below is English, because each one names a symptom this
+ * app's own questionnaire already publishes in English. A member describing a symptom in
+ * Filipino typed it into a free-text box, and "hindi ako makapag-hinga" contains none of
+ * the needles above — so the life-threatening case did NOT flag. utils/languageAnchors.js
+ * appends the English wording for what the member said, which is why `anchored()` wraps
+ * the free text and the symptom names here. Safety is the one surface where the anchor
+ * list must err wide: an over-flag costs an admin a look, a missed flag costs a member
+ * their emergency response.
  */
+
+const { anchorText } = require('./languageAnchors');
 
 const SEVERE_SYMPTOMS = [
   'chest pain', 'difficulty breathing', 'shortness of breath', 'fainting',
@@ -26,16 +37,41 @@ const CRITICAL_SYMPTOMS = [
   'loss of consciousness',
 ];
 
-// Emergency phrases that indicate critical situations
+// The crisis wording, in one place, because two surfaces have to agree on it:
+// this module's critical tier and the consult-doctor trigger in routes/recommend.js.
+// It used to be a regex that only lived in recommend.js
+// ('suicid|self.harm|hopeless|want to die'), and "I want to harm myself" or
+// "I want to end my life" matched none of those needles — so an English member
+// writing the plainest possible cry for help got a wellness plan and no flag.
+// Deliberately wide: an over-flag costs a clinician one look, a missed flag costs
+// a member the emergency response. Every entry is lowercase because matching
+// happens on lowercased, anchor-expanded text (utils/languageAnchors.js maps the
+// Filipino and Bisaya crisis phrasing onto 'suicidal thoughts self-harm want to
+// die', which is why the member does not have to write English to be flagged).
+const CRISIS_PHRASES = [
+  'suicid',
+  'self-harm', 'self harm', 'harm myself', 'hurt myself on purpose',
+  'kill myself', 'killing myself', 'take my own life',
+  'end my life', 'end it all',
+  'want to die', 'wanna die',
+  'better off dead', 'no reason to live', 'wish i was dead', 'wish i were dead',
+  'hopeless',
+];
+
+// Emergency phrases that indicate critical situations.
+// 'want to die' and 'hopeless' live in CRISIS_PHRASES above, not here — they are the
+// same list, and a needle in two places is a needle that drifts out of sync.
 const EMERGENCY_PHRASES = [
   "can't breathe",
   'chest crushing',
-  'want to die',
   'bleeding heavily',
   'severe pain',
   'passing out',
   'feeling faint',
   'extreme pain',
+  ...CRISIS_PHRASES,
+  // FAST signs — a stroke is the one flag where the response time IS the treatment.
+  'slurred speech', 'facial drooping', 'face drooping', 'drooping face',
 ];
 
 const CRITICAL_CONDITIONS = [
@@ -52,6 +88,19 @@ const RED_FLAG_PHRASES = [
   'chest pain', 'difficulty breathing', "can't breathe", 'faint',
   'suicid', 'self-harm', 'severe pain', 'emergency', 'blood in stool',
   'blood in urine', 'coughing blood',
+  // Both of these are already red-flag SYMPTOM NAMES in SEVERE_SYMPTOMS above, so a
+  // member who picks "Numbness" from the questionnaire is flagged while a member who
+  // types "my whole left arm went numb" is not. Free text is where the second member
+  // lives, and where every Filipino description lands (utils/languageAnchors.js
+  // anchors "namamanhid ang kamay ko" onto this exact wording).
+  'numbness', 'heart palpitations',
+  // Same reason: the words exist in the English corpus of complaints, they simply were
+  // never listed. 'sudden weakness' is what utils/languageAnchors.js anchors the
+  // stroke-sign phrases onto.
+  'sudden weakness', 'sudden numbness', 'paralysis', 'paralysed', 'one side of my body',
+  // The two FAST words on their own, because English writes them in either
+  // order — 'my speech went slurred' carries the needle 'slurred speech' nowhere.
+  'slurred', 'drooping',
 ];
 
 // AI warnings are generic disclaimers — only flag on explicit emergency language, not the word "severe" alone
@@ -81,6 +130,25 @@ function containsAny(haystack, needles) {
 }
 
 /**
+ * The member's own free-text answers, joined the way this module has always joined
+ * them, plus the English wording for anything written in another language. Placeholder
+ * values and sub-three-character answers are dropped BEFORE anchoring, which is the
+ * order that keeps the "empty input never flags" fix intact: an anchored "None" would
+ * otherwise become a symptom description.
+ */
+function anchoredFreeText(input = {}) {
+  const raw = [
+    input.feelingDescription, input.currentMedications, input.allergies,
+    input.recentBloodTest, input.bloodTestResults,
+  ].filter(v => typeof v === 'string')
+   .map(v => v.trim())
+   .filter(v => v && !IGNORE_VALUES.has(v.toLowerCase()) && v.length > 3)
+   .join('\n')
+   .toLowerCase();
+  return anchorText(raw, ['safety', 'health']);
+}
+
+/**
  * Determine severity tier based on symptoms and conditions
  * @returns {'critical' | 'high' | 'medium' | null}
  */
@@ -90,14 +158,7 @@ function getSeverityTier(input = {}, aiResults = null) {
   const conditions = normalizeList(input.medicalConditions);
 
   // Build freeText from free-text fields
-  const rawFreeText = [
-    input.feelingDescription, input.currentMedications, input.allergies,
-    input.recentBloodTest, input.bloodTestResults,
-  ].filter(v => typeof v === 'string')
-   .map(v => v.trim())
-   .filter(v => v && !IGNORE_VALUES.has(v.toLowerCase()) && v.length > 3)
-   .join('\n')
-   .toLowerCase();
+  const rawFreeText = anchoredFreeText(input);
 
   const symptomNames = symptoms.join('\n').toLowerCase();
 
@@ -158,14 +219,7 @@ function analyzeSeverity(input = {}, aiResults = null) {
   const conditions = normalizeList(input.medicalConditions);
 
   // Build freeText from free-text fields, ignoring placeholder "None" values and very short text
-  const rawFreeText = [
-    input.feelingDescription, input.currentMedications, input.allergies,
-    input.recentBloodTest, input.bloodTestResults,
-  ].filter(v => typeof v === 'string')
-   .map(v => v.trim())
-   .filter(v => v && !IGNORE_VALUES.has(v.toLowerCase()) && v.length > 3)
-   .join('\n')
-   .toLowerCase();
+  const rawFreeText = anchoredFreeText(input);
   const freeText = rawFreeText;
 
   // 1. Explicitly severe symptom ratings — only for non-ignored symptoms (case-insensitive key lookup)
@@ -239,4 +293,4 @@ function analyzeSeverity(input = {}, aiResults = null) {
   return { flagged: unique.length > 0, reasons: unique, tier };
 }
 
-module.exports = { analyzeSeverity, getSeverityTier, CRITICAL_SYMPTOMS, EMERGENCY_PHRASES };
+module.exports = { analyzeSeverity, getSeverityTier, CRITICAL_SYMPTOMS, EMERGENCY_PHRASES, CRISIS_PHRASES };

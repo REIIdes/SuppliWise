@@ -48,6 +48,38 @@ function secTimeAgo(iso) {
   return new Date(iso).toLocaleDateString();
 }
 
+// The AI reply-language choices, in the order a member reads them.
+//
+// Mirrors two server lists that must stay together: the `preferredLanguage` enum in
+// server/models/User.js and REPLY_LANGUAGE in server/utils/language.js. Pinning them
+// against each other is server/Test File/language-detection.test.js; this copy is the
+// third leg, and it only needs to be honest about what the assistant can do — a code
+// the server refuses returns "That language is not available yet" rather than a
+// silently wrong reply.
+const AI_LANGUAGE_OPTIONS = [
+  { code: '', label: 'English' },
+  { code: 'fil', label: 'Filipino (Tagalog)' },
+  { code: 'fil_taglish', label: 'Taglish (Tagalog + English)' },
+  { code: 'ceb', label: 'Cebuano (Bisaya)' },
+  { code: 'hil', label: 'Hiligaynon (Ilonggo)' },
+  { code: 'bik', label: 'Bikol' },
+  { code: 'ilo', label: 'Ilocano' },
+  { code: 'kap', label: 'Kapampangan' },
+  { code: 'pag', label: 'Pangasinan' },
+  { code: 'war', label: 'Waray' },
+];
+
+/**
+ * One English entry, because the server accepts both '' and 'en' and means the
+ * same thing by them. Without this, an account saved as 'en' would render a
+ * dropdown with no matching option — visually blank, and the first change the
+ * member makes would look like a fix rather than the no-op it is.
+ */
+function languageCodeForControl(code) {
+  const value = String(code || '');
+  return value === 'en' ? '' : value;
+}
+
 function ProfilePage() {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
@@ -72,6 +104,12 @@ function ProfilePage() {
   // /auth/me and drive the Account Security cards below.
   const [twoFactorMethod, setTwoFactorMethod] = useState(() => storedUser.twoFactorMethod || null);
   const [passwordChangedAt, setPasswordChangedAt] = useState(() => storedUser.passwordChangedAt || null);
+  // Which language the AI assistant should answer in when the member's own message
+  // does not say. POST /auth/language stores it; utils/language.js still reads the
+  // message first, so this is the fallback, not an override.
+  const [preferredLanguage, setPreferredLanguage] = useState(() => languageCodeForControl(storedUser.preferredLanguage));
+  const [languageSaving, setLanguageSaving] = useState(false);
+  const [languageNote, setLanguageNote] = useState('');
 
   // Re-read the security facts after any of the cards changes one. Deliberately
   // a fresh /me rather than trusting the local response, so the card can never
@@ -214,6 +252,7 @@ const otpTickRef = useRef(null);
           setTwoFactorEnabled(fresh.twoFactorEnabled === true);
           setTwoFactorMethod(fresh.twoFactorEnabled ? (fresh.twoFactorMethod || 'authenticator') : null);
           setPasswordChangedAt(fresh.passwordChangedAt || null);
+          setPreferredLanguage(languageCodeForControl(fresh.preferredLanguage));
           const live = applyFresh(fresh);
           setSubscription({
             active: live.active,
@@ -235,6 +274,7 @@ const otpTickRef = useRef(null);
               twoFactorEnabled: fresh.twoFactorEnabled,
               twoFactorMethod: fresh.twoFactorEnabled ? (fresh.twoFactorMethod || 'authenticator') : null,
               passwordChangedAt: fresh.passwordChangedAt || null,
+              preferredLanguage: fresh.preferredLanguage || '',
               subscriptionActive: fresh.subscriptionActive,
               subscriptionPlan: fresh.subscriptionPlan,
               subscriptionUpdatedAt: fresh.subscriptionUpdatedAt,
@@ -675,6 +715,37 @@ const otpTickRef = useRef(null);
       await submitProfileUpdate(true);
     } catch (err) {
       setError(err.message || 'Invalid OTP. Please try again.');
+    }
+  };
+
+  // Saved the moment it changes rather than behind the profile Save button. The
+  // setting is one value, it applies to the assistant's very next reply, and
+  // folding it into that form would tie it to a name/email/picture edit the
+  // member may not want to make just to change a language.
+  const saveLanguagePreference = async (code) => {
+    const previous = preferredLanguage;
+    setPreferredLanguage(code);
+    setLanguageSaving(true);
+    setLanguageNote('');
+    try {
+      const response = await fetch(`${BASE_URL}/auth/language`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ code }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Could not save that preference. Please try again.');
+      const saved = data.preferredLanguage ?? code;
+      setPreferredLanguage(languageCodeForControl(saved));
+      setLanguageNote(data.message || 'Saved.');
+      try {
+        setStoredUser({ ...(getStoredUser() || {}), preferredLanguage: saved });
+      } catch { /* cache write best-effort */ }
+    } catch (err) {
+      setPreferredLanguage(previous);
+      setError(err.message || 'Something went wrong. Please try again.');
+    } finally {
+      setLanguageSaving(false);
     }
   };
 
@@ -1266,6 +1337,46 @@ const otpTickRef = useRef(null);
                   {profileLoading ? 'Retrying…' : 'Retry'}
                 </button>
               </div>
+            )}
+
+            {/* ── AI assistant language ──
+                The assistant already answers in whatever language the member's own
+                message is written in (server/utils/language.js detects it per turn).
+                This control is the fallback for the turns whose own words do not say:
+                a follow-up that is only "ok thanks". Plans and supplement guides are
+                not covered — they stay English because their safety rules are
+                English; see routes/supplement_detail.js on the server.
+                Saved on change — see saveLanguagePreference. */}
+            {view === 'personal' && (
+            <div className="profile-section profile-section--language" id="profile-language">
+              <h2 className="profile-section-title">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M2 12h20" />
+                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                </svg>
+                AI assistant language
+              </h2>
+              <p className="profile-section-subtitle">
+                The assistant answers in the language you write to it in. This is what it uses when your message does not make that clear — a short reply like "ok thanks".
+              </p>
+              <div className="profile-form-group">
+                <label htmlFor="preferredLanguage">Answer me in</label>
+                <select
+                  id="preferredLanguage"
+                  value={preferredLanguage}
+                  onChange={(e) => saveLanguagePreference(e.target.value)}
+                  disabled={languageSaving}
+                >
+                  {AI_LANGUAGE_OPTIONS.map((option) => (
+                    <option key={option.code || 'english'} value={option.code}>{option.label}</option>
+                  ))}
+                </select>
+                <span className="profile-helper-text">
+                  {languageSaving ? 'Saving…' : languageNote}
+                </span>
+              </div>
+            </div>
             )}
 
             {view === 'security' && (
