@@ -32,6 +32,7 @@
  */
 
 const { canonicalOrderPromptLine } = require('./planConsistency');
+const { spinePromptBlock } = require('./planSelection');
 const { neutralize, GUARDRAIL_CLAUSE } = require('./aiGuardrails');
 const { citationRegistryPromptBlock, citationRegistryPromptLine, HONEST_MARKER } = require('./supplementEvidenceRegistry');
 const { NEUTRAL_TRIGGER, DOSE_TABLE } = require('./planGrounding');
@@ -156,6 +157,11 @@ function buildAssessmentPrompt(a) {
   // how they actually followed it), rendered by utils/memberHistory.js and
   // already fenced + neutralised. Absent for a first-ever assessment.
   const historyBlock = String(a._historyBlock || '').trim();
+  // [PLAN SPINE] — the item list this app's clinical rules already selected from
+  // these answers, injected by the recommend route from utils/planSelection.
+  // Membership is guaranteed in code; stating it here means the model's own
+  // reasoning lands on the right row instead of being re-hosted onto another.
+  const spineBlock = spinePromptBlock(a._planSpine);
   // Section numbering follows what is actually present, so the list never shows
   // a gap when the learned knowledge base is empty.
   const citationNumber = dynamicKb ? 10 : 9;
@@ -178,10 +184,12 @@ ${doseGuidancePromptBlock()}
 
 [APPROVED SUPPLEMENT NAMES]
 Recommend only products a clinical nutrition taxonomy recognises — for example: ${citationRegistryPromptLine()}. A name invented for this answer ("Adrenal Support Complex", "Stress Relief Matrix", "Cell Energy Activator") is not a supplement, and it will be deleted before the patient sees the plan. Prescription medicines are never recommended by this app.
-
+${spineBlock ? `\n${spineBlock}\n` : ''}
 [INSTRUCTIONS]
 1. Output valid JSON only — no markdown, no code fences, no text before or after the object.
-2. Provide exactly 15 recommendations. High = most clinically urgent for this patient, Medium = moderately relevant, Low = supportive/preventive. Order them: priority tier first, then canonical item order from the knowledge base.
+2. ${spineBlock
+    ? 'Provide exactly one recommendation per [PLAN SPINE] item, using that item\'s name verbatim and in that order. High = most clinically urgent for this patient, Medium = moderately relevant, Low = supportive/preventive; keep the tier the spine labels on each item.'
+    : 'Provide exactly 15 recommendations. High = most clinically urgent for this patient, Medium = moderately relevant, Low = supportive/preventive. Order them: priority tier first, then canonical item order from the knowledge base.'}
 3. Every recommendation MUST combine at least 2-3 of these factors: symptoms (with severity), conditions, goals, diet type, BMI, lifestyle, medications, or blood test. Never cite only one thing.
 4. reason field: 2-4 sentences weaving symptoms+severity, diet, BMI, goals and lifestyle. Example style: "Magnesium plays a central role in nerve signaling and muscle relaxation. This patient follows a ketogenic diet, which may support fat-soluble nutrient absorption, but their sedentary lifestyle and reported migraines (with severe nausea) suggest a higher likelihood of magnesium insufficiency. Supplementation may help reduce neuronal excitability and support the muscle gain goal."
 5. conditionContext field: one punchy sentence combining 2-3 factors, or null. Example: "Given your severe nausea and migraine history, and your keto diet's fat-soluble nutrient profile, magnesium may support nerve function and reduce symptom frequency."

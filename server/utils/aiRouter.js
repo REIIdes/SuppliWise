@@ -625,6 +625,43 @@ function parseJsonObject(text) {
 }
 
 /**
+ * Which sampling controls each provider accepts, by provider KEY.
+ *
+ * Two providers exist to make a plan reproducible and only these two knobs are
+ * in their published request schemas: `top_p` (how wide the sampling pool is)
+ * and `seed` (the number the pool is walked from). Neither produces an identical
+ * reply by itself — a provider may batch differently, update a model, or ignore
+ * `seed` on a model it has not wired it up for — so they are used as variance
+ * REDUCTION on top of the deterministic gates in utils/planSelection.js, never
+ * as the guarantee. Reproducing a plan is those gates' job.
+ *
+ * Declared here rather than per provider entry because it is a wire-protocol
+ * fact, not a routing preference — and because sending a field a vendor rejects
+ * is not a warning: an unknown top-level key is a 400 that reads like a payload
+ * bug, and the member gets the rule engine instead of a plan. Groq validates its
+ * request body and has no `seed`; Anthropic has no `seed` either.
+ */
+const SAMPLING_CAPABILITIES = {
+  openrouter: { seed: true, topP: true },
+  openai: { seed: true, topP: true },
+  llama: { seed: true, topP: true },
+  groq: { seed: false, topP: true },
+  anthropic: { seed: false, topP: true },
+};
+
+/** The sampling fields this provider will accept, in its own spelling. */
+function samplingFields(providerKey, { seed, topP }, wire) {
+  const caps = SAMPLING_CAPABILITIES[providerKey] || { seed: false, topP: wire !== 'anthropic' };
+  const out = {};
+  // `Number.isInteger` keeps 0 valid (a fully greedy request) and rejects a
+  // caller that passed a hash string or NaN by accident.
+  if (caps.seed && Number.isInteger(seed)) out.seed = seed;
+  const top = Number(topP);
+  if (caps.topP && Number.isFinite(top) && top > 0 && top <= 1) out.top_p = top;
+  return out;
+}
+
+/**
  * Make one completion call against a RESOLVED target. Never throws.
  *
  * Split out from `complete` so a caller walking a fallback chain can reuse every
@@ -641,6 +678,8 @@ async function completeWithTarget(target, {
   messages = null,
   maxTokens = 700,
   temperature = 0.3,
+  seed = null,
+  topP = null,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   json = false,
   extraBody = null,
@@ -696,12 +735,16 @@ async function completeWithTarget(target, {
   };
 
   const buildBody = ({ withJsonMode }) => {
+    // Recomputed per wire so a field never reaches a provider that would reject
+    // it, and so `extraBody` tuning below can still override.
+    const sampling = samplingFields(target.provider, { seed, topP }, target.wire);
     if (target.wire === 'anthropic') {
       const { systemText, turns } = liftSystem(conversation);
       return {
         model: target.model,
         max_tokens: maxTokens, // required by this API, not optional
         temperature,
+        ...sampling,
         ...(systemText ? { system: systemText } : {}),
         messages: turns.length ? turns : [{ role: 'user', content: user || '' }],
         stream: false,
@@ -736,6 +779,7 @@ async function completeWithTarget(target, {
       messages: conversation,
       max_tokens: maxTokens,
       temperature,
+      ...sampling,
       stream: false,
       ...(tuning && typeof tuning === 'object' ? tuning : {}),
       ...(withJsonMode && json ? { response_format: { type: 'json_object' } } : {}),
@@ -850,6 +894,7 @@ async function completeWithTarget(target, {
  * @param {string} purpose
  * @param {{system?: string, user?: string, messages?: Array<{role: string, content: string}>,
  *          maxTokens?: number, temperature?: number, timeoutMs?: number,
+ *          seed?: number|null, topP?: number|null,
  *          json?: boolean, extraBody?: object, env?: NodeJS.ProcessEnv}} options
  * @returns {Promise<{ok: boolean, data: Record<string, unknown>|null, text: string,
  *                    truncated: boolean, provider: string, model: string|null,
@@ -1050,6 +1095,8 @@ function describeRouting({ env = process.env } = {}) {
 module.exports = {
   DEFAULT_PROVIDER,
   DEFAULT_PROVIDER_ENV,
+  SAMPLING_CAPABILITIES,
+  samplingFields,
   defaultProviderKey,
   AI_ROUTES,
   DEFAULT_TIMEOUT_MS,

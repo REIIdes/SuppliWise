@@ -5,12 +5,14 @@ const { preprocessUserInput, sanitizeMedicalField } = require('../utils/sanitize
 const { completeWithFallback } = require('../utils/aiRouter');
 const { simplifiedReasonFor, simplifiedEvidenceFor } = require('../utils/recommendationPlainLanguage');
 const { promptSafe, ASSESSMENT_SYSTEM_PROMPT, buildAssessmentPrompt } = require('../utils/assessmentPrompt');
-const { enforcePlanConsistency } = require('../utils/planConsistency');
+const { enforcePlanConsistency, classifySupplement } = require('../utils/planConsistency');
 const { containsForbiddenFood } = require('../utils/planEvaluation');
 const { getLiveConditions, mergeSelectedBundles, kbBlockForPrompt } = require('../utils/dynamicConditions');
 const { registeredEvidence, extractPmids } = require('../utils/supplementEvidenceRegistry');
-const { groundPlan } = require('../utils/planGrounding');
+const { groundPlan, doseEntry, NEUTRAL_TRIGGER, rejectReason } = require('../utils/planGrounding');
 const { loadMemberHistory, applyAdaptation } = require('../utils/memberHistory');
+const { answerSignature, alignPlanToSpine, validateModelPlan, selectionKey } = require('../utils/planSelection');
+const Assessment = require('../models/Assessment');
 
 // Kept on the route's public surface because existing probes import it from
 // here; the implementation now lives in utils/assessmentPrompt.js.
@@ -33,6 +35,184 @@ function cleanStr(s) {
     .replace(/\u00e7/g, 'c').replace(/\u00df/g, 'ss')
     .replace(/[\u0080-\u00FF]/g, (c) => c) // keep other latin-1
     .replace(/[^\x00-\xFF]/g, '');  // strip anything above latin extended
+}
+
+/**
+ * A request seed from the answer digest. The digest is a hash, so this carries
+ * no answer text, and taking it modulo 2^31 keeps it inside the integer range
+ * every provider that accepts `seed` documents.
+ */
+function seedFromSignature(signature) {
+  const head = String(signature || '').slice(0, 8);
+  const parsed = /^[0-9a-f]{1,8}$/i.test(head) ? parseInt(head, 16) : 0;
+  return parsed % 2147483647;
+}
+
+/**
+ * The plan length the product presents. Kept as a number here, rather than only
+ * as a line in the prompt ("provide exactly 15 recommendations"), because the
+ * count is a property of the SELECTION, and selection is decided in code.
+ */
+const SPINE_TARGET_COUNT = 15;
+
+/**
+ * Preventive support items, in canonical nutrient order, used to bring a
+ * rule-driven plan up to the presented length.
+ *
+ * These are NOT "one set of supplements for every user". Every entry is
+ * screened against the member's own answers before it can be added: declared
+ * allergens, diet (a vegan never gets a bovine collagen or fish-derived row),
+ * age band (nothing adult-dosed reaches a child or adolescent), pregnancy or
+ * breastfeeding (nothing hormonal or herb-like), and named conditions a row is
+ * documented to aggravate. Rows already chosen for a clinical reason are never
+ * duplicated, and a nutrient class already in the plan is not added twice.
+ *
+ * `role` is what the app can say about the nutrient in general — the reason a
+ * dietitian lists it as preventive support. It asserts nothing about the reader.
+ */
+const GENERAL_SUPPORT_POOL = [
+  { name: 'Vitamin D3 (Cholecalciferol)', role: 'bone density, calcium absorption and immune function' },
+  { name: 'Omega-3 (EPA+DHA)', role: 'heart, brain and eye health', animalDerived: true, bloodThinnerNote: 'High-dose omega-3 can add to a blood thinner — keep to 1g daily and inform your doctor' },
+  { name: 'Magnesium Glycinate', role: 'nerve signalling, muscle relaxation and sleep quality' },
+  { name: 'Calcium Citrate', role: 'bone mineral density, especially when dietary calcium is low', avoidConditions: ['kidney stone', 'kidney disease'] },
+  { name: 'Vitamin B12 (Methylcobalamin)', role: 'energy metabolism, red blood cells and nerve function' },
+  { name: 'Folate (Methylfolate)', role: 'cell division and homocysteine metabolism' },
+  { name: 'Vitamin C (Ascorbic Acid)', role: 'antioxidant defence, collagen formation and iron absorption' },
+  { name: 'Zinc Picolinate', role: 'immune function, wound healing and protein synthesis' },
+  { name: 'Vitamin K2 (MK-7)', role: 'directing calcium into bone rather than soft tissue', bloodThinnerNote: 'Vitamin K can blunt warfarin effect — discuss with your doctor' },
+  { name: 'Probiotic (Multi-strain)', role: 'gut microbiome diversity and digestive regularity' },
+  { name: 'Fiber (Psyllium Husk)', role: 'bowel regularity and satiety' },
+  { name: 'CoQ10 (Ubiquinol)', role: 'cellular energy production, particularly relevant with statin therapy', adultOnly: true },
+  { name: 'Curcumin + Piperine', role: 'exercise-related inflammation and joint comfort', pregnancyAvoid: true, adultOnly: true, bloodThinnerNote: 'Curcumin has mild blood-thinning activity — discuss with your doctor' },
+  { name: 'L-Theanine', role: 'calm alertness without sedation', adultOnly: true },
+  { name: 'Creatine Monohydrate', role: 'muscle strength, power and recovery', adultOnly: true, pregnancyAvoid: true, avoidConditions: ['kidney disease', 'kidney stone'] },
+  { name: 'Collagen Peptides (Type I & III)', role: 'skin, hair and connective-tissue support', animalDerived: true, adultOnly: true },
+];
+
+/**
+ * The nutrient words inside a supplement name, stripped of the marketing and
+ * form fluff: "Vitamin D3 + K2" → d3, k2; "Iron Bisglycinate + Vitamin C" →
+ * iron, bisglycinate, c; "Probiotic (Multi-strain, 50B CFU)" → probiotic,
+ * multi-strain, 50b cfu.
+ *
+ * This is what stops a preventive row doubling a nutrient the rules already
+ * selected. The canonical CLASS alone is not enough: a combined D3+K2 row
+ * classifies as vitamin-D, so without the token comparison a separate Vitamin
+ * K2 row would be added on top of the K2 it already contains — and a member
+ * taking two sources of one nutrient is a dosing error, not a fuller plan.
+ */
+function nameNutrientTokens(name) {
+  return String(name || '')
+    .toLowerCase()
+    .split(/[+&(),/]| and | with /)
+    .map((part) => part.trim().replace(/^(vitamin|mineral|natural|pure)\s+/, '').replace(/\s+/g, ' '))
+    // Single letters stay: "Vitamin C" reduces to "c", and dropping it is exactly
+    // how a preventive Vitamin C row ended up on top of "Iron + Vitamin C".
+    .filter((part) => part.length > 0);
+}
+
+/** Whether this member's own answers rule a preventive row out. */
+function preventiveRowIsBlocked(item, a) {
+  const name = String(item.name).toLowerCase();
+  const allergens = String(a.allergies || '')
+    .toLowerCase().split(/[,;]/).map((t) => t.trim())
+    .filter((t) => t.length > 2 && !/^(none|nkda|not specified|no known allergies?|n\/a)/.test(t));
+  if (allergens.some((t) => name.includes(t) || t.includes(name.split(' ')[0]))) return true;
+
+  const age = Number(a.age);
+  if (item.adultOnly && (!Number.isFinite(age) || age < 18)) return true;
+
+  const preg = String(a.pregnancyStatus || '').toLowerCase();
+  const isExpecting = preg.includes('pregnant') || preg.includes('breast') || preg.includes('lactat');
+  if (item.pregnancyAvoid && isExpecting) return true;
+
+  const conditions = (Array.isArray(a.medicalConditions) ? a.medicalConditions : String(a.medicalConditions || '').split(','))
+    .map((c) => String(c).toLowerCase()).join(' ');
+  if ((item.avoidConditions || []).some((c) => conditions.includes(c))) return true;
+
+  const diet = String(a.dietType || '').toLowerCase();
+  if (item.animalDerived && (diet.includes('vegan') || diet.includes('vegetarian'))) return true;
+  // An algae omega-3 is the plant form and is already what the rules emit for a
+  // plant-based diet, so the fish-derived entry must not be added on top of it.
+  if (item.animalDerived && diet.includes('pescatarian') && name.includes('collagen')) return true;
+
+  // A name this app will refuse outright (a prescription medicine, an invented
+  // "complex") must not enter the spine, where it would be re-checked per row.
+  if (rejectReason(item.name)) return true;
+  return false;
+}
+
+/**
+ * The authoritative item list for this member: every row the clinical rules
+ * selected from their answers, then preventive support rows up to the presented
+ * length, re-sorted into canonical order.
+ *
+ * Pure function of (answers, rule output), so two submissions of the same
+ * answers select the same supplements — which is what the model alone cannot
+ * promise, and the reason this runs before the prompt is built rather than
+ * after the reply arrives.
+ */
+function buildPlanSpine(baseRecs, a, { target = SPINE_TARGET_COUNT } = {}) {
+  const spine = (Array.isArray(baseRecs) ? baseRecs : [])
+    .filter((r) => r && typeof r.name === 'string' && r.name.trim())
+    .map((r) => ({ ...r }));
+
+  const keys = new Set(spine.map((r) => selectionKey(r.name)));
+  const classes = new Set(spine.map((r) => classifySupplement(r.name)).filter(Boolean));
+  const takenTokens = new Set(spine.flatMap((r) => nameNutrientTokens(r.name)));
+  const symptoms = Array.isArray(a.symptoms) ? a.symptoms : [];
+  const goals = Array.isArray(a.healthGoals) ? a.healthGoals : [];
+  const conditions = Array.isArray(a.medicalConditions) ? a.medicalConditions : [];
+
+  for (const item of GENERAL_SUPPORT_POOL) {
+    if (spine.length >= target) break;
+    if (preventiveRowIsBlocked(item, a)) continue;
+    const key = selectionKey(item.name);
+    if (keys.has(key)) continue;
+    if (nameNutrientTokens(item.name).some((t) => takenTokens.has(t))) continue;
+    const classId = classifySupplement(item.name);
+    if (classId && classes.has(classId)) continue;
+
+    const onBloodThinner = /warfarin|coumadin|blood thinner|apixaban|rivaroxaban|clopidogrel|aspirin/i
+      .test(String(a.currentMedications || ''));
+    const dosage = (doseEntry(item.name) || {}).standard || 'per product label';
+    const row = {
+      name: item.name,
+      reason: `${item.name} is listed as preventive nutritional support rather than for a symptom reported on this assessment. It contributes to ${item.role}, and intake of these nutrients is often below recommended levels from diet alone. Supplementation is generally considered when food intake does not cover the difference.`,
+      simplifiedReason: simplifiedReasonFor({ name: item.name, symptoms, goals, conditions })
+        || `${item.name} supports general wellness as part of this plan.`,
+      conditionContext: null,
+      triggeredBy: NEUTRAL_TRIGGER,
+      dosage,
+      timing: /magnesium|calcium|iron|zinc|creatine|coq10/i.test(item.name)
+        ? 'With a meal, split from any thyroid medication by 4+ hours'
+        : 'With a meal containing some fat',
+      priority: 'Low',
+      confidenceScore: 72,
+      severityLevel: 'Low',
+      interactions: item.bloodThinnerNote && onBloodThinner
+        ? item.bloodThinnerNote
+        : (/calcium|iron|zinc/.test(key)
+          ? 'Separate by 4+ hours from thyroid medication and antibiotics'
+          : 'None identified'),
+      evidence: inferEvidence(item.name),
+      simplifiedEvidence: simplifiedEvidenceFor(item.name),
+      foods: dietAdjustFoods(inferFoods(item.name), a.dietType),
+      sideEffects: inferSideEffects(item.name),
+      preventiveSupport: true,
+    };
+    spine.push(row);
+    keys.add(key);
+    for (const t of nameNutrientTokens(item.name)) takenTokens.add(t);
+    if (classId) classes.add(classId);
+  }
+
+  return orderForPresentation(spine);
+}
+
+/** Canonical order without touching anything else about the rows. */
+function orderForPresentation(recs) {
+  return enforcePlanConsistency({ recommendations: recs }).recommendations;
 }
 
 function sanitizeStrings(obj) {
@@ -82,11 +262,18 @@ router.post('/', protect, async (req, res) => {
     const dynamicPmids = new Set(liveDynamic.flatMap((d) => (d.supplements || [])
       .flatMap((s) => extractPmids(s.evidence))));
 
-    // The clinical rule engine's own answer for THIS profile. It is both the
-    // degraded path and, on the AI path, the source that refills a slot when
-    // grounding has to delete a row — a member should never get an 11-item plan
-    // because a model invented a supplement.
-    const clinicalPlan = enforcePlanConsistency(generateClinicalFallback(req.body, liveDynamic));
+    // The clinical rule engine's own answer for THIS profile, brought up to the
+    // presented length by the preventive-support pool. This list is the SPINE:
+    // it is what the plan will contain, whether the model answers or not, and it
+    // is a pure function of these answers — so which supplements a member is
+    // offered is decided by rules, not by sampling. It is also the degraded path
+    // and the source that refills a slot when grounding deletes a row, so a
+    // member never gets an 11-item plan because a model invented a supplement.
+    const spineProfile = { ...a, currentMedications: processedMedications, allergies: processedAllergies };
+    const engineRows = enforcePlanConsistency(generateClinicalFallback(req.body, liveDynamic));
+    engineRows.recommendations = buildPlanSpine(engineRows.recommendations, spineProfile);
+    engineRows.dailySchedule = buildDailySchedule(engineRows.recommendations);
+    const clinicalPlan = enforcePlanConsistency(engineRows);
 
     // Everything the app already knows about THIS member: the plan they are
     // holding, what they reported then versus now, and how they actually followed
@@ -106,6 +293,28 @@ router.post('/', protect, async (req, res) => {
       console.error('[recommend] member history unavailable, generating without it:', historyError.message);
     }
 
+    // REUSE GATE — these exact answers already produced a finalised plan for
+    // this member (a repeated submission, or the same form submitted from the
+    // app again), so that plan is what they get. Regenerating identical answers
+    // through a sampling model is the single largest source of "I submitted the
+    // same thing and got a different plan", and it costs a generation to do it.
+    // Only the digest is compared; no answer text is logged or sent to the query.
+    const signature = answerSignature(a, { liveDynamic });
+    try {
+      const prior = await Assessment.findOne({
+        user: req.user?._id,
+        'aiResults.planSignature': signature,
+      }).sort({ createdAt: -1 }).select('aiResults').lean();
+      const stored = prior?.aiResults;
+      if (stored && Array.isArray(stored.recommendations) && stored.recommendations.length > 0) {
+        console.log(`[recommend] reusing finalised plan ${signature} from assessment ${prior._id}`);
+        return res.json(sanitizeStrings({ ...stored, reusedFinalisedPlan: true }));
+      }
+    } catch (reuseError) {
+      // A lookup failure costs the member a regeneration, never their results.
+      console.error('[recommend] finalised-plan lookup failed:', reuseError.message);
+    }
+
     // The structured prompt (ROLE / DOMAIN KNOWLEDGE BASE / INSTRUCTIONS /
     // TONE / PATIENT DATA / OUTPUT FORMAT) is built in utils/assessmentPrompt
     // so the benchmark harness (eval/aiBenchmark.js) scores the exact prompt
@@ -117,6 +326,11 @@ router.post('/', protect, async (req, res) => {
       currentSupplements: processedSupplements,
       _dynamicKb: kbBlockForPrompt(liveDynamic),
       _historyBlock: member.block || null,
+      // Which supplements are in the plan is decided by the rules above, not by
+      // the model. The spine is named-only (no member data), and telling the
+      // model it means its own reasoning lands on the right row instead of
+      // being re-hosted onto one by utils/planSelection.
+      _planSpine: clinicalPlan.recommendations,
     });
 
     // -- Default AI call (assessment) ---------------------------------------
@@ -143,6 +357,21 @@ router.post('/', protect, async (req, res) => {
       // Variety inside the plan (varied sentence openers, per-patient wording)
       // is carried by the prompt's TONE section, not by random sampling.
       temperature: 0.2,
+      // Deterministic sampling, where the provider supports it. The seed is
+      // derived from the digest of THESE ANSWERS, so the same submission asks for
+      // the same walk of the sampling pool and two different members do not share
+      // one seed. `top_p: 0.1` narrows the pool to the tokens the model is most
+      // confident about, which is what a fixed-schema clinical plan wants.
+      //
+      // Honest scope: this REDUCES run-to-run variation. It cannot remove it —
+      // a gateway may ignore `seed` for a given model, batch differently, or ship
+      // a model update — and groq/anthropic have no `seed` field at all, so
+      // utils/aiRouter drops it rather than sending a key the vendor 400s on.
+      // The part that is actually guaranteed not to vary is WHICH SUPPLEMENTS
+      // appear: that is decided in code by utils/planSelection (see SELECTION
+      // GATE below), not here.
+      seed: seedFromSignature(signature),
+      topP: 0.1,
       timeoutMs: 180000, // 3 minutes — the longest single generation in the product
       json: true,
       // `reasoning.effort` is an OpenRouter-GATEWAY field. Scoped by provider key
@@ -162,8 +391,35 @@ router.post('/', protect, async (req, res) => {
       console.error(`[recommend] no provider answered: ${JSON.stringify(assessment.attempts)}`);
     }
 
-    // Use AI result if valid, otherwise rule-based fallback
-    if (aiResult && aiResult.recommendations) {
+    // Use AI result if valid, otherwise rule-based fallback.
+    //
+    // "Valid" used to mean "has a `recommendations` key", which let
+    // `{recommendations: "n/a"}`, a list of nameless rows or a plan with no
+    // summary through to the member. validateModelPlan is the shape check;
+    // anything it can repair (a missing summary, a row with no name) is taken
+    // from the rule engine's answer for the same answers, and only a reply with
+    // nothing usable in it at all is discarded.
+    const shape = validateModelPlan(aiResult);
+    if (!shape.ok && aiResult) {
+      console.error(`[recommend] model reply unusable, using rule engine: ${shape.issues.join('; ')}`);
+    }
+    if (shape.ok) {
+      aiResult.recommendations = shape.usable;
+      for (const field of ['summary', 'simplifiedSummary', 'wellnessBaseline', 'consultDoctor', 'consultReason']) {
+        if (aiResult[field] === undefined || aiResult[field] === null || aiResult[field] === '') {
+          aiResult[field] = clinicalPlan[field];
+        }
+      }
+      // SELECTION GATE — the rule engine's list for these answers decides which
+      // supplements appear, at which tier and in which order; the model keeps
+      // its own wording for each row. This is what makes an identical submission
+      // produce an identical set of supplements on every provider, which prompt
+      // wording and a low temperature can only make more likely, never certain.
+      const aligned = alignPlanToSpine(aiResult, clinicalPlan.recommendations);
+      if (aligned.audit.dropped.length) {
+        console.log(`[recommend] selection gate dropped ${aligned.audit.dropped.length} off-spine row(s)`);
+      }
+      aiResult = aligned.plan;
       // Enrich AI recs with fallback evidence/foods/sideEffects if the AI omitted them
       aiResult.recommendations = aiResult.recommendations.map(rec => ({
         ...rec,
@@ -199,7 +455,12 @@ router.post('/', protect, async (req, res) => {
       // nutrient order (Omega-3 before Magnesium); this enforces them, so the
       // item order a member sees is a property of the system, not of the model's
       // sampling luck. It only ever re-orders, never adds or removes.
-      return res.json(sanitizeStrings(enforcePlanConsistency(applyAdaptation(grounded, member))));
+      //
+      // `planSignature` is what lets the next identical submission be answered
+      // with this finalised plan instead of a new generation; `selection` is the
+      // audit of what the selection gate did with the model's rows.
+      const finalised = enforcePlanConsistency(applyAdaptation(grounded, member));
+      return res.json(sanitizeStrings({ ...finalised, planSignature: signature, selection: aligned.audit }));
     }
 
     console.log('Using rule-based clinical fallback');
@@ -213,11 +474,20 @@ router.post('/', protect, async (req, res) => {
       allergies: processedAllergies,
       currentSupplements: processedSupplements,
     }, { adjustFoods: dietAdjustFoods, allowedPmids: dynamicPmids });
-    return res.json(sanitizeStrings(enforcePlanConsistency(applyAdaptation(engineGrounded, member))));
+    const engineFinalised = enforcePlanConsistency(applyAdaptation(engineGrounded, member));
+    // Stamped on the degraded path too: an engine plan is just as finalised as
+    // an AI one, and a member who retries after a provider outage should not get
+    // a different plan than the one they were already shown.
+    return res.json(sanitizeStrings({ ...engineFinalised, planSignature: signature }));
 
   } catch (error) {
     console.error('Recommend route error:', error.message);
-    return res.json(sanitizeStrings(enforcePlanConsistency(generateClinicalFallback(req.body, liveDynamic))));
+    // Same spine as every other path, so a member whose request threw halfway
+    // through is not handed a shorter or differently-ordered plan.
+    const rescue = enforcePlanConsistency(generateClinicalFallback(req.body, liveDynamic));
+    rescue.recommendations = buildPlanSpine(rescue.recommendations, req.body || {});
+    rescue.dailySchedule = buildDailySchedule(rescue.recommendations);
+    return res.json(sanitizeStrings(enforcePlanConsistency(rescue)));
   }
 });
 
@@ -1418,6 +1688,9 @@ module.exports.promptSafe = promptSafe;
 // The benchmark harness scores the rule-based engine as the BASELINE the LLM
 // output is compared against, so it needs the generator, not just the route.
 module.exports.generateClinicalFallback = generateClinicalFallback;
+// Exposed for the determinism suite (Test File/plan-selection.test.js): the
+// selection rules have to be testable without calling a provider.
+module.exports.buildPlanSpine = buildPlanSpine;
 
 
 
