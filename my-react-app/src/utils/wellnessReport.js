@@ -5,6 +5,7 @@ import {
   REPORT_LAYOUT as L,
   cleanReportText,
   downloadPdf,
+  drawMeasuredTextCard,
   drawReportFooter,
   drawReportHeader,
   drawSectionHeading,
@@ -172,10 +173,15 @@ export async function downloadWellnessReport({ results = {}, assessment = {}, us
     drawContinuationHeader(pageNumber);
     return L.continuationContentTop;
   };
-  const ensureSpace = (needed) => {
+  // `at` is where the caller actually stands. A paragraph that spans a page
+  // boundary calls this once per fragment with its own cursor; reading a stale
+  // section y instead would move the second fragment back to the top of the
+  // page and print it over the first.
+  const ensureSpace = (needed, at) => {
     const amount = Number.isFinite(Number(needed)) ? Number(needed) : 18;
+    if (Number.isFinite(Number(at))) y = Number(at);
     if (!Number.isFinite(y) || y < 0) y = addPage();
-    if (y + amount > L.pageHeight - L.footerHeight - 4) return addPage();
+    if (y + amount > L.pageHeight - L.footerHeight - 4) y = addPage();
     return y;
   };
   const tableMargin = { top: L.continuationContentTop, bottom: L.footerHeight + 5, left: L.margin, right: L.margin };
@@ -192,49 +198,32 @@ export async function downloadWellnessReport({ results = {}, assessment = {}, us
       bodyStyles: { lineColor: C.line, ...(options.bodyStyles || {}) },
       didDrawPage: drawTableHeader(doc, drawContinuationHeader),
     });
-    const rawFinalY = doc.lastAutoTable?.finalY;
-    const finalY = rawFinalY === null || rawFinalY === undefined ? NaN : Number(rawFinalY);
-    return Number.isFinite(finalY) ? finalY : y;
+    const finalY = Number(doc.lastAutoTable?.finalY);
+    // AutoTable reports the y underneath its last row. If that ever comes back
+    // unparseable, the safe answer is a fresh page — carrying on at the pre-table
+    // y would print the next section straight over the rows just drawn.
+    if (!Number.isFinite(finalY)) return addPage();
+    y = finalY;
+    return finalY;
   };
 
   const beginSection = (label, accent) => {
-    const currentPage = doc.getCurrentPageInfo().pageNumber;
-    const freshContinuationPage = currentPage > 1 && y <= L.continuationContentTop + 0.5;
-    // AutoTable can finish a split table close to the top of a continuation
-    // page. Starting the next heading on a fresh page in that narrow band keeps
-    // the heading clear of the last row instead of letting text overlap.
-    if (currentPage > 1 && !freshContinuationPage && y < 88) y = addPage();
-    else y = ensureSpace(18);
+    // Ask for the heading plus the start of the block that follows it, so a
+    // heading never sits alone at the foot of a page. This replaces the earlier
+    // "push anything above 88 mm onto a new page" rule, whose blank space
+    // depended on where the previous table happened to end rather than on the
+    // layout, and which is no longer needed now that runTable reports a
+    // trustworthy final y.
+    y = ensureSpace(35);
     return drawSectionHeading(doc, label, y, accent);
   };
 
+  // Every paragraph card in the report goes through the same measured box: the
+  // wrap width and the line leading are both read from jsPDF's own metrics, so
+  // a long description grows the card and splits across pages instead of being
+  // cut to an arbitrary line count or drawn past its own border.
   const drawTextCard = ({ label, text, accent = C.emerald, fill = C.emeraldLight, fontSize = 8.5 }) => {
-    const lines = doc.splitTextToSize(reportText(text, ''), L.contentWidth - 18);
-    const chunks = [];
-    for (let index = 0; index < Math.max(1, lines.length); index += 8) {
-      chunks.push(lines.slice(index, index + 8));
-    }
-    chunks.forEach((chunk, index) => {
-      const height = 13 + chunk.length * (fontSize * 0.48);
-      y = ensureSpace(height + 4);
-      doc.setFillColor(...fill);
-      doc.setDrawColor(...C.line);
-      doc.setLineWidth(0.3);
-      doc.roundedRect(L.margin, y, L.contentWidth, height, 2.5, 2.5, 'FD');
-      doc.setFillColor(...accent);
-      doc.roundedRect(L.margin, y, 3.5, height, 1.5, 1.5, 'F');
-      if (index === 0) {
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(7.3);
-        doc.setTextColor(...accent);
-        doc.text(reportText(label, '').toUpperCase(), L.margin + 8, y + 7, { maxWidth: L.contentWidth - 16 });
-      }
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(fontSize);
-      doc.setTextColor(...C.muted);
-      doc.text(chunk, L.margin + 8, y + (index === 0 ? 14 : 8), { lineHeightFactor: 1.25 });
-      y += height + 4;
-    });
+    y = drawMeasuredTextCard(doc, { y, ensureSpace, label, text, fontSize, accent, fill });
   };
 
   const drawEmptyCard = (message, accent = C.indigo, fill = C.indigoLight) => {
@@ -252,12 +241,17 @@ export async function downloadWellnessReport({ results = {}, assessment = {}, us
 
   const kpiGap = 4;
   const kpiWidth = (L.contentWidth - kpiGap * 3) / 4;
-  y = ensureSpace(26);
-  drawKpi(doc, L.margin, y, kpiWidth, 24, assessment?.age ?? '—', 'Age', C.cyan, C.tealLight);
-  drawKpi(doc, L.margin + kpiWidth + kpiGap, y, kpiWidth, 24, asArray(assessment?.healthGoals).length, 'Health goals', C.violet, C.violetLight);
-  drawKpi(doc, L.margin + (kpiWidth + kpiGap) * 2, y, kpiWidth, 24, recommendations.length, 'Plan items', C.emerald, C.emeraldLight);
-  drawKpi(doc, L.margin + (kpiWidth + kpiGap) * 3, y, kpiWidth, 24, shouldConsult ? 'Review' : 'Routine', 'Next step', shouldConsult ? C.rose : C.indigo, shouldConsult ? C.roseLight : C.indigoLight);
-  y += 32;
+  const kpiHeight = 24;
+  // Reserve the row itself plus the following gap, then advance by exactly the
+  // same amount: sizing the box and moving past it have to be one number, not a
+  // 26 mm reservation followed by an unrelated 32 mm step.
+  y = ensureSpace(kpiHeight + 5);
+  const kpiY = y;
+  drawKpi(doc, L.margin, kpiY, kpiWidth, kpiHeight, assessment?.age ?? '—', 'Age', C.cyan, C.tealLight);
+  drawKpi(doc, L.margin + kpiWidth + kpiGap, kpiY, kpiWidth, kpiHeight, asArray(assessment?.healthGoals).length, 'Health goals', C.violet, C.violetLight);
+  drawKpi(doc, L.margin + (kpiWidth + kpiGap) * 2, kpiY, kpiWidth, kpiHeight, recommendations.length, 'Plan items', C.emerald, C.emeraldLight);
+  drawKpi(doc, L.margin + (kpiWidth + kpiGap) * 3, kpiY, kpiWidth, kpiHeight, shouldConsult ? 'Review' : 'Routine', 'Next step', shouldConsult ? C.rose : C.indigo, shouldConsult ? C.roseLight : C.indigoLight);
+  y = kpiY + kpiHeight + 5;
 
   y = beginSection('Clinical summary', C.emerald);
   drawTextCard({
@@ -334,13 +328,17 @@ export async function downloadWellnessReport({ results = {}, assessment = {}, us
       headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7.2, fontStyle: 'bold', cellPadding: 3.5 },
       bodyStyles: { fontSize: 7.2, textColor: C.ink, cellPadding: 3.2, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
       alternateRowStyles: { fillColor: C.violetLight },
+      // One prose column is left to AutoTable. When every column carries a fixed
+      // cellWidth the widths have to sum to the page content width exactly; any
+      // single name or dose too long to shrink then pushes the table past the
+      // right margin, so the flexible column absorbs the difference instead.
       columnStyles: {
         0: { cellWidth: 27, fontStyle: 'bold' },
         1: { cellWidth: 18, halign: 'center' },
-        2: { cellWidth: 16, halign: 'center' },
-        3: { cellWidth: 52 },
-        4: { cellWidth: 31 },
-        5: { cellWidth: 36 },
+        2: { cellWidth: 14, halign: 'center' },
+        3: { cellWidth: 'auto' },
+        4: { cellWidth: 30 },
+        5: { cellWidth: 31 },
       },
       didParseCell: (data) => {
         if (data.section !== 'body') return;
@@ -542,35 +540,17 @@ export async function downloadWellnessFallback({ results = {}, assessment = {}, 
     pageHeader(doc.internal.getNumberOfPages());
     y = L.continuationContentTop;
   };
-  const ensure = (height) => {
+  const ensure = (height, at) => {
+    if (Number.isFinite(Number(at))) y = Number(at);
     if (!Number.isFinite(y) || y + height > L.pageHeight - L.footerHeight - 4) {
       addPage();
     }
     return y;
   };
+  // Same measured card as the main renderer: the last-resort report should not
+  // be the one that clips a long description at eight lines.
   const block = (label, value, accent = C.emerald, fill = C.emeraldLight) => {
-    const lines = doc.splitTextToSize(reportText(value, ''), L.contentWidth - 18);
-    for (let start = 0; start < Math.max(1, lines.length); start += 8) {
-      const chunk = lines.slice(start, start + 8);
-      const height = 13 + chunk.length * 4;
-      y = ensure(height);
-      doc.setFillColor(...fill);
-      doc.setDrawColor(...C.line);
-      doc.roundedRect(L.margin, y, L.contentWidth, height, 2, 2, 'FD');
-      doc.setFillColor(...accent);
-      doc.rect(L.margin, y, 3.5, height, 'F');
-      if (start === 0) {
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(7.2);
-        doc.setTextColor(...accent);
-        doc.text(reportText(label, '').toUpperCase(), L.margin + 8, y + 7, { maxWidth: L.contentWidth - 16 });
-      }
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8.2);
-      doc.setTextColor(...C.muted);
-      doc.text(chunk, L.margin + 8, y + (start === 0 ? 14 : 8), { lineHeightFactor: 1.2 });
-      y += height + 4;
-    }
+    y = drawMeasuredTextCard(doc, { y, ensureSpace: ensure, label, text: value, fontSize: 8.2, accent, fill });
   };
 
   block('Important context', 'For educational and wellness purposes only. This report does not diagnose, treat, or cure any disease. Always consult a licensed healthcare professional before starting any supplement regimen.', C.indigo, C.indigoLight);

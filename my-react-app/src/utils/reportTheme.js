@@ -140,6 +140,132 @@ export function safeFilenamePart(value, fallback = 'report') {
 }
 
 /**
+ * Line spacing used for every wrapped paragraph in the reports, expressed as a
+ * multiple of the measured font size, not of the nominal point size — the point
+ * size is in points and the page is in millimetres, and mixing those two is
+ * exactly how a card ended up sized by a formula nobody checked against the text
+ * it contained.
+ */
+export const REPORT_LINE_LEADING = 1.34;
+
+/**
+ * Measure a paragraph instead of guessing at it.
+ *
+ * Returns the wrapped lines plus the exact mm each line will occupy, both read
+ * back from jsPDF's own font metrics at the size and width actually used. Every
+ * box in the report is then sized from `lineHeight * lines.length`, so a longer
+ * description grows the box rather than running past its border or under the
+ * next section.
+ */
+export function measureParagraph(doc, value, { maxWidth, fontSize, fontStyle = 'normal' }) {
+  doc.setFont('helvetica', fontStyle);
+  doc.setFontSize(fontSize);
+  const text = reportText(value, '');
+  const lines = text ? doc.splitTextToSize(text, maxWidth) : [];
+  // One em of this font, in document units, measured — not fontSize * 0.3528
+  // assumed. 'Ag' spans ascender to descender, which is what a line advances by.
+  const em = doc.getTextDimensions(['Ag'], { fontSize }).height || fontSize * 0.3528;
+  return { lines, em, lineHeight: em * REPORT_LINE_LEADING, height: Math.max(0, lines.length) * em * REPORT_LINE_LEADING };
+}
+
+/**
+ * Draw a wrapped paragraph line by line, at positions this module computed.
+ * Drawing the array in one call leaves the leading to jsPDF's own default, which
+ * is a different number from the one a caller sized its box with.
+ */
+export function drawParagraph(doc, { lines, em, lineHeight }, x, top) {
+  doc.setTextColor(...REPORT_COLORS.muted);
+  lines.forEach((line, index) => {
+    doc.text(line, x, top + em * 0.82 + index * lineHeight);
+  });
+  return top + lines.length * lineHeight;
+}
+
+/**
+ * A rounded, rail-accented paragraph card that sizes itself to its content and
+ * splits across pages by measured height.
+ *
+ * `ensureSpace(needed, currentY)` must return the y the card may draw at,
+ * advancing the page when the box does not fit. It is given the card's own
+ * cursor, not the caller's section y: one 40-line description can span three
+ * pages, and each fragment has to be placed relative to where the previous
+ * fragment ended, or the second box lands on top of the first.
+ */
+export function drawMeasuredTextCard(doc, {
+  y,
+  ensureSpace = (needed, currentY) => currentY,
+  label = '',
+  text = '',
+  fontSize = 8.5,
+  accent = REPORT_COLORS.emerald,
+  fill = REPORT_COLORS.emeraldLight,
+} = {}) {
+  const { margin, contentWidth } = REPORT_LAYOUT;
+  const railWidth = 3.5;
+  const inset = 8;                       // left gap between the rail and the copy
+  const rightPadding = 5;
+  const innerWidth = contentWidth - railWidth - inset - rightPadding;
+
+  const body = measureParagraph(doc, text, { maxWidth: innerWidth, fontSize });
+  const safeAccent = Array.isArray(accent) && accent.length >= 3 ? accent : REPORT_COLORS.emerald;
+  const safeFill = Array.isArray(fill) && fill.length >= 3 ? fill : REPORT_COLORS.white;
+
+  const labelBlock = measureParagraph(doc, label ? label.toUpperCase() : '', {
+    maxWidth: innerWidth, fontSize: 7.3, fontStyle: 'bold',
+  });
+  // The label sits on the first fragment only; the rest continue the same box
+  // without repeating a heading that would read as a new section.
+  const headerHeight = labelBlock.lines.length ? labelBlock.height + 2.5 : 0;
+  const boxPadding = 4;
+
+  if (!body.lines.length && !labelBlock.lines.length) return y;
+
+  const boxGap = 4;
+  const bottomLimit = REPORT_LAYOUT.pageHeight - REPORT_LAYOUT.footerHeight - 4;
+  let cursor = Number.isFinite(Number(y)) ? Number(y) : 0;
+  let remaining = body.lines.length ? body.lines : [[]];
+  let isFirst = true;
+  while (remaining.length) {
+    const chrome = (isFirst ? headerHeight : 0) + boxPadding * 2;
+    // Secure room for at least one line before deciding how many lines fit.
+    // Sizing against the old y first, then moving the page, used to strand a
+    // single orphan line at the top of a fresh page while the rest of that page
+    // went unused.
+    cursor = ensureSpace(chrome + body.lineHeight + boxGap, cursor);
+    const room = bottomLimit - boxGap - cursor - chrome;
+    const fit = Math.max(1, Math.min(remaining.length, Math.floor(room / body.lineHeight)));
+    const chunk = remaining.slice(0, fit);
+    remaining = remaining.slice(fit);
+
+    const height = chrome + chunk.length * body.lineHeight;
+
+    doc.setFillColor(...safeFill);
+    doc.setDrawColor(...REPORT_COLORS.line);
+    doc.setLineWidth(0.3);
+    doc.roundedRect(margin, cursor, contentWidth, height, 2.5, 2.5, 'FD');
+    doc.setFillColor(...safeAccent);
+    doc.rect(margin, cursor, railWidth, height, 'F');
+
+    let textTop = cursor + boxPadding;
+    if (isFirst && labelBlock.lines.length) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.3);
+      doc.setTextColor(...safeAccent);
+      doc.text(labelBlock.lines.join(' '), margin + railWidth + inset, textTop + labelBlock.em * 0.82);
+      textTop += labelBlock.height + 2.5;
+    }
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(fontSize);
+    textTop = drawParagraph(doc, { lines: chunk, em: body.em, lineHeight: body.lineHeight },
+      margin + railWidth + inset, textTop);
+    isFirst = false;
+    cursor = textTop + boxPadding + boxGap;
+  }
+  return cursor;
+}
+
+/**
  * Draw the branded report header.  The first page uses the tall cover header;
  * continuation pages use a compact bar so auto-table rows never sit underneath
  * the brand block.
@@ -172,17 +298,21 @@ export function drawReportHeader(doc, {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7.5);
     doc.setTextColor(...REPORT_COLORS.white);
-    doc.text(reportText(subtitle, ''), 15, 15);
+    doc.text(reportText(subtitle, ''), 15, 15, { maxWidth: width - 60 });
     doc.text(`PAGE ${pageNumber}`, width - 15, 12, { align: 'right' });
     return;
   }
 
   const height = 58;
+  // The metadata card is fixed to the right edge; every left-hand line in this
+  // block is bounded by its edge so a long name or date can never run under it.
+  const cardX = width - 66;
+  const identityWidth = cardX - 21;
   doc.setFillColor(...REPORT_COLORS.emerald);
   doc.rect(0, 0, width, height, 'F');
 
   // A single black rail caps the green block: the only inks are green, black
-  // and white, so the rule does the work the old four-colour gradient did.
+  // and white, so the rule does the work of the old four-colour gradient.
   doc.setFillColor(...REPORT_COLORS.black);
   doc.rect(0, 0, width, 4, 'F');
 
@@ -194,16 +324,15 @@ export function drawReportHeader(doc, {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10.5);
   doc.setTextColor(...REPORT_COLORS.white);
-  doc.text(reportText(subtitle, ''), 15, 31);
+  doc.text(reportText(subtitle, ''), 15, 31, { maxWidth: identityWidth });
 
   doc.setFontSize(8.5);
   doc.setTextColor(...REPORT_COLORS.white);
-  if (preparedFor) doc.text(`Prepared for ${reportText(preparedFor)}`, 15, 41);
-  if (dateLabel) doc.text(reportText(dateLabel, ''), 15, 48);
+  if (preparedFor) doc.text(`Prepared for ${reportText(preparedFor)}`, 15, 41, { maxWidth: identityWidth });
+  if (dateLabel) doc.text(reportText(dateLabel, ''), 15, 48, { maxWidth: identityWidth });
 
   // Metadata card / confidentiality badge. It sits on the green header block,
   // so it is black to stay legible without introducing a fourth ink.
-  const cardX = width - 66;
   doc.setFillColor(...REPORT_COLORS.black);
   doc.roundedRect(cardX, 11, 51, 35, 3, 3, 'F');
   doc.setFillColor(...REPORT_COLORS.black);
@@ -291,7 +420,16 @@ export function drawPill(doc, text, x, y, width, color, { height = 8, fontSize =
 }
 
 export function downloadPdf(doc, filename) {
-  const safeName = safeFilenamePart(filename, 'suppliwise-report.pdf').replace(/-pdf$/i, '') + '.pdf';
+  // Report names end in the assessment date and time, and that suffix is what
+  // keeps two exports for the same member apart. Truncating from the front (the
+  // way safeFilenamePart caps a name) cut the timestamp off instead, so a second
+  // export silently reused the first one's file name. Cap the stem from the
+  // back, and keep the extension outside the cap.
+  const stem = cleanReportText(filename || '')
+    .replace(/\.pdf$/i, '')
+    .replace(/[^a-z0-9_-]+/gi, '-')
+    .replace(/^-+|-+$/g, '');
+  const safeName = `${(stem.slice(-127) || 'suppliwise-report').replace(/^-+/, '')}.pdf`;
   const saveWithLink = () => {
     if (typeof document === 'undefined') throw new Error('PDF download is unavailable in this runtime.');
     const link = document.createElement('a');
