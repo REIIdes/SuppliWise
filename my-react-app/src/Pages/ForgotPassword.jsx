@@ -8,6 +8,7 @@ import {
   recoverWithPasskey,
   recoverWithPhoneCode,
   recoverWithRecoveryCode,
+  redeemPasswordResetCode,
   requestPasswordReset,
   requestPhoneReset,
   requestRecoveryEmailReset,
@@ -262,6 +263,43 @@ function ForgotPassword() {
   // would be shown a code field for a code nothing had been asked to send.
   const [phoneCodeSent, setPhoneCodeSent] = useState(false);
 
+  // ── The emailed code ────────────────────────────────────────────────────
+  // The reset email now carries ONLY a 6-digit code — no link — because a link
+  // cannot be relied on: mail clients rewrite and sometimes truncate the query
+  // string, and a link has to name an address the reader's device can reach,
+  // which on a phone is not the laptop that issued it.
+  //
+  // So this is the primary way to finish, not a fallback: it is offered on the
+  // "check your email" screen where the reader already is, having just asked for
+  // the code. Redemption returns the same grant every other method here returns,
+  // so it lands on the same reset form through the same path.
+  const [resetCode, setResetCode] = useState('');
+  const [codeBusy, setCodeBusy] = useState(false);
+  const [codeError, setCodeError] = useState('');
+
+  const handleResetCodeSubmit = async (event) => {
+    event.preventDefault();
+    const digits = resetCode.trim();
+    if (!/^\d{6}$/.test(digits)) {
+      setCodeError('Enter the 6-digit code from your email.');
+      return;
+    }
+
+    setCodeError('');
+    setCodeBusy(true);
+    try {
+      const data = await redeemPasswordResetCode(trimmed, digits);
+      continueToReset(data?.resetToken);
+    } catch (err) {
+      // One message for every failure from the server, on purpose: anything
+      // added here would rebuild the account-existence oracle the recovery
+      // routes refuse to expose.
+      setCodeError(err.message || 'That code did not work. Please try again.');
+    } finally {
+      setCodeBusy(false);
+    }
+  };
+
   const trimmed = email.trim();
   const fieldProblem = trimmed ? emailProblem(email) : '';
   // Only surfaced once the field has been visited, so an empty untouched form
@@ -306,7 +344,7 @@ function ForgotPassword() {
     try {
       const data = await requestPasswordReset(trimmed);
       setSent(true);
-      setMessage(data?.message || 'If an account exists for that address, a reset link is on its way.');
+      setMessage(data?.message || 'If an account exists for that address, a reset code is on its way.');
       startCooldown();
     } catch (err) {
       setError(err.message || 'We could not send your reset link. Please try again.');
@@ -447,13 +485,59 @@ function ForgotPassword() {
           <p className="pwreset-subtitle">{message}</p>
 
           <div className="pwreset-inbox">
-            <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--pw-ink)' }}>We sent the link to</p>
+            <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--pw-ink)' }}>We sent a code to</p>
             <span className="pwreset-inbox-address">{email.trim()}</span>
             <p className="pwreset-inbox-note">
-              The link works once and expires in 30 minutes.<br />
+              It works once and expires in 30 minutes.<br />
               Nothing arrived? Look in your spam folder, use another way to recover, or send another.
             </p>
           </div>
+
+          {/* ── Enter the code ──────────────────────────────────────────────
+              The email carries a 6-digit code and no link, so this is the way the
+              reset is actually completed. It sits directly under the "check your
+              inbox" message rather than behind a toggle: the reader has just asked
+              for the code and is holding it. */}
+          <form className="pwreset-alt-form" onSubmit={handleResetCodeSubmit} noValidate>
+            <div className="pwreset-field">
+              <label htmlFor="pwreset-code">Enter the 6-digit code from your email</label>
+              <div className="pwreset-lead">
+                <input
+                  id="pwreset-code"
+                  name="resetCode"
+                  type="text"
+                  className="pwreset-input"
+                  value={resetCode}
+                  onChange={(e) => {
+                    setResetCode(e.target.value.replace(/\D/g, '').slice(0, 6));
+                    setCodeError('');
+                  }}
+                  placeholder="000000"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  disabled={codeBusy}
+                  autoFocus
+                />
+              </div>
+              <p className="pwreset-hint">
+                Open the newest email from SuppliWise and type the code here. It works once and
+                expires after 30 minutes.
+              </p>
+            </div>
+
+            {codeError && (
+              <div className="pwreset-alert is-error" role="alert">
+                <Icon name="error" />
+                <span>{codeError}</span>
+              </div>
+            )}
+
+            <button type="submit" className="pwreset-btn pwreset-btn-primary" disabled={codeBusy}>
+              {codeBusy && <span className="pwreset-btn-spinner" aria-hidden="true" />}
+              {codeBusy ? 'Checking…' : 'Continue with this code'}
+            </button>
+          </form>
 
           <button
             type="button"
@@ -465,8 +549,8 @@ function ForgotPassword() {
             {loading
               ? 'Sending…'
               : cooldown > 0
-                ? `Send another link (${cooldown}s)`
-                : 'Send another link'}
+                ? `Send another code (${cooldown}s)`
+                : 'Send another code'}
           </button>
 
           {/* The person who most needs an alternative is the one whose mail never
@@ -502,7 +586,7 @@ function ForgotPassword() {
         <div className="pwreset-badge" aria-hidden="true"><Icon name="mail" /></div>
         <h1 className="pwreset-title">Reset your password</h1>
         <p className="pwreset-subtitle">
-          Enter the email address on your account and we&apos;ll send you a link to choose a new password.
+          Enter the email address on your account and we&apos;ll send you a 6-digit code to choose a new password with.
         </p>
 
         {/* Server-side refusals only. See `error` above. */}
@@ -558,7 +642,7 @@ function ForgotPassword() {
 
           <button type="submit" className="pwreset-btn pwreset-btn-primary" disabled={loading}>
             {loading && <span className="pwreset-btn-spinner" aria-hidden="true" />}
-            {loading ? 'Sending…' : 'Send reset link'}
+            {loading ? 'Sending…' : 'Send reset code'}
           </button>
         </form>
 

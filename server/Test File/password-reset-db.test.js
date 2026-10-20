@@ -51,8 +51,8 @@ const mongoose = require('mongoose');
 // Load .env FIRST, for the same reason as withResetRouter.js: `node --test`
 // gives this file its own process, so nothing server/index.js would normally
 // load is present. The reset route signs a JWT when it issues a grant, and
-// without JWT_SECRET that throws — which arrived here as an undefined
-// `resetUrl` on a 500 rather than as the obvious "no secret configured".
+// without JWT_SECRET that throws — which arrived here as an absent code in the
+// captured mail on a 500 rather than as the obvious "no secret configured".
 require('dotenv').config();
 
 const { PASSWORD_RULES } = require('../utils/passwordRules');
@@ -203,6 +203,24 @@ async function makeUser() {
   });
 }
 
+/**
+ * Turn the 6-digit code from the last reset email into a grant.
+ *
+ * The reset email no longer carries a link — mail clients rewrite and truncate
+ * link query strings, and a link has to name an address the reader's device can
+ * reach — so these tests follow what a reader actually does now: read the code
+ * out of the mail and post it. Exercising the real route against the real model
+ * is closer to the shipped flow than reading a token off a URL ever was.
+ */
+async function grantFromLastEmail(call, sent) {
+  const code = sent[sent.length - 1].code;
+  assert.match(code, /^\d{6}$/, 'the reset email must carry a 6-digit code');
+  const redeemed = await call('/api/auth/password-reset/code', { email: EMAIL, code });
+  assert.equal(redeemed.status, 200, JSON.stringify(redeemed.body));
+  assert.ok(redeemed.body.resetToken, 'the code must yield a grant');
+  return redeemed.body.resetToken;
+}
+
 // ── 1. The model, on a real database ───────────────────────────────────────
 
 test('the token model creates and reads back a grant', async (t) => {
@@ -303,8 +321,7 @@ test('a real reset changes the stored password to a verifiable argon2id hash', a
     assert.equal(requested.status, 200, JSON.stringify(requested.body));
     assert.equal(requested.body.token, undefined, 'the link must never be echoed in the response');
 
-    const token = new URL(sent[sent.length - 1].resetUrl).searchParams.get('token');
-    assert.ok(token, 'the email must contain a link');
+    const token = await grantFromLastEmail(call, sent);
 
     const done = await call('/api/auth/password-reset/complete', { token, newPassword: NEW_PASSWORD });
     assert.equal(done.status, 200, JSON.stringify(done.body));
@@ -326,7 +343,7 @@ test('a real link cannot be redeemed twice, and a second reset starts clean', as
     await makeUser();
 
     await call('/api/auth/password-reset/request', { email: EMAIL });
-    const first = new URL(sent[sent.length - 1].resetUrl).searchParams.get('token');
+    const first = await grantFromLastEmail(call, sent);
 
     const done = await call('/api/auth/password-reset/complete', { token: first, newPassword: NEW_PASSWORD });
     assert.equal(done.status, 200, JSON.stringify(done.body));
@@ -346,7 +363,7 @@ test('the real policy is enforced end to end, not just in the unit tests', async
   await withServer(async ({ call, sent }) => {
     await makeUser();
     await call('/api/auth/password-reset/request', { email: EMAIL });
-    const token = new URL(sent[sent.length - 1].resetUrl).searchParams.get('token');
+    const token = await grantFromLastEmail(call, sent);
 
     // One password per rule, all refused, and the link must survive every one.
     const refusals = [

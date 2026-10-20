@@ -389,14 +389,46 @@ This is an automated message from SuppliWise.
  *
  * Returns true on sent, false otherwise — never throws.
  */
-async function sendPasswordResetEmail(toEmail, { resetUrl, code, expiresInMinutes = 30 } = {}) {
+/**
+ * "Here is your SuppliWise reset code" — the ONLY thing a reset email carries.
+ *
+ * WHY THERE IS NO LINK IN THIS EMAIL
+ * ----------------------------------
+ * It used to contain a `/reset-password?token=…` link, and that link was the
+ * reason password reset failed on a phone — the one device people actually open a
+ * recovery mail on. Two independent things break it:
+ *
+ *   1. The link has to name an address the reader's device can reach. In
+ *      development that was `https://localhost:5173`, and on a phone `localhost`
+ *      is the phone — there is no dev server there, so the link could not open.
+ *   2. Mail clients rewrite links. They wrap them in tracking redirects, and some
+ *      truncate the query string, so `/reset-password?token=…` arrives without
+ *      its token. The reset screen then says the link expired, which is not what
+ *      happened.
+ *
+ * A 6-digit code has neither problem. It survives being copied out of any mail
+ * app, it is typed by hand so no client rewrites anything, and it needs no URL to
+ * resolve — which matters most when the machine that issued it is a laptop on the
+ * same Wi-Fi and the reader is on a phone.
+ *
+ * So the code is now the whole credential. The link-based path is NOT removed
+ * from the product: the alternative recovery proofs (passkey, recovery code,
+ * authenticator, phone) all mint the same grant and hand it to the same reset
+ * form, which still reads `?token=` if one is ever supplied.
+ *
+ * `resetUrl` is accepted and deliberately ignored, because callers still pass it
+ * and silently dropping a required-looking field is how this would regress.
+ *
+ * Returns true on sent, false otherwise — never throws.
+ */
+async function sendPasswordResetEmail(toEmail, { codeUrl, code, expiresInMinutes = 30 } = {}) {
   try {
     const clean = safeRecipient(toEmail);
-    const link = String(resetUrl || '').trim();
+    const digits = String(code == null ? '' : code).trim();
     if (!clean) return false;
-    // Refuse to send a "reset your password" mail with no working link: that
-    // would be a credential-shaped email that helps nobody.
-    if (!/^https?:\/\//i.test(link)) return false;
+    // A code-shaped mail is the entire recovery route now, so one that cannot
+    // carry a usable code helps nobody.
+    if (!/^\d{6}$/.test(digits)) return false;
 
     const transport = getTransporter();
     if (!transport) return false;
@@ -404,17 +436,21 @@ async function sendPasswordResetEmail(toEmail, { resetUrl, code, expiresInMinute
     const fromName = process.env.EMAIL_FROM_NAME || 'SuppliWise';
     const fromAddress = process.env.EMAIL_FROM_ADDRESS || process.env.EMAIL_USER;
     const minutes = Math.max(1, Math.ceil(Number(expiresInMinutes) || 30));
-    const safeLink = link.replace(/"/g, '%22');
+    // Where to type it. Optional by design — a caller with no origin to hand (the
+    // legacy `/resend-password-reset-otp` path) omits the button rather than
+    // linking somewhere wrong.
+    const rawCodeUrl = String(codeUrl || '').trim();
+    const codeLink = /^https?:\/\//i.test(rawCodeUrl) ? rawCodeUrl.replace(/"/g, '%22') : '';
     const year = new Date().getFullYear();
 
     await transport.sendMail({
       from: `"${fromName}" <${fromAddress}>`,
       to: clean,
-      subject: 'Reset your SuppliWise password',
+      subject: `${digits} is your SuppliWise password reset code`,
       html: `
         <!DOCTYPE html>
         <html>
-        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Reset your password</title></head>
+        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Your password reset code</title></head>
         <body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background-color:#f0faf0;">
           <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0faf0;padding:40px 20px;">
             <tr><td align="center">
@@ -426,40 +462,40 @@ async function sendPasswordResetEmail(toEmail, { resetUrl, code, expiresInMinute
                         <g transform="translate(25, 25)"><rect x="15" y="20" width="20" height="30" rx="3" fill="none" stroke="#22c55e" stroke-width="4"/><circle cx="25" cy="15" r="12" fill="none" stroke="#22c55e" stroke-width="4"/><line x1="22" y1="30" x2="28" y2="30" stroke="#22c55e" stroke-width="4" stroke-linecap="round"/><line x1="25" y1="30" x2="25" y2="35" stroke="#22c55e" stroke-width="4" stroke-linecap="round"/></g>
                       </svg>
                     </div>
-                    <h1 style="color:#ffffff;font-size:26px;font-weight:700;margin:0;">Reset your password</h1>
+                    <h1 style="color:#ffffff;font-size:26px;font-weight:700;margin:0;">Your reset code</h1>
                     <p style="color:rgba(255,255,255,0.9);font-size:15px;margin:8px 0 0;">SuppliWise account recovery</p>
                   </td>
                 </tr>
                 <tr>
                   <td style="padding:36px 30px;">
                     <p style="color:#374151;font-size:16px;line-height:1.6;margin:0 0 20px;">Hi there,</p>
-                    <p style="color:#374151;font-size:16px;line-height:1.6;margin:0 0 28px;">
+                    <p style="color:#374151;font-size:16px;line-height:1.6;margin:0 0 24px;">
                       We received a request to reset the password on your SuppliWise account.
-                      Press the button below to choose a new one. This link works once and expires in
+                      Enter this code to choose a new one. It works once and expires in
                       <strong>${minutes} minutes</strong>.
                     </p>
-                    <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 28px;">
+                    <div style="background:#ffffff;border:2px solid #22c55e;border-radius:12px;padding:22px;text-align:center;margin:0 0 24px;">
+                      <span style="color:#111827;font-size:42px;font-weight:700;letter-spacing:12px;font-family:'Courier New',monospace;">${digits}</span>
+                    </div>
+                    ${codeLink ? `
+                    <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px;">
                       <tr><td align="center">
-                        <a href="${safeLink}" style="display:inline-block;background:#16a34a;color:#ffffff;text-decoration:none;font-size:16px;font-weight:600;padding:14px 32px;border-radius:10px;">Choose a new password</a>
+                        <a href="${codeLink}" style="display:inline-block;background:#16a34a;color:#ffffff;text-decoration:none;font-size:16px;font-weight:600;padding:14px 32px;border-radius:10px;">Enter my code</a>
                       </td></tr>
                     </table>
-                    <p style="color:#6b7280;font-size:13px;line-height:1.6;margin:0 0 28px;word-break:break-all;">
-                      If the button does not work, open this address:<br>
-                      <a href="${safeLink}" style="color:#16a34a;">${safeLink}</a>
-                    </p>
-                    <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:20px;margin:0 0 24px;">
-                      <p style="color:#374151;font-size:14px;line-height:1.6;margin:0 0 10px;">
-                        <strong>Opening this on a different device?</strong> Use this ${String(code).length}-digit code on the reset screen instead:
-                      </p>
-                      <div style="background:#ffffff;border:2px solid #22c55e;border-radius:8px;padding:12px;text-align:center;">
-                        <span style="color:#111827;font-size:32px;font-weight:700;letter-spacing:8px;font-family:'Courier New',monospace;">${code}</span>
-                      </div>
-                    </div>
+                    <p style="color:#6b7280;font-size:13px;line-height:1.6;margin:0 0 24px;word-break:break-all;">
+                      Or open the reset page yourself and type the code in:<br>
+                      <a href="${codeLink}" style="color:#16a34a;">${codeLink}</a>
+                    </p>` : `
+                    <p style="color:#6b7280;font-size:14px;line-height:1.6;margin:0 0 24px;">
+                      Open the SuppliWise app, choose <strong>Forgot your password?</strong>, and enter
+                      this code along with the email address on your account.
+                    </p>`}
                     <div style="background:#fef2f2;border-left:4px solid #dc2626;padding:16px;border-radius:4px;margin:0 0 24px;">
                       <p style="color:#991b1b;font-size:14px;line-height:1.6;margin:0;">
                         <strong>Did not request this?</strong> Nothing has changed and you can ignore this email.
                         To be safe, reset your password anyway — and note that SuppliWise staff will never
-                        ask you for a reset link or a verification code.
+                        ask you for a reset code.
                       </p>
                     </div>
                     <p style="color:#6b7280;font-size:14px;line-height:1.6;margin:0;">Best regards,<br><strong style="color:#22c55e;">The SuppliWise Team</strong></p>
@@ -476,31 +512,34 @@ async function sendPasswordResetEmail(toEmail, { resetUrl, code, expiresInMinute
           </table>
         </body>
         </html>`,
-      text: `Reset your SuppliWise password
+      text: `Your SuppliWise password reset code
 
 We received a request to reset the password on your SuppliWise account.
-Open this link to choose a new one. It works once and expires in ${minutes} minutes:
+Enter this code to choose a new one. It works once and expires in ${minutes} minutes:
 
-${link}
+    ${digits}
+${codeLink ? `
+Open the reset page and enter it there, with the email address you asked for the reset from:
 
-Opening this on a different device? Use this code on the reset screen instead:
-
-    ${code}
-
+${codeLink}
+` : `
+Open the SuppliWise app, choose "Forgot your password?", and enter this code along with
+the email address on your account.
+`}
 Did not request this? Nothing has changed and you can ignore this email. To be
 safe, reset your password anyway. SuppliWise staff will never ask you for a
-reset link or a verification code.
+reset code.
 
 Best regards,
 The SuppliWise Team`,
     });
-    console.log(`[Email] Password reset link sent to ${maskEmail(clean)}`);
+    console.log(`[Email] Password reset code sent to ${maskEmail(clean)}`);
     return true;
   } catch (error) {
     // Close, don't just forget — see closeTransporter(). Dropping the reference
     // on its own leaked the whole connection pool on every send failure.
     await closeTransporter();
-    console.error('[Email] Failed to send password reset link:', error.message);
+    console.error('[Email] Failed to send password reset code:', error.message);
     return false;
   }
 }
@@ -515,6 +554,124 @@ async function sendPasswordChangedEmail(toEmail) {
   return sendStatusEmail(toEmail, 'password-changed', {});
 }
 
+/**
+ * "Here is your administrator authenticator key" — one recipient, one account.
+ *
+ * This is the ONLY sender in this file that carries a standing secret, which is
+ * why it takes an explicit key argument and is never reached from a recurring
+ * notice, a schedule, or any member-facing flow.
+ *
+ * WHAT IT DELIBERATELY DOES NOT CARRY
+ * -----------------------------------
+ * A password. `AdminAccount.passwordHash` is a one-way argon2id hash and the
+ * plaintext does not exist anywhere on the machine, so any "send the password"
+ * wording here would be a promise the code cannot keep — and the temptation to
+ * fake it (by resurrecting a stored hand-off password) is exactly what this
+ * signature makes impossible: there is no password parameter to fill in.
+ *
+ * @param {string} toEmail
+ * @param {{alias?: string, authenticatorKey?: string}} [context]
+ * @returns {Promise<boolean>} true only when the mail was handed to SMTP
+ */
+async function sendAdminCredentialEmail(toEmail, context = {}) {
+  try {
+    const clean = safeRecipient(toEmail);
+    if (!clean) return false;
+    const key = String(context.authenticatorKey || '').trim();
+    // An envelope without a key is not a credential delivery, it is a confusing
+    // email. Refuse rather than send a message whose one actionable field is
+    // blank.
+    if (!key) return false;
+    const transport = getTransporter();
+    if (!transport) return false;
+
+    const alias = escapeHtml(String(context.alias || '').trim() || 'administrator');
+    const safeKey = escapeHtml(key);
+    const fromName = process.env.EMAIL_FROM_NAME || 'SuppliWise';
+    const fromAddress = process.env.EMAIL_FROM_ADDRESS || process.env.EMAIL_USER;
+
+    await transport.sendMail({
+      from: `"${fromName}" <${fromAddress}>`,
+      to: clean,
+      subject: 'Your SuppliWise administrator authenticator key',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Your SuppliWise administrator authenticator key</title>
+        </head>
+        <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4fb;">
+          <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f4fb; padding: 40px 20px;">
+            <tr>
+              <td align="center">
+                <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);">
+                  <tr>
+                    <td style="background: linear-gradient(135deg, #8b5cf6 0%, #4f46e5 100%); padding: 36px 30px; text-align: center;">
+                      <h1 style="color: #ffffff; font-size: 26px; font-weight: 700; margin: 0;">Administrator credentials</h1>
+                      <p style="color: rgba(255, 255, 255, 0.9); font-size: 15px; margin: 8px 0 0;">SuppliWise Admin Console</p>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 36px 30px;">
+                      <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 0 0 20px;">Hello ${alias},</p>
+                      <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 0 0 24px;">Here are the administrator credentials on file for you. Your sign-in alias and authenticator key are below; your password is not, because the server stores only a one-way hash of it and cannot read it back.</p>
+                      <table width="100%" cellpadding="0" cellspacing="0" style="margin: 0 0 24px;">
+                        <tr>
+                          <td style="padding: 0 0 12px;">
+                            <p style="color: #6b7280; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; margin: 0 0 6px;">Sign-in alias</p>
+                            <p style="color: #111827; font-size: 18px; font-weight: 700; margin: 0;">${alias}</p>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td>
+                            <p style="color: #6b7280; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; margin: 0 0 6px;">Authenticator key (TOTP)</p>
+                            <div style="background: #f5f3ff; border: 2px solid #ddd6fe; border-radius: 12px; padding: 18px; text-align: center;">
+                              <span style="font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; font-size: 16px; font-weight: 700; color: #4c1d95; letter-spacing: .04em; word-break: break-all;">${safeKey}</span>
+                            </div>
+                          </td>
+                        </tr>
+                      </table>
+                      <p style="color: #374151; font-size: 15px; line-height: 1.6; margin: 0 0 20px;">To use it in Google Authenticator: tap the <strong>+</strong>, choose <strong>Enter a setup key</strong>, type this alias as the account name, select <strong>Time based</strong> and SHA1, paste the key, then tap <strong>Add</strong>.</p>
+                      <p style="color: #1e40af; font-size: 14px; line-height: 1.5; margin: 0; padding: 14px 16px; background: #eff6ff; border-left: 4px solid #4f46e5; border-radius: 8px;">This key replaces any older one you were using for this account. If you did not ask for these credentials, contact the system owner immediately — someone else may hold access to the admin console.</p>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 24px 30px; background: #fafaff; border-top: 1px solid #eeeefb;">
+                      <p style="color: #6b7280; font-size: 13px; line-height: 1.5; margin: 0;">SuppliWise · automated delivery, please do not forward this message.</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </body>
+        </html>
+      `,
+      text: `SuppliWise administrator credentials
+Hello ${String(context.alias || '').trim() || 'administrator'},
+
+Sign-in alias: ${String(context.alias || '').trim() || 'administrator'}
+Authenticator key (TOTP): ${key}
+
+Your password is not included: the server stores only a one-way hash of it and cannot read it back.
+
+To use the key in Google Authenticator: tap +, choose "Enter a setup key", type the alias as the account name, select Time based and SHA1, paste the key, then tap Add.
+
+This key replaces any older one you were using for this account. If you did not ask for these credentials, contact the system owner immediately.`,
+    });
+    // The address is masked and the key is never written: this line is the only
+    // server-side trace a delivery happened at all.
+    console.log(`[Email] Admin authenticator key sent to ${maskEmail(clean)}`);
+    return true;
+  } catch (error) {
+    await closeTransporter();
+    console.error('[Email] Failed to send admin credentials:', error.message);
+    return false;
+  }
+}
+
 module.exports = {
   sendOtpEmail,
   // The TTL the mail TELLS the user about. Exported so a test can assert it
@@ -524,6 +681,9 @@ module.exports = {
   sendStatusEmail,
   sendPasswordResetEmail,
   sendPasswordChangedEmail,
+  // The one sender allowed to carry a standing secret (an authenticator key).
+  // Never call it from a recurring notice or a member-facing flow.
+  sendAdminCredentialEmail,
   // Verifies SMTP credentials at startup so a bad app-password shows up in
   // the server log immediately instead of as mysterious login failures.
   verifyEmailConfig,

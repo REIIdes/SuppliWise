@@ -68,7 +68,13 @@ const Passkey = require('../models/Passkey');
 const BackupCode = require('../models/BackupCode');
 const SecurityEvent = require('../models/SecurityEvent');
 
-const { mintResetGrant, issueGrantByEmail } = require('./passwordReset');
+const PasswordResetToken = require('../models/PasswordResetToken');
+
+const {
+  mintResetGrant,
+  issueGrantByEmail,
+  PASSWORD_RESET_MAX_CODE_ATTEMPTS,
+} = require('./passwordReset');
 const { sendStatusEmail } = require('./email');
 const { normalizeIp } = require('./geo');
 const { isValidEmail } = require('./emailValidation');
@@ -248,6 +254,104 @@ async function withAuthenticatorCode({ email, code, req } = {}) {
   clearOffenses(lockKey);
 
   const grant = await mintResetGrant(await User.findById(user._id), { method: 'authenticator', req });
+  if (!grant.ok) {
+    return { status: 503, message: 'We could not start your recovery. Please try again in a moment.' };
+  }
+
+  return {
+    status: 200,
+    message: 'Code accepted. Choose a new password to finish.',
+    success: true,
+    resetToken: grant.token,
+    expiresAt: grant.expiresAt,
+  };
+}
+
+/**
+ * THE SIX-DIGIT CODE FROM THE RESET EMAIL
+ * ---------------------------------------
+ * Every reset email carries a 6-digit code next to the link, and tells the
+ * reader to use it "on the reset screen instead" when they are opening the
+ * message on a different device. That instruction was a dead end: the reset
+ * screen had no field for a code, and the only route that could redeem one
+ * (POST /api/auth/verify-password-reset-otp, kept for stale clients) is keyed on
+ * a `userId` that the email does not carry and the reader certainly does not
+ * have. So the one recovery route offered to somebody whose link did not open
+ * led nowhere, and the email was actively misleading them about it.
+ *
+ * This is that route, keyed on the EMAIL ADDRESS — which the reader does have,
+ * because it is the address they requested the reset from.
+ *
+ * WHY IT IS NOT A NEW WAY TO CHANGE A PASSWORD
+ * ---------------------------------------------
+ * It ends at `mintResetGrant`, like every other method here, so the redeemed
+ * grant is the identical single-use, TTL-bound PasswordResetToken the emailed
+ * link produces. `/reset-password?token=…` therefore remains the one place a
+ * password changes: same atomic burn, same timer, same "every other grant dies
+ * with it", same session revocation. All this adds is a way to REACH that
+ * screen, not a second screen.
+ *
+ * WHY IT IS SAFE TO BE UNAUTHENTICATED
+ * -----------------------------------
+ * It proves the same thing the emailed link proves — read access to the mailbox
+ * — with a far smaller secret behind it, so the defences that matter are here:
+ *
+ *   • ONE refusal (`REFUSAL`) for unknown address, no reset in progress, wrong
+ *     code, expired and locked alike. Nothing distinguishes them, so the route
+ *     is not an account-existence oracle.
+ *   • `checkCode` burns the record after 5 strikes and compares digests in
+ *     constant time, so guessing does not scale: a million-wide space with five
+ *     live attempts per emailed reset.
+ *   • The escalating per-account lockout (`pwreset-factor`, the same key the
+ *     other factors use) plus the route's own per-IP budget.
+ *   • `equalizeMiss()` on the paths that reject before a lookup, so a miss is not
+ *     obviously cheaper than a hit.
+ *
+ * The code is deliberately NOT accepted for accounts that have 2FA configured.
+ * There the emailed code is not the factor — the authenticator is — so a
+ * password reset on the strength of a code sitting in a mailbox would quietly
+ * downgrade the account. Those users belong on the authenticator or recovery
+ * code methods, and `REFUSAL` says nothing about which.
+ */
+async function withEmailedCode({ email, code, req } = {}) {
+  const submitted = str(code).trim();
+  // Shape only, before any lookup: a field that cannot be a code reveals
+  // nothing about the account, so this is honestly a 400.
+  if (!/^\d{6}$/.test(submitted)) {
+    equalizeMiss();
+    return { status: 400, message: 'Enter the 6-digit code from your reset email.' };
+  }
+
+  const user = await loadAccount(email, '_id email twoFactorEnabled twoFactorMethod');
+  if (!user) {
+    equalizeMiss();
+    return { status: 401, message: REFUSAL };
+  }
+  if (!isActive(user) || user.twoFactorEnabled === true) {
+    equalizeMiss();
+    return { status: 401, message: REFUSAL };
+  }
+
+  const lockKey = accountKey('pwreset-factor', user._id);
+  if (lockRemainingMs(lockKey) > 0) {
+    return { status: 429, message: 'Too many attempts. Please wait a few minutes and try again.' };
+  }
+
+  // `checkCode` is the same primitive the emailed path uses: digest comparison
+  // in constant time, a strike counter, and the record burned at the cap. Its
+  // four outcomes are flattened to REFUSAL below, because "no reset in
+  // progress" and "wrong code" must not read differently from outside.
+  const result = await PasswordResetToken.checkCode(user._id, submitted, PASSWORD_RESET_MAX_CODE_ATTEMPTS);
+  if (!result.ok) {
+    noteFailure(user, req, result.outcome, 'emailed-code');
+    return { status: 401, message: REFUSAL };
+  }
+
+  clearOffenses(lockKey);
+
+  // Re-read as a full document: `applyNewPassword` needs the pre-save hook to
+  // hash the new password, and a lean projection cannot save.
+  const grant = await mintResetGrant(await User.findById(user._id), { method: 'emailed-code', req });
   if (!grant.ok) {
     return { status: 503, message: 'We could not start your recovery. Please try again in a moment.' };
   }
@@ -442,7 +546,7 @@ async function withPasskey({ response, req } = {}) {
  * answers generically.
  */
 const GENERIC_RECOVERY_EMAIL_MESSAGE =
-  'If that account has a verified recovery address, a reset link is on its way there.';
+  'If that account has a verified recovery address, a reset code is on its way there.';
 
 async function withRecoveryEmail({ email, req } = {}) {
   const user = await User.findOne({ email: normalizeEmail(email) })
@@ -701,6 +805,7 @@ module.exports = {
   RESET_FLOW,
   withRecoveryCode,
   withAuthenticatorCode,
+  withEmailedCode,
   passkeyOptions,
   withPasskey,
   withRecoveryEmail,

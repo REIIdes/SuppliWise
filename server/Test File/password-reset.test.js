@@ -45,7 +45,7 @@ const GUESSABLE_PASSWORD = 'Password123!';
 // ── 1. The grant outlives the request ──────────────────────────────────────
 
 test('the link still works on a later request — the grant is not held in memory', async () => {
-  await withResetRouter({}, async ({ request, call, linkFromLastMail, store }) => {
+  await withResetRouter({}, async ({ request, call, tokenFromStore, store }) => {
     const first = await request();
     assert.equal(first.status, 200);
 
@@ -53,7 +53,7 @@ test('the link still works on a later request — the grant is not held in memor
     assert.equal(store.rows.length, 1, 'the grant must be persisted, not held in a Map');
     assert.equal(store.rows[0].tokenHash.startsWith('h:'), true);
 
-    const token = linkFromLastMail();
+    const token = tokenFromStore();
     const validated = await call(`/validate?token=${encodeURIComponent(token)}`);
     assert.equal(validated.status, 200, `link must validate: ${JSON.stringify(validated.body)}`);
     assert.equal(validated.body.valid, true);
@@ -61,10 +61,10 @@ test('the link still works on a later request — the grant is not held in memor
 });
 
 test('the stored row holds no plaintext token or code — only digests', async () => {
-  await withResetRouter({}, async ({ request, sent, store, linkFromLastMail }) => {
+  await withResetRouter({}, async ({ request, sent, store, tokenFromStore }) => {
     await request();
     const row = store.rows[0];
-    const token = linkFromLastMail();
+    const token = tokenFromStore();
     const code = sent[sent.length - 1].code;
 
     assert.notEqual(row.tokenHash, token, 'the raw token must never be stored');
@@ -144,9 +144,9 @@ test('a malformed address is still rejected — the anonymity is not a free pass
 // ── 4. Redeeming the link ───────────────────────────────────────────────────
 
 test('a valid link sets the new password and signs every device out', async () => {
-  await withResetRouter({}, async ({ request, call, linkFromLastMail, sessionUsers }) => {
+  await withResetRouter({}, async ({ request, call, tokenFromStore, sessionUsers }) => {
     await request();
-    const token = linkFromLastMail();
+    const token = tokenFromStore();
 
     const res = await call('/complete', { token, newPassword: NEW_PASSWORD });
     assert.equal(res.status, 200, `${res.status} ${JSON.stringify(res.body)}`);
@@ -156,9 +156,9 @@ test('a valid link sets the new password and signs every device out', async () =
 });
 
 test('the same link cannot be used twice', async () => {
-  await withResetRouter({}, async ({ request, call, linkFromLastMail }) => {
+  await withResetRouter({}, async ({ request, call, tokenFromStore }) => {
     await request();
-    const token = linkFromLastMail();
+    const token = tokenFromStore();
 
     const first = await call('/complete', { token, newPassword: NEW_PASSWORD });
     assert.equal(first.status, 200);
@@ -170,9 +170,9 @@ test('the same link cannot be used twice', async () => {
 });
 
 test('two simultaneous redemptions of one link: exactly one wins', async () => {
-  await withResetRouter({}, async ({ request, call, linkFromLastMail }) => {
+  await withResetRouter({}, async ({ request, call, tokenFromStore }) => {
     await request();
-    const token = linkFromLastMail();
+    const token = tokenFromStore();
 
     // Fired together on purpose. The guarantee is in the conditional claim, so
     // this is the only way to prove it is really there.
@@ -187,9 +187,9 @@ test('two simultaneous redemptions of one link: exactly one wins', async () => {
 });
 
 test('a rejected new password leaves the link usable', async () => {
-  await withResetRouter({}, async ({ request, call, linkFromLastMail }) => {
+  await withResetRouter({}, async ({ request, call, tokenFromStore }) => {
     await request();
-    const token = linkFromLastMail();
+    const token = tokenFromStore();
 
     // Too short, no symbol, then the blocked shape — each must refuse.
     for (const bad of ['short', 'alllowercase1', GUESSABLE_PASSWORD, `${'a'.repeat(200)}aA1!`]) {
@@ -205,9 +205,9 @@ test('a rejected new password leaves the link usable', async () => {
 });
 
 test('a password identical to the current one is refused, and the link survives', async () => {
-  await withResetRouter({}, async ({ request, call, linkFromLastMail }) => {
+  await withResetRouter({}, async ({ request, call, tokenFromStore }) => {
     await request();
-    const token = linkFromLastMail();
+    const token = tokenFromStore();
 
     const res = await call('/complete', { token, newPassword: CURRENT_PASSWORD });
     assert.equal(res.status, 400);
@@ -231,7 +231,7 @@ test('an unknown or malformed token is refused without a 500', async () => {
 });
 
 test('a NoSQL-operator token cannot select a grant', async () => {
-  await withResetRouter({ deliver: () => true }, async ({ request, call, linkFromLastMail }) => {
+  await withResetRouter({ deliver: () => true }, async ({ request, call, tokenFromStore }) => {
     await request();
     // The classic probe: if the hash were compared as a query object rather
     // than as a string, this would match every row.
@@ -252,9 +252,9 @@ test('missing fields are 400s, never a 500', async () => {
 // ── 5. Superseding a link ──────────────────────────────────────────────────
 
 test('a successful reset burns the account\'s other outstanding links', async () => {
-  await withResetRouter({}, async ({ request, call, store, linkFromLastMail }) => {
+  await withResetRouter({}, async ({ request, call, store, tokenFromStore }) => {
     await request();
-    const ownerToken = linkFromLastMail();
+    const ownerToken = tokenFromStore();
 
     // A second link issued before the owner got theirs — what an attacker who
     // triggered a reset first would be holding. Written straight to the store

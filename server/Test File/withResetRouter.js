@@ -211,8 +211,28 @@ async function withResetRouter({ deliver, findUser, route = 'link' } = {}, fn) {
     request: () => (route === 'legacy'
       ? call('/forgot-password', { email: EMAIL })
       : call('/request', { email: EMAIL })),
-    /** Read the link out of the last email, as the user would. */
-    linkFromLastMail: () => new URL(sent[sent.length - 1].resetUrl).searchParams.get('token'),
+    /**
+     * The raw token of a stored grant.
+     *
+     * The reset email no longer contains a link — it carries a 6-digit code,
+     * because a link is rewritten by mail clients and has to name an address the
+     * reader's device can reach — so there is no longer a token to read out of
+     * the email. The token path itself still exists and is still exercised: the
+     * passkey / recovery-code / authenticator proofs all mint one and hand it to
+     * the client.
+     *
+     * `tokenStore`'s digest is the fake `h:<value>`, which is the only reason the
+     * raw token is recoverable here. That is a property of the TEST double, not
+     * of the real model, and is why nothing like this can be done in production.
+     *
+     * @param {number} [index=0] which stored grant to read; 0 is the first one
+     *   issued, which is the one the requester holds.
+     */
+    tokenFromStore: (index = 0) => {
+      const row = store.rows[index];
+      if (!row) throw new Error(`no stored grant at index ${index}`);
+      return String(row.tokenHash).replace(/^h:/, '');
+    },
     sent,
     store,
     sessionUsers,

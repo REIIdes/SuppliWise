@@ -334,10 +334,10 @@ test('a failed "send again" keeps the code the user is already working from', as
 // is the LINK the user is already working from — not a code sitting in a modal.
 test('a failed password-reset resend keeps the reset link already in hand', async () => {
   let deliver = true;
-  await withResetRouter({ deliver: () => deliver }, async ({ call, sent, store, linkFromLastMail }) => {
+  await withResetRouter({ deliver: () => deliver }, async ({ call, sent, store, tokenFromStore }) => {
     const first = await call('/request', { email: EMAIL });
     assert.equal(first.status, 200);
-    const originalLink = linkFromLastMail();
+    const originalLink = tokenFromStore();
     assert.ok(originalLink, 'a link was issued');
 
     // The mail goes down and the user asks for another one.

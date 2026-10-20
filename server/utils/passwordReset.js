@@ -15,6 +15,7 @@
  */
 
 const crypto = require('crypto');
+const os = require('os');
 const jwt = require('jsonwebtoken');
 const jwtKeyring = require('./jwtKeyring');
 
@@ -50,7 +51,7 @@ const PASSWORD_RESET_MAX_CODE_ATTEMPTS = 5;
 const RESET_GRANT_TTL_SECONDS = 15 * 60;
 
 const GENERIC_REQUEST_MESSAGE =
-  'If an account exists for that email address, a reset link is on its way. '
+  'If an account exists for that email address, a reset code is on its way. '
   + 'Check your inbox — and your spam folder if it does not arrive within a few minutes.';
 
 const INVALID_LINK_MESSAGE =
@@ -161,10 +162,15 @@ async function issueGrantByEmail({ user, recipient, req }) {
   }
 
   const { token, code } = PasswordResetToken.generateSecrets();
-  const resetUrl = buildResetUrl(resolveWebOrigin(req), token);
+  const webOrigin = resolveWebOrigin(req);
+  // The email carries NO link — the 6-digit code is the whole credential (see
+  // sendPasswordResetEmail for why a link cannot be relied on). The only address
+  // in the mail is the page the code is typed into, which is deliberately the
+  // token-free one: a URL that reaches the form without carrying a grant.
+  const codeUrl = `${webOrigin}/reset-password`;
 
   const sent = await sendPasswordResetEmail(address, {
-    resetUrl,
+    codeUrl,
     code,
     expiresInMinutes: PASSWORD_RESET_TTL_MINUTES,
   });
@@ -188,8 +194,8 @@ async function issueGrantByEmail({ user, recipient, req }) {
     });
     rememberSent(userId, Date.now());
   } catch (error) {
-    // The mail is already out, so this must not fail the request — but the
-    // link the user now holds is worthless, and saying so to them would be
+    // The mail is already out, so this must not fail the request — but the CODE
+    // the user now holds is worthless, and saying so to them would be
     // indistinguishable from the enumeration oracle below. Log it loudly.
     console.error('[password-reset] could not store the grant:', error.message);
     return { delivered: false, reason: 'store' };
@@ -247,15 +253,79 @@ function asObjectId(value) {
   return raw;
 }
 
+// Vite's dev port. The single place the development frontend port is named, so
+// the LAN link below and the last-resort localhost link cannot disagree.
+const DEV_WEB_PORT = '5173';
+
+/** Is this origin one that only resolves on THIS machine? */
+function isLoopbackOrigin(origin) {
+  let host;
+  try {
+    host = new URL(origin).hostname;
+  } catch {
+    return false;
+  }
+  const name = String(host).toLowerCase().replace(/^\[|\]$/g, '');
+  return name === 'localhost' || name === '::1' || name === '0.0.0.0' || /^127\./.test(name);
+}
+
+/**
+ * This machine's address on the network, for a link somebody else can open.
+ *
+ * Development only, and only because a loopback address in an EMAIL is never
+ * right — see `resolveWebOrigin`. Returns '' when there is no external
+ * interface (a locked-down container, CI), and the caller falls back rather
+ * than inventing one.
+ */
+function lanOrigin(fromOrigin) {
+  const interfaces = os.networkInterfaces() || {};
+  for (const list of Object.values(interfaces)) {
+    for (const net of list || []) {
+      const family = net.family === 'IPv4' || net.family === 4;
+      if (!family || net.internal) continue;
+      // Keep the scheme and port the caller is actually browsing on — that is
+      // what the dev server is really serving — and swap only the host. The port
+      // defaults to Vite's, because a link with no port points at the wrong
+      // service the moment the origin is not a parseable URL.
+      let scheme = 'http';
+      let port = DEV_WEB_PORT;
+      try {
+        const parsed = new URL(fromOrigin);
+        scheme = parsed.protocol.replace(':', '');
+        if (parsed.port) port = parsed.port;
+      } catch {
+        /* keep the defaults */
+      }
+      return `${scheme}://${net.address}:${port}`;
+    }
+  }
+  return '';
+}
+
 /**
  * The web origin the reset link points at.
  *
- * The Origin header is attacker-controlled, so it is only ever consulted outside
- * production: a hostile origin here would rewrite the link in a real user's
- * inbox, and the token would be delivered straight to whoever chose it. In
- * production `PUBLIC_WEB_URL` is the only source; if it is unset the link is
- * built for localhost and the mail is effectively useless — loudly logged, so
- * the misconfiguration is visible rather than silent.
+ * A LOOPBACK ADDRESS IS NEVER A VALID ANSWER HERE, and trusting the request to
+ * supply one is what broke this.
+ *
+ * The origin used to come straight from the `Origin` header in development, which
+ * meant that resetting a password from the desktop produced an email containing
+ * `https://localhost:5173/reset-password?token=…`. That link works on the
+ * machine that requested it and nowhere else. Open the email on a phone — the
+ * obvious thing to do with an account-recovery mail — and `localhost` resolves
+ * to the PHONE, which is running no dev server, so the link cannot work and the
+ * account cannot be recovered. Nothing warned about it: the existing warning sat
+ * behind a branch that a browser request never reaches, because a browser always
+ * supplies a perfectly valid Origin.
+ *
+ * So a loopback origin is now treated as "no usable origin" rather than as an
+ * answer, and in development the machine's own LAN address is substituted, which
+ * is reachable from a phone on the same Wi-Fi.
+ *
+ * The Origin header is still attacker-controlled, so it is only ever consulted
+ * outside production — a hostile origin here would rewrite the link in a real
+ * user's inbox and deliver the token to whoever chose it. In production
+ * `PUBLIC_WEB_URL` is the only source, and index.js refuses to boot without it.
  */
 function resolveWebOrigin(req) {
   const configured = str(process.env.PUBLIC_WEB_URL || process.env.WEB_ORIGIN).trim().replace(/\/+$/, '');
@@ -263,21 +333,48 @@ function resolveWebOrigin(req) {
 
   if (process.env.NODE_ENV !== 'production') {
     const origin = str(req?.headers?.origin).trim().replace(/\/+$/, '');
-    if (/^https?:\/\//i.test(origin)) return origin;
+    // The caller is already browsing on an address that works for them — a LAN
+    // address, typically, which is exactly the phone-testing case.
+    if (/^https?:\/\//i.test(origin) && !isLoopbackOrigin(origin)) return origin;
+
+    // Otherwise the request came from this machine. Emailing `localhost` would
+    // produce a link that is guaranteed to fail on every other device, so use an
+    // address that is reachable instead.
+    const lan = lanOrigin(origin);
+    if (lan) {
+      if (!resolveWebOrigin.warnedLan) {
+        resolveWebOrigin.warnedLan = true;
+        console.warn(
+          `[password-reset] PUBLIC_WEB_URL is not set, so reset links are being built for `
+          + `${lan} (this machine on the local network). That is reachable from a phone on the `
+          + 'same Wi-Fi, but it changes when your network does. Set PUBLIC_WEB_URL in '
+          + 'server/.env to the address your users actually reach you on.'
+        );
+        if (/^https:/i.test(lan)) {
+          console.warn(
+            '[password-reset] That address is https, and the development certificate is issued '
+            + 'for localhost only — a phone will warn about it. For phone testing, start the '
+            + 'frontend with VITE_DEV_HTTPS=false so it serves plain http on the LAN address.'
+          );
+        }
+      }
+      return lan;
+    }
   }
 
   // Unreachable in production — index.js refuses to boot without
-  // PUBLIC_WEB_URL — but reachable in a misconfigured dev/test process, where a
-  // localhost link is the correct answer. Logged once per process rather than
-  // per request so it cannot flood the log.
+  // PUBLIC_WEB_URL — but reachable in a misconfigured dev/test process with no
+  // external interface at all. Logged once per process rather than per request
+  // so it cannot flood the log.
   if (!resolveWebOrigin.warned) {
     resolveWebOrigin.warned = true;
     console.warn(
-      '[password-reset] PUBLIC_WEB_URL is not set. Reset links will point at '
-      + 'https://localhost:5173 and will not work for a real user. Set PUBLIC_WEB_URL.'
+      '[password-reset] PUBLIC_WEB_URL is not set and this machine has no network address to '
+      + 'fall back on. Reset links will point at https://localhost:5173 and will NOT work on '
+      + 'any other device, including a phone. Set PUBLIC_WEB_URL in server/.env.'
     );
   }
-  return 'https://localhost:5173';
+  return `https://localhost:${DEV_WEB_PORT}`;
 }
 
 function buildResetUrl(webOrigin, token) {
@@ -340,7 +437,7 @@ async function requestReset({ email, req } = {}) {
     userAgent: req?.get?.('user-agent'),
   }).catch(() => {});
 
-  console.log(`[password-reset] link issued to ${maskEmail(normalized)} (expires in ${PASSWORD_RESET_TTL_MINUTES}m)`);
+  console.log(`[password-reset] code issued to ${maskEmail(normalized)} (expires in ${PASSWORD_RESET_TTL_MINUTES}m)`);
   return { status: 200, message: GENERIC_REQUEST_MESSAGE, sent: true };
 }
 

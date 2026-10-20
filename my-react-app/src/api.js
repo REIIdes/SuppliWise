@@ -1455,6 +1455,30 @@ export const recoverWithAuthenticator = async (email, code) => {
 };
 
 /**
+ * Redeem the 6-digit code from the reset email.
+ *
+ * The email tells the reader to use this code "on the reset screen instead" when
+ * they are opening it on another device, so this is the route that makes that
+ * sentence true. It returns the SAME grant shape every other recovery method
+ * returns, which `completePasswordReset` then redeems — so there is still only
+ * one place a password changes.
+ *
+ * Built with `recoveryError` rather than `friendlyError` for the reason spelled
+ * out above that helper: this route is unauthenticated and answers 401 for a
+ * wrong code, which must not tear down the tab's session.
+ */
+export const redeemPasswordResetCode = async (email, code) => {
+  const res = await apiFetch('/auth/password-reset/code', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, code }),
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw recoveryError(res.status, data?.message);
+  return data; // { message, resetToken, expiresAt }
+};
+
+/**
  * Send the reset link to the account's verified secondary address instead.
  *
  * Always resolves: like `/request`, the server cannot answer honestly about
@@ -2064,6 +2088,18 @@ export const isSecurityNotification = (item) =>
 // Check whether new assessments are blocked by unresolved Priority items
 export const getPriorityStatus = async () => {
   const res = await apiFetch('/assessment/priority-status', {
+    headers: { ...authHeader() },
+  });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
+// Ask the admin team to verify a Priority flag and clear it (medical review).
+// Also the re-request call after an admin replies "needs more info".
+export const requestMedicalReview = async (assessmentId) => {
+  const res = await apiFetch(`/assessment/${assessmentId}/review-request`, {
+    method: 'POST',
     headers: { ...authHeader() },
   });
   const data = await parseJSON(res);

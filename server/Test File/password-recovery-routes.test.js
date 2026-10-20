@@ -48,6 +48,10 @@ test('the recovery methods are mounted on the paths the client calls', () => {
     // answer generically, while redeeming is a credential check.
     'POST /phone-code',
     'POST /phone',
+    // The 6-digit code the reset email itself tells the reader to use when they
+    // are on a different device. Without this route that instruction is a dead
+    // end, which is the bug this endpoint exists to close.
+    'POST /code',
     // Capability reporting, so the client can hide a method that cannot run.
     'GET /capabilities',
     // The pre-existing emailed flow must survive alongside them.
@@ -77,7 +81,7 @@ test('the recovery routes are registered BEFORE requestLimiter', () => {
     'expected exactly one router-wide middleware layer'
   );
 
-  for (const name of ['recovery-code', 'authenticator', 'recovery-email', 'phone-code', 'phone']) {
+  for (const name of ['recovery-code', 'authenticator', 'recovery-email', 'phone-code', 'phone', 'code']) {
     const at = stack.findIndex((layer) => layer.route && layer.route.path === `/${name}`);
     assert.ok(at !== -1, `route not found: ${name}`);
     assert.ok(

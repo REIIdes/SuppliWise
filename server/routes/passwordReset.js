@@ -155,6 +155,36 @@ router.post('/authenticator', factorLimiter, async (req, res) => {
 });
 
 /**
+ * POST /api/auth/password-reset/code
+ *
+ * Redeem the 6-digit code that arrives in the reset email, for a reset grant.
+ *
+ * This exists because the email already tells the reader to use that code "on
+ * the reset screen instead" when they are on a different device, and until now
+ * nothing in the product could accept it. Keyed on the email address rather than
+ * a user id, because the address is the one of those two the reader actually
+ * has. See `withEmailedCode` in utils/passwordRecovery.js for why that is safe
+ * on an unauthenticated route.
+ *
+ * Registered ABOVE `requestLimiter` with the other credential-shaped proofs, and
+ * so it shares `factorLimiter` with them rather than the much looser budget the
+ * emailed-link requests get. `password-recovery-routes.test.js` asserts that
+ * ordering, so moving it below would fail the suite rather than quietly weaken
+ * the limit.
+ */
+router.post('/code', factorLimiter, async (req, res) => {
+  try {
+    return sendResult(res, await recovery.withEmailedCode({
+      email: req.body?.email,
+      code: req.body?.code,
+      req,
+    }));
+  } catch (error) {
+    return fail(res, error, 'password-reset/code');
+  }
+});
+
+/**
  * POST /api/auth/password-reset/passkey/options — step 1 of the ceremony.
  *
  * Identical in shape to a sign-in options request and deliberately so: the same

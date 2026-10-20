@@ -1,9 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
-import { completePasswordReset, getPasswordRules, validatePasswordResetToken } from '../api';
+import {
+  completePasswordReset,
+  getPasswordRules,
+  redeemPasswordResetCode,
+  validatePasswordResetToken,
+} from '../api';
 import { FALLBACK_RULES, evaluate } from '../utils/passwordPolicy';
 import './PasswordReset.css';
+
+// Mirrors the server's address check in utils/passwordReset.js, so an obvious
+// typo is caught before the round trip. The server still validates.
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/;
 
 // Phases, in the order the screen can be in. `checking` and `checkingRules`
 // are folded into one `loading` view — they are both "we don't know yet", and
@@ -95,6 +104,76 @@ function ResetPassword() {
   // the page first loaded.
   const [retry, setRetry] = useState(0);
 
+  // ── The emailed 6-digit code ────────────────────────────────────────────
+  // The reset email carries a code beside the link and tells the reader to use
+  // it "on the reset screen instead" when they are opening the message on a
+  // different device. Until now this screen had no field for it, so that
+  // instruction led nowhere: someone without a working link had no way forward
+  // except requesting yet another email, which is exactly what does not work
+  // when the mailbox is the problem.
+  //
+  // Redeeming one hands back the same single-use grant the link carries, so the
+  // password is still changed in one place — the form below — with the token
+  // arriving by navigation rather than by URL.
+  //
+  // The grant is kept in STATE rather than pushed into the URL, which is the
+  // better of the two available routes and not a stylistic choice. Navigating to
+  // `/reset-password?token=…` from this component would not work at all: `token`
+  // is read once in a `useState` initializer (see above), so the link check would
+  // never re-run and the screen would sit on "This page needs a reset link" with
+  // a perfectly good grant in hand. And holding it in state keeps the credential
+  // out of the address bar, out of history and out of any Referer the next
+  // navigation sends — `ForgotPassword` has to scrub it because it navigates to
+  // a different route, and here there is no reason to put it there at all.
+  const [grant, setGrant] = useState('');
+  const [codeOpen, setCodeOpen] = useState(false);
+  const [codeEmail, setCodeEmail] = useState('');
+  const [codeValue, setCodeValue] = useState('');
+  const [codeError, setCodeError] = useState('');
+  const [codeBusy, setCodeBusy] = useState(false);
+
+  // The grant actually in force. A redeemed code's grant wins over the URL's,
+  // and the two can never both be live: this screen only leaves its initial
+  // check once, and a redeemed code arrives only from the no-link screen.
+  const activeToken = grant || token;
+
+  const handleCodeSubmit = async (event) => {
+    event.preventDefault();
+    const address = codeEmail.trim();
+    const digits = codeValue.trim();
+
+    if (!EMAIL_REGEX.test(address)) {
+      setCodeError('Enter the email address you asked for the reset from.');
+      return;
+    }
+    if (!/^\d{6}$/.test(digits)) {
+      setCodeError('Enter the 6-digit code from your reset email.');
+      return;
+    }
+
+    setCodeError('');
+    setCodeBusy(true);
+    try {
+      const data = await redeemPasswordResetCode(address, digits);
+      if (!aliveRef.current) return;
+      // Straight to the form. The link check is not re-run: this grant was minted
+      // seconds ago by the server, so there is nothing left to verify.
+      setGrant(String(data?.resetToken || ''));
+      setNotice('');
+      setCodeValue('');
+      setPhase(PHASE.FORM);
+    } catch (err) {
+      if (!aliveRef.current) return;
+      // The server answers one message for every failure — unknown address, no
+      // reset running, wrong code, expired — so whatever it says is shown
+      // verbatim. Adding local commentary here would rebuild the account oracle
+      // the server deliberately refuses to expose.
+      setCodeError(err.message || 'That did not work. Please try again.');
+    } finally {
+      if (aliveRef.current) setCodeBusy(false);
+    }
+  };
+
   // Guards against a late-arriving response writing state onto an unmounted
   // page. The requests below are fire-and-forget, and a slow one on a mobile
   // connection very easily outlives the screen.
@@ -140,10 +219,16 @@ function ResetPassword() {
       }
       const why = tokenResult.status === 'rejected' ? '' : (tokenResult.value?.reason || 'invalid');
       setReason(why);
+      // A missing token is not a spent one. It used to fall through to the generic
+      // "no longer valid", which contradicted the heading directly above it
+      // ("This page needs a reset link") and told someone who never had a link
+      // that the link they do not have had expired.
       setNotice(
         tokenResult.status === 'rejected'
           ? tokenResult.reason?.message || 'We could not check that reset link. Please try again.'
-          : tokenResult.value?.message || 'This reset link is no longer valid.'
+          : why === 'missing'
+            ? 'This address has no reset link in it. Open the link from your reset email, or use the 6-digit code from that email below.'
+            : tokenResult.value?.message || 'This reset link is no longer valid.'
       );
       setPhase(PHASE.DEAD);
     };
@@ -172,7 +257,7 @@ function ResetPassword() {
 
     setSubmitting(true);
     try {
-      const data = await completePasswordReset(token, password);
+      const data = await completePasswordReset(activeToken, password);
       if (!aliveRef.current) return;
       setNotice(data?.message || 'Your password has been changed.');
       setPassword('');
@@ -243,15 +328,16 @@ function ResetPassword() {
             <Icon name="alert" />
             <span>
               {missing
-                ? 'Reset links look like this: /reset-password?token=… — if your email app '
-                  + 'truncated the address, open the original message again and use the button in it.'
+                ? 'Your reset email now carries a 6-digit code rather than a link, so nothing is '
+                  + 'missing here — enter that code below with the email address you asked for the '
+                  + 'reset from. If you followed an older email that did have a link, open it again.'
                 : 'Reset links work once and expire after 30 minutes. Requesting a new one '
                   + 'is quick and does not change anything else on your account.'}
             </span>
           </div>
 
           <Link className="pwreset-btn pwreset-btn-primary" to="/forgot-password" style={{ textDecoration: 'none' }}>
-            Send me a new link
+            Send me a new code
           </Link>
           {/* Not shown when there was no token: there is nothing in the URL to
               re-check, so this button could only ever report the same thing. */}
@@ -259,6 +345,96 @@ function ResetPassword() {
             <button type="button" className="pwreset-btn pwreset-btn-secondary" style={{ marginTop: 10 }} onClick={recheck}>
               Check another link
             </button>
+          )}
+
+          {/* The code path, offered exactly where the email sends people who
+              cannot use the link. Without it the "6-digit code" in every reset
+              email was a dead end. */}
+          {missing && (
+            <div className="pwreset-alt">
+              <button
+                type="button"
+                className="pwreset-alt-toggle"
+                aria-expanded={codeOpen}
+                onClick={() => { setCodeOpen((v) => !v); setCodeError(''); }}
+              >
+                <Icon name="shield" />
+                {codeOpen ? 'Hide the code option' : 'Use the 6-digit code from my email'}
+              </button>
+
+              {codeOpen && (
+                <div className="pwreset-alt-panel">
+                  <p className="pwreset-alt-intro">
+                    Enter the address you asked for the reset from, and the 6-digit code in that
+                    email. This opens the same form the link would have.
+                  </p>
+
+                  <form onSubmit={handleCodeSubmit} noValidate>
+                    <div className="pwreset-field">
+                      <label htmlFor="pwreset-code-email">Email address</label>
+                      <div className="pwreset-lead">
+                        <span className="pwreset-lead__icon" aria-hidden="true">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="2" y="4" width="20" height="16" rx="2" />
+                            <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+                          </svg>
+                        </span>
+                        <input
+                          id="pwreset-code-email"
+                          name="codeEmail"
+                          type="email"
+                          className="pwreset-input"
+                          value={codeEmail}
+                          onChange={(e) => { setCodeEmail(e.target.value); setCodeError(''); }}
+                          placeholder="you@example.com"
+                          autoComplete="email"
+                          maxLength={254}
+                          disabled={codeBusy}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="pwreset-field">
+                      <label htmlFor="pwreset-code-value">6-digit code</label>
+                      <div className="pwreset-lead">
+                        <input
+                          id="pwreset-code-value"
+                          name="resetCode"
+                          type="text"
+                          className="pwreset-input"
+                          value={codeValue}
+                          onChange={(e) => {
+                            setCodeValue(e.target.value.replace(/\D/g, '').slice(0, 6));
+                            setCodeError('');
+                          }}
+                          placeholder="000000"
+                          inputMode="numeric"
+                          autoComplete="one-time-code"
+                          maxLength={6}
+                          disabled={codeBusy}
+                        />
+                      </div>
+                      <p className="pwreset-hint">
+                        Use the code from the newest reset email. Each code works once and expires
+                        with the link beside it.
+                      </p>
+                    </div>
+
+                    {codeError && (
+                      <div className="pwreset-alert is-error" role="alert">
+                        <Icon name="alert" />
+                        <span>{codeError}</span>
+                      </div>
+                    )}
+
+                    <button type="submit" className="pwreset-btn pwreset-btn-primary" disabled={codeBusy}>
+                      {codeBusy && <span className="pwreset-btn-spinner" aria-hidden="true" />}
+                      {codeBusy ? 'Checking…' : 'Continue with this code'}
+                    </button>
+                  </form>
+                </div>
+              )}
+            </div>
           )}
 
           <Link className="pwreset-back" to="/login">Back to sign in</Link>
@@ -283,8 +459,8 @@ function ResetPassword() {
           <div className="pwreset-alert is-info" style={{ textAlign: 'left' }}>
             <Icon name="clock" />
             <span>
-              This is a short pause to protect your account, not a problem with your link.
-              Wait a moment, then try again — you do not need a new link.
+              This is a short pause to protect your account, not a problem with your code.
+              Wait a moment, then try again — you do not need a new one.
             </span>
           </div>
 
@@ -292,7 +468,7 @@ function ResetPassword() {
             Try again
           </button>
           <Link className="pwreset-btn pwreset-btn-secondary" to="/forgot-password" style={{ marginTop: 10, textDecoration: 'none' }}>
-            Send me a new link
+            Send me a new code
           </Link>
 
           <Link className="pwreset-back" to="/login">Back to sign in</Link>

@@ -628,7 +628,9 @@ test('every sender in the module rejects an injected recipient', async () => {
     const results = await Promise.all([
       stubbedEmail.sendOtpEmail(bad, '123456', 'login'),
       stubbedEmail.sendStatusEmail(bad, 'lockout', {}),
-      stubbedEmail.sendPasswordResetEmail(bad, { resetUrl: 'https://x.test/r?t=1', code: '123456' }),
+      // No resetUrl: the reset email carries a 6-digit code and no link, so the
+      // sender's whole payload is the code plus the page to type it into.
+      stubbedEmail.sendPasswordResetEmail(bad, { code: '123456' }),
     ]);
 
     for (const [index, sent] of results.entries()) {
@@ -709,9 +711,7 @@ test('the OTP is never written to a log line', async () => {
 
     try {
       await stubbedEmail.sendOtpEmail('real.user@example.com', code, 'login');
-      await stubbedEmail.sendPasswordResetEmail('real.user@example.com', {
-        resetUrl: 'https://x.test/r?t=abc', code,
-      });
+      await stubbedEmail.sendPasswordResetEmail('real.user@example.com', { code });
     } finally {
       console.log = originals.log;
       console.error = originals.error;
