@@ -168,13 +168,89 @@ function appDocs() {
   }));
 }
 
+/**
+ * Field-observation notes — what the project team actually saw when it ran its research
+ * interview at a community pharmacy, written down so the assistant can be honest about
+ * local purchasing patterns instead of inventing them.
+ *
+ * The shape is deliberate, and each constraint is load-bearing:
+ *
+ * - `pmids: []` and `nutrients: []`. These notes carry NO evidence and name NO registry
+ *   nutrient. That is not an oversight: `planGrounding` only lets a reply keep a citation
+ *   that belongs to a nutrient it names, and only lets a plan row survive if the app has an
+ *   evidence entry for it. A field note therefore cannot smuggle a supplement into a plan or
+ *   a PMID into a sentence, and `verifyProse` still strips any number or benefit the model
+ *   tries to hang on it.
+ * - Every sentence states what the observation is NOT. A retrieved note reads to a member
+ *   like the app's own guidance, so a note about brands has to say in the same breath that
+ *   the app cannot verify those brands — otherwise the model gets a name it recognises and
+ *   fills in a benefit it does not have.
+ * - Composition is never guessed at. The interview recorded brand names customers ask for,
+ *   not what is in them, so these notes refuse to describe them.
+ *
+ * Provenance: one pharmacy staff respondent, October 2026, conducted by this project. No
+ * patient identifiers were collected and none are recorded here. It is a purchasing
+ * pattern from one shop, not a population statement, and the note says so.
+ */
+function fieldStudyDocs() {
+  const source = 'Source: community pharmacy staff interview conducted by the SuppliWise project team, '
+    + 'October 2026 — one respondent, no patient identifiers, purchasing patterns only.';
+  return [
+    {
+      id: 'field:maintenance-medications',
+      kind: 'field',
+      title: 'Maintenance medications most often bought locally',
+      text: `In the community pharmacy where this app's research was conducted, the maintenance `
+        + `medications customers most often buy are amlodipine, losartan and telmisartan, used for `
+        + `blood pressure and cardiovascular health, and they are usually served on a prescription. `
+        + `This is a note about what people around here already take, not a clinical claim: it says `
+        + `nothing about whether any supplement helps blood pressure, and no supplement replaces a `
+        + `prescribed antihypertensive. If a member names one of these, it is their own medication `
+        + `and a clinician's decision. ${source}`,
+      keys: ['amlodipine', 'losartan', 'telmisartan', 'blood pressure', 'hypertension', 'bp',
+        'maintenance medication', 'prescription', 'refill', 'cardiovascular'],
+      nutrients: [],
+      pmids: [],
+    },
+    {
+      id: 'field:supplement-brands',
+      kind: 'field',
+      title: 'Supplement brands asked for locally',
+      text: `Supplement brand names frequently requested in that same pharmacy are Santonn Plus, `
+        + `Santonn Plus Gold, Eyeberry, Liveraid and barley (powder or capsule). This app holds no `
+        + `evidence entry for any of those brand names, so it cannot say what is in them, what dose `
+        + `is right, or what they do — including for eyes, liver or any other purpose the name seems `
+        + `to suggest. A brand name is not an ingredient. If a member asks about one, say the app `
+        + `cannot verify that brand, and offer to talk about the ingredient list on their own pack. `
+        + `${source}`,
+      keys: ['santon', 'santonn', 'eyeberry', 'liveraid', 'barley', 'brand', 'sachet', 'capsule'],
+      nutrients: [],
+      pmids: [],
+    },
+    {
+      id: 'field:who-was-asked',
+      kind: 'field',
+      title: 'Who the app was studied with',
+      text: `The research this app's questionnaire was informed by was carried out in a community `
+        + `pharmacy whose regular customers are mostly middle-aged and older adults, and health `
+        + `shops are where many of them first ask about supplements. That is why the app writes its `
+        + `plans in plain language and treats a new supplement as something to raise with the `
+        + `pharmacist or clinician who already knows their medications. It is not a statement about `
+        + `any individual member's risk. ${source}`,
+      keys: ['research', 'interview', 'study', 'pharmacy', 'older adults', 'elderly', 'community'],
+      nutrients: [],
+      pmids: [],
+    },
+  ];
+}
+
 let cached = null;
 
 /** The whole corpus, built once per process. Synchronous and keyless on purpose. */
 function buildCorpus() {
   if (cached) return cached;
   const nutrients = nutrientDocs();
-  cached = [...nutrients, ...doseDocs(), ...outcomeDocs(nutrients), ...appDocs()];
+  cached = [...nutrients, ...doseDocs(), ...outcomeDocs(nutrients), ...appDocs(), ...fieldStudyDocs()];
   return cached;
 }
 
@@ -233,6 +309,7 @@ module.exports = {
   nutrientDocs,
   doseDocs,
   appDocs,
+  fieldStudyDocs,
   planDocs,
   dynamicConditionDocs,
   tokens,

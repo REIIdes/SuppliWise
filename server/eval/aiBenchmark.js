@@ -35,7 +35,12 @@ const { enforcePlanConsistency } = require('../utils/planConsistency');
 const { scorePlan, comparePlans, priorityDistribution } = require('../utils/planEvaluation');
 const { completeWithFallback } = require('../utils/aiRouter');
 const { groundPlan, groundingViolations } = require('../utils/planGrounding');
-const profiles = require('./baseline-profiles.json');
+// The hand-written profiles, plus the ones shaped by the project's pharmacy interview
+// (an older member on maintenance antihypertensives, asking about branded supplements).
+// Both are synthetic and both go through the same gates — the second set exists because
+// an accuracy number measured only on situations the authors imagined is a number about
+// the authors. See eval/field-study-profiles.json for the provenance of each.
+const profiles = [...require('./baseline-profiles.json'), ...require('./field-study-profiles.json')];
 
 const args = process.argv.slice(2);
 const LIVE = args.includes('--live');
@@ -199,7 +204,7 @@ function checkThresholds(score, label, failures) {
     for (const f of failures) console.error(`  - ${f}`);
     process.exit(1);
   }
-  console.log(`BENCHMARK PASSED — ${baselineRows.length} baseline profiles${LIVE ? ` x ${RUNS} live run(s)` : ''}, all thresholds met.`);
+  console.log(`BENCHMARK PASSED — ${baselineRows.length} profiles (baseline + field-study)${LIVE ? ` x ${RUNS} live run(s)` : ''}, all thresholds met.`);
 })().catch((err) => {
   console.error('Benchmark crashed:', err);
   process.exit(1);

@@ -521,8 +521,8 @@ const SECURITY_AUDIT = {
           'fact vocabulary, a possessive claim ("your rheumatoid arthritis", "your ferritin") is checked the same way as ' +
           'a reported one, and common drug names joined the medication-word list. The prompt now asks for what the code ' +
           'enforces (assessment rule 19, and a SAFETY RULES block in chat), so the model produces less of it to begin ' +
-          'with. eval/hallucinationAudit.js is the gate: 19 canned hallucinations must all be repaired, 11 true ' +
-          'sentences must be untouched, the rule engine\'s own shipped plans must need zero repairs, and 1,152 combined ' +
+          'with. eval/hallucinationAudit.js is the gate: every canned hallucination must be repaired, every true ' +
+          'sentence must be untouched, the rule engine\'s own shipped plans must need zero repairs, and 1,152 combined ' +
           'texts must come out identical when verified a second time — the sweep that found the one real bug in the ' +
           'design, where deleting a clause fused two sentences and a later pass clamped a dose that had changed ' +
           'nutrient. `npm run eval:hallucination`, and Test File/prose-grounding.test.js pins each rule individually.',
@@ -555,9 +555,10 @@ const SECURITY_AUDIT = {
           + 'grounding rule that deleted a true patient clause — "Since you reported poor sleep and low energy" — '
           + 'along with the verified PMID inside it, because multi-word terms were exempt from word-level licensing.',
         fix:
-          'Retrieval before generation, learning after it, and a number on both. utils/ragCorpus.js builds 165 '
+          'Retrieval before generation, learning after it, and a number on both. utils/ragCorpus.js builds 168 '
           + 'documents synchronously from what the app already publishes (the evidence registry, the dose table, '
-          + 'questionnaire labels, the app feature guide, the member\'s own plan rows, and the conditions the learning '
+          + 'questionnaire labels, the app feature guide, the project\'s own field observations, the member\'s own plan '
+          + 'rows, and the conditions the learning '
           + 'cycle published), with curated alias expansion that adds QUERY terms only and never a document claim; '
           + 'utils/ragRetriever.js scores BM25 (k1 1.4, b 0.75) over it, force-promotes the note whose title the member '
           + 'literally named, always includes the absence notes on a how-do-I question, and emits them FIRST so the '
@@ -623,9 +624,9 @@ const SECURITY_AUDIT = {
   // Dates are part of the claim: an undated "PASS" is how F1's stale
   // "0 vulnerabilities" survived for a week.
   verification: {
-    unitTests: 'PASS 2026-10-20 — npm test ("node --test Test File/*.test.js"): 1545 passed, 0 failed, 56 skipped (1601 run). The 56 are the ten pre-existing suites gated on MONGO_TEST_URI — they skip the same way in CI, which is why the count reads differently from a run that has a second database',
+    unitTests: 'PASS 2026-10-20 — npm test ("node --test Test File/*.test.js"): 1561 passed, 0 failed, 56 skipped (1617 run). The 56 are the ten pre-existing suites gated on MONGO_TEST_URI — they skip the same way in CI, which is why the count reads differently from a run that has a second database',
     clientTests: 'PASS 2026-10-20 — npm test in my-react-app: 715/715, 0 failed, 0 skipped, re-taken after the ai_provider_billing row was registered in the Security Center display maps',
-    syntaxCheck: 'PASS 2026-10-20 — npm run check: Syntax OK, 346 source file(s)',
+    syntaxCheck: 'PASS 2026-10-20 — npm run check: Syntax OK, 347 source file(s)',
     // F13 is a claim about generated content, so it is measured two ways: the
     // citations the app itself asserts (static, against NCBI), and the plans the
     // model actually returns (live, before and after the grounding gate).
@@ -659,9 +660,10 @@ const SECURITY_AUDIT = {
       + 'evidence isn\'t a guarantee") proven to reach the member unedited and never as "isn\'t a promises". The last '
       + 'case in the file runs eval/hallucinationAudit.js '
       + 'itself, so the gate cannot rot without the suite going red',
-    hallucinationAudit: 'PASS 2026-10-20 — npm run eval:hallucination: 1,191 offline cases, 0 shipped violations '
-      + '(19/19 canned hallucinations repaired, 12/12 true sentences untouched, 4/4 shipped rule-engine baselines '
-      + 'needing zero repair, 1,152/1,152 combined texts identical when verified a second time). '
+    hallucinationAudit: 'PASS 2026-10-20 — npm run eval:hallucination: 1,198 offline cases, 0 shipped violations '
+      + '(22/22 canned hallucinations repaired, 14/14 true sentences untouched, 6/6 shipped rule-engine baselines '
+      + 'needing zero repair — the four baselines plus the two field-study profiles shaped by the pharmacy interview, '
+      + 'and 1,152/1,152 combined texts identical when verified a second time). '
       + '`npm run eval:hallucination:live` ran the 7 baited probes against the routed model (openrouter '
       + 'deepseek-v4-flash) and shipped 0 of 9 raw violations: 2 on the chat treatment-change question, 1 on the '
       + 'curcumin guide (a "by up to 2000%" effect size), 5 on the red-yeast-rice guide (four sentences of '
@@ -686,7 +688,7 @@ const SECURITY_AUDIT = {
       + 'limit cannot be misread as an accuracy failure. `--threshold=` and `--case=id,id` are there so the floor can '
       + 'be argued about and a '
       + 'failing case re-run without re-paying for the eleven that passed',
-    retrievalGrounding: 'PASS 2026-10-20 — Test File/rag-retrieval.test.js: 13/13 over utils/ragCorpus.js (165 '
+    retrievalGrounding: 'PASS 2026-10-20 — Test File/rag-retrieval.test.js: 13/13 over utils/ragCorpus.js (168 '
       + 'documents built synchronously from what the app already publishes) + utils/ragRetriever.js (BM25 k1 1.4 / b '
       + '0.75, no keys, no network, deterministic). Pins corpus uniqueness and byte-stability, every curated note '
       + 'keeping the identifier the app verified, a dose question returning the app ceiling first, everyday symptom '
@@ -751,6 +753,23 @@ const SECURITY_AUDIT = {
       + 'deliberately NOT folded — the app writes an em dash in its own boilerplate and DOSE_NUMBER and CLAUSE_SPLIT '
       + 'already enumerate [-–—], and folding them broke verifyProse\'s idempotence contract, which the '
       + 'eval/hallucinationAudit.js sweep caught before it shipped',
+    fieldStudyInputs: 'PASS 2026-10-20 — the project team\'s own community-pharmacy interview (October 2026, one '
+      + 'respondent, purchasing patterns only, no patient identifiers) is now a bounded input to the product instead of '
+      + 'a note in a document. Three paths: utils/ragCorpus.js `fieldStudyDocs()` adds 3 `kind: field` retrieval notes '
+      + '(corpus 168), each with `pmids: []` and `nutrients: []` and no figure with a unit, so a field observation can '
+      + 'be retrieved but can never be cited as clinical evidence or become a dose; eval/field-study-profiles.json adds '
+      + '2 synthetic member profiles shaped by what the interview saw (58F on telmisartan, 67M on amlodipine + losartan '
+      + '+ atorvastatin asking about the brands named locally) and they now run through `eval:ai`, `eval:fine-tune` and '
+      + 'the shipped-baseline sweep in `eval:hallucination`, so the accuracy gates measure the member this research '
+      + 'actually described; and utils/planGrounding.js gained telmisartan in `PRESCRIPTION_DRUG_NAMES`, which makes the '
+      + 'fabricated-patient-fact guard and the refuse-to-stop-a-pill guard both see a medicine these members take. That '
+      + 'widening exposed a real defect: a claim about a brand the app has no evidence entry for was being HEDGED — '
+      + '"Santonn Plus is clinically proven to improve your vision" shipped as "Santonn Plus is reported to improve '
+      + 'your vision", which launders an unverifiable product claim into something that reads sourced. '
+      + '`enforceBrandClaims()` now replaces such a sentence with a line that names no product, so a brand can be '
+      + 'mentioned but never credited with an effect. Test File/field-study.test.js: 16/16 pins the evidence-free field '
+      + 'docs and their printed provenance, the brand question retrieving the brand note, the possessive-drug-claim '
+      + 'repair, and two false-positive guards (a bare interaction sentence and a food word) plus idempotence.',
     selfLearning: 'PASS 2026-10-20 — Test File/condition-learning.test.js: 23/23. It pins the thresholds (24 h AND 25 unseen assessments, from the durable AiLearningRun ledger rather than process memory), the atomic lease that stops two processes spending the same quota, the kill switch, the no-file-writes rule for the scheduled path, the fact that index.js arms it, and that member contact fragments cannot reach a provider through an aggregate term',
     memberAdaptation: 'PASS 2026-10-20 — Test File/member-history.test.js: 23/23, plus plan-grounding 38/38, chat-safety 10/10, supplement-guide-store 35/35, ai-routing 66/66. Covers the resubmit-vs-reassessment window, adherence corrected to the member\'s own clock, escalation on a first-time symptom, the never-demote rule, and the fenced history block being read as data after the answers it is compared against',
 
@@ -863,12 +882,12 @@ const SECURITY_AUDIT = {
     + 'nutrient. Then run `npm run eval:citations` (server/): it resolves every PMID in the registry against NCBI '
     + 'E-utilities at 3 requests/second and exits non-zero on a drift or a title that does not name the nutrient. '
     + 'It needs network and can fail on NCBI being unreachable, so it is a pre-ship gate, not a CI step. '
-    + '`npm run eval:ai:live` is the matching model-side gate: it sends the real assessment prompt for the four '
-    + 'baseline profiles and prints each plan twice — before and after utils/planGrounding.js — so a regression in '
+    + '`npm run eval:ai:live` is the matching model-side gate: it sends the real assessment prompt for the six '
+    + 'baseline and field-study profiles and prints each plan twice — before and after utils/planGrounding.js — so a regression in '
     + 'what the model returns is visible as repairs the gate had to make. It spends API tokens, so run it on demand, '
     + 'not on every commit.',
     'OPERATIONAL (F14): `npm run eval:hallucination` (server/) is the prose-side gate and needs no network. It hands '
-    + 'the verifier 19 canned hallucinations and 12 sentences that are true, every shipped baseline plan, and 1,152 '
+    + 'the verifier 22 canned hallucinations and 14 sentences that are true, every shipped baseline plan, and 1,152 '
     + 'combined texts to prove a second pass changes nothing, then exits non-zero if a hallucination survives, a true '
     + 'sentence is damaged, or the verifier is not idempotent. When a member reports an inaccurate answer, add it to '
     + 'CHALLENGES; when curated copy is wrongly rewritten, add it to GUARDS. A rule with no case pinned to it gets '

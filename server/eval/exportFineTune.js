@@ -32,6 +32,13 @@ const { buildAssessmentPrompt, ASSESSMENT_SYSTEM_PROMPT } = require('../utils/as
 const { enforcePlanConsistency } = require('../utils/planConsistency');
 const { groundPlan, groundingViolations } = require('../utils/planGrounding');
 const profiles = require('./baseline-profiles.json');
+// Field-study profiles are the second half of the set: also synthetic, also scored through
+// the same verifier, but shaped by what the project's pharmacy interview actually observed
+// (an older, hypertensive, maintenance-medication member asking about branded supplements)
+// rather than by what the engine's authors thought to write down. A fine-tune built only
+// from the first four profiles teaches the model the four situations someone imagined.
+const fieldStudyProfiles = require('./field-study-profiles.json');
+const TRAINING_PROFILES = [...profiles, ...fieldStudyProfiles];
 
 const args = process.argv.slice(2);
 const OUT = (args.find((a) => a.startsWith('--out=')) || '').split('=')[1]
@@ -60,7 +67,7 @@ function buildRow(profile) {
 function main() {
   const rows = [];
   const skipped = [];
-  for (const profile of profiles) {
+  for (const profile of TRAINING_PROFILES) {
     const built = buildRow(profile);
     if (built.error) {
       skipped.push(`${profile.id}: ${built.error.map((v) => `${v.kind}/${v.name}`).join(', ')}`);

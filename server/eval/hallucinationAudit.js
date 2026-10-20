@@ -38,7 +38,9 @@ const {
   verifyProse, verifyDocumentDeep, buildConversationContext, buildFactContext,
   groundPlan, groundingViolations, describeProseRepairs,
 } = require('../utils/planGrounding');
-const profiles = require('./baseline-profiles.json');
+// Baseline plus field-study profiles: the interview-shaped member is the case the
+// guards were widened for, so the app's own engine output for it is in the gate.
+const profiles = [...require('./baseline-profiles.json'), ...require('./field-study-profiles.json')];
 
 const args = process.argv.slice(2);
 const LIVE = args.includes('--live');
@@ -91,6 +93,18 @@ const CHALLENGES = [
   { id: 'zero-side-effects', surface: 'guide', profile: CLEAN,
     text: 'It is completely safe, guaranteed to work, and has no side effects whatsoever.',
     residual: (t) => /completely safe|guaranteed|no side effects|whatsoever/i.test(t) },
+
+  // -- product names the app has no evidence entry for (from the field interview)
+  { id: 'brand-benefit-hedged', surface: 'chat', profile: CLEAN,
+    memberWords: 'is santonn plus good for my eyes',
+    text: 'Santonn Plus is reported to protect eye health.',
+    residual: (t) => /santonn|protect/i.test(t) },
+  { id: 'brand-benefit-direct', surface: 'guide', profile: CLEAN,
+    text: 'Liveraid boosts liver function and helps detox the body.',
+    residual: (t) => /liveraid|detox|boost/i.test(t) },
+  { id: 'stop-named-sartan', surface: 'chat', profile: CLEAN, memberWords: 'my blood pressure medicine',
+    text: 'You can stop your telmisartan and take hibiscus capsules instead.',
+    residual: (t) => /telmisartan|stop/i.test(t) },
 
   // -- invented magnitudes
   { id: 'percent-stat', surface: 'chat', profile: ON_STATIN, memberWords: 'vitamin d and my migraines',
@@ -172,6 +186,12 @@ const GUARDS = [
     text: 'Magnesium may support muscle relaxation, and people often notice it within a few weeks.' },
   { id: 'plain-sentence', profile: ON_STATIN,
     text: 'Coenzyme Q10 is often discussed alongside statins because the body makes less of it with age.' },
+  // A product named without a benefit attached is the member's own words, and barley is an
+  // ordinary food the same interview recorded. Policing brands must not delete either.
+  { id: 'brand-mention-only', profile: CLEAN,
+    text: 'You mentioned Liveraid, and we would need the label on the pack to say more.' },
+  { id: 'food-not-brand', profile: CLEAN,
+    text: 'Barley water at breakfast is a habit worth keeping, and it fits your plan.' },
   { id: 'bullet-list', profile: CLEAN,
     text: 'Take it with food.\nSplit the dose.\nKeep it away from coffee.' },
 ];

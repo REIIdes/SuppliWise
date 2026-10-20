@@ -164,6 +164,14 @@ const SERIOUS_CONDITION_TERMS = [
 const PRESCRIPTION_DRUG_NAMES = [
   'atorvastatin', 'simvastatin', 'rosuvastatin', 'pravastatin', 'fluvastatin', 'pitavastatin',
   'lisinopril', 'ramipril', 'enalapril', 'losartan', 'valsartan', 'amlodipine', 'metoprolol',
+  // Telmisartan is here because the project's own pharmacy interview named it as one of the
+  // three maintenance medicines its members actually buy. Two guards read this list, and a
+  // drug missing from it is invisible to both: the patient-fact guard only catches "your
+  // telmisartan" / "since you take telmisartan" if it recognises the word as a medication at
+  // all, and `enforceMedicationSafety` only refuses to advise stopping a pill it can name.
+  // Neither guard fires on a bare mention ("safe alongside telmisartan"), which is correct —
+  // naming a drug in a general interaction sentence is not a claim about the member.
+  'telmisartan',
   'atenolol', 'carvedilol', 'propranolol', 'hydrochlorothiazide', 'furosemide', 'spironolactone',
   'warfarin', 'coumadin', 'apixaban', 'eliquis', 'rivaroxaban', 'xarelto', 'clopidogrel',
   'metformin', 'glipizide', 'glyburide', 'empagliflozin', 'semaglutide', 'ozempic', 'levothyroxine',
@@ -1670,6 +1678,41 @@ function tidyProse(text) {
     .replace(/[ \t]{2,}/g, ' ');
 }
 
+/**
+ * Proprietary product names this app holds no evidence entry for.
+ *
+ * These are the brands the project's own pharmacy interview found members asking about, so
+ * they are the names a model will meet in a member's message. The narrow, specific reason
+ * this guard exists: a hedged brand claim — "Santonn Plus is reported to improve your
+ * vision" — used to ship, because the certainty downgrade did its job on the VERB and left
+ * an efficacy claim attached to a product the app cannot look up. A hedge in front of an
+ * unverifiable subject is not a repair; it reads as a careful source.
+ *
+ * Barley is deliberately NOT listed even though the interview named it, because it is an
+ * ordinary food and a member's diet is not a brand. Deleting a true sentence about barley
+ * water to police a label is the wrong trade; `groundPlan` already refuses to build a plan
+ * row for anything without an evidence entry, which is where a food name actually matters.
+ */
+const UNVERIFIED_PRODUCT_TERMS = ['santonn', 'eyeberry', 'liveraid'];
+
+const PRODUCT_BENEFIT = new RegExp(
+  `\\b(?:${UNVERIFIED_PRODUCT_TERMS.join('|')})\\b[^.!?]{0,60}?`
+  + '\\b(?:helps?|improves?|boosts?|supports?|treats?|prevents?|reduces?|lowers?|strengthens?'
+  + '|protects?|detox\\w*|benefits?|fights?|enhances?|works?|is\\s+good\\s+for|proven|clinically)\\b',
+  'i');
+
+/** What the app says instead. It names no product, so it cannot re-trigger this rule. */
+const BRAND_CLAIM_LINE = 'The app has no evidence entry for that product, so it cannot say '
+  + 'what it does — the ingredient list on the pack is what it can talk about.';
+
+function enforceBrandClaims(text) {
+  return mapSentences(text, (sentence, mark) => {
+    if (!PRODUCT_BENEFIT.test(sentence)) return sentence;
+    mark('brand-unverifiable', sentence.trim().slice(0, 80));
+    return BRAND_CLAIM_LINE;
+  });
+}
+
 function verifyProse(text, options = {}) {
   if (typeof text !== 'string' || !text.trim()) return { value: text, repairs: [] };
   const repairs = [];
@@ -1685,6 +1728,7 @@ function verifyProse(text, options = {}) {
     () => enforceCitationAgreement(value),
     () => enforceMedicationSafety(value),
     () => enforceWithheldData(value),
+    () => enforceBrandClaims(value),
     () => (options.memberName ? enforceIdentity(value, { memberName: options.memberName }) : { value, repairs: [] }),
     () => downgradeAbsoluteClaims(value),
     () => stripUnsourcedStatistics(value, options),
@@ -1767,6 +1811,9 @@ module.exports = {
   MED_SAFETY_LINE,
   UNSOURCED_STAT_LINE,
   WITHHELD_LINE,
+  BRAND_CLAIM_LINE,
+  UNVERIFIED_PRODUCT_TERMS,
+  enforceBrandClaims,
   PLAN_PROSE_SKIP_KEYS,
   CLAIM_REWRITES,
   buildFactContext,
