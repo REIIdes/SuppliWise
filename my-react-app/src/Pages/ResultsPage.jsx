@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import { exportResultsToPDF } from '../utils/exportPDF';
 import { checkFeature } from '../api';
@@ -323,7 +323,7 @@ function SupplementCard({ rec, index = 0, expanded, onToggle, onOpenDetail, deta
 function ResultsPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { recommendations: r, assessment, garbageFields: rawGarbageFields = [] } = location.state || {};
+  const { recommendations: r, assessment, garbageFields: rawGarbageFields = [], recommendationProof = null } = location.state || {};
   const garbageFields = (Array.isArray(rawGarbageFields) ? rawGarbageFields : [])
     .filter((field) => field && typeof field === 'object');
 
@@ -552,6 +552,21 @@ function ResultsPage() {
               <p className="results-eyebrow"><span aria-hidden="true">✦</span> PERSONALIZED WELLNESS PLAN</p>
               <h2 id="results-plan-title">Your Personalized Health Plan</h2>
               <p className="results-header-sub">A clear starting point shaped around your goals, habits, and wellbeing.</p>
+              {/* The plan the engine returned is anchored on the ledger as it is
+                  saved, so "this is what we suggested, on this date" is evidence
+                  and not a screenshot. Only a web3-plan member gets a receipt,
+                  because only their plans are anchored. */}
+              {recommendationProof && (
+                <p className="results-chain-proof" style={{ margin: '10px 0 0', fontSize: 13, opacity: 0.85 }}>
+                  <span aria-hidden="true">⛓</span>
+                  {' Anchored on the SuppliWise ledger at block #'}
+                  <strong style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{recommendationProof.blockIndex}</strong>
+                  {' · commit '}
+                  <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{String(recommendationProof.combinedHash || '').slice(0, 12)}</span>
+                  {' — '}
+                  <Link to="/web3">verify this plan</Link>
+                </p>
+              )}
             </div>
             {/* Detail Mode Toggle */}
             <div className="detail-mode-toggle" role="group" aria-label="Recommendation detail level">

@@ -10,13 +10,11 @@ const {
   Wallet,
 } = require('../../models/Web3');
 const Assessment = require('../../models/Assessment');
-const IntakeRecord = require('../../models/IntakeRecord');
 const DashboardMetrics = require('../../models/DashboardMetrics');
 const User = require('../../models/User');
 const engine = require('../../blockchain/engine');
 const ledger = require('../../blockchain/ledger');
 const {
-  hashPayload,
   sealData,
   openData,
   contentId,
@@ -25,10 +23,19 @@ const {
   stableStringify,
 } = require('../../blockchain/crypto');
 const { requireFeature } = require('../../utils/entitlements');
+// The health-ledger and recommendation commitments are derived in
+// blockchain/proofs.js, because the product now anchors them automatically: an
+// assessment save and the member's own "anchor" button must produce
+// byte-identical commitments, or `/health/verify` would reject half of the
+// receipts the platform issues.
+const {
+  recommendationCommitment,
+  buildHealthDigest,
+  anchorHealthLedger,
+  anchorRecommendation,
+} = require('../../blockchain/proofs');
 
 const router = express.Router();
-
-const RECOMMENDER_LOGIC_VERSION = 'suppliwise-rec-engine@1';
 
 function userOnly(req, res, next) {
   if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
@@ -36,51 +43,6 @@ function userOnly(req, res, next) {
 }
 // DELUXE plan gate for the health ledger, storage, consent and AI proofs.
 router.use(userOnly, requireFeature('web3'));
-
-// Deep JSON-safe conversion (Dates → ISO, ObjectIds → strings) so hashing is
-// deterministic across reads.
-function jsonSafe(value) {
-  if (value === null || value === undefined) return value;
-  if (value instanceof Date) return value.toISOString();
-  if (Array.isArray(value)) return value.map(jsonSafe);
-  if (typeof value === 'object') {
-    if (typeof value.toHexString === 'function') return value.toHexString();
-    const out = {};
-    for (const [k, v] of Object.entries(value)) out[k] = jsonSafe(v);
-    return out;
-  }
-  return value;
-}
-
-// Digest over the user's full record history (feature 6): every assessment
-// identity + timestamps + intake volume. Personal data stays in the DB — the
-// chain only ever receives this digest.
-async function buildHealthDigest(userId) {
-  const [assessments, intakeCount, latestIntake] = await Promise.all([
-    Assessment.find({ user: userId }).select('_id createdAt updatedAt priority').sort({ createdAt: 1 }).lean(),
-    IntakeRecord.countDocuments({ user: userId }),
-    IntakeRecord.findOne({ user: userId }).select('date').sort({ date: -1 }).lean(),
-  ]);
-  const payload = {
-    assessments: assessments.map((a) => ({
-      id: String(a._id),
-      createdAt: a.createdAt ? new Date(a.createdAt).toISOString() : '',
-      updatedAt: a.updatedAt ? new Date(a.updatedAt).toISOString() : '',
-      priority: a.priority,
-    })),
-    intakeCount,
-    latestIntakeAt: latestIntake && latestIntake.date ? new Date(latestIntake.date).toISOString() : '',
-  };
-  return {
-    payload,
-    digest: hashPayload(payload),
-    assessmentCount: assessments.length,
-    intakeCount,
-    latestAssessmentAt: assessments.length
-      ? new Date(assessments[assessments.length - 1].createdAt).getTime()
-      : 0,
-  };
-}
 
 // ── User-owned health records (feature 6) ─────────────────────────────────
 router.get('/health/ledger', async (req, res) => {
@@ -106,47 +68,25 @@ router.get('/health/ledger', async (req, res) => {
 
 router.post('/health/ledger/anchor', async (req, res) => {
   try {
-    const snapshot = await buildHealthDigest(req.user._id);
-    const wallet = await engine.getWalletDoc(req.user._id);
-    const tx = await engine.anchor('health:anchor', wallet.address, {
-      secret: snapshot.payload,               // digest-only: never the data
-      public: {
-        digest: snapshot.digest,
-        assessmentCount: snapshot.assessmentCount,
-        intakeCount: snapshot.intakeCount,
-      },
-    });
+    const out = await anchorHealthLedger(req.user, { reward: true });
     // A failed append is now explicit rather than an index of -1 that every
     // caller had to remember to test. Without this check the route stored an
     // anchor row saying "proven at block -1", paid the anchor reward for a block
     // that does not exist, and LedgerPanel showed the member a chain anchor they
     // can never verify — the health/verify endpoint would reject that digest,
     // so the receipt contradicted the ledger it came from.
-    if (tx.anchored === false || !(tx.index >= 0)) {
+    if (!out.anchored) {
       return res.status(502).json({
         anchored: false,
         message: 'The chain could not accept this snapshot right now, so nothing was anchored and no reward was paid. Try again in a moment.',
-        error: tx.error || 'unknown',
+        error: out.error || 'unknown',
       });
     }
-    const anchor = await HealthAnchor.create({
-      user: req.user._id,
-      digest: snapshot.digest,
-      assessmentCount: snapshot.assessmentCount,
-      intakeCount: snapshot.intakeCount,
-      latestAssessmentAt: snapshot.latestAssessmentAt,
-      blockIndex: tx.index,
-      txHash: tx.txs[0] || '',
+    res.status(201).json({
+      anchor: out.anchor,
+      reward: out.reward,
+      alreadyClaimed: out.alreadyClaimed,
     });
-    const cfg = await engine.getConfig();
-    const reward = await engine.grantReward({
-      userId: req.user._id,
-      kind: 'health-anchor',
-      refId: require('../../blockchain/crypto').dayKey(),
-      amount: cfg.params.healthAnchorReward,
-      public: { digest: snapshot.digest },
-    });
-    res.status(201).json({ anchor, reward: reward.amount, alreadyClaimed: reward.alreadyClaimed });
   } catch (error) {
     console.error('[web3 POST /health/ledger/anchor]', error.message);
     res.status(500).json({ message: 'Could not anchor your health ledger.' });
@@ -517,36 +457,17 @@ router.post('/recommendations/anchor', async (req, res) => {
   try {
     const assessmentId = String(req.body.assessmentId || '');
     if (!mongoose.isValidObjectId(assessmentId)) return res.status(400).json({ message: 'Invalid assessment.' });
-    const assessment = await Assessment.findOne({ _id: assessmentId, user: req.user._id }).lean();
-    if (!assessment) return res.status(404).json({ message: 'Assessment not found.' });
-    if (!assessment.aiResults) return res.status(400).json({ message: 'No AI results on this assessment yet.' });
-
-    const safe = jsonSafe(assessment);
-    const { aiResults, ...inputFields } = safe;
-    const inputHash = hashPayload(inputFields);
-    const outputHash = hashPayload(aiResults);
-    const combinedHash = hashPayload({ logicVersion: RECOMMENDER_LOGIC_VERSION, inputHash, outputHash });
-
-    const anchorDoc = await RecAnchor.findOneAndUpdate(
-      { user: req.user._id, assessmentId: assessment._id },
-      {
-        $set: {
-          logicVersion: RECOMMENDER_LOGIC_VERSION,
-          inputHash,
-          outputHash,
-          combinedHash,
-        },
-      },
-      { upsert: true, new: true }
-    );
-    const wallet = await engine.getWalletDoc(req.user._id);
-    const tx = await engine.anchor('rec:anchor', wallet.address, {
-      public: { assessment: assessmentId, logicVersion: RECOMMENDER_LOGIC_VERSION, combinedHash },
-    });
-    anchorDoc.blockIndex = tx.index;
-    anchorDoc.txHash = tx.txs[0] || '';
-    await anchorDoc.save();
-    res.status(201).json({ anchor: anchorDoc });
+    const out = await anchorRecommendation(req.user, assessmentId);
+    if (!out.anchored) {
+      if (out.code === 'not_found') return res.status(404).json({ message: 'Assessment not found.' });
+      if (out.code === 'no_results') return res.status(400).json({ message: 'No AI results on this assessment yet.' });
+      return res.status(502).json({
+        anchored: false,
+        message: 'The chain could not accept this plan right now, so nothing was anchored. Try again in a moment.',
+        error: out.error || 'unknown',
+      });
+    }
+    res.status(201).json({ anchor: out.anchor });
   } catch (error) {
     console.error('[web3 POST /recommendations/anchor]', error.message);
     res.status(500).json({ message: 'Could not anchor the recommendation.' });
@@ -561,11 +482,10 @@ router.get('/recommendations/anchor/:assessmentId', async (req, res) => {
     const assessment = await Assessment.findOne({ _id: req.params.assessmentId, user: req.user._id }).lean();
     if (!assessment) return res.status(404).json({ message: 'Assessment not found.' });
 
-    const safe = jsonSafe(assessment);
-    const { aiResults, ...inputFields } = safe;
-    const inputHash = hashPayload(inputFields);
-    const outputHash = hashPayload(aiResults);
-    const combinedHash = hashPayload({ logicVersion: anchorDoc.logicVersion, inputHash, outputHash });
+    // Re-derived through the same helper the anchor itself uses, so the
+    // verifier and the anchorer cannot drift apart.
+    const derived = recommendationCommitment(assessment, anchorDoc.logicVersion);
+    const { inputHash, outputHash, combinedHash } = derived;
     const recordIntact = combinedHash === anchorDoc.combinedHash;
 
     // The two rows this used to compare — the assessment and its anchor — live
@@ -584,7 +504,7 @@ router.get('/recommendations/anchor/:assessmentId', async (req, res) => {
     // `logicVersion` then fails here instead of quietly re-deriving a matching
     // combined hash.
     const againstChain = onChain
-      ? hashPayload({ logicVersion: onChain.logicVersion, inputHash, outputHash })
+      ? recommendationCommitment(assessment, onChain.logicVersion).combinedHash
       : '';
     // v1 blocks committed the joined txHash list only, so the text inside
     // `tx.data` was never hashed into anything. On v2 it was. Saying which one

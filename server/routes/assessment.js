@@ -13,6 +13,15 @@ const { historyLimitFor, tierOf, can, PLAN_LABELS, resolveSubscription } = requi
 const { analyzePriorityFlagging } = require('../utils/priorityFlagging');
 const { expiryDateFromNow, expiryFromCreatedAt, notExpiredFilter } = require('../utils/assessments');
 const { guardRaisePriority, selfHealOpenPriority } = require('../utils/priorityGate');
+// Chain proofs for the events this route actually produces. Anchoring is an
+// enhancement, never a dependency: the helpers return `anchored: false` instead
+// of throwing, so a member can always save their assessment even when the
+// ledger is refusing blocks.
+const {
+  web3Enabled,
+  anchorHealthLedger,
+  anchorRecommendation,
+} = require('../blockchain/proofs');
 
 // Flag an assessment as Priority + notify the user and admins (best-effort,
 // never fails the surrounding request). Idempotent per assessment.
@@ -302,7 +311,24 @@ router.post('/', protect, async (req, res) => {
     });
     
     console.log('Dashboard metrics reset for new assessment');
-    res.status(201).json({ message: 'Assessment saved', assessment, garbageFields, severityFlag });
+    // Every assessment the platform issues is now a chain event, not just the
+    // ones whose member happens to visit the Web3 hub and press a button. The
+    // digest is history-level (assessment ids, timestamps, intake volume), so
+    // nothing personal is written on-chain and the record stays verifiable by
+    // the same /health/verify endpoint a clinic would use.
+    let chainProof = null;
+    if (web3Enabled(req.user)) {
+      const out = await anchorHealthLedger(req.user);
+      if (out.anchored) {
+        chainProof = {
+          blockIndex: out.blockIndex,
+          txHash: out.txHash,
+          digest: out.snapshot.digest,
+          assessmentCount: out.snapshot.assessmentCount,
+        };
+      }
+    }
+    res.status(201).json({ message: 'Assessment saved', assessment, garbageFields, severityFlag, chainProof });
   } catch (error) {
     console.error('[assessment POST]', error.message);
     res.status(500).json({ message: 'Could not save your assessment. Please try again.' });
@@ -605,7 +631,24 @@ router.patch('/:id/results', protect, async (req, res) => {
           : { flagged: false, reasons: [], suppressed: outcome.reason };
       }
     }
-    res.json({ message: 'Results saved', assessment, severityFlag });
+    // The plan the engine just returned is anchored as it is persisted, so
+    // "the app suggested this" is a dated, tamper-evident claim rather than
+    // something the member has to remember to prove later. Same commitment the
+    // Web3 hub's own anchor button makes — one derivation, so the two can never
+    // disagree about what a plan hashes to.
+    let recommendationProof = null;
+    if (web3Enabled(req.user)) {
+      const out = await anchorRecommendation(req.user, assessment._id);
+      if (out.anchored) {
+        recommendationProof = {
+          blockIndex: out.blockIndex,
+          txHash: out.txHash,
+          combinedHash: out.combinedHash,
+          logicVersion: out.logicVersion,
+        };
+      }
+    }
+    res.json({ message: 'Results saved', assessment, severityFlag, recommendationProof });
   } catch (error) {
     console.error('[assessment PATCH /:id/results]', error.message);
     res.status(500).json({ message: 'Could not save results. Please try again.' });

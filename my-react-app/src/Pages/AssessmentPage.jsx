@@ -2816,6 +2816,11 @@ function AssessmentPage() {
       let savedAt = null;
       let garbageFields = [];
       let lastSeverityFlag = { flagged: false, reasons: [] };
+      // Chain receipts the server hands back for the two events this flow
+      // produces. null simply means "no proof for this plan" — the member's
+      // plan is saved either way.
+      let healthProof = null;
+      let recommendationProof = null;
       
       // In update mode: get AI recommendations BEFORE saving
       // This ensures a timeout/failure leaves the old plan untouched
@@ -2839,6 +2844,7 @@ function AssessmentPage() {
           savedAt = saveResult?.assessment?.createdAt || null;
           garbageFields = saveResult?.garbageFields || [];
           if (saveResult?.severityFlag) lastSeverityFlag = saveResult.severityFlag;
+          healthProof = saveResult?.chainProof || null;
           if (assessmentId) break;
         } catch (saveErr) {
           console.error(`Assessment save attempt ${attempt} failed:`, saveErr.message);
@@ -2856,7 +2862,8 @@ function AssessmentPage() {
 
       if (assessmentId) {
         try {
-          await saveAssessmentResults(assessmentId, recommendations);
+          const resultsSave = await saveAssessmentResults(assessmentId, recommendations);
+          recommendationProof = resultsSave?.recommendationProof || null;
           
           // In update mode: migrate history after successful AI save
           if (isUpdateMode && updateAssessmentId) {
@@ -2888,6 +2895,8 @@ function AssessmentPage() {
           recommendations,
           assessment: { ...payload, _id: assessmentId || undefined, createdAt: savedAt || undefined },
           garbageFields,
+          healthProof,
+          recommendationProof,
         },
       });
     } catch (err) {

@@ -629,9 +629,12 @@ const SECURITY_AUDIT = {
   // Dates are part of the claim: an undated "PASS" is how F1's stale
   // "0 vulnerabilities" survived for a week.
   verification: {
-    unitTests: 'PASS 2026-10-20 — npm test ("node --test Test File/*.test.js"): 1561 passed, 0 failed, 56 skipped (1617 run). The 56 are the ten pre-existing suites gated on MONGO_TEST_URI — they skip the same way in CI, which is why the count reads differently from a run that has a second database',
-    clientTests: 'PASS 2026-10-20 — npm test in my-react-app: 715/715, 0 failed, 0 skipped, re-taken after the ai_provider_billing row was registered in the Security Center display maps',
-    syntaxCheck: 'PASS 2026-10-20 — npm run check: Syntax OK, 347 source file(s)',
+    unitTests: 'PASS 2026-10-21 — npm test ("node --test Test File/*.test.js"): 1741 passed, 0 failed, 56 skipped (1797 run). The 56 are the ten pre-existing suites gated on MONGO_TEST_URI — they skip the same way in CI, which is why the count reads differently from a run that has a second database',
+    clientTests: 'PASS 2026-10-21 — npm test in my-react-app: 744/744, 0 failed, 0 skipped',
+    syntaxCheck: 'PASS 2026-10-21 — npm run check: Syntax OK, 370 source file(s)',
+    // The chain only means anything if it covers events the product actually
+    // produces, so the claim recorded here is about the wiring, not the ledger.
+    productEventProofs: 'PASS 2026-10-21 — Test File/web3-product-proofs.test.js: 16/16. Saving an assessment anchors the health ledger and saving AI results anchors the plan, from routes/assessment.js, gated on the same web3 entitlement the hub gates on; the commitment is one implementation shared by the automatic anchor and the manual button; a refused or throwing append returns anchored:false and stores no block claim, pays no reward and cannot fail the save. src/Pages/resultsChainProof.test.js: 4/4 for the receipt reaching the plan screen',
     // F13 is a claim about generated content, so it is measured two ways: the
     // citations the app itself asserts (static, against NCBI), and the plans the
     // model actually returns (live, before and after the grounding gate).

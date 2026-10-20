@@ -58,7 +58,7 @@ export default function AiProofPanel() {
         fail({ message: `Unchanged, but not chain-proven: ${res.verification.chain?.reason || 'the ledger has no intact block committing this record.'}` });
       } else fail({ message: 'Verification FAILED: the record changed after it was anchored.' });
     } catch (err) {
-      fail(err, err.status === 404 ? 'No anchor yet for this assessment — anchor it first.' : 'Could not verify.');
+      fail(err, err.status === 404 ? 'No anchor yet for this assessment. Plans anchor automatically when they save — press Anchor to commit this one.' : 'Could not verify.');
     } finally {
       setBusy(false);
     }
@@ -73,9 +73,10 @@ export default function AiProofPanel() {
       <div className="w3-card accent">
         <div className="w3-card-title">🤖 Why was I recommended this?</div>
         <p className="w3-card-sub">
-          Black-box AI is the opposite of what a health product needs. Anchor every recommendation
-          run — inputs, outputs and the engine version — then re-verify it any time. If a single
-          byte changed afterwards, verification fails.
+          Black-box AI is the opposite of what a health product needs. Every plan is anchored as it
+          saves — inputs, outputs and the engine version — then re-verified here any time. If a single
+          byte changed afterwards, verification fails. "Anchor" re-commits the record as it stands now,
+          which is what you want after editing an assessment.
         </p>
 
         {assessments.length === 0 ? (
