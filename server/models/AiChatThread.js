@@ -26,6 +26,31 @@ const aiChatMessageSchema = new mongoose.Schema({
   text: { type: String, required: true },
 }, { _id: false });
 
+/**
+ * What the server put in front of the model for one reply.
+ *
+ * A separate array from `messages`, in its own shape, because the transcript is what
+ * the panel renders and it must stay `{role, text}`. This is the audit trail of the
+ * generation: which reference notes were retrieved, which verifier categories the
+ * draft needed, which provider answered. It is what makes a thumbs-down mean
+ * something — without it, feedback is a feeling with no cause to correlate against,
+ * and the ranking loop has nothing to learn from.
+ *
+ * `i` is the index of the assistant message in `messages`, so a vote on an older
+ * reply still resolves to the notes that produced that reply, even after ten more
+ * turns.
+ */
+const aiChatTurnSchema = new mongoose.Schema({
+  i: { type: Number, required: true },
+  docs: { type: [String], default: [] },
+  repairs: { type: [String], default: [] },
+  provider: { type: String, trim: true, maxlength: 60, default: '' },
+  // A turn whose reply shipped unchanged. Tracked because "the verifier never had to
+  // touch this answer" is the state the whole grounding pass is trying to reach, and
+  // it is only knowable if it is recorded.
+  clean: { type: Boolean, default: true },
+}, { _id: false });
+
 const aiChatThreadSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -39,6 +64,7 @@ const aiChatThreadSchema = new mongoose.Schema({
   pinned: { type: Boolean, default: false },
   archived: { type: Boolean, default: false },
   messages: [aiChatMessageSchema],
+  turns: [aiChatTurnSchema],
 }, { timestamps: true });
 
 module.exports = mongoose.model('AiChatThread', aiChatThreadSchema);

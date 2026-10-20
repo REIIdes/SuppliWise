@@ -21,6 +21,10 @@ const { isArgon2id, isBcrypt } = require('../utils/password');
 const { SECURITY_AUDIT } = require('../utils/securityAudit');
 const { getAiProviders, oldestCheck, isEnvStale, checkAiProvider, AI_PROVIDERS } = require('../utils/aiProviders');
 const { describeRouting } = require('../utils/aiRouter');
+const AiChatThread = require('../models/AiChatThread');
+const { feedbackStats } = require('../utils/chatLearning');
+const { buildCorpus } = require('../utils/ragCorpus');
+const { retrieve } = require('../utils/ragRetriever');
 const { detectSystemThreats } = require('../utils/systemDetection');
 const { getLastOutcome } = require('../utils/priorityFlagging');
 const { reloadFromDisk } = require('../utils/envFile');
@@ -1864,6 +1868,63 @@ const runMonitorProbes = async (app) => {
         detail: result.detail.replace(/^Reachable — /, 'Priority-flagging AI reachable. ')
           + ' Provides a second opinion on assessments; it can escalate a Priority flag but never clear one.',
       };
+    }),
+
+    // ── 7b. AI Chat grounding + learning loop ─────────────────────────────
+    //
+    // Everything the AI chat surface promises rests on three things that fail
+    // SILENTLY: retrieval returning the curated note for a question, the absence
+    // note staying in front of the model on a "does it have X" question, and the
+    // feedback loop actually being fed. None of them throw — a broken retriever
+    // still produces a fluent answer, it is just the model's own recall again,
+    // which is the exact thing the grounding pass exists to stop. So this probe
+    // asks two questions whose answers are curated and checks that the corpus
+    // produced them, rather than reporting that a provider key loaded.
+    //
+    // It reads only turn METADATA (which docs were handed over, whether the
+    // verifier had to edit the draft) — never transcript text, never a member id.
+    probe('ai_chat_grounding', 'AI Chat Grounding & Learning', 'openrouter', async () => {
+      const corpus = buildCorpus();
+      if (!corpus.length) {
+        return { status: 'critical', detail: 'The retrieval corpus is empty — every chat answer is the model guessing again.' };
+      }
+
+      const dose = retrieve('how much magnesium should I take every day', { limit: 3 }).docs.map((d) => d.id);
+      if (!dose.includes('dose:Magnesium')) {
+        return { status: 'critical', detail: `Retrieval lost the curated dose row for magnesium (top 3: ${dose.join(', ') || 'nothing'}). Chat is answering dose questions from model recall.` };
+      }
+
+      const feature = retrieve('can the app read my blood test results', { limit: 5 }).docs.map((d) => d.id);
+      if (!feature.includes('app:does-not-exist')) {
+        return { status: 'critical', detail: 'The "feature does not exist" note no longer reaches a does-it-have-X prompt — the assistant can affirm a capability the app never shipped.' };
+      }
+
+      const stats = await feedbackStats();
+      const rows = await AiChatThread.find({ 'turns.0': { $exists: true } })
+        .sort({ updatedAt: -1 }).limit(200).select('turns').lean();
+      const turns = rows.reduce((n, t) => n + (t.turns || []).length, 0);
+      const edited = rows.reduce((n, t) => n + (t.turns || []).filter((x) => x.clean === false || (x.repairs || []).length).length, 0);
+      const editPct = turns ? Math.round((edited / turns) * 100) : null;
+
+      if (!turns) {
+        return { status: 'warning', detail: `Corpus and retrieval healthy (${corpus.length} note(s)), but no chat turn has recorded its retrieval audit trail — feedback cannot be attributed to the notes that produced it.` };
+      }
+
+      const learning = stats.total
+        ? `${stats.ups} up / ${stats.downs} down in ${stats.windowDays} days, ${stats.activePriors} prior(s) published`
+        : `no votes in ${stats.windowDays} days — the ranking loop is dormant`;
+      const notes = [stats.priorsFailed ? 'prior refresh is failing (last good ranking in use)' : learning, `${edited}/${turns} recent reply(ies) needed a verifier repair${editPct === null ? '' : ` (${editPct}%)`}`];
+
+      // A repair means the prompt did not ground the answer and the verifier caught
+      // it. The member read a correct reply, so this is not critical — but a third
+      // of drafts needing editing is a prompt that is losing, and it should be seen.
+      if (editPct !== null && editPct > 33) {
+        return { status: 'warning', detail: `${notes.join('; ')}. Retrieval is sound but drafts keep needing repairs before they ship.` };
+      }
+      if (!stats.total) {
+        return { status: 'warning', detail: `${notes.join('; ')}. Adaptation needs members to rate answers; nothing is tuning the ranking yet.` };
+      }
+      return { status: 'healthy', detail: `${corpus.length} curated note(s); dose and absence retrievals verified live. ${notes.join('; ')}.` };
     }),
 
     // ── 8. Delete Account ────────────────────────────────────────────────

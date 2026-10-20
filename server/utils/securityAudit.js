@@ -39,14 +39,16 @@ const SECURITY_AUDIT = {
   // listed as half-closed in its own `status` and is not counted twice.
   // Re-counted 2026-10-20 for F13 — fabricated citations inside the app's own
   // curated evidence table — which is a third critical and is closed in code.
+  // Re-counted again the same day for F15: the AI chat surface answering from model
+  // recall, not knowing the member, and having no measurement of either. Ninth high.
   counts: {
-    total: 31,
+    total: 32,
     critical: 3,
-    high: 8,
+    high: 9,
     medium: 9,
     low: 7,
     informational: 4,
-    remediatedInCode: 27,
+    remediatedInCode: 28,
     openOrAccepted: 4,
   },
 
@@ -524,7 +526,68 @@ const SECURITY_AUDIT = {
           'texts must come out identical when verified a second time — the sweep that found the one real bug in the ' +
           'design, where deleting a clause fused two sentences and a later pass clamped a dose that had changed ' +
           'nutrient. `npm run eval:hallucination`, and Test File/prose-grounding.test.js pins each rule individually.',
-        status: 'fixed 2026-10-20 — eval/hallucinationAudit.js: 1,189 offline cases pass (19/19 hallucinations repaired, 11/11 true sentences untouched, 4/4 shipped baselines needing zero repair, 1,152/1,152 combined texts idempotent); the 7 live probes against the routed model produced 9 raw violations and 0 shipped; Test File/prose-grounding.test.js 36/36, and the whole server suite is 1,500 passed / 0 failed',
+        status: 'fixed 2026-10-20 — eval/hallucinationAudit.js: 1,189 offline cases pass (19/19 hallucinations repaired, 11/11 true sentences untouched, 4/4 shipped baselines needing zero repair, 1,152/1,152 combined texts idempotent); the 7 live probes against the routed model produced 9 raw violations and 0 shipped; Test File/prose-grounding.test.js 36/36, and the whole server suite is 1,532 passed / 0 failed',
+      },
+      {
+        id: 'F15',
+        severity: 'high',
+        title: 'The assistant answered from model recall, did not know the member, and could not learn from being wrong',
+        detail:
+          'F13 and F14 made the verifier strong enough that a bad sentence no longer reaches a member. That is a '
+          + 'defensive property, and the audit had no offensive one: nothing measured whether the AI chat knew anything '
+          + 'true in the first place. Reading it whole found four separate gaps and, under them, six defects that only '
+          + 'a benchmark could surface. (1) Chat carried no retrieval. The prompt asked for a helpful answer and the '
+          + 'model supplied one from its own weights, so "70% of adults are vitamin D deficient" was not a verifier bug '
+          + '— it was the only mechanism there was. (2) Chat did not know who it was talking to. "What is my name?" '
+          + 'answered "I don\'t have your name" while the name sat in the same request\'s `req.user`; members were being '
+          + 'told the app they had just filled in was a stranger. (3) Nothing was recorded about a reply, so a '
+          + 'thumbs-down had no cause to correlate against and the system could not adapt; the POST /api/chat/feedback '
+          + 'endpoint that would have recorded it threw `invalidatePriors is not a function` after writing the row — '
+          + 'a 500 on every vote, on a route that looked correct because the function existed and simply was not '
+          + 'exported. (4) Even the learning that was written never ran: the route passed `priors: '
+          + 'priorsForRetrieval()` — a Promise, not a Map — so retrieval fell through to `Object.entries(promise)` = '
+          + 'empty and every published weight applied to nothing, forever, silently. The five that the new benchmark '
+          + 'then found: a token fold that turned "migraines" into "migrain", so an everyday symptom question retrieved '
+          + 'nothing but app help pages; the 3,200-character reference cap able to truncate the one note that says '
+          + 'this feature DOES NOT EXIST, which is how an assistant affirms a capability it never shipped; app '
+          + 'capability keys ("can i", "is there") winning whole-phrase name matches, so "what is vitamin d good for" '
+          + 'returned Calcium; fourteen curated alias synonyms that matched no token in the corpus at all; and a '
+          + 'grounding rule that deleted a true patient clause — "Since you reported poor sleep and low energy" — '
+          + 'along with the verified PMID inside it, because multi-word terms were exempt from word-level licensing.',
+        fix:
+          'Retrieval before generation, learning after it, and a number on both. utils/ragCorpus.js builds 165 '
+          + 'documents synchronously from what the app already publishes (the evidence registry, the dose table, '
+          + 'questionnaire labels, the app feature guide, the member\'s own plan rows, and the conditions the learning '
+          + 'cycle published), with curated alias expansion that adds QUERY terms only and never a document claim; '
+          + 'utils/ragRetriever.js scores BM25 (k1 1.4, b 0.75) over it, force-promotes the note whose title the member '
+          + 'literally named, always includes the absence notes on a how-do-I question, and emits them FIRST so the '
+          + 'character cap cannot cut them; the reference block is fenced and `<`-escaped because a retrieved plan row '
+          + 'is the one place a reply can pick up somebody else\'s imperative sentence. utils/chatIdentity.js gives the '
+          + 'prompt an explicit allowlist projection (name, first name, pronouns, age band, assessment labels) and '
+          + 'nothing else — an admin or alias session gets no identity at all, and the withheld fields (email, phone, '
+          + 'date of birth, clinician notes) are named in the prompt so the model cannot volunteer what it was never '
+          + 'given. AiChatThread.turns records, per reply, which docs were handed over, which verifier categories fired, '
+          + 'which provider answered and whether it shipped untouched; AiChatFeedback stores a vote against that turn '
+          + 'with the docIds read off the SERVER record, never off the client body, so a member cannot train the '
+          + 'ranking by claiming notes they were never shown. utils/chatLearning.js turns 30 days of those votes into '
+          + 'bounded multipliers (2-vote floor, 30-day half-life, 90-day window, clamped to -0.45/+0.6 and capped at '
+          + '0.4x-2x) applied on top of BM25 — feedback tunes which evidence gets handed over and never writes '
+          + 'evidence, and no prior can ever outrank the question in front of it. eval/chatAccuracy.js is the gate the '
+          + 'audit was missing: 131 offline cases across ANSWER (gold note in the top 3 AND its answering sentence in '
+          + 'the block), REFUSAL, IDENTITY (including that no withheld field reaches the prompt), CITATION, ADAPTATION '
+          + '(a +500 prior on three irrelevant dose rows must not evict the right one), EXPANSION (every synonym must '
+          + 'exist in the token bag) and SCORER (the live regexes pinned against sentences providers really sent, so a '
+          + 'permissive edit cannot turn the number into theatre), plus 12 live cases that ask the routed model through '
+          + 'the real prompt and score raw and SHIPPED separately — a reply the verifier had to edit is counted as a '
+          + 'prompt failure even when the member reads something correct. routes/admin.js runs two of those as monitor '
+          + 'probes on production traffic. Nine pinned tests plus Test File/monitor-probe-honesty.test.js keep the six '
+          + 'defects from coming back.',
+        status: 'fixed 2026-10-20 — eval/chatAccuracy.js: 131/131 offline (100.0%, floor 90%) and 12/12 live at BOTH '
+          + 'raw and shipped 100.0% — the live replies went out with zero verifier edits, which is the state the whole '
+          + 'grounding pass was aimed at. Suites: rag-retrieval 13/13, chat-identity 11/11, chat-feedback-route 7/7 '
+          + '(including the un-awaited-prior case), monitor-probe-honesty 10/10, prose+plan grounding 87/87. eval/'
+          + 'hallucinationAudit.js 1,189 offline cases still pass and eval/citationAudit.js still reports 65 entries / '
+          + '48 PMIDs / 0 failing, so the new retrieval layer did not cost the old guarantees anything.',
       },
     ],
     reVerification: {
@@ -560,9 +623,9 @@ const SECURITY_AUDIT = {
   // Dates are part of the claim: an undated "PASS" is how F1's stale
   // "0 vulnerabilities" survived for a week.
   verification: {
-    unitTests: 'PASS 2026-10-20 — npm test ("node --test Test File/*.test.js"): 1500 passed, 0 failed, 56 skipped (1556 run). The 56 are the ten pre-existing suites gated on MONGO_TEST_URI — they skip the same way in CI, which is why the count reads differently from a run that has a second database',
-    clientTests: 'PASS 2026-10-20 — npm test in my-react-app: 715/715, 0 failed, 0 skipped. One of those 715 is the admin-monitor contract that refuses to pass when the server registers a probe the dashboard has no row for, which is how the new ai_learning row was caught before it could appear as a bare snake_case key',
-    syntaxCheck: 'PASS 2026-10-20 — npm run check: Syntax OK, 334 source file(s)',
+    unitTests: 'PASS 2026-10-20 — npm test ("node --test Test File/*.test.js"): 1532 passed, 0 failed, 56 skipped (1588 run). The 56 are the ten pre-existing suites gated on MONGO_TEST_URI — they skip the same way in CI, which is why the count reads differently from a run that has a second database',
+    clientTests: 'PASS 2026-10-20 — npm test in my-react-app: 715/715, 0 failed, 0 skipped, re-taken after the ai_chat_grounding row was registered in the Security Center display maps',
+    syntaxCheck: 'PASS 2026-10-20 — npm run check: Syntax OK, 344 source file(s)',
     // F13 is a claim about generated content, so it is measured two ways: the
     // citations the app itself asserts (static, against NCBI), and the plans the
     // model actually returns (live, before and after the grounding gate).
@@ -594,6 +657,49 @@ const SECURITY_AUDIT = {
       + 'back clean unprompted, so the model is asking for less of this than the rules catch. The live path also '
       + 'found the design bug the sweep now prevents: a guide that questioned four prescriptions printed the safety '
       + 'warning four times, so one warning per document is the rule and three violations in one document is a pinned test',
+    // F15 is a claim about what the assistant KNOWS, so it is measured as accuracy
+    // rather than as repair counts: a benchmark that can fail, per category, offline
+    // and live, with a floor nobody can quietly lower.
+    chatAccuracy: 'PASS 2026-10-20 — npm run eval:chat: 131/131 offline = 100.0% against a 90% floor, measured per '
+      + 'category and overall (answer 30/30, refusal 10/10, identity 10/10, adaptation 2/2, citation 48/48, expansion '
+      + '19/19, scorer 12/12). npm run eval:chat:live asks the routed model (openrouter deepseek-v4-flash) 12 questions '
+      + 'through the real prompt and scores RAW and SHIPPED separately: 12/12 raw, 12/12 shipped — every live reply '
+      + 'reached the member with zero verifier edits, which is the state this whole pass exists to reach, and the '
+      + 'stronger of the two numbers because a reply that needed repairing is a reply the prompt failed to ground. A '
+      + 'run where fewer than 60% of the live cases get any reply is itself a failure, so a provider outage cannot be '
+      + 'reported as accuracy. `--threshold=` and `--case=id,id` are there so the floor can be argued about and a '
+      + 'failing case re-run without re-paying for the eleven that passed',
+    retrievalGrounding: 'PASS 2026-10-20 — Test File/rag-retrieval.test.js: 13/13 over utils/ragCorpus.js (165 '
+      + 'documents built synchronously from what the app already publishes) + utils/ragRetriever.js (BM25 k1 1.4 / b '
+      + '0.75, no keys, no network, deterministic). Pins corpus uniqueness and byte-stability, every curated note '
+      + 'keeping the identifier the app verified, a dose question returning the app ceiling first, everyday symptom '
+      + 'phrasing ("I get migraines, what helps") reaching the notes that answer it, the nutrient the member named '
+      + 'beating a nutrient merely related to it, the absence note always in front of the model on a how-do-I question, '
+      + 'the member\'s own plan retrieved as a document instead of recalled from the prompt, a learned prior reordering '
+      + 'notes without ever outranking the question, pronoun follow-ups retrieving on the conversation, references '
+      + 'fenced as data / escaped / bounded, and the case that makes retrieval safe rather than merely clever: nothing '
+      + 'the app hands over needs repairing before it ships',
+    chatIdentity: 'PASS 2026-10-20 — Test File/chat-identity.test.js: 11/11. "What is my name" answers with the name on '
+      + 'the account; an admin or alias session is given no identity at all; and email, phone, date of birth and '
+      + 'clinician notes are withheld by an explicit ALLOWLIST projection (utils/chatIdentity.js) rather than by '
+      + 'subtracting fields someone remembers to list — then named in the prompt, so the model cannot volunteer what it '
+      + 'was never handed',
+    feedbackLearning: 'PASS 2026-10-20 — Test File/chat-feedback-route.test.js: 7/7. A client may send only '
+      + '{threadId, messageIndex, vote}; docIds, repairs and provider are read off the server-written AiChatThread.turns '
+      + 'record, so nobody can train the ranking on notes they were never shown; another member\'s thread 404s with '
+      + 'ownership inside the filter; malformed shapes 400; a re-vote updates the same row. Two real defects live in '
+      + 'those seven: `invalidatePriors` existed but was never exported, so every POST /api/chat/feedback 500\'d AFTER '
+      + 'writing the vote, and the route passed `priors: priorsForRetrieval()` — an un-awaited Promise, which '
+      + 'retrieval read as an empty Map, so every published weight applied to nothing while the assistant kept '
+      + 'answering merrily. The last case asserts both halves of that seam: a Map raises the score of the note it '
+      + 'points at (16.788 → 26.86 on a real query), the un-awaited Promise changes nothing at all, and the route awaits',
+    aiMonitorRow: 'PASS 2026-10-20 — Test File/monitor-probe-honesty.test.js: 10/10 with ai_chat_grounding added to the '
+      + 'Security Center (registered in Components/SecurityStatus/SecurityStatus.jsx as its own labelled, grouped, '
+      + 'ordered row). The row does not report that a provider key loaded: it asks the retriever a question whose '
+      + 'answer the app curates and demands that the curated dose document came back, checks that the '
+      + '"feature does not exist" note still reaches a does-it-have-X prompt, and reports how many of the last 200 '
+      + 'threads\' replies needed a verifier edit. Three of those are critical states, and the test forbids the probe '
+      + 'from reading transcript text — turn metadata only',
     selfLearning: 'PASS 2026-10-20 — Test File/condition-learning.test.js: 23/23. It pins the thresholds (24 h AND 25 unseen assessments, from the durable AiLearningRun ledger rather than process memory), the atomic lease that stops two processes spending the same quota, the kill switch, the no-file-writes rule for the scheduled path, the fact that index.js arms it, and that member contact fragments cannot reach a provider through an aggregate term',
     memberAdaptation: 'PASS 2026-10-20 — Test File/member-history.test.js: 23/23, plus plan-grounding 38/38, chat-safety 10/10, supplement-guide-store 35/35, ai-routing 60/60. Covers the resubmit-vs-reassessment window, adherence corrected to the member\'s own clock, escalation on a first-time symptom, the never-demote rule, and the fenced history block being read as data after the answers it is compared against',
 
@@ -608,7 +714,7 @@ const SECURITY_AUDIT = {
     // could not pass in a tree with no credentials. Both fixed, and the next run
     // was green — the server job now takes 1.6 minutes.
     continuousIntegration: 'PASS 2026-10-19 — Actions run 39232170080 (commit 2d91411) is green on all three jobs: Server 1.6 min with Unit tests and the dependency audit both successful and the per-suite pinpoint step skipped because nothing hung, Client 0.7 min, Secret sweep 0.1 min. Two earlier runs had burned the full six-hour job limit on the hang',
-    productionBuild: 'PASS 2026-10-20 — npm run build in my-react-app: vite build clean, PWA v1.3.0 generateSW wrote dist/sw.js + workbox (96 precached entries, 2839.46 KiB). Re-taken for this pass; the same build succeeded on 2026-10-19',
+    productionBuild: 'PASS 2026-10-20 — npm run build in my-react-app: vite build clean, PWA v1.3.0 generateSW wrote dist/sw.js + workbox (96 precached entries, 2841.54 KiB). Re-taken for this pass; the same build succeeded on 2026-10-19',
     lint: 'PASS 2026-10-20 — npm run lint (eslint .) in my-react-app: 0 errors, 4 pre-existing react-hooks/exhaustive-deps warnings. .github/workflows/ci.yml\'s Lint step was fixed on 2026-10-19 (it passed --max-warnings=unlimited, which eslint rejects with exit 2 before linting anything)',
     // NOT a verdict any more. This line used to assert "npm audit: 0
     // vulnerabilities" as a standing fact, which is the exact failure mode F1
@@ -718,6 +824,18 @@ const SECURITY_AUDIT = {
     + 'un-done by the next rule. `npm run eval:hallucination:live` also asks the routed model the baited questions and '
     + 'prints its raw violation rate beside what actually shipped; it spends tokens and a provider outage fails it, so '
     + 'it is a pre-ship measurement, not a CI step.',
+    'OPERATIONAL (F15): `npm run eval:chat` (server/) is the accuracy gate this record did not have, and it needs no '
+    + 'network and no keys — it scores retrieval, refusal, identity, citation, adaptation, alias expansion and the live '
+    + 'scorers themselves against a 90% floor per category and overall, and exits non-zero on any miss, so "the AI is '
+    + 'accurate" is a number rather than a feeling. `npm run eval:chat:live` spends provider quota to ask the routed '
+    + 'model the same questions through the real prompt and prints RAW beside SHIPPED; run it before shipping a prompt '
+    + 'or corpus change, and re-run one failing case with `--case=id` instead of paying for all twelve. The discipline '
+    + 'that makes it worth having: when a member reports a wrong answer, add it as a case — the gold document plus the '
+    + 'sentence that must be in the reference block, or the refusal it owes — BEFORE editing the retriever, because a '
+    + 'fix no case pins is a fix the next tuning pass undoes. `ai_chat_grounding` in the admin Security Center is the '
+    + 'production-side view of the same two invariants: it re-asks a curated dose question and a does-it-have-X question '
+    + 'on every monitor refresh and goes critical when either document stops reaching the prompt, and warns when the '
+    + 'reply-repair rate climbs or nobody has voted in thirty days, which is the learning loop being armed but not fed.',
     'OPERATIONAL (the self-learning loop): it is armed from API boot (index.js → utils/conditionLearning.schedule()) '
     + 'and needs no operator to remember it, which is exactly why it needs watching rather than trusting. Read the '
     + 'ai_learning row in the admin Security Center: it says how many assessments are new since the last cycle, how '
@@ -741,7 +859,11 @@ const SECURITY_AUDIT = {
     + 'been here before. The same day closed the last of that with F14: free prose — a chat reply, a polished answer, '
     + 'a supplement guide — is now checked sentence by sentence for invented citations, unsourced statistics in any '
     + 'unit, doses above the published range, cure and certainty claims, advice to change a named prescription, and '
-    + 'lab values or conditions the member never reported. It is not a penetration ' +
+    + 'lab values or conditions the member never reported. F15, also 2026-10-20, is the offensive half of the same '
+    + 'claim rather than the defensive one: the assistant now retrieves what the app has already published before it '
+    + 'answers, knows the member it is talking to inside an allowlist, records which notes it was shown and whether it '
+    + 'had to edit the reply, learns from the votes cast against those records, and is scored per category against a '
+    + '90% accuracy floor offline and live. It is not a penetration ' +
     'test and does not certify the system as secure or "100% protected". Infrastructure, the database cluster, the ' +
     'dependency supply chain, third-party APIs, and social-engineering vectors were out of scope. Several findings ' +
     'remain open until the manual rotations above are completed, and secrets that have ever been committed must be ' +

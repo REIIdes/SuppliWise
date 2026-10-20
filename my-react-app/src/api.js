@@ -1147,6 +1147,21 @@ export const sendChatMessage = async (message, history = [], threadOptions = {})
   return data;
 };
 
+// Rate one stored reply. Only the address leaves the browser — conversation,
+// message index, helpful or not. The notes that produced that answer were recorded
+// by the server when it generated the reply, so a client cannot name a document to
+// be promoted; that is what keeps this signal usable for ranking.
+export const sendChatFeedback = async ({ threadId, messageIndex, vote }) => {
+  const res = await apiFetch('/chat/feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify({ threadId, messageIndex, vote }),
+  }, 15000);
+  const data = await parseJSON(res).catch(() => ({}));
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data;
+};
+
 // Stored AI conversations (ULTIMATE only). The list reads only the
 // denormalised tail fields, so the history menu never downloads
 // transcripts to show a conversation's last line.

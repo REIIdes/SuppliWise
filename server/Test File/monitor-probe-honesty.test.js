@@ -130,6 +130,24 @@ test('the sensitive-data row runs a real document through the JSON boundary', ()
   assert.match(body, /status: 'critical'/, 'and it can say so');
 });
 
+test('the chat grounding row asks the retriever a real question, and can go red', () => {
+  // The AI rows that used to exist only reported whether a provider key loaded,
+  // which says nothing about whether the answer is grounded. A broken retriever
+  // still returns a fluent reply — so this probe asks a question whose answer the
+  // app curates, and demands that the curated document is the one that came back.
+  const body = probeBody(ADMIN_SRC, "probe('ai_chat_grounding'", "probe('delete_account'");
+  assert.ok(ADMIN_SRC.includes("probe('ai_chat_grounding'"), 'the row exists at all');
+  assert.match(body, /buildCorpus\(\)/, 'an empty corpus is measured, not assumed');
+  assert.match(body, /retrieve\('how much magnesium/, 'a dose question whose answer is a curated row');
+  assert.match(body, /'dose:Magnesium'/, 'and the document it must return is named');
+  assert.match(body, /'app:does-not-exist'/, 'the absence note must survive retrieval, or the assistant affirms features that do not exist');
+  assert.match(body, /status: 'critical'/, 'all three losses are red, not a shrug');
+  // It reports on member conversations, so it must not read them.
+  assert.match(body, /select\('turns'\)/, 'turn metadata only — never transcript text');
+  assert.doesNotMatch(body, /select\('messages|\.messages\b/, 'and no path that could put a member reply into an admin detail line');
+  assert.match(body, /feedbackStats\(\)/, 'the learning loop is asked whether it is being fed');
+});
+
 test('every probe in this file is reachable from the dashboard', () => {
   // A probe that is written but never registered is how a control stops being
   // believed: the row either goes missing or stays on a stale verdict.

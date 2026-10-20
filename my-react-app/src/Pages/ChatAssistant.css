@@ -744,6 +744,43 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* Rating row. Quiet until hovered or chosen, because it sits under advice the
+   member came here to read. The chips are deliberately not the 44px the rest of
+   this panel uses: they are a preference, not a task, and at 30px they clear
+   WCAG 2.5.8 (24px) without turning every reply into a row of buttons. */
+.chat-rating {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+  opacity: 0.5;
+  transition: opacity 0.15s ease;
+}
+.chat-rating:hover,
+.chat-rating:focus-within { opacity: 1; }
+.chat-rating-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  min-height: 30px;
+  padding: 6px;
+  border: 1px solid rgba(99, 102, 241, 0.22);
+  border-radius: 9px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+}
+.chat-rating-btn:hover { color: #4f46e5; border-color: rgba(99, 102, 241, 0.55); }
+/* The down vote reuses the up glyph rotated, which keeps one path in this file
+   instead of a second near-identical one. */
+.chat-rating-down svg { transform: rotate(180deg); }
+.chat-rating-btn.active {
+  color: #4338ca;
+  background: rgba(99, 102, 241, 0.12);
+  border-color: rgba(99, 102, 241, 0.6);
+  opacity: 1;
+}
+
 /* "You" is a short message, so it carries the brand. It was the same emerald
    as the header it now sits under, which flattened the two apart. */
 .chat-bubble.user {

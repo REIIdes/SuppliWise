@@ -46,6 +46,7 @@ const { classifySupplement } = require('./planConsistency');
 const {
   HONEST_MARKER,
   GENERIC_EVIDENCE,
+  ENTRIES,
   evidenceEntry,
   extractPmids,
   allowlistedPmids,
@@ -332,6 +333,16 @@ function unreportedClaims(text, ctx, { ignoreGoalLabels = false } = {}) {
     if (ignoreGoalLabels && ctx.goalTerms.has(term)) continue;
     if (ctx.reported.has(term)) continue;
     if (!term.includes(' ') && ctx.reportedWords.has(term)) continue; // a word they did report
+    // A phrase built entirely out of words this member reported is not a fabricated
+    // fact. They chose "Boost Energy" and a "Low" sleep rating, the model wrote
+    // "low energy", and this check used to exempt multi-word terms from word-level
+    // licensing — so it deleted a true clause and the verified citation sitting inside
+    // it. Every content word still has to come from the member's own answers, so
+    // "rheumatoid arthritis" is not licensed by a reported "osteoarthritis".
+    if (term.includes(' ')) {
+      const words = term.split(/[^a-z0-9'-]+/).filter((w) => w.length >= 4);
+      if (words.length && words.every((w) => ctx.reportedWords.has(w) || ctx.freeText.includes(w))) continue;
+    }
     if (ctx.freeText.includes(term)) continue; // the member named it themselves
     if (termMatcher(term).test(lower)) hits.push({ term, label });
   }
@@ -1494,11 +1505,143 @@ const PLAN_PROSE_SKIP_KEYS = new Set([
  * run before a store AND on the way out of a cache read without the text
  * degrading on the second trip.
  */
+// -- h. Identity, citation agreement and data this app never holds -------------
+
+/**
+ * A member asking "what is my name?" is asking the app something the app genuinely
+ * knows, and until now the chat prompt never contained the answer — so the model
+ * either refused a trivial question or invented a name for the person it was
+ * talking to. The route now supplies the member's own name, and this rule closes
+ * the other half: a name asserted that is NOT the one on the account is replaced
+ * with the one that is. It is the only place in the verifier that puts text IN
+ * rather than taking it out, and it may do so only because the replacement comes
+ * from the app's own record instead of from the model.
+ */
+const NAME_ASSERTION = /\b(?:your|her|their)\s+name\s+(?:is|'s|was)\s+(\*{0,2})([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]{1,29})(\*{0,2})(?:\s+(\*{0,2}[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]{1,29}\*{0,2}))?/i;
+const NAME_GREETING = /(^|[.!?]\s+|\n)((?:Hi|Hello|Hey)[,\s]+)(\*{0,2})([A-Z][a-z]{1,20})(\*{0,2})\b/;
+
+/**
+ * Greeting words that are not anyone's name. Without this list "Hi there" would
+ * be rewritten as "Hi Maria", which is the verifier inventing a fact rather than
+ * correcting one.
+ */
+const NOT_A_NAME = new Set(['there', 'again', 'everyone', 'anyone', 'someone', 'friend', 'friends',
+  'guys', 'you', 'there', 'now', 'today', 'morning', 'afternoon', 'evening', 'doctor', 'nurse',
+  'suppliwise', 'assistant', 'team', 'and', 'so', 'but', 'if', 'it', 'this', 'that', 'welcome',
+  'sorry', 'hello', 'hey', 'great', 'good', 'nice', 'sure', 'okay', 'yes', 'well', 'please']);
+
+function nameTokens(value) {
+  return String(value || '')
+    .replace(/\*+/g, '')
+    .toLowerCase()
+    .split(/[^a-zà-ÿ'’-]+/)
+    .filter((t) => t.length > 1);
+}
+
+function enforceIdentity(text, ctx = {}) {
+  const licensed = new Set(nameTokens(ctx.memberName));
+  if (!licensed.size) return { value: text, repairs: [] };
+  // The replacement keeps the account's own spelling. `nameTokens` lower-cases for
+  // comparing, and writing that back would turn "Maria" into "maria" — the
+  // verifier would fix one wrong fact by breaking the way a person's name looks.
+  const firstName = String(ctx.memberName).replace(/\*+/g, '').trim().split(/\s+/)[0];
+  return mapSentences(text, (sentence, report) => {
+    let out = sentence;
+    out = out.replace(NAME_ASSERTION, (whole, open, first, close, rest) => {
+      const said = nameTokens(`${first}${rest ? ` ${rest}` : ''}`);
+      if (said.length && said.every((t) => licensed.has(t))) return whole;
+      report('identity', whole.slice(0, 120));
+      const suffix = (rest ? ` ${rest.replace(/\*+/g, '')}` : '');
+      return `your name is ${firstName}${suffix}`;
+    });
+    out = out.replace(NAME_GREETING, (whole, lead, hello, open, token, close) => {
+      const lower = token.toLowerCase();
+      if (licensed.has(lower) || NOT_A_NAME.has(lower) || licensed.size === 0) return whole;
+      report('identity', whole.slice(0, 120));
+      return `${lead}${hello}${firstName}`;
+    });
+    return out;
+  });
+}
+
+/**
+ * A citation has to belong to the nutrient it sits next to. `stripUnverifiable
+ * Identifiers` already deletes a PMID that is not in the app's registry at all;
+ * the gap was a *real* PMID attached to the wrong claim, which is the shape a
+ * model reaches for when it remembers that magnesium has a study but not which
+ * one. Both citations below exist in the registry; only one of them is about
+ * magnesium, and the app cannot stand behind the other in that sentence.
+ */
+function namedNutrients(sentence) {
+  const found = [];
+  for (const entry of ENTRIES) {
+    for (const key of entry.keys) {
+      const k = String(key).trim().toLowerCase();
+      if (k.length < 3) continue;
+      if (new RegExp(`\\b${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?!\\w)`, 'i').test(sentence)) {
+        found.push(entry);
+        break;
+      }
+    }
+  }
+  return found;
+}
+
+function enforceCitationAgreement(text) {
+  return mapSentences(text, (sentence, report) => {
+    const ids = extractPmids(sentence);
+    if (!ids.length) return sentence;
+    const entries = namedNutrients(sentence);
+    if (!entries.length) return sentence; // the general allowlist already judged this one
+    // Union over every nutrient named: "vitamin D and magnesium (PMID: …)" may be
+    // cited for either half of the sentence, and deleting a citation that belongs
+    // to the other half would be the verifier damaging a true sentence.
+    const allowed = new Set(entries.flatMap((e) => extractPmids(e.citation).map(String)));
+    const bad = ids.filter((id) => !allowed.has(String(id)));
+    if (!bad.length) return sentence;
+    report('citation-mismatch', `${bad.join(', ')} for ${entries.map((e) => e.nutrient).join(' / ')}`.slice(0, 160));
+    return sentence.replace(PMID_TOKEN, (whole) => {
+      const within = extractPmids(whole).map(String);
+      return within.some((id) => !allowed.has(id)) ? '' : whole;
+    });
+  });
+}
+
+/**
+ * Data this app deliberately never puts in front of a model. The identity block
+ * carries a name and nothing else, so an email address or phone number in a chat
+ * reply cannot be a recollection — it is fabricated, and a fabricated contact
+ * detail is the kind of thing a member acts on. Sentence replacement, not token
+ * removal: an invented address is only useful to a member if the sentence around
+ * it is deleted too.
+ */
+const EMAIL_TOKEN = /\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b/;
+const PHONE_TOKEN = /\b\+\d[\d\s().-]{8,}\d\b|\b\d{3,4}[-.]\d{3}[-.]\d{4}\b|\b\(\d{3}\)\s?\d{3}[-.]\d{4}\b/;
+const BIRTH_ASSERTION = /\b(?:born\s+(?:on|in)\s+\d{0,2}(?:st|nd|rd|th)?\s*[A-Za-z]{3,9}\s+\d{4}|\b(?:date of birth|birthday|DOB)\b[^.!?]{0,12}\b(?:is|was|:)\b[^.!?]{0,24}\d)/i;
+const WITHHELD_LINE = 'This assistant is not given your contact, sign-in or billing details, so it cannot read them out. They are on your Profile page.';
+
+function enforceWithheldData(text) {
+  return mapSentences(text, (sentence, report) => {
+    if (sentence === WITHHELD_LINE) return sentence;
+    if (!EMAIL_TOKEN.test(sentence) && !PHONE_TOKEN.test(sentence) && !BIRTH_ASSERTION.test(sentence)) return sentence;
+    report('withheld-data', sentence.slice(0, 140));
+    return WITHHELD_LINE;
+  });
+}
+
+// ---------------------------------------------------------------------------
+
 function tidyProse(text) {
   // Spaces and tabs only. A newline is content here — bullet lists and
   // paragraph breaks travel inside these strings — so `\s+` would flatten them.
   return text
+    // An identifier removed from inside its own brackets leaves the brackets as a
+    // visible scar of the edit, so the empty pair goes first — before the spacing
+    // rules, or the space it held ends up glued to the following period.
+    .replace(/[ \t]*\(([ \t]*(?:,?[ \t]*(?:and|or)[ \t]*)?)?\)[ \t]*/gi, ' ')
+    .replace(/[ \t]*\[[ \t]*\][ \t]*/g, ' ')
     .replace(/[ \t]+([,.;:!?])/g, '$1')
+    .replace(/\b(?:see|read more(?:\s+at)?|at|in|from|via|available at|published in)\s+(?=[.,;:!?])/gi, '')
     .replace(/[ \t]{2,}/g, ' ');
 }
 
@@ -1512,7 +1655,10 @@ function verifyProse(text, options = {}) {
   value = ids.value;
 
   for (const step of [
+    () => enforceCitationAgreement(value),
     () => enforceMedicationSafety(value),
+    () => enforceWithheldData(value),
+    () => (options.memberName ? enforceIdentity(value, { memberName: options.memberName }) : { value, repairs: [] }),
     () => downgradeAbsoluteClaims(value),
     () => stripUnsourcedStatistics(value, options),
     () => clampDosesInProse(value),
@@ -1593,6 +1739,7 @@ module.exports = {
   DOSE_TABLE,
   MED_SAFETY_LINE,
   UNSOURCED_STAT_LINE,
+  WITHHELD_LINE,
   PLAN_PROSE_SKIP_KEYS,
   CLAIM_REWRITES,
   buildFactContext,
@@ -1614,6 +1761,10 @@ module.exports = {
   stripIdentifiersDeep,
   walkStrings,
   enforceMedicationSafety,
+  enforceIdentity,
+  enforceCitationAgreement,
+  enforceWithheldData,
+  namedNutrients,
   downgradeAbsoluteClaims,
   stripUnsourcedStatistics,
   clampDosesInProse,

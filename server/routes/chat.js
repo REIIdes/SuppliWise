@@ -7,6 +7,9 @@ const { requireFeature } = require('../utils/entitlements');
 const { completeWithFallback } = require('../utils/aiRouter');
 const { GUARDRAIL_CLAUSE } = require('../utils/aiGuardrails');
 const { verifyProse, buildConversationContext, describeProseRepairs } = require('../utils/planGrounding');
+const { identityForChat, IDENTITY_POLICY } = require('../utils/chatIdentity');
+const { retrieve, referencesBlock } = require('../utils/ragRetriever');
+const { priorsForRetrieval, invalidatePriors } = require('../utils/chatLearning');
 const {
   ChatInputError,
   normalizeChatRequest,
@@ -16,6 +19,7 @@ const {
   MAX_HISTORY_ITEMS,
 } = require('../utils/chatSafety');
 const AiChatThread = require('../models/AiChatThread');
+const AiChatFeedback = require('../models/AiChatFeedback');
 
 // Chat consumes a paid provider quota, so it gets its own account-scoped
 // ceiling instead of sharing the general dashboard/user request counter.
@@ -30,8 +34,60 @@ const chatLimiter = rateLimit({
   message: { message: 'The AI assistant is busy. Please wait a minute and try again.' },
 });
 
+/**
+ * The two faces of the evidence rule, chosen by whether retrieval found anything for
+ * this question.
+ *
+ * They used to be one rule, and that rule was the product's central contradiction: it
+ * told the model that the evidence this app stands behind "is NOT available to you in
+ * this conversation", then asked it to answer a supplement question anyway. The gap
+ * got filled from model recall, and the verifier spent its time deleting the result.
+ * With retrieval in place the honest instruction is the opposite one for the case it
+ * covers — use what we hand you — and the old strict text stays for the case where
+ * nothing matched, because an ungrounded answer still must not cite.
+ */
+const GROUNDED_EVIDENCE_RULES = `## EVIDENCE RULES — CRITICAL, THEY OVERRIDE EVERYTHING ABOVE
+The <reference_notes> above are this app's own curated knowledge: notes the app wrote, checked against PubMed, and is willing to stand behind. They are the factual backbone of your answer. Where a note and your memory disagree, the note is what this product publishes, so the note wins.
+
+- Repeat a note's substance in your own words: its dose, its caution, what the nutrient is commonly used for. Quoting its evidence sentence, including a (PMID: …) it carries, is allowed and encouraged — that identifier was looked up, unlike anything you produce yourself.
+- Keep a PMID in the sentence with only the nutrient it belongs to. The verifier checks that a source matches every nutrient named around it, so "magnesium and vitamin D (PMID: …)" loses its source even when the number is real. Put one nutrient and its source in one sentence.
+- Everything else stays forbidden: no percentage, effect size, response rate, sample size or "across 14 studies" that is not written in a note; no journal title, author, conference or publication year; no DOI, arXiv id, trial registration number or study URL; no source for a claim no note makes. If the notes do not cover something, say the app does not have that answer — that is a true and useful sentence, and a plausible invented one is not.
+- The notes about what the app can and cannot do are as binding as the ones about nutrients. "The app does not have reminders" is an answer, not a failure to help; never describe a Settings path, button or feature that no note mentions.
+- Dosage: give the amount the note states, phrased as what this app uses, and point at their Results page for the amount in their own plan. Never raise a number, average two, or extrapolate for age or weight.
+- Not every question matches a note. When nothing was retrieved, the ungrounded rules apply: answer what a nutrient is generally used for in possibility language, and cite nothing at all.`;
+
+const UN_GROUNDED_EVIDENCE_RULES = `## EVIDENCE RULES — CRITICAL, THEY OVERRIDE EVERYTHING ABOVE
+You are a wellness assistant, not a literature database. The curated evidence this app is willing to stand behind was not found for this question, so anything you cite here is something the app cannot check — and it deletes it before the member sees it. An answer that arrives with its sources cut out reads as a broken product, so do not put them there.
+
+- NEVER write a PMID, DOI, arXiv/CLINICALTRIALS number, journal title, author name, conference name or publication year. Not "a 2021 randomized trial in Nutrients", not "(PMID: 12345678)", not a study URL. This app ships no citations in chat, at any confidence level.
+- NEVER invent a number that sounds like evidence: no percentages, effect sizes, response rates, sample sizes or "across 14 studies". If you do not genuinely know a figure, the correct answer is that the evidence is modest or mixed — that is true far more often than a confident number.
+- Speak about what research generally shows ("studies suggest", "the evidence points to", "is commonly used for") instead of naming studies.
+- Dosage and safety ranges you quote must be the conservative, commonly-stated ones, phrased as general guidance and paired with "check your plan / ask a clinician" — never as a number from a specific trial.
+- If a member asks for a source or proof, say the evidence note for each of their supplements is on the Results page, that each one is copied from the app's curated registry and checked against PubMed, and offer to explain what that recommendation means for them. Never generate a citation of your own to satisfy the request.
+- Not citing is not the same as being vague: still give the full, specific, useful answer.`;
+
 // ── System prompt ──────────────────────────────────────────────────────────
-function buildSystemPrompt(recContext) {
+/**
+ * The prompt is assembled from three things that used to be missing, in order of how
+ * much they changed the answer:
+ *
+ * - `identity` — who is speaking. Every reply used to be generated against a prompt
+ *   that did not contain the member's name, so "what is my name" had no true answer
+ *   available and the model supplied a false one. See utils/chatIdentity.js for why
+ *   this is an allowlist projection rather than `req.user`.
+ * - `references` — what the app knows. Retrieval (utils/ragRetriever.js) hands over
+ *   the curated notes for this question, which replaces the previous instruction to
+ *   be useful about supplements while being told the app's evidence was unavailable.
+ * - `recContext` — unchanged: the member's own saved plan.
+ *
+ * `buildSystemPrompt(null)` still works, because eval/hallucinationAudit.js builds an
+ * anonymous prompt to measure the assistant the way a member with no plan would see
+ * it.
+ */
+function buildSystemPrompt(recContext, options = {}) {
+  const identity = options.identity || {};
+  const references = String(options.references || '');
+  const evidenceRules = references ? GROUNDED_EVIDENCE_RULES : UN_GROUNDED_EVIDENCE_RULES;
   return `You are SuppliWise AI, a focused health and wellness assistant built into the SuppliWise web app.
 
 ## YOUR ROLE
@@ -55,101 +111,15 @@ Use one of these styles (vary them naturally):
 - Never robotic or dismissive on health topics
 - **TYPO HANDLING**: If the user's message contains an obvious misspelling of a health/supplement/app term, gently acknowledge it and proceed with the corrected meaning. Format: "It looks like you might mean [corrected term] — [answer]." Only do this for clear health-related typos (e.g. "vitamen d" → "Vitamin D", "magnisium" → "magnesium", "suppliment" → "supplement", "ashwaganda" → "ashwagandha"). Do NOT correct grammar or non-health words.
 
-## SUPPLIWISE APP — COMPLETE FEATURE GUIDE
-
-### Core Pages
-- **HomePage** (root): Landing with redirects to assessment or dashboard
-- **AssessmentPage** (route /assessment): 4-step health questionnaire
-- **ResultsPage** (route /results): AI supplement recommendations with confidence scores & priorities
-- **DashboardPage** (route /dashboard): Track Intake tab + Recommendations tab
-- **TrackIntakePage** (route /track-intake): Daily supplement tracker with calendar
-- **RecommendationsPage** (route /recommendations): Browse AI recommendations with filters/sorting
-- **HistoryPage** (route /history): Past assessments with view, PDF export, and owner/admin delete controls
-- **InsightsPage** (route /insights): 4 tabs - Overview, Today's Progress, Adherence, AI Insight
-- **ProfilePage** (route /profile): Edit info, pictures, password. **Logout button at bottom of page (left side on desktop, below Edit Profile on mobile). Access profile by clicking avatar/name in top-right navbar.**
-
-### Navigation
-**Navbar:** Logo (→dashboard) | Clock icon (top-right, →history) | Avatar/name (top-right, →profile) | Sign In (when logged out)
-
-### Authentication & Account
-**Registration:** Name, email, DOB, gender, password (min 8 chars, 1 uppercase, 1 number)
-**Login:** Email + password, then a 6-digit email OTP. User sessions end on sign-out or when a newer login replaces the older session.
-**✅ FORGOT PASSWORD EXISTS:** Click "Forgot Password?" → Enter email → Receive 6-digit OTP → Verify (10-min expiry) → Set new password
-**Profile Editing:** Name, email, DOB, gender, profile picture (max 2MB), banner (max 3MB), password (needs current)
-**Email Change:** Triggers OTP verification
-**Logout:** Profile page bottom left (desktop: Logout left, Edit Profile right | mobile: Edit Profile top, Logout below)
-
-### Assessment (4 Steps)
-1. Basic: Age, gender, weight, height, activity level
-2. Diet & Goals: Diet type, health goals (energy, sleep, immunity, digestion, mental clarity, stress, heart, bone, muscle, skin, weight, hormonal, joint, etc.)
-3. Symptoms: Select with severity (mild/moderate/severe), sleep quality, water intake
-4. Medical: Conditions, medications, allergies, lifestyle (smoking/alcohol/caffeine), blood tests (optional), notes
-- AI: recommendations are generated from your four answers and then checked against the app's curated evidence registry — citations it cannot verify are removed before you see them. Progress auto-saves.
-
-### Results & Supplements
-**Supplement Cards:** Name, dosage, timing, priority (High/Med/Low), confidence % (90-100%=direct match, 80-89%=good, 70-79%=moderate, <70%=partial), reason, interactions
-**Sections:** Priority Supplements, Optional, Daily Schedule, Lifestyle Advice, Meals, Action Plan, Warnings, Avoid List
-**PDF Export:** Available from results page & history page
-
-### Dashboard
-**Track Intake Tab:** Mark supplements as taken by time slot (Morning/Afternoon/Evening/Night), completion counter, toast when all taken
-**Recommendations Tab:** Browse all, filter (All/Priority/Optional), sort (Priority/Name/Confidence), "+ Add to Plan" button
-
-### Tracking & Insights
-**Track Intake Page:** Today's supplements list (priority dots), mark taken/undo, calendar with completion colors (green=100%, yellow=partial, red=missed, blue=today), adherence %, streak counter
-**Insights Page:**
-- Overview: Stats (streak, adherence, wellness score, assessments), current phase, lifestyle tips
-- Today's Progress: Circular chart, supplement list with status
-- Adherence: Weekly bar chart (7 days), action plan phases
-- AI Insight: Enhanced phase guidance, personalized tips
-
-### History
-- All assessments (newest first), eye icon (view), download icon (PDF)
-- Assessment owners and admins can delete an assessment; deletion also removes its linked tracking data
-- Expandable cards with tabs
-
-### Recommendations
-- Full list, filter/sort, "+ Add to Plan", "Added to Plan" badge
-
-### ✅ FEATURES THAT EXIST
-- Forgot password (OTP-based reset)
-- Profile editing (all fields + pictures)
-- Password change (needs current)
-- Email change with OTP
-- Supplement tracking (daily checkboxes by time)
-- Calendar view (monthly with completion)
-- Adherence tracking (weekly & overall %)
-- Streak tracking (current & longest)
-- Insights page (4 tabs)
-- PDF export (results & history)
-- Add to Plan (add/remove from tracker)
-- Filters & sorting (recommendations)
-- Completion toast (when all supplements taken)
-- OTP verification (password reset & email change)
-
-### ❌ FEATURES THAT DON'T EXIST
-- Email/push notifications or reminders
-- Dark mode (light only)
-- Compare assessments side-by-side
-- Social features or sharing
-- Wearable integration (no Apple Watch/Fitbit)
-- Detailed supplement logging (only daily checkboxes, no notes/time)
-- Supplement time-based reminders
-- Custom supplement addition (only AI-recommended)
-- Progress charts beyond adherence (no detailed wellness/symptom graphs)
-
+${identity.hasIdentity
+    ? `${IDENTITY_POLICY}
+<member_identity>${identity.block}</member_identity>`
+    : IDENTITY_POLICY}
+${references ? `\n## WHAT THIS APP KNOWS ABOUT THE QUESTION ASKED\n${references}` : ''}
 ## HEALTH & SUPPLEMENT KNOWLEDGE
 Deep knowledge about supplements, vitamins, minerals, nutrition, symptoms, diet, lifestyle, sleep, exercise, and wellness. Answer health questions fully — what a nutrient is generally used for, how it works, when to take it, what to watch out for, what the research broadly shows. Use possibility language ("may help", "evidence suggests") — never diagnose.
 
-## EVIDENCE RULES — CRITICAL, THEY OVERRIDE EVERYTHING ABOVE
-You are a wellness assistant, not a literature database. The curated evidence this app is willing to stand behind is NOT available to you in this conversation, so anything you cite here is something the app cannot check — and it deletes it before the member sees it. An answer that arrives with its sources cut out reads as a broken product, so do not put them there.
-
-- NEVER write a PMID, DOI, arXiv/CLINICALTRIALS number, journal title, author name, conference name or publication year. Not "a 2021 randomized trial in Nutrients", not "(PMID: 12345678)", not a study URL. This app ships no citations in chat, at any confidence level.
-- NEVER invent a number that sounds like evidence: no percentages, effect sizes, response rates, sample sizes or "across 14 studies". If you do not genuinely know a figure, the correct answer is that the evidence is modest or mixed — that is true far more often than a confident number.
-- Speak about what research generally shows ("studies suggest", "the evidence points to", "is commonly used for") instead of naming studies.
-- Dosage and safety ranges you quote must be the conservative, commonly-stated ones, phrased as general guidance and paired with "check your plan / ask a clinician" — never as a number from a specific trial.
-- If a member asks for a source or proof, say the evidence note for each of their supplements is on the Results page, that each one is copied from the app's curated registry and checked against PubMed, and offer to explain what that recommendation means for them. Never generate a citation of your own to satisfy the request.
-- Not citing is not the same as being vague: still give the full, specific, useful answer.
+${evidenceRules}
 
 ## SAFETY RULES — CRITICAL, SAME STANDING AS THE EVIDENCE RULES
 An unsourced number is not the only way to be wrong, and these are the shapes that reach a member as advice rather than as trivia. The app runs a verifier over your reply and rewrites these; a reply that arrives edited is worse for the member than a careful one that never needed it.
@@ -183,6 +153,23 @@ function atSentenceEnd(text) {
   if (cut <= 0) return s;
   const kept = s.slice(0, cut + 1);
   return kept.length >= s.length * 0.4 ? kept : s;
+}
+
+/**
+ * The turn record stored beside a threaded reply: which notes were retrieved, what
+ * the verifier had to change, who answered. `i` is computed after the messages are
+ * pushed, so it is the index of THIS assistant reply — the coordinate a later
+ * thumbs-up/down is joined back on.
+ */
+function turnRecord(thread, meta) {
+  return {
+    i: thread.messages.length - 1,
+    docs: [],
+    repairs: [],
+    provider: '',
+    clean: true,
+    ...(meta || {}),
+  };
 }
 
 // Conversation titles are the first question, shortened — the
@@ -248,6 +235,14 @@ router.post('/', protect, requireFeature('chat'), chatLimiter, async (req, res) 
     // like a real answer does.
     let reply = null;
     let source = null;
+    // What this turn handed the model, recorded so a later thumbs-up/down can be
+    // joined to the notes that produced the answer. Set inside the generation block;
+    // null for a declined turn.
+    let turnMeta = null;
+    // Where this reply landed in the stored transcript, so the client can rate it
+    // without guessing at indices (a rating aimed at the wrong message would promote
+    // and demote notes for an answer nobody objected to).
+    let turnIndex = null;
     if (isOffTopic) {
       const declines = [
         "I'm only able to help with health, wellness, and SuppliWise questions. Is there something health-related I can assist you with?",
@@ -274,7 +269,7 @@ router.post('/', protect, requireFeature('chat'), chatLimiter, async (req, res) 
           // know that a member who never mentioned hypothyroidism never mentioned
           // hypothyroidism, and "since your thyroid condition" sails through as
           // fluent prose. This is the same list `buildFactContext` reads.
-          .select('aiResults.recommendations symptoms symptomSeverity medicalConditions healthGoals lifestyleHabits allergies dietType pregnancyStatus currentMedications bloodTestResults feelingDescription currentSupplements takingSupplements recentBloodTest recreationalDrugTypes sleepQuality stressLevel proteinIntake fitnessFocus waterIntake activityLevel sunExposure')
+          .select('aiResults.recommendations age weight height symptoms symptomSeverity medicalConditions healthGoals lifestyleHabits allergies dietType pregnancyStatus currentMedications bloodTestResults feelingDescription currentSupplements takingSupplements recentBloodTest recreationalDrugTypes sleepQuality stressLevel proteinIntake fitnessFocus waterIntake activityLevel sunExposure')
           .lean();
         recContext = buildRecommendationContext(latestAssessment);
         memberProfile = latestAssessment;
@@ -294,8 +289,26 @@ router.post('/', protect, requireFeature('chat'), chatLimiter, async (req, res) 
         )
         : history;
 
+      // ── What this turn is allowed to know ─────────────────────────────────
+      // Two lookups that did not exist until now. `identity` is the member's own
+      // name and reported answers, projected through an allowlist (a chat that can
+      // say "what is my name" is a chat that must not be able to say an email
+      // address). `references` is the app's curated answer to THIS question, ranked
+      // by BM25 over content the app already published — so the model is repeating
+      // checked text instead of recalling unchecked text, which is the difference
+      // between grounding a reply and deleting one after the fact.
+      //
+      // A follow-up ("and does that help sleep?") retrieves on its own and finds
+      // nothing, so a short turn borrows the previous question. Pronouns are the
+      // whole reason a chat needs this.
+      const identity = identityForChat(req.user, memberProfile);
+      const priorQuestion = [...aiHistory].reverse().find((m) => m.role === 'user');
+      const retrievalQuery = q.length >= 24 || !priorQuestion ? q : `${priorQuestion.content} ${q}`;
+      const picked = retrieve(retrievalQuery, { assessment: memberProfile, priors: await priorsForRetrieval() });
+      const references = referencesBlock(picked);
+
       const messages = [
-        { role: 'system', content: buildSystemPrompt(recContext) },
+        { role: 'system', content: buildSystemPrompt(recContext, { identity, references }) },
         ...aiHistory,
         { role: 'user', content: q },
       ];
@@ -348,11 +361,21 @@ router.post('/', protect, requireFeature('chat'), chatLimiter, async (req, res) 
         // re-verifying a reply that came out of a stored transcript cannot degrade
         // it a second time.
         const memberWords = [
-          ...aiHistory.filter((m) => m.role === 'user').map((m) => m.text),
+          // `normalizeHistory` emits `{role, content}`; reading `.text` here used to
+          // put the literal string "undefined" into the verifier's picture of what
+          // this member said, so a condition raised on an earlier turn was not
+          // licensed on a later one and true prose got repaired.
+          ...aiHistory.filter((m) => m.role === 'user').map((m) => m.content),
           q,
         ].join(' ');
         const proseCtx = buildConversationContext(memberProfile || {}, memberWords);
-        const grounded = verifyProse(result.text, { ctx: proseCtx });
+        const grounded = verifyProse(result.text, { ctx: proseCtx, memberName: identity.memberName });
+        turnMeta = {
+          docs: picked.docs.map((d) => d.id),
+          repairs: grounded.repairs.map((r) => r.kind),
+          provider: result.provider || '',
+          clean: grounded.repairs.length === 0,
+        };
         if (grounded.repairs.length) {
           console.warn(`[chat] ${describeProseRepairs(grounded.repairs)}`);
         }
@@ -364,6 +387,7 @@ router.post('/', protect, requireFeature('chat'), chatLimiter, async (req, res) 
         console.error('[chat] no provider answered:', JSON.stringify(result.attempts || []));
         reply = offlineFallback(q);
         source = 'fallback';
+        turnMeta = { docs: picked.docs.map((d) => d.id), repairs: [], provider: 'fallback', clean: true };
       }
     }
 
@@ -378,6 +402,7 @@ router.post('/', protect, requireFeature('chat'), chatLimiter, async (req, res) 
         thread.messages.push({ role: 'user', text: q }, { role: 'assistant', text: reply });
         thread.lastText = reply.slice(0, 200);
         thread.messageCount = thread.messages.length;
+        thread.turns.push(turnRecord(thread, turnMeta));
         // The title comes from the first real question; later
         // turns must not overwrite it.
         if (thread.title === 'New conversation') thread.title = threadTitleFrom(q);
@@ -398,9 +423,14 @@ router.post('/', protect, requireFeature('chat'), chatLimiter, async (req, res) 
         });
         thread.lastText = reply.slice(0, 200);
         thread.messageCount = thread.messages.length;
+        thread.turns.push(turnRecord(thread, turnMeta));
         await thread.save();
         persistedThreadId = thread._id;
       }
+      // The reply is the last message either way, and `turnRecord` stamped the same
+      // index — the client rates by this number and the server resolves it back to
+      // the notes that produced that answer.
+      if (persistedThreadId) turnIndex = thread.messages.length - 1;
 
       // ── Auto-archive oldest threads beyond the 7-conversation limit ──
       // Runs on every chat turn to keep recent list at 7 or fewer.
@@ -445,7 +475,16 @@ router.post('/', protect, requireFeature('chat'), chatLimiter, async (req, res) 
       console.error('[chat] conversation persistence failed:', saveError.message);
     }
 
-    return res.json({ reply, source, threadId: persistedThreadId });
+    return res.json({
+      reply,
+      source,
+      threadId: persistedThreadId,
+      messageIndex: turnIndex,
+      // How many of the app's own notes were handed to the model for this answer —
+      // zero means the reply was generated without grounding, which is the number
+      // the accuracy eval and the admin monitor both want to see.
+      retrieved: turnMeta && turnMeta.docs ? turnMeta.docs.length : 0,
+    });
 
   } catch (error) {
     if (error instanceof ChatInputError) {
@@ -457,6 +496,76 @@ router.post('/', protect, requireFeature('chat'), chatLimiter, async (req, res) 
       message: 'The chat service is temporarily unavailable. Please try again.',
       reply: "I'm having trouble right now. Please try again in a moment.",
     });
+  }
+});
+
+// ── POST /api/chat/feedback ────────────────────────────────────────────────
+// A member's verdict on one reply, joined to the notes that produced it.
+//
+// The client sends an address — thread, message index, vote — and nothing else.
+// `docIds`, `repairs` and `provider` are read off the turn record the server wrote
+// when it generated that reply, because a feedback endpoint that accepts a list of
+// documents to promote is an endpoint where any member can decide what every other
+// member gets told. Same reason the recommendation context ignores the client's copy.
+const feedbackLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 60,
+  keyGenerator: (req) => `user:${String(req.user?._id || 'unknown')}`,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many ratings at once. Please wait a moment.' },
+});
+
+router.post('/feedback', protect, requireFeature('chat'), feedbackLimiter, async (req, res) => {
+  try {
+    const { threadId, messageIndex, vote } = req.body || {};
+    // Shape checked before any query: `$ne`/`$gt` in these fields would be turned
+    // into a filter object by the driver, and an index that is a string becomes NaN
+    // rather than a rejection.
+    if (typeof threadId !== 'string' || !/^[a-fA-F0-9]{24}$/.test(threadId)) {
+      return res.status(400).json({ message: 'A conversation reference is required to rate a reply.' });
+    }
+    if (!Number.isInteger(messageIndex) || messageIndex < 0 || messageIndex > 499) {
+      return res.status(400).json({ message: 'That reply cannot be rated.' });
+    }
+    if (vote !== 'up' && vote !== 'down') {
+      return res.status(400).json({ message: 'A rating is either helpful or not helpful.' });
+    }
+
+    // Ownership in the filter, not in a check afterwards: another member's thread id
+    // is simply not found.
+    const thread = await AiChatThread.findOne({ _id: threadId, user: req.user._id })
+      .select('messages turns')
+      .lean();
+    if (!thread) return res.status(404).json({ message: 'Conversation not found.' });
+
+    const message = (thread.messages || [])[messageIndex];
+    if (!message || message.role !== 'assistant') {
+      return res.status(400).json({ message: 'Only an answer can be rated.' });
+    }
+
+    const turn = (thread.turns || []).find((t) => Number(t && t.i) === messageIndex) || null;
+    const docIds = turn && Array.isArray(turn.docs) ? turn.docs.slice(0, 12).map(String) : [];
+    const repairs = turn && Array.isArray(turn.repairs) ? turn.repairs.slice(0, 8).map(String) : [];
+    const provider = turn ? String(turn.provider || '').slice(0, 60) : '';
+
+    await AiChatFeedback.findOneAndUpdate(
+      { user: req.user._id, thread: threadId, messageIndex },
+      {
+        $set: { vote, docIds, repairs, provider, wasRepaired: repairs.length > 0 },
+        $setOnInsert: { user: req.user._id, thread: threadId, messageIndex },
+      },
+      { new: true, upsert: true, setDefaultsOnInsert: true, lean: true }
+    );
+
+    // The next reply in any conversation should see this. Cheaper than waiting out
+    // the cache, and one vote cannot move a ranking on its own.
+    invalidatePriors();
+
+    return res.json({ ok: true, vote, docs: docIds.length });
+  } catch (error) {
+    console.error('[chat] feedback write failed:', error.message);
+    return res.status(500).json({ message: 'Could not save that rating. Please try again.' });
   }
 });
 

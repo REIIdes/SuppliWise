@@ -2,6 +2,7 @@
 import { useNavigate } from 'react-router-dom';
 import {
   sendChatMessage,
+  sendChatFeedback,
   listChatThreads,
   getChatThread,
   deleteChatThread,
@@ -272,6 +273,31 @@ export default function ChatAssistant() {
   const [showQuickPrompts, setShowQuickPrompts] = useState(true);
   const [connectionState, setConnectionState] = useState('online');
   const [upgradeInfo, setUpgradeInfo] = useState(null);
+  // Ratings are keyed by conversation + message index, not by the position in this
+  // component's array, because that array also holds the welcome bubble and failed
+  // turns — and a rating aimed at the wrong message would retune the assistant for
+  // an answer nobody objected to.
+  const [ratings, setRatings] = useState({});
+  const ratingKey = (threadId, msgIndex) => `${threadId}:${msgIndex}`;
+  const rate = async (msg, vote) => {
+    if (!activeThreadId || !Number.isInteger(msg.msgIndex)) return;
+    const key = ratingKey(activeThreadId, msg.msgIndex);
+    if (ratings[key] === vote) return;
+    setRatings((prev) => ({ ...prev, [key]: vote }));
+    try {
+      await sendChatFeedback({ threadId: activeThreadId, messageIndex: msg.msgIndex, vote });
+    } catch (err) {
+      // The vote is a preference, not a state transition: if it cannot be saved the
+      // reply stays on screen and the control goes back to unset rather than lying
+      // about having recorded something.
+      setRatings((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      console.warn('[chat] rating not saved:', err.message);
+    }
+  };
   // Stored conversations: the server keeps the transcripts,
   // the panel only tracks which one is open and the list the
   // history menu shows.
@@ -537,7 +563,9 @@ export default function ChatAssistant() {
       if (version !== conversationVersionRef.current) return;
       setActiveThreadId(data?._id ?? null);
       setMessages((Array.isArray(data?.messages) ? data.messages : [])
-        .map((m) => ({ role: m.role, text: m.text })));
+        // A stored transcript is the server's own array, so its position IS the
+        // message index the feedback route expects.
+        .map((m, i) => ({ role: m.role, text: m.text, msgIndex: i })));
       followBottomRef.current = true;
     } catch (err) {
       if (version !== conversationVersionRef.current) return;
@@ -711,6 +739,10 @@ export default function ChatAssistant() {
       setMessages(prev => [...prev, {
         role: 'assistant',
         text: reply,
+        // The transcript position the server stored this reply at. Feedback is
+        // addressed by it, and a locally-computed index would be wrong as soon as
+        // the panel shows a welcome bubble or a failed turn.
+        ...(Number.isInteger(data?.messageIndex) ? { msgIndex: data.messageIndex } : {}),
         ...(data.source === 'fallback' ? { kind: 'error' } : {}),
       }]);
       // Adopt the stored conversation so every later turn
@@ -1200,6 +1232,28 @@ export default function ChatAssistant() {
                         ? <Markdown text={msg.text} />
                         : <p className="md-p">{msg.text}</p>
                       }
+                      {msg.role === 'assistant' && msg.kind !== 'error' && activeThreadId && Number.isInteger(msg.msgIndex) && (
+                        <div className="chat-rating" role="group" aria-label="Was this answer helpful?">
+                          {['up', 'down'].map((vote) => {
+                            const active = ratings[ratingKey(activeThreadId, msg.msgIndex)] === vote;
+                            return (
+                              <button
+                                key={vote}
+                                type="button"
+                                className={`chat-rating-btn chat-rating-${vote}${active ? ' active' : ''}`}
+                                aria-pressed={active}
+                                aria-label={vote === 'up' ? 'This answer was helpful' : 'This answer was not helpful'}
+                                onClick={() => rate(msg, vote)}
+                              >
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                  <path d="M7 10v12" />
+                                  <path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.51l-2.34 6.68a2 2 0 0 1-1.92 1.49H4.76a2 2 0 0 1-2-2.4l1.6-7.2A2 2 0 0 1 6.36 8h4.3l1.83-5.49A2.41 2.41 0 0 1 15 5.88Z" />
+                                </svg>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   ))}
                   {loading && (
