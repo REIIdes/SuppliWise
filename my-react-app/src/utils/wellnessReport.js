@@ -85,6 +85,34 @@ const expandFoods = (value) => {
   return parts.length > 0 ? parts.join(', ') : expandFoodItem(value);
 };
 
+/**
+ * A stored plan row, printed.  Every cell is either verbatim from the saved
+ * assessment or left empty: a report that filled a blank field with a sentence
+ * of its own ("Timing not specified", "Follow clinician guidance") was showing
+ * the member text the finalized plan never contained, and that text changed
+ * whenever the plan was re-exported after a generation.
+ */
+export const planReportCells = (rec) => [
+  cleanReportText(rec?.name || 'Unnamed supplement'),
+  priorityMeta(rec?.priority).label,
+  scoreValue(rec?.confidenceScore),
+  cleanReportText(rec?.reason || ''),
+  cleanReportText(rec?.dosage || ''),
+  cleanReportText(rec?.timing || ''),
+];
+
+export const safetyReportCells = (rec) => [
+  cleanReportText(rec?.name || 'Unnamed supplement'),
+  cleanReportText(rec?.evidence || ''),
+  cleanReportText(expandFoods(rec?.foods) || ''),
+  // Verbatim from the stored row, including the row's own "None identified":
+  // the app decides what a safety field says, the report only prints it.
+  cleanReportText([
+    nonEmpty(rec?.interactions) ? rec.interactions : null,
+    nonEmpty(rec?.sideEffects) ? rec.sideEffects : null,
+  ].filter(Boolean).join(' | ')),
+];
+
 const getUserName = (assessment, fallback = '') => {
   const explicit = reportText(assessment?.userName || assessment?.name, '').trim();
   if (explicit) return explicit;
@@ -316,14 +344,7 @@ export async function downloadWellnessReport({ results = {}, assessment = {}, us
     y = runTable({
       startY: y,
       head: [['Supplement', 'Priority', 'Match', 'Why it may help', 'How to use', 'Timing']],
-      body: sorted.map((rec) => [
-        cleanReportText(rec?.name || 'Unnamed supplement'),
-        priorityMeta(rec?.priority).label,
-        scoreValue(rec?.confidenceScore),
-        cleanReportText(rec?.reason || 'No rationale supplied.'),
-        cleanReportText(rec?.dosage || 'Follow clinician guidance'),
-        cleanReportText(rec?.timing || 'Not specified'),
-      ]),
+      body: sorted.map(planReportCells),
       theme: 'grid',
       headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7.2, fontStyle: 'bold', cellPadding: 3.5 },
       bodyStyles: { fontSize: 7.2, textColor: C.ink, cellPadding: 3.2, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
@@ -363,15 +384,7 @@ export async function downloadWellnessReport({ results = {}, assessment = {}, us
     y = runTable({
       startY: y,
       head: [['Supplement', 'Evidence', 'Food sources', 'Interactions / side effects']],
-      body: sorted.map((rec) => [
-        cleanReportText(rec?.name || 'Unnamed supplement'),
-        cleanReportText(rec?.evidence || 'No evidence text supplied.'),
-        cleanReportText(expandFoods(rec?.foods) || 'Not specified'),
-        cleanReportText([
-          nonEmpty(rec?.interactions) && rec.interactions !== 'None identified' ? rec.interactions : null,
-          nonEmpty(rec?.sideEffects) ? rec.sideEffects : null,
-        ].filter(Boolean).join(' | ') || 'No interactions identified.'),
-      ]),
+      body: sorted.map(safetyReportCells),
       theme: 'grid',
       headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7.2, fontStyle: 'bold', cellPadding: 3.5 },
       bodyStyles: { fontSize: 7.1, textColor: C.ink, cellPadding: 3.2, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
@@ -557,7 +570,7 @@ export async function downloadWellnessFallback({ results = {}, assessment = {}, 
   block('Clinical summary', results?.summary || 'No clinical summary was returned for this assessment.');
   if (results?.consultDoctor) block('Medical consultation recommended', results?.consultReason || 'Please review this plan with a licensed healthcare professional.', C.rose, C.roseLight);
   block('Plan', recs.length > 0
-    ? recs.map((rec, index) => `${index + 1}. ${reportText(rec?.name, 'Supplement')} — ${reportText(rec?.dosage, 'Follow clinician guidance')}; ${reportText(rec?.timing, 'Timing not specified')}. ${reportText(rec?.reason, '')}`).join('\n\n')
+    ? recs.map((rec, index) => `${index + 1}. ${reportText(rec?.name, 'Supplement')}${[reportText(rec?.dosage, ''), reportText(rec?.timing, ''), reportText(rec?.reason, '')].filter(Boolean).join('; ')}.`).join('\n\n')
     : 'No supplement recommendations were generated.', C.violet, C.violetLight);
   const warnings = asArray(results?.warnings);
   if (warnings.length > 0) block('Important warnings', warnings.map((item) => `- ${reportText(item, '')}`).join('\n'), C.rose, C.roseLight);

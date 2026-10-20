@@ -341,7 +341,7 @@ function applyAdaptation(plan, member = {}) {
   }
 
   const currentNames = (Array.isArray(plan.recommendations) ? plan.recommendations : []).map((r) => norm(r?.name));
-  plan.adaptation = {
+  const adaptation = {
     previousAssessmentAt: member.previous?.createdAt
       ? new Date(member.previous.createdAt).toISOString() : null,
     previousPlanSize: previousNames.length,
@@ -354,6 +354,15 @@ function applyAdaptation(plan, member = {}) {
     symptomsResolved: delta.resolved || [],
     escalated,
   };
+
+  // Nothing changed, so nothing is announced. A member who re-submitted the same
+  // questionnaire used to be handed "14 carried over" as if that were news, and
+  // the Results screen grew a note nobody caused. The record is only worth
+  // showing when the comparison actually found a difference.
+  const changed = adaptation.itemsNew || adaptation.itemsDropped
+    || adaptation.symptomsNew.length || adaptation.symptomsResolved.length || escalated.length;
+  if (changed) plan.adaptation = adaptation;
+  else delete plan.adaptation;
   return plan;
 }
 

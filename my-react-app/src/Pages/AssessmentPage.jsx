@@ -2813,6 +2813,7 @@ function AssessmentPage() {
     setSubmitting(true);
     try {
       let assessmentId = null;
+      let savedAt = null;
       let garbageFields = [];
       let lastSeverityFlag = { flagged: false, reasons: [] };
       
@@ -2832,6 +2833,10 @@ function AssessmentPage() {
         try {
           const saveResult = await saveAssessment(payload);
           assessmentId = saveResult?.assessment?._id;
+          // The record's own date, from the database. The report is stamped with
+          // it so exporting the same plan twice gives the same document; reading
+          // the clock at export time made every PDF a new one.
+          savedAt = saveResult?.assessment?.createdAt || null;
           garbageFields = saveResult?.garbageFields || [];
           if (saveResult?.severityFlag) lastSeverityFlag = saveResult.severityFlag;
           if (assessmentId) break;
@@ -2874,7 +2879,17 @@ function AssessmentPage() {
       if (lastSeverityFlag?.flagged) {
         sessionStorage.setItem('suppliwise_last_priority_flag', JSON.stringify({ at: Date.now(), reasons: lastSeverityFlag.reasons || [] }));
       }
-      navigate('/results', { state: { recommendations, assessment: payload, garbageFields } });
+      // `_id` + `createdAt` travel with the answers so the Results screen and the
+      // PDF describe the record that was actually saved. Without them the report
+      // has no date to print and falls back to the clock, which makes every
+      // export of an unchanged plan look like a changed one.
+      navigate('/results', {
+        state: {
+          recommendations,
+          assessment: { ...payload, _id: assessmentId || undefined, createdAt: savedAt || undefined },
+          garbageFields,
+        },
+      });
     } catch (err) {
       const msg = err.message || '';
       if (msg.toLowerCase().includes('network') || msg.toLowerCase().includes('fetch')) {

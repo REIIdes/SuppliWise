@@ -217,6 +217,31 @@ test('the full report lays out identically for the same stored plan and paginate
   assert.ok(longRun.pageCount > shortOnce.pageCount, 'a much longer description must add pages, not overflow boxes');
 });
 
+test('a stored row prints verbatim, and a blank field prints blank rather than invented prose', async () => {
+  const { planReportCells, safetyReportCells } = await import('./wellnessReport.js');
+  const sparse = { name: 'Vitamin D3 (Cholecalciferol)', priority: 'low' };
+  assert.deepEqual(planReportCells(sparse), ['Vitamin D3 (Cholecalciferol)', 'Low', '—', '', '', ''],
+    'the report wrote a rationale, dose or timing the saved plan never had');
+  assert.deepEqual(safetyReportCells(sparse), ['Vitamin D3 (Cholecalciferol)', '', '', ''],
+    'the report wrote evidence or a safety claim the saved plan never had');
+  // What the plan does say is printed as-is, including its own "None identified".
+  const stored = { name: 'Iron Bisglycinate + Vitamin C', evidence: 'WHO iron guidance.', foods: 'legumes', interactions: 'None identified', sideEffects: 'Dark stools' };
+  assert.deepEqual(safetyReportCells(stored), [
+    'Iron Bisglycinate + Vitamin C',
+    'WHO iron guidance.',
+    'legumes (lentils, chickpeas, black beans)',
+    'None identified | Dark stools',
+  ]);
+});
+
+test('the exported date and file name come from the saved record, not the export clock', async () => {
+  const { downloadWellnessReport } = await import('./wellnessReport.js');
+  const assessment = { createdAt: '2026-10-20T00:00:00.000Z', userName: 'Test Person' };
+  const results = { recommendations: [{ name: 'Magnesium Glycinate', reason: 'r', dosage: '200 mg' }] };
+  const run = await downloadWellnessReport({ save: false, results, assessment });
+  assert.match(run.filename, /_2026-10-20_00-00-00\.pdf$/, 'the file name followed the click, not the assessment');
+});
+
 test('the last-resort renderer still produces a readable multi-page report for a malformed row', async () => {
   const { downloadWellnessFallback } = await import('./wellnessReport.js');
   const result = await downloadWellnessFallback({

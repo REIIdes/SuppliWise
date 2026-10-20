@@ -49,7 +49,12 @@ const ADULT = { ...baselineProfiles[0] };
 test('the same answers, submitted five times, select the same supplements in the same order', () => {
   for (const profile of baselineProfiles) {
     const first = spineFor(profile);
-    assert.ok(first.length >= 10, `${profile.id}: expected a full plan, got ${first.length} rows`);
+    // Every baseline profile reports symptoms, so every row here is one the
+    // clinical rules chose from those answers. A generic filler row would make
+    // the plan look fuller while telling the member about nothing they said.
+    assert.ok(first.length > 0, `${profile.id}: expected a plan, got none`);
+    assert.equal(first.filter((row) => row.preventiveSupport).length, 0,
+      `${profile.id}: rows were added that this member did not justify`);
     for (let run = 1; run < 5; run += 1) {
       const again = spineFor(JSON.parse(JSON.stringify(profile)));
       assert.deepEqual(names(again), names(first), `${profile.id}: selection moved on run ${run + 1}`);
@@ -97,16 +102,17 @@ test('different answers still produce different plans', () => {
   assert.notDeepEqual(names(spineFor(pregnant)), names(spineFor(ADULT)));
 });
 
-test('a plan is padded toward the presented length without ignoring what this member reported', () => {
-  const spine = spineFor(ADULT);
-  // Fifteen is what the app presents, not a quota: the preventive pool is
-  // screened against this member's allergens, diet, age band, pregnancy and
-  // conditions, and against the nutrient already in every clinical row, so a
-  // plan stops when nothing safe and non-duplicating is left to add.
-  assert.ok(spine.length >= 12 && spine.length <= 15, `expected a near-full plan, got ${spine.length} rows`);
-  // The rows the clinical rules chose carry the member's own triggers; the
-  // padding rows are explicitly labelled preventive, so nothing is claimed about
-  // a symptom the member never mentioned.
+test('a plan contains only what this member justified, and stays in canonical order', () => {
+  const answers = canonicaliseAnswers(ADULT);
+  const engine = enforcePlanConsistency(generateClinicalFallback(answers));
+  const spine = buildPlanSpine(engine.recommendations, answers);
+  // The spine is the engine's rows minus nutrient-class duplicates. Nothing is
+  // added: a member who reports six things gets the plan those six things
+  // justify, not a fifteen-item list padded with general wellness filler that
+  // changes every time the pool screen shifts.
+  assert.equal(spine.length, new Set(engine.recommendations.map((row) => classifySupplement(row.name) || `name:${selectionKey(row.name)}`)).size,
+    'the spine is neither the deduplicated engine rows nor the engine rows themselves');
+  assert.ok(spine.length > 0 && spine.length < 15, `expected an honest plan, got ${spine.length} rows`);
   for (const row of spine.filter((item) => item.preventiveSupport)) {
     assert.equal(row.triggeredBy, NEUTRAL_TRIGGER, `${row.name} claims a trigger the member did not report`);
     assert.equal(row.priority, 'Low');
@@ -121,6 +127,19 @@ test('a plan is padded toward the presented length without ignoring what this me
   assert.equal(new Set(classes).size, classes.length, 'one nutrient was dosed twice in the same plan');
 });
 
+test('an empty rule result gets the preventive floor, labelled as preventive', () => {
+  // A member whose answers trigger no clinical rule must still leave with
+  // something. That is the one case padding is honest about, and it is a floor
+  // of general support rows, not a quota the other plans get inflated to.
+  const spine = buildPlanSpine([], canonicaliseAnswers(ADULT));
+  assert.equal(spine.length, 5, 'the preventive floor moved');
+  for (const row of spine) {
+    assert.equal(row.preventiveSupport, true, `${row.name} was added without being labelled preventive`);
+    assert.equal(row.triggeredBy, NEUTRAL_TRIGGER);
+    assert.equal(row.priority, 'Low');
+  }
+});
+
 test('two rule branches that reach the same nutrient leave one row, the urgent one', () => {
   const spine = buildPlanSpine([
     { name: 'Iron Bisglycinate', dosage: '18mg daily', priority: 'Low', interactions: 'None identified' },
@@ -129,8 +148,9 @@ test('two rule branches that reach the same nutrient leave one row, the urgent o
   const iron = spine.filter((row) => classifySupplement(row.name) === 'iron');
   assert.equal(iron.length, 1, 'a member was told to take iron twice');
   assert.equal(iron[0].name, 'Iron Bisglycinate + Vitamin C', 'the more urgent row was dropped for the less urgent one');
-  assert.equal(spine.length <= 15, true, 'the plan overran the presented length');
-  assert.ok(spine.length >= 12, `deduplicating a row should leave the pool room to refill, got ${spine.length}`);
+  // Losing a row to dedupe does not open a slot for filler: nothing is added
+  // back, so the plan shrinks instead of quietly swapping in a generic item.
+  assert.equal(spine.length, 1, `a duplicate was replaced by padding, got ${spine.length} rows`);
 });
 
 test('a child, a pregnancy, a vegan diet and kidney stones each remove their own rows', () => {
@@ -289,5 +309,6 @@ test('the prompt hands the model a fixed item list when the app has decided it',
 
   const unconstrained = buildAssessmentPrompt(ADULT);
   assert.doesNotMatch(unconstrained, /\[PLAN SPINE/, 'the spine block leaked into a run with no spine');
-  assert.match(unconstrained, /Provide exactly 15 recommendations/, 'the free-choice instruction changed for no reason');
+  assert.match(unconstrained, /Recommend only what this patient profile justifies/, 'the free-choice instruction changed for no reason');
+  assert.doesNotMatch(unconstrained, /Provide exactly \d+ recommendations/, 'the model was told to fill a quota');
 });

@@ -50,15 +50,17 @@ function seedFromSignature(signature) {
 }
 
 /**
- * The plan length the product presents. Kept as a number here, rather than only
- * as a line in the prompt ("provide exactly 15 recommendations"), because the
- * count is a property of the SELECTION, and selection is decided in code.
+ * How many general-support rows to assemble when the clinical rules found
+ * NOTHING to recommend for this member. It is a floor for an empty plan, not a
+ * quota to fill: a padded plan grew the same eight-to-eleven-item tail on
+ * nearly every member, and each extra item is a thing a member may actually
+ * start taking. A plan contains what these answers justify.
  */
-const SPINE_TARGET_COUNT = 15;
+const PREVENTIVE_FLOOR = 5;
 
 /**
- * Preventive support items, in canonical nutrient order, used to bring a
- * rule-driven plan up to the presented length.
+ * Preventive support items, in canonical nutrient order, used to assemble a
+ * plan the rules had no rows for.
  *
  * These are NOT "one set of supplements for every user". Every entry is
  * screened against the member's own answers before it can be added: declared
@@ -199,15 +201,16 @@ function preventiveRowIsBlocked(item, a) {
 
 /**
  * The authoritative item list for this member: every row the clinical rules
- * selected from their answers, then preventive support rows up to the presented
- * length, re-sorted into canonical order.
+ * selected from their answers, de-duplicated per nutrient, with any medication
+ * caution written onto it, re-sorted into canonical order. A member the rules
+ * found nothing for gets a small general-support plan instead of an empty one.
  *
  * Pure function of (answers, rule output), so two submissions of the same
  * answers select the same supplements — which is what the model alone cannot
  * promise, and the reason this runs before the prompt is built rather than
  * after the reply arrives.
  */
-function buildPlanSpine(baseRecs, a, { target = SPINE_TARGET_COUNT } = {}) {
+function buildPlanSpine(baseRecs, a, { floor = PREVENTIVE_FLOOR } = {}) {
   // Two engine branches can reach the same nutrient for one member — the anemia
   // branch emits "Iron Bisglycinate + Vitamin C" while a depletion branch emits
   // "Iron Bisglycinate" — and a member who follows both takes one nutrient twice.
@@ -234,8 +237,13 @@ function buildPlanSpine(baseRecs, a, { target = SPINE_TARGET_COUNT } = {}) {
   const goals = Array.isArray(a.healthGoals) ? a.healthGoals : [];
   const conditions = Array.isArray(a.medicalConditions) ? a.medicalConditions : [];
 
-  for (const item of GENERAL_SUPPORT_POOL) {
-    if (spine.length >= target) break;
+  // Only a plan the rules could say nothing about gets assembled from the
+  // general-support pool. Anything else is filler that the member did not earn
+  // from their own answers, and filler is what made an update look like it had
+  // added supplements by itself.
+  const padding = spine.length === 0 ? GENERAL_SUPPORT_POOL.slice(0, floor * 3) : [];
+  for (const item of padding) {
+    if (spine.length >= floor) break;
     if (preventiveRowIsBlocked(item, a)) continue;
     const key = selectionKey(item.name);
     if (keys.has(key)) continue;
@@ -338,13 +346,13 @@ router.post('/', protect, async (req, res) => {
     const dynamicPmids = new Set(liveDynamic.flatMap((d) => (d.supplements || [])
       .flatMap((s) => extractPmids(s.evidence))));
 
-    // The clinical rule engine's own answer for THIS profile, brought up to the
-    // presented length by the preventive-support pool. This list is the SPINE:
-    // it is what the plan will contain, whether the model answers or not, and it
-    // is a pure function of these answers — so which supplements a member is
-    // offered is decided by rules, not by sampling. It is also the degraded path
-    // and the source that refills a slot when grounding deletes a row, so a
-    // member never gets an 11-item plan because a model invented a supplement.
+    // The clinical rule engine's own answer for THIS profile, de-duplicated per
+    // nutrient. This list is the SPINE: it is what the plan will contain, whether
+    // the model answers or not, and it is a pure function of these answers — so
+    // which supplements a member is offered is decided by rules, not by sampling.
+    // It is also the degraded path and the source that refills a slot when
+    // grounding deletes a row, so a member never loses an item because a model
+    // invented a supplement.
     const spineProfile = { ...answers, currentMedications: processedMedications, allergies: processedAllergies };
     const engineRows = enforcePlanConsistency(generateClinicalFallback(answers, liveDynamic));
     engineRows.recommendations = buildPlanSpine(engineRows.recommendations, spineProfile);

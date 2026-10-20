@@ -3,9 +3,8 @@
  *
  * WHY THIS EXISTS
  * ---------------
- * The assessment prompt asks the model for fifteen recommendations, and the
- * order they come back in is whatever the model felt like that run: the same
- * profile can return Omega-3 first, or Magnesium first, or something else
+ * The model decides how many rows to write and the order it writes them in: the
+ * same profile can return Omega-3 first, or Magnesium first, or something else
  * entirely on the next submission. Item order is part of the answer's quality,
  * and a research evaluation needs the SAME profile to produce the SAME
  * structure every time.

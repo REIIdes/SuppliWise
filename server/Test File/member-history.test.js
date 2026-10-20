@@ -282,11 +282,24 @@ test('the adaptation record says what carried over, what is new and what was dro
   assert.equal(plan.adaptation.adherencePercent, null, 'no tracking on file is not reported as zero');
 });
 
-test('a plan with no rows still records that no baseline was available', () => {
+test('a plan with nothing to report against carries no adaptation note', () => {
+  // The note exists to tell a member what changed. A first plan (or a
+  // re-submit of the same answers) changed nothing, so it shows nothing —
+  // "0 added, 4 carried over" reads like content appeared on its own.
   const plan = applyAdaptation({ recommendations: [] }, {});
-  assert.equal(plan.adaptation.previousAssessmentAt, null);
-  assert.equal(plan.adaptation.itemsCarried, 0);
-  assert.deepEqual(plan.adaptation.symptomsNew, []);
+  assert.equal(plan.adaptation, undefined, 'a plan that did not change said it did');
+});
+
+test('the same plan re-submitted against its own baseline announces nothing', () => {
+  // Adherence alone is not a change to the plan, and "carried over" is not news:
+  // showing a note here is content appearing because the member pressed submit.
+  const plan = applyAdaptation(structuredClone(PLAN), {
+    previous: { createdAt: at(1440), aiResults: { recommendations: PLAN.recommendations } },
+    delta: { hasBaseline: true, newlyReported: [], resolved: [] },
+    adherence: { percent: 55, days: 7 },
+  });
+  assert.equal(plan.adaptation, undefined, 'an unchanged plan told the member something moved');
+  assert.deepEqual(plan.recommendations.map((r) => r.priority), ['High', 'Medium', 'Low']);
 });
 
 test('escalation is word-based, so "Fatigue" cannot raise a row about "infertility"', () => {
