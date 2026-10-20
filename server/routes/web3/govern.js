@@ -36,44 +36,67 @@ async function finalizeExpired() {
   const now = Date.now();
   if (now - lastFinalizeAt < FINALIZE_MIN_INTERVAL_MS) return;
   lastFinalizeAt = now;
-  const expired = await Proposal.find({ status: 'active', endsAt: { $lte: now } })
+  const due = await Proposal.find({
+    $or: [
+      { status: 'active', endsAt: { $lte: now } },
+      {
+        // The reconciliation the `executionError` marker was always meant to
+        // drive. A proposal that was claimed, had its parameter applied, and
+        // THEN failed to anchor sat 'passed' with no `executedTx` forever: the
+        // chain could not explain the reward rate or quorum it was operating
+        // under, and nothing ever retried, because the marker was written and
+        // never read. Anchoring is retried here WITHOUT re-applying the
+        // parameter, so a second sweep cannot double-change it.
+        status: 'passed',
+        executedTx: { $in: ['', null] },
+        executionError: { $nin: ['', null] },
+        param: { $ne: '' },
+      },
+    ],
+  })
     .sort({ endsAt: 1 })
     .limit(FINALIZE_BATCH)
     .lean();
-  if (!expired.length) return;
+  if (!due.length) return;
   const cfg = await engine.getConfig();
-  for (const proposal of expired) {
+  for (const proposal of due) {
+    const needsReanchor = proposal.status === 'passed';
     try {
-      const tally = tallyProposal(proposal.votes, cfg.params, Date.now(), proposal.endsAt);
-      const status = tally.passed ? 'passed' : 'rejected';
-      // Claim the finalization FIRST (atomic active→passed/rejected): two
-      // concurrent lazy finalizers can never both execute + double-anchor the
-      // same parameter change.
-      const claim = await Proposal.updateOne(
-        { _id: proposal._id, status: 'active' },
-        { $set: { status } }
-      );
-      if (claim.modifiedCount !== 1) continue;
-      if (tally.passed && proposal.param
-          && Object.prototype.hasOwnProperty.call(DEFAULT_PARAMS, proposal.param)) {
+      const tally = tallyProposal(proposal.votes, cfg.params, now, proposal.endsAt);
+      if (!needsReanchor) {
+        const status = tally.passed ? 'passed' : 'rejected';
+        // Claim the finalization FIRST (atomic active→passed/rejected): two
+        // concurrent lazy finalizers can never both execute + double-anchor the
+        // same parameter change.
+        const claim = await Proposal.updateOne(
+          { _id: proposal._id, status: 'active' },
+          { $set: { status } }
+        );
+        if (claim.modifiedCount !== 1) continue;
+        if (!tally.passed || !proposal.param
+            || !Object.prototype.hasOwnProperty.call(DEFAULT_PARAMS, proposal.param)) continue;
         await engine.setParam(proposal.param, proposal.value, `dao:${proposal._id}`);
-        const tx = await ledger.append([
-          {
-            type: 'dao:execute',
-            actor: 'sw:dao',
-            data: { proposal: String(proposal._id), param: proposal.param, value: proposal.value, tally },
-          },
-        ]);
-        await Proposal.updateOne({ _id: proposal._id }, { $set: { executedTx: tx.txs[0] } });
+      } else if (!Object.prototype.hasOwnProperty.call(DEFAULT_PARAMS, proposal.param)) {
+        continue;
       }
+      // `ledger.append` directly, not `engine.anchor`: anchor() swallows a failed
+      // append into an empty txHash, which is how the parameter got applied with
+      // no record of it. Throwing here leaves `executionError` set, and this
+      // sweep picks the proposal up again on its next run.
+      const tx = await ledger.append([
+        {
+          type: 'dao:execute',
+          actor: 'sw:dao',
+          data: { proposal: String(proposal._id), param: proposal.param, value: proposal.value, tally },
+        },
+      ]);
+      await Proposal.updateOne(
+        { _id: proposal._id },
+        { $set: { executedTx: tx.txs[0] || '', executionError: '' } }
+      );
     } catch (err) {
       // A single bad proposal must never abort the sweep (or the GET that
       // triggered it) — log it and keep finalizing the rest.
-      //
-      // If the failure landed AFTER the status claim, the proposal is now
-      // 'passed' with no executedTx and the chain cannot explain the parameter
-      // value it holds — permanently, because the claim can never be re-taken.
-      // Mark it for a reconciliation sweep rather than losing the evidence.
       console.error('[web3 dao finalize]', String(proposal._id), err.message);
       await Proposal.updateOne(
         { _id: proposal._id, status: 'passed', executedTx: { $in: ['', null] } },

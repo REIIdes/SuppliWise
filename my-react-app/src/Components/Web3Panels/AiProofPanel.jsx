@@ -53,8 +53,10 @@ export default function AiProofPanel() {
       clear();
       const res = await getRecommendationAnchor(selected);
       setResult(res);
-      if (res.verification.valid) ok('✓ Verified — inputs, outputs and logic version are intact since anchoring.');
-      else fail({ message: 'Verification FAILED: the record changed after it was anchored.' });
+      if (res.verification.valid) ok('✓ Proven on-chain — inputs, outputs and logic version match the block this was anchored in.');
+      else if (res.verification.recordIntact) {
+        fail({ message: `Unchanged, but not chain-proven: ${res.verification.chain?.reason || 'the ledger has no intact block committing this record.'}` });
+      } else fail({ message: 'Verification FAILED: the record changed after it was anchored.' });
     } catch (err) {
       fail(err, err.status === 404 ? 'No anchor yet for this assessment — anchor it first.' : 'Could not verify.');
     } finally {
@@ -121,10 +123,38 @@ export default function AiProofPanel() {
                 Outputs {result.verification.outputIntact ? 'intact ✓' : 'CHANGED ✗'}
               </span>
               <span className={`w3-badge ${result.verification.valid ? 'green' : 'red'}`}>
-                {result.verification.valid ? 'Fully verified ✓' : 'Verification failed ✗'}
+                {result.verification.valid ? 'Proven on-chain ✓'
+                  : result.verification.recordIntact ? 'Unchanged, not chain-proven' : 'Verification failed ✗'}
               </span>
+              {/* The chain dimension, stated separately: the digests above come
+                  from the same two database rows, so on their own they say the
+                  application did not drift — not that the record is tamper-evident. */}
+              <span className={`w3-badge ${result.verification.chain?.anchored ? 'green' : 'amber'}`}>
+                {result.verification.chain?.anchored
+                  ? `block #${result.verification.chain.blockIndex} ${result.verification.chain.blockIntact ? 'intact ✓' : 'BROKEN ✗'}`
+                  : 'never anchored'}
+              </span>
+              {result.verification.chain?.anchored && (
+                <span className={`w3-badge ${result.verification.chain.agrees ? 'green' : 'red'}`}>
+                  chain copy {result.verification.chain.agrees ? 'agrees ✓' : 'DISAGREES ✗'}
+                </span>
+              )}
+              {result.verification.chain?.anchored && !result.verification.chain.payloadCommitted && (
+                <span className="w3-badge amber" title="This block was mined before payloads were committed into the header, so its contents are not tamper-evident.">
+                  payload not committed (v1 block)
+                </span>
+              )}
               <span className="w3-badge blue">logic: {result.verification.logicVersion}</span>
             </div>
+          )}
+
+          {result.verification && !result.verification.valid && (
+            <p className="w3-card-sub" style={{ marginTop: -6, marginBottom: 12 }}>
+              {result.verification.chain?.reason
+                || (result.verification.recordIntact
+                  ? 'The records are unchanged, but the ledger cannot back them up. Anchor it again to get a block whose payload the header actually commits to.'
+                  : 'The record changed after it was anchored.')}
+            </p>
           )}
 
           <div className="w3-table-wrap">

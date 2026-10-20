@@ -566,6 +566,45 @@ router.get('/recommendations/anchor/:assessmentId', async (req, res) => {
     const inputHash = hashPayload(inputFields);
     const outputHash = hashPayload(aiResults);
     const combinedHash = hashPayload({ logicVersion: anchorDoc.logicVersion, inputHash, outputHash });
+    const recordIntact = combinedHash === anchorDoc.combinedHash;
+
+    // The two rows this used to compare — the assessment and its anchor — live
+    // in the SAME database, so this endpoint was grading the database against
+    // itself: it detects the application drifting, and detects nothing about
+    // whoever can write to either document. The chain holds a third copy of the
+    // commitment, inside a block that is hashed onto its predecessor, so read
+    // that back and make the verdict depend on it.
+    const block = anchorDoc.txHash ? await ledger.findByTx(anchorDoc.txHash) : null;
+    const tx = block ? (block.txs || []).find((t) => t.txHash === anchorDoc.txHash) : null;
+    const onChain = tx && tx.data ? tx.data : null;
+    const window = block ? await ledger.proveBlocks([block.index]) : null;
+    const chainBlock = window && window.blocks.length ? window.blocks[0] : null;
+    // Re-derive the commitment from the CURRENT records against the logic
+    // version the CHAIN recorded, not the one the anchor row claims. An edited
+    // `logicVersion` then fails here instead of quietly re-deriving a matching
+    // combined hash.
+    const againstChain = onChain
+      ? hashPayload({ logicVersion: onChain.logicVersion, inputHash, outputHash })
+      : '';
+    // v1 blocks committed the joined txHash list only, so the text inside
+    // `tx.data` was never hashed into anything. On v2 it was. Saying which one
+    // this is beats claiming the stronger guarantee for both.
+    const payloadCommitted = !!chainBlock && chainBlock.commitment >= 2;
+    const chain = {
+      anchored: !!block,
+      blockIndex: block ? block.index : null,
+      txHash: anchorDoc.txHash || '',
+      blockIntact: !!(chainBlock && chainBlock.intact),
+      reason: chainBlock && !chainBlock.intact ? chainBlock.reason : (block ? '' : 'no block contains this transaction'),
+      payloadCommitted,
+      logicVersion: onChain ? onChain.logicVersion : null,
+      combinedHash: onChain ? onChain.combinedHash : null,
+      // The chain's own copy agrees with what these records say right now.
+      agrees: !!onChain && againstChain === String(onChain.combinedHash),
+      // The sealed checkpoint covers this block: the server re-hashed genesis→here
+      // under a verdict signed with a key that is not in this database.
+      sealed: !!(window && window.integrity.anchored),
+    };
     res.json({
       anchor: anchorDoc,
       verification: {
@@ -573,7 +612,11 @@ router.get('/recommendations/anchor/:assessmentId', async (req, res) => {
         outputIntact: outputHash === anchorDoc.outputHash,
         logicVersion: anchorDoc.logicVersion,
         recomputed: combinedHash,
-        valid: combinedHash === anchorDoc.combinedHash,
+        recordIntact,
+        chain,
+        // "Verified" now means the ledger backs the row, not that two rows in
+        // one database agree with each other.
+        valid: recordIntact && chain.anchored && chain.blockIntact && chain.payloadCommitted && chain.agrees,
         checkedAt: new Date().toISOString(),
       },
     });

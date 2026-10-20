@@ -458,6 +458,11 @@ function assessProofWindow({
       index,
       hash: block.hash,
       txCount: (block.txs || []).length,
+      // Which commitment scheme mined this block. On v2 the header covers each
+      // full transaction, so a payload inside it is chain-committed; on v1 it
+      // never was, and a verifier must be able to tell the two apart instead of
+      // being shown the same green tick for both.
+      commitment: commitVersionOf(block),
       linked: block.prevHash === predecessor.hash,
       intact: !reason,
       reason,
