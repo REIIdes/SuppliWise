@@ -885,6 +885,18 @@
   border-bottom: 1px solid #f1f5f9;
   color: #374151;
 }
+/* The bubble sets `overflow-wrap: anywhere` so a long URL cannot push the
+   transcript wider than the panel. Inside a table that same rule deletes the
+   table's minimum content width, so the automatic layout had nothing to push
+   back with and squeezed every column to a few characters — which is how
+   "Supplement" came out as "Supp / leme / nt". Cells wrap at spaces only, and
+   the wrapper scrolls sideways instead of the words breaking. */
+.md-table th,
+.md-table td {
+  overflow-wrap: normal;
+  word-break: normal;
+  vertical-align: top;
+}
 .md-table tr:last-child td { border-bottom: none; }
 
 /* ── Quick Prompts ──────────────────────────────────────────────────────

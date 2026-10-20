@@ -116,7 +116,11 @@ function MdTable({ lines }) {
 
   return (
     <div className="md-table-wrap">
-      <table className="md-table">
+      {/* A table with no floor on its width collapses to whatever the panel has
+          left over — four columns of prose became four columns of broken words.
+          Each column gets a readable minimum and `.md-table-wrap` scrolls
+          sideways when the bubble is narrower than that. */}
+      <table className="md-table" style={{ minWidth: `${header.length * 132}px` }}>
         <thead>
           <tr>{header.map((cell, i) => <th key={i}>{inlineFormat(cell)}</th>)}</tr>
         </thead>
