@@ -51,37 +51,56 @@ async function verifyBatch(req, res) {
       return res.status(404).json({ message: 'No batch found for this code.', verified: false, code });
     }
 
-    // Recompute the hash of every anchored tx and check its block linkage.
-    const txHashes = [
-      ...batch.events.map((e) => e.txHash),
-      ...batch.certifications.map((c) => c.txHash),
-    ].filter(Boolean);
-    const blocks = await Block_lookup(txHashes);
-    let proofsChecked = 0;
-    let proofsValid = 0;
-    const problems = [];
-    for (const hash of txHashes) {
-      const block = blocks.get(hash);
-      if (!block) continue;
-      proofsChecked += 1;
-      // Use checkBlock, not a bare headerHash re-computation. The old check
-      // compared the header hash alone, which is exactly the check that proved
-      // nothing about the transaction: a rewritten payload left the header
-      // untouched and this endpoint still answered `verified: true` to whoever
-      // scanned the bottle. checkBlock re-derives every txHash and every payload
-      // digest as well as the header, so a green result now means the anchored
-      // record is intact.
-      //
-      // `expectedPrev` is unknown here — this endpoint reads individual blocks,
-      // not a contiguous chain — so prevHash linkage is not asserted; the block
-      // and everything inside it is.
-      const reason = ledger.checkBlock(block, block.prevHash);
-      if (!reason) proofsValid += 1;
-      else problems.push({ txHash: hash, blockIndex: block.index, reason });
-    }
+    // Every step and certificate carries the transaction hash it claims to be
+    // provable by. EVERY claim is counted, including one with no hash at all:
+    // the old loop did `if (!block) continue` and then divided by the number of
+    // blocks it happened to find, so a bottle with 5 anchored steps and 2 lost
+    // ones answered `verified: true` — missing evidence vanished from the
+    // arithmetic instead of counting against it.
+    const claims = [
+      ...batch.events.map((e) => ({ kind: 'step', step: e.step, txHash: e.txHash, blockIndex: e.blockIndex })),
+      ...batch.certifications.map((c) => ({ kind: 'certification', name: c.name, txHash: c.txHash, blockIndex: c.blockIndex })),
+    ];
+    const located = await blockIndexOfTx(claims.map((c) => c.txHash).filter(Boolean));
+
+    // One bounded window re-hash: each block against its OWN predecessor, plus
+    // the sealed checkpoint that covers it. This replaces
+    // `ledger.checkBlock(block, block.prevHash)`, which judged a block only
+    // against itself — so an edited block whose author re-mined its hash (a
+    // few thousand SHA-256 rounds, no key and no network needed) passed every
+    // check this endpoint ran, and the tampering only ever showed at the block
+    // AFTER it. Loading the predecessor is what makes an edit impossible to
+    // contain.
+    const indexes = [...new Set(claims.map((c) => located.get(c.txHash)).filter((i) => Number.isInteger(i)))];
+    const window = await ledger.proveBlocks(indexes);
+    const byIndex = new Map(window.blocks.map((b) => [b.index, b]));
+    const statusOf = (claim) => proofStatus(located, byIndex, claim.txHash);
+    const problems = claims
+      .map((claim) => ({ claim, status: statusOf(claim) }))
+      .filter((x) => x.status !== 'proven')
+      .map(({ claim, status }) => ({
+        ...claim,
+        blockIndex: located.get(claim.txHash),
+        // Only the failure kind and the block number — never payload contents.
+        reason: !claim.txHash
+          ? 'this step was never anchored on-chain'
+          : status === 'unanchored'
+            ? 'no block in the chain contains this transaction'
+            : (byIndex.get(located.get(claim.txHash)) || {}).reason || 'block is missing',
+      }));
+    const checks = claims.length;
+    const valid = checks - problems.length;
+    const unanchored = claims.filter((c) => statusOf(c) === 'unanchored').length;
 
     res.json({
-      verified: proofsChecked > 0 && proofsValid === proofsChecked,
+      // Headline = "every claim on this record re-hashes cleanly onto its
+      // predecessor". `anchored` is reported beside it, not folded into it: the
+      // checkpoint is a STRONGER claim (the server re-hashed genesis→here under
+      // a verdict signed with a key outside this database) and can legitimately
+      // lag a freshly-appended block by under a minute. Folding it in would make
+      // a healthy bottle flash false.
+      verified: checks > 0 && valid === checks,
+      anchored: window.integrity.anchored,
       // Surfaced so a scanner sees WHY a bottle failed rather than a bare
       // false. Only the failure kind and block number — never payload contents.
       problems,
@@ -102,6 +121,9 @@ async function verifyBatch(req, res) {
           at: e.at,
           txHash: e.txHash,
           blockIndex: e.blockIndex,
+          // Per-step verdict, so one broken step cannot be hidden by the other
+          // five passing: 'proven' | 'broken' | 'unanchored'.
+          proof: proofStatus(located, byIndex, e.txHash),
         })),
       certifications: batch.certifications.map((c) => ({
         type: c.type,
@@ -111,10 +133,18 @@ async function verifyBatch(req, res) {
         at: c.at,
         txHash: c.txHash,
         blockIndex: c.blockIndex,
+        proof: proofStatus(located, byIndex, c.txHash),
       })),
       proof: {
-        checks: proofsChecked,
-        valid: proofsValid,
+        checks,
+        valid,
+        // Claims with nothing to check: never anchored, or anchored and the
+        // block is gone. Counted separately from `broken` because they mean
+        // different things to a reader — this record was never on-chain, versus
+        // it was and is corrupt.
+        unanchored,
+        blocks: window.blocks,
+        integrity: window.integrity,
         difficulty: ledger.difficulty,
         height: ledger.height,
         network: 'SuppliWise Mainnet (proof-of-work)',
@@ -126,15 +156,30 @@ async function verifyBatch(req, res) {
   }
 }
 
-// Fetch all blocks containing the given tx hashes in one query.
-async function Block_lookup(txHashes) {
+/** 'proven' | 'broken' | 'unanchored' for one stored tx reference. */
+function proofStatus(located, byIndex, txHash) {
+  if (!txHash) return 'unanchored';
+  const index = located.get(txHash);
+  if (!Number.isInteger(index)) return 'unanchored';
+  const block = byIndex.get(index);
+  return block && block.intact ? 'proven' : 'broken';
+}
+
+// Resolve each tx hash to the height of the block holding it, in one query.
+// Only the index is read — the block bodies are re-loaded, projected, by
+// proveBlocks, so this must not drag whole documents across the wire.
+async function blockIndexOfTx(txHashes) {
   const map = new Map();
   if (!txHashes.length) return map;
   const { Block } = require('../../models/Web3');
-  const docs = await Block.find({ 'txs.txHash': { $in: txHashes } }).lean();
+  const docs = await Block.find(
+    { 'txs.txHash': { $in: txHashes } },
+    { index: 1, 'txs.txHash': 1 },
+  ).lean();
+  const wanted = new Set(txHashes);
   for (const doc of docs) {
     for (const tx of doc.txs || []) {
-      if (txHashes.includes(tx.txHash)) map.set(tx.txHash, doc);
+      if (wanted.has(tx.txHash)) map.set(tx.txHash, doc.index);
     }
   }
   return map;

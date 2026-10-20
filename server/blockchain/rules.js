@@ -8,7 +8,14 @@
 // ── DAO proposal tally (feature 13) ────────────────────────────────────────
 // Weight = tokens held + staked at vote time. A proposal passes when, at
 // quorum, `for` strictly outweighs `against` and total weight reaches quorum.
-function tallyProposal(votes, params = {}, now = Date.now()) {
+//
+// `deadline` is the proposal's own `endsAt`. It used to be missing, and the
+// field computed from it read `!Number.isFinite(now) || now >= 0` — true for
+// every real timestamp, so any caller that trusted `tally.expired` saw a
+// proposal that closed in six days as already expired. Unknown deadline is
+// reported as NOT expired: a tally cannot invent a closing time, and the safe
+// default for a live vote is to leave it open.
+function tallyProposal(votes, params = {}, now = Date.now(), deadline = null) {
   let forWeight = 0;
   let againstWeight = 0;
   const voters = new Set();
@@ -27,7 +34,8 @@ function tallyProposal(votes, params = {}, now = Date.now()) {
   }
   const totalWeight = forWeight + againstWeight;
   const quorum = Number(params.daoQuorumWeight) || 0;
-  const expired = !Number.isFinite(now) || now >= 0; // tally is evaluated now
+  const endsAt = deadline == null || deadline === '' ? NaN : new Date(deadline).getTime();
+  const expired = Number.isFinite(endsAt) && now >= endsAt;
   const quorumReached = totalWeight >= quorum;
   const passed = quorumReached && forWeight > againstWeight;
   return {

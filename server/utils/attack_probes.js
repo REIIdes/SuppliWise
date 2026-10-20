@@ -639,9 +639,12 @@ const probes = {
       'routes/totp.js': ['/verify'],
       'routes/subscription.js': ['/plans'],
       // Registered ahead of the router-level protect on purpose: a buyer scans a
-      // batch QR without an account, and a share link is opened by whoever holds
-      // the unguessable token the owner issued.
-      'routes/web3/index.js': ['/verify/:code', '/verify/:code/qr', '/share/:token'],
+      // batch QR without an account, a share link is opened by whoever holds the
+      // unguessable token the owner issued, and a health credential is checked by
+      // the clinician who received it — which is the entire point of signing it.
+      // Requiring an account at /health/verify would mean the receiver has to
+      // trust the exporter's word instead of the signature.
+      'routes/web3/index.js': ['/verify/:code', '/verify/:code/qr', '/share/:token', '/health/verify'],
     };
     const files = [];
     const walk = (dir, prefix) => {

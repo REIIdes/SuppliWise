@@ -14,12 +14,14 @@ const IntakeRecord = require('../../models/IntakeRecord');
 const DashboardMetrics = require('../../models/DashboardMetrics');
 const User = require('../../models/User');
 const engine = require('../../blockchain/engine');
+const ledger = require('../../blockchain/ledger');
 const {
   hashPayload,
   sealData,
   openData,
   contentId,
   sign,
+  verify,
   stableStringify,
 } = require('../../blockchain/crypto');
 const { requireFeature } = require('../../utils/entitlements');
@@ -114,6 +116,19 @@ router.post('/health/ledger/anchor', async (req, res) => {
         intakeCount: snapshot.intakeCount,
       },
     });
+    // A failed append is now explicit rather than an index of -1 that every
+    // caller had to remember to test. Without this check the route stored an
+    // anchor row saying "proven at block -1", paid the anchor reward for a block
+    // that does not exist, and LedgerPanel showed the member a chain anchor they
+    // can never verify — the health/verify endpoint would reject that digest,
+    // so the receipt contradicted the ledger it came from.
+    if (tx.anchored === false || !(tx.index >= 0)) {
+      return res.status(502).json({
+        anchored: false,
+        message: 'The chain could not accept this snapshot right now, so nothing was anchored and no reward was paid. Try again in a moment.',
+        error: tx.error || 'unknown',
+      });
+    }
     const anchor = await HealthAnchor.create({
       user: req.user._id,
       digest: snapshot.digest,
@@ -177,7 +192,7 @@ router.get('/health/export', async (req, res) => {
         algorithm: 'ed25519',
         publicKey: wallet.publicKey,
         did: wallet.did,
-        verifyWith: 'GET /api/web3/health/verify',
+        verifyWith: 'POST /api/web3/health/verify',
       },
     });
   } catch (error) {
@@ -185,6 +200,123 @@ router.get('/health/export', async (req, res) => {
     res.status(500).json({ message: 'Could not export your health profile.' });
   }
 });
+
+// @route   POST /api/web3/health/verify
+// @desc    Verify a signed health credential.
+// @access  Public
+//
+// This is the endpoint /health/export has always pointed its `verifyWith` field
+// at, and LedgerPanel's "verify it at /web3/health/verify" caption has always
+// shown the member — and it did not exist. A verifiable credential that nothing
+// can verify is a signed PNG: the export asked the member to hand their health
+// record to a clinic, told the clinic where to check it, and the check 404'd.
+//
+// PUBLIC, deliberately. The entire value of a verifiable credential is that the
+// receiver — a doctor, a clinic, a nutritionist — can check it without holding
+// an account on the platform that issued it. Requiring auth here would mean the
+// verifier has to trust the exporter's word, which is what the signature exists
+// to replace.
+async function verifyCredential(req, res) {
+  try {
+    const credential = req.body && req.body.credential;
+    // The signature travels in `proof` because that is the shape
+    // /health/export returns and the shape the member downloads and hands over:
+    // a verifier posts the file back exactly as it was received.
+    const signature = String((req.body && req.body.proof && req.body.proof.signature) || '');
+    if (!credential || typeof credential !== 'object' || !signature) {
+      return res.status(400).json({
+        verified: false,
+        message: 'Post the exported credential file exactly as /health/export returned it ({ credential, proof }).',
+      });
+    }
+
+    // The key is read from OUR wallet row, never from the submitted document.
+    // Verifying against `credential.proof.publicKey` would let anyone generate a
+    // keypair, sign a fabricated health record with it and get a green tick: a
+    // signature is only evidence when the key behind it is identified by
+    // something other than the thing it signed.
+    const address = String(credential.address || '');
+    const wallet = address ? await Wallet.findOne({ address }).lean() : null;
+    if (!wallet || !wallet.publicKey) {
+      return res.json({
+        verified: false,
+        checks: { identity: false, signature: false, ledger: false, arithmetic: false },
+        reason: 'No SuppliWise identity holds this address, so there is no key to verify this against.',
+      });
+    }
+    if (credential.did && String(credential.did) !== String(wallet.did)) {
+      return res.json({
+        verified: false,
+        checks: { identity: false, signature: false, ledger: false, arithmetic: false },
+        reason: "The DID on this credential is not the DID issued to that address.",
+      });
+    }
+
+    // The signature covers the credential body — `proof` is the envelope the
+    // signature travels in, and /health/export signs the payload before adding
+    // it, so the message re-hashed here is the message that was signed there.
+    const signatureValid = verify(wallet.publicKey, stableStringify(credential), signature);
+
+    // Then the ledger, which is what a signature alone cannot give: the numbers
+    // in this document were anchored at the time they were issued, in a block
+    // that still re-hashes onto its predecessor.
+    const digest = credential.record && credential.record.currentDigest;
+    const anchor = signatureValid && digest
+      ? await HealthAnchor.findOne({ user: wallet.user, digest, blockIndex: { $gte: 0 } }).lean()
+      : null;
+    const window = anchor ? await ledger.proveBlocks([anchor.blockIndex]) : null;
+    const ledgerValid = !!(window && window.valid);
+
+    // Cross-check the credential's own counts against what the ledger recorded
+    // under that digest. An issued document asserting more assessments than
+    // were anchored is not the document the ledger produced.
+    const arithmeticValid = !!anchor
+      && Number(anchor.assessmentCount) === Number(credential.record && credential.record.assessmentCount)
+      && Number(anchor.intakeCount) === Number(credential.record && credential.record.intakeCount);
+
+    const checks = {
+      identity: true,
+      signature: signatureValid,
+      ledger: ledgerValid,
+      arithmetic: arithmeticValid,
+    };
+    const verified = Object.values(checks).every(Boolean);
+    res.json({
+      verified,
+      checks,
+      reason: verified ? '' : (!signatureValid
+        ? 'The signature does not match this document under the key issued to that address.'
+        : !anchor
+          ? 'No ledger anchor exists for this health digest, so the record it describes was never anchored.'
+          : !ledgerValid
+            ? 'The block anchoring this digest no longer re-hashes cleanly — its contents or its linkage changed.'
+            : 'The anchored counts disagree with the counts printed on this credential.'),
+      // What the credential claims, so a verifier can read it back without
+      // trusting the document's own framing of the result.
+      subject: credential.subject || null,
+      record: credential.record || null,
+      issuedAt: credential.issuedAt || null,
+      issuer: credential.issuer || null,
+      holder: { did: wallet.did, address: wallet.address },
+      anchor: anchor
+        ? { digest, blockIndex: anchor.blockIndex, txHash: anchor.txHash, at: anchor.at }
+        : null,
+      chain: window
+        ? {
+            blocks: window.blocks,
+            integrity: window.integrity,
+            difficulty: ledger.difficulty,
+            network: 'SuppliWise Mainnet (proof-of-work)',
+          }
+        : null,
+    });
+  } catch (error) {
+    console.error('[web3 POST /health/verify]', error.message);
+    // Same reasoning as /chain/verify: a verifier that could not run has NOT
+    // verified anything, and that is a verdict rather than a transport error.
+    res.status(503).json({ verified: false, message: 'The credential could not be checked.' });
+  }
+}
 
 // ── Decentralized & encrypted storage (feature 8) ─────────────────────────
 // Content-addressed (IPFS-style CID) + AES-256-GCM encrypted: no plaintext at
@@ -573,3 +705,4 @@ async function publicShare(req, res) {
 
 module.exports = router;
 module.exports.publicShare = publicShare;
+module.exports.verifyCredential = verifyCredential;

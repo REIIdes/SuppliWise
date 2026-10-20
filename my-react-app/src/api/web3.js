@@ -47,7 +47,12 @@ export const getWallet = () => w3Fetch('/web3/wallet');
 export const exportWalletKey = () => w3Fetch('/web3/wallet/private-key');
 export const getChain = (limit = 25, before = null) =>
   w3Fetch(`/web3/chain?limit=${limit}${before != null ? `&before=${before}` : ''}`);
-export const verifyChain = () => w3Fetch('/web3/chain/verify');
+// `full: true` re-hashes EVERY block, which is what the "Verify entire chain"
+// button claims to do; the default on this endpoint is the incremental tail
+// check, and the two give different answers about a chain that was edited below
+// the last proven-good block.
+export const verifyChain = ({ full = false } = {}) =>
+  w3Fetch(`/web3/chain/verify${full ? '?full=1' : ''}`);
 // Compact integrity state for the chain banner. Separate from verifyChain
 // because this one is cheap enough to poll, while a full re-verification is not.
 export const getChainStatus = () => w3Fetch('/web3/chain/status');
@@ -126,6 +131,10 @@ export const upvoteKnowledge = (postId) => w3Fetch(`/web3/knowledge/${postId}/up
 export const getHealthLedger = () => w3Fetch('/web3/health/ledger');
 export const anchorHealthLedger = () => w3Fetch('/web3/health/ledger/anchor', body({}));
 export const exportHealthCredential = () => w3Fetch('/web3/health/export');
+// PUBLIC — no token needed, because the person checking a credential is a
+// clinician with no account here. `payload` is the exported file verbatim.
+export const verifyHealthCredential = (payload) =>
+  w3Fetch('/web3/health/verify', { method: 'POST', body: JSON.stringify(payload) });
 export const backupHealthRecord = () => w3Fetch('/web3/health/backup', body({}));
 export const pinStorage = (data, kind) => w3Fetch('/web3/storage/pin', body({ data, kind }));
 export const getStorage = (cid) => w3Fetch(`/web3/storage/${encodeURIComponent(cid)}`);

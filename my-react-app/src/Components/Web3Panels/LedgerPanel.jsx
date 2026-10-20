@@ -3,6 +3,7 @@ import {
   getHealthLedger,
   anchorHealthLedger,
   exportHealthCredential,
+  verifyHealthCredential,
   backupHealthRecord,
   getStorage,
 } from '../../api/web3';
@@ -15,6 +16,11 @@ export default function LedgerPanel() {
   const { loading, setLoading, alert, ok, fail, clear, info } = usePanelState();
   const [ledger, setLedger] = useState(null);
   const [credential, setCredential] = useState(null);
+  // The verdict from POST /web3/health/verify, run on the credential this panel
+  // just produced. A member handing this file to a clinic should see it checked
+  // before they hand it over, not discover at the other end that nothing can
+  // check it.
+  const [check, setCheck] = useState(null);
   const [backup, setBackup] = useState(null);
   const [restoreCid, setRestoreCid] = useState('');
   const [restored, setRestored] = useState(null);
@@ -58,7 +64,7 @@ export default function LedgerPanel() {
     a.download = `suppliwise-health-credential-${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    info('Credential downloaded — verify it at /web3/health/verify or share it with your clinician.');
+    info('Credential downloaded — hand the file over as-is. Anyone can check it with POST /api/web3/health/verify, no account needed.');
   };
 
   if (loading && !ledger) return <Spinner />;
@@ -160,12 +166,50 @@ export default function LedgerPanel() {
           <div className="w3-row" style={{ marginTop: 12 }}>
             <button className="w3-btn small" onClick={downloadCredential}>Download JSON</button>
             <button
+              className="w3-btn small"
+              disabled={busy}
+              onClick={() =>
+                run(
+                  () => verifyHealthCredential(credential),
+                  (r) => setCheck(r)
+                )
+              }
+            >
+              🔍 Check it as a clinic would
+            </button>
+            <button
               className="w3-btn ghost small"
-              onClick={() => { setCredential(null); clear(); }}
+              onClick={() => { setCredential(null); setCheck(null); clear(); }}
             >
               Hide
             </button>
           </div>
+
+          {check && (
+            <div style={{ marginTop: 12 }}>
+              <div className="w3-row" style={{ marginBottom: 8 }}>
+                <span className={`w3-badge ${check.verified ? 'green' : 'red'}`}>
+                  {check.verified ? 'Verified ✓' : 'Not verified ✗'}
+                </span>
+                {[['identity', 'Identity'], ['signature', 'Signature'], ['ledger', 'Ledger anchor'], ['arithmetic', 'Counts']]
+                  .map(([key, label]) => (
+                    <span key={key} className={`w3-badge ${check.checks?.[key] ? 'green' : 'red'}`}>
+                      {label} {check.checks?.[key] ? '✓' : '✗'}
+                    </span>
+                  ))}
+                {check.chain?.integrity?.anchored && (
+                  <span className="w3-badge purple">chain sealed ✓</span>
+                )}
+              </div>
+              {check.reason && <p className="w3-card-sub">{check.reason}</p>}
+              {!check.verified && (
+                <p className="w3-card-sub">
+                  Do not hand this file over until every check above is green — the signature is
+                  generated even when the ledger cannot back the numbers up.
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -231,7 +275,10 @@ export default function LedgerPanel() {
                 {anchors.map((a) => (
                   <tr key={a._id}>
                     <td>{fmtTime(a.at)}</td>
-                    <td className="w3-mono">#{a.blockIndex}</td>
+                    {/* An anchor row whose block is -1 was written when the chain
+                        refused the append. It is not an anchor, and "#-1" reads
+                        like one. */}
+                    <td className="w3-mono">{Number.isInteger(a.blockIndex) && a.blockIndex >= 0 ? `#${a.blockIndex}` : 'not anchored'}</td>
                     <td>{a.assessmentCount}</td>
                     <td>{a.intakeCount}</td>
                     <td><CopyChip value={a.digest} label={trunc(a.digest, 10, 6)} /></td>

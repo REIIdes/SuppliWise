@@ -44,7 +44,7 @@ async function finalizeExpired() {
   const cfg = await engine.getConfig();
   for (const proposal of expired) {
     try {
-      const tally = tallyProposal(proposal.votes, cfg.params);
+      const tally = tallyProposal(proposal.votes, cfg.params, Date.now(), proposal.endsAt);
       const status = tally.passed ? 'passed' : 'rejected';
       // Claim the finalization FIRST (atomic active→passed/rejected): two
       // concurrent lazy finalizers can never both execute + double-anchor the
@@ -109,7 +109,7 @@ router.get('/dao/proposals', async (req, res) => {
     const proposals = await Proposal.find({}).sort({ createdAt: -1 }).limit(50).lean();
     const wallet = await engine.getWalletDoc(req.user._id);
     const shaped = proposals.map((p) => {
-      const tally = tallyProposal(p.votes, cfg.params);
+      const tally = tallyProposal(p.votes, cfg.params, Date.now(), p.endsAt);
       const myVote = p.votes.find((v) => String(v.user) === String(req.user._id)) || null;
       return {
         _id: p._id,
@@ -188,7 +188,7 @@ router.post('/dao/proposals', async (req, res) => {
     proposal.votes.push({ user: req.user._id, address: wallet.address, choice: 'for', weight, at: Date.now() });
     await proposal.save();
 
-    const tally = tallyProposal(proposal.votes, cfg.params);
+    const tally = tallyProposal(proposal.votes, cfg.params, Date.now(), proposal.endsAt);
     res.status(201).json({ proposal: { _id: proposal._id, title, endsAt: proposal.endsAt, tally }, txHash: tx.txs[0] });
   } catch (error) {
     console.error('[web3 POST /dao/proposals]', error.message);
@@ -249,7 +249,7 @@ router.post('/dao/proposals/:id/vote', async (req, res) => {
     // Re-tally from the stored (complete) vote set, not the stale in-memory doc.
     const fresh = await Proposal.findById(req.params.id).lean();
     const cfg = await engine.getConfig();
-    res.json({ tally: tallyProposal(fresh.votes, cfg.params), txHash: tx.txs[0], weight });
+    res.json({ tally: tallyProposal(fresh.votes, cfg.params, Date.now(), fresh.endsAt), txHash: tx.txs[0], weight });
   } catch (error) {
     console.error('[web3 POST /dao/proposals/:id/vote]', error.message);
     res.status(500).json({ message: 'Could not cast the vote.' });

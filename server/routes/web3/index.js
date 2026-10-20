@@ -13,11 +13,11 @@ const ecosystemRouter = require('./ecosystem');
 // ═══════════════════════════════════════════════════════════════════════════
 // /api/web3 — SuppliWise blockchain layer router.
 //
-// Order matters: the three PUBLIC endpoints (QR verification of a physical
-// bottle + shared health-profile links) are registered before `protect`, so
-// a consumer can scan a code without an account. Everything else requires a
-// signed-in USER session (admins are rejected by the per-router guard —
-// admin identities have no health/wallet semantics here).
+// Order matters: the PUBLIC endpoints (QR verification of a physical bottle,
+// health-credential verification + shared health-profile links) are registered
+// before `protect`, so a consumer can scan a code without an account. Everything
+// else requires a signed-in USER session (admins are rejected by the per-router
+// guard — admin identities have no health/wallet semantics here).
 // ═══════════════════════════════════════════════════════════════════════════
 
 const router = express.Router();
@@ -29,6 +29,10 @@ router.get('/verify/:code', supplyRouter.verifyBatch);
 router.get('/verify/:code/qr', supplyRouter.batchQr);
 // #16 Interoperable health profile — time-boxed, revocable share links.
 router.get('/share/:token', dataRouter.publicShare);
+// Check a signed health credential. Public for the same reason a banknote's
+// security strip is public: the person receiving the record is a doctor with no
+// account here, and a credential nobody can verify is a signed PNG.
+router.post('/health/verify', dataRouter.verifyCredential);
 
 // ── Authenticated ─────────────────────────────────────────────────────────
 router.use(protect);
@@ -45,7 +49,7 @@ router.use(protect);
 // DELUXE"). Attached as the second handler it does not run at all, because the
 // sub-router has already answered.
 //
-// Below `protect` and below the three public routes above: bottle
+// Below `protect` and below the public routes above: bottle
 // verification and share links are read by consumers with no account and no
 // plan, so they must stay reachable.
 router.use(userOnly, web3PlanGate);

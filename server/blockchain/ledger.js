@@ -54,14 +54,20 @@ const COMMIT_V2 = 2;
 //
 // Deliberately NOT derived from anything in the chain. A seal key an attacker
 // can read from the database they are attacking certifies nothing.
-let cachedSealKey = null;
+//
+// Read from the environment on every call rather than cached. A cached key made
+// a rotation silently do nothing: the operator would change CHAIN_SEAL_KEY
+// precisely because the old one is compromised, and the ledger would go on
+// signing and verifying with it forever, reporting the new key as if it were in
+// use. Reading live means the first checkpoint written after a rotation fails its
+// seal, is discarded, and is re-established under the new key — which is what a
+// key rotation is FOR. The cost is one full re-hash, the same cost as a missing
+// checkpoint.
 function sealKey() {
-  if (cachedSealKey !== null) return cachedSealKey;
   const raw = process.env.CHAIN_SEAL_KEY || process.env.JWT_SECRET || '';
   // An empty/absent secret would silently produce a well-formed but worthless
   // seal, so an unsealable deployment reports "no seal" instead of pretending.
-  cachedSealKey = raw.length >= 16 ? raw : '';
-  return cachedSealKey;
+  return raw.length >= 16 ? raw : '';
 }
 
 /** True when this deployment can produce/verify integrity seals at all. */
@@ -71,7 +77,29 @@ function sealAvailable() {
 
 // Canonical bytes the seal covers. Every field the fast path trusts is in here,
 // so a single HMAC authenticates the whole record at once.
-function sealPayload({ upTo, prevHash, sealedIndex, sealedHash }) {
+//
+// The high-water mark is stored FLAT by the on-disk head anchor
+// (`sealedIndex`/`sealedHash`) and NESTED by the database checkpoint
+// (`sealed: { index, hash }`). Both shapes must normalise to the same payload,
+// because the nested one is the field that makes TRUNCATION detectable. Reading
+// only the flat keys meant a persisted checkpoint's seal was computed over
+// `sealedIndex: NaN, sealedHash: ''` — which matched on verify, so the seal
+// reported 'ok' while authenticating nothing about the high-water mark at all.
+// Anyone able to write to the blocks could then lower `sealed.index` to the new
+// (shorter) tip and the forged truncation would sail through every check,
+// including the one designed to catch it.
+function sealFields(record) {
+  const nested = (record && record.sealed) || {};
+  return {
+    upTo: record && record.upTo,
+    prevHash: record && record.prevHash,
+    sealedIndex: record && record.sealedIndex !== undefined ? record.sealedIndex : nested.index,
+    sealedHash: record && record.sealedHash !== undefined ? record.sealedHash : nested.hash,
+  };
+}
+
+function sealPayload(record) {
+  const { upTo, prevHash, sealedIndex, sealedHash } = sealFields(record);
   return stableStringify({
     v: COMMIT_V2,
     upTo: Number(upTo),
@@ -350,6 +378,118 @@ function checkBlock(block, expectedPrev) {
   // CHAIN_DIFFICULTY later must not retroactively invalidate existing history.
   if (!meetsDifficulty(block.hash, blockDifficulty(block))) return 'difficulty target not met';
   return null;
+}
+
+/**
+ * Normalise a caller's list of block heights.
+ *
+ * `null`, `undefined` and `''` are dropped rather than converted: `Number(null)`
+ * is 0, so a stored tx reference that was never written would otherwise resolve
+ * to block 0 and be judged against genesis — reporting a claim with no evidence
+ * as proven. Non-integers (1.5) and negative heights are not heights either.
+ */
+function toHeights(indexes) {
+  return [...new Set((indexes || [])
+    .map((raw) => (raw === null || raw === undefined || raw === '' ? NaN : Number(raw)))
+    .filter((n) => Number.isInteger(n) && n >= 0))]
+    .sort((a, b) => a - b);
+}
+
+/**
+ * Grade a proof window — the set of block heights a claim points at.
+ *
+ * Pure by design: it takes documents the caller already loaded, so the verdict
+ * is testable without a database AND cannot be reached by reading a stored
+ * field. Every judgement here comes from re-deriving hashes.
+ *
+ * It answers three questions separately because they fail separately, and the
+ * single `verified` boolean this replaced claimed all three at once:
+ *
+ *   · present  — the block the record points at is still in the chain at all.
+ *   · intact   — re-hashing proves the header, every transaction inside it,
+ *                AND that it links onto its PREDECESSOR's stored hash. Judging a
+ *                block against its own `prevHash` (what verifyBatch used to do)
+ *                cannot contain a rewrite: an author with database access can
+ *                re-mine the edited block's hash for the cost of a few thousand
+ *                SHA-256 rounds, and every check inside that block then passes.
+ *                Only comparison against what is stored one block below forces
+ *                the edit to show up — at the successor it did not rewrite.
+ *   · anchored — the sealed checkpoint covers this height: the server re-hashed
+ *                genesis→here, and that claim is signed with CHAIN_SEAL_KEY, a
+ *                secret that does not live in the database being verified.
+ *                Without this, a rewritten history still passes `intact`.
+ */
+function assessProofWindow({
+  indexes = [],
+  blocksByIndex = new Map(),
+  checkpoint = null,
+  genesisPrevHash = GENESIS_PREV_HASH,
+} = {}) {
+  const requested = toHeights(indexes);
+  const missing = [];
+  const blocks = [];
+  let highest = -1;
+
+  for (const index of requested) {
+    const block = blocksByIndex.get(index);
+    if (!block) {
+      missing.push(index);
+      continue;
+    }
+    highest = Math.max(highest, index);
+    // The predecessor is the only thing that can prove this block sits where it
+    // claims to. A window that starts at block 0 chains from genesis.
+    const predecessor = index === 0
+      ? { hash: genesisPrevHash }
+      : blocksByIndex.get(index - 1) || null;
+    if (!predecessor || !predecessor.hash) {
+      blocks.push({
+        index,
+        hash: block.hash,
+        txCount: (block.txs || []).length,
+        linked: false,
+        intact: false,
+        reason: `block ${index - 1} is missing, so this block's linkage cannot be proven`,
+      });
+      continue;
+    }
+    const reason = checkBlock(block, predecessor.hash) || '';
+    blocks.push({
+      index,
+      hash: block.hash,
+      txCount: (block.txs || []).length,
+      linked: block.prevHash === predecessor.hash,
+      intact: !reason,
+      reason,
+    });
+  }
+
+  const seal = checkpoint ? verifySeal(checkpoint) : 'absent';
+  const sealed = (checkpoint && checkpoint.sealed) || {};
+  const provenThrough = Number.isInteger(sealed.index) ? sealed.index : -1;
+  const tip = blocks[blocks.length - 1];
+
+  return {
+    requested: requested.length,
+    present: requested.length - missing.length,
+    missing,
+    blocks,
+    // Every block the record points at exists and re-hashes onto its
+    // predecessor. This is the narrowest, strongest claim the chain itself can
+    // support, and the one a scanner should be shown.
+    valid: requested.length > 0 && missing.length === 0 && blocks.every((b) => b.intact),
+    height: tip ? tip.index : -1,
+    difficulty: tip ? blockDifficulty(blocksByIndex.get(tip.index)) : DIFFICULTY,
+    integrity: {
+      seal,
+      provenThrough,
+      // True when the sealed checkpoint reaches at least as far as the deepest
+      // block in this window. `bad`/`unsealed`/`absent` never anchor anything:
+      // an unsigned claim is a row in the same database it describes.
+      anchored: seal === 'ok' && highest >= 0 && provenThrough >= highest,
+      verifiedAt: (checkpoint && checkpoint.verifiedAt) || null,
+    },
+  };
 }
 
 // The difficulty a stored block was mined against. Blocks written before the
@@ -1430,6 +1570,37 @@ class Ledger {
       newBlocks: 0,
     };
   }
+
+  /**
+   * Public proof primitive for verifiers: re-hash the blocks a claim points at,
+   * each against its own predecessor, and grade the sealed checkpoint over them.
+   *
+   * Reads one bounded window (the requested heights plus the predecessor of each)
+   * rather than walking the chain, so a scanner gets a real integrity verdict for
+   * the cost of a handful of documents. Use this instead of calling
+   * `checkBlock(block, block.prevHash)` from a route: judging a block against its
+   * OWN stored prevHash means a rewrite whose author also re-mined the hash is
+   * flawless — the damage only ever shows at the successor, and this is what
+   * loads the successor.
+   */
+  async proveBlocks(indexes) {
+    const requested = toHeights(indexes);
+    const wanted = new Set(requested);
+    for (const index of requested) if (index > 0) wanted.add(index - 1);
+    const [docs, checkpoint] = await Promise.all([
+      Block.find({ index: { $in: [...wanted] } }, VERIFY_PROJECTION).sort({ index: 1 }).lean(),
+      ChainAudit.findOne(
+        { key: 'chain' },
+        { upTo: 1, prevHash: 1, sealed: 1, seal: 1, verifiedAt: 1 },
+      ).lean(),
+    ]);
+    return assessProofWindow({
+      indexes: requested,
+      blocksByIndex: new Map(docs.map((doc) => [doc.index, doc])),
+      checkpoint,
+    });
+  }
+
 /**
    * Recover from a detected break: discard what cannot be verified, rewind the
    * host anchor, open a fresh chain segment, and let the caller carry on.
@@ -1456,8 +1627,25 @@ class Ledger {
    * business operation has already been committed to the database either way.
    */
   async resync({ actor = 'auto-resync', inline = false } = {}) {
-    if (this.resyncing) return this.lastResync;
+    // A caller arriving mid-re-sync joins the re-sync that is ACTUALLY running.
+    // Returning `this.lastResync` here handed back the previous incident's
+    // receipt — its cycle, its kept height, its discarded count — so an operator
+    // who triggered a repair while the watchdog's was still in flight was shown
+    // confirmation of a repair that had already happened, for a different
+    // break. A second re-sync must never be started either: the first is
+    // already truncating and re-mining.
+    if (this.resyncing && this.resyncJob) return this.resyncJob;
     this.resyncing = true;
+    this.resyncJob = this.runResync({ actor, inline });
+    try {
+      return await this.resyncJob;
+    } finally {
+      this.resyncing = false;
+      this.resyncJob = null;
+    }
+  }
+
+  async runResync({ actor, inline }) {
     try {
       // `inline` is set by the append that discovered the break: it is already
       // running on the queue, so re-entering it would wait on itself forever.
@@ -1481,8 +1669,6 @@ class Ledger {
       console.error('[chain] re-sync failed:', err.message);
       this.lastResync = { at: Date.now(), ok: false, actor, cycle: this.cycle, error: err.message };
       return this.lastResync;
-    } finally {
-      this.resyncing = false;
     }
   }
 
@@ -1999,6 +2185,7 @@ module.exports = new Ledger();
 module.exports.headerHash = headerHash;
 module.exports.normalizeTx = normalizeTx;
 module.exports.checkBlock = checkBlock;
+module.exports.assessProofWindow = assessProofWindow;
 module.exports.checkTx = checkTx;
 module.exports.DIFFICULTY = DIFFICULTY;
 module.exports.COMMIT_V2 = COMMIT_V2;

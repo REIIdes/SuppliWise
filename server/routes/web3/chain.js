@@ -1,5 +1,4 @@
 const express = require('express');
-const mongoose = require('mongoose');
 const engine = require('../../blockchain/engine');
 const ledger = require('../../blockchain/ledger');
 const { Wallet } = require('../../models/Web3');
@@ -236,5 +235,5 @@ router.get('/config', async (req, res) => {
   }
 });
 
+
 module.exports = router;
-module.exports.isValidId = (id) => mongoose.isValidObjectId(id);

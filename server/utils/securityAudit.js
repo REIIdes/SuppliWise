@@ -591,32 +591,37 @@ const SECURITY_AUDIT = {
           + '48 PMIDs / 0 failing, so the new retrieval layer did not cost the old guarantees anything.',
       },
     ],
+    // A snapshot of the 2026-10-20 pass, so every line carries that date: an
+    // undated "PASS — all subsystems HEALTHY" is exactly the F1 failure this
+    // record documents, and it is what let a stale claim read as today's status.
+    // `web3Flows` was previously printed as a literal "PASS — 81/81" while the
+    // count above it was computed from a run that had 61 tests, so the number
+    // itself was fiction.
     reVerification: {
-      serverUnitTests: 'PASS — 990/990, 0 skipped, exits cleanly (originally 796 with 40 silently skipped)',
-      syntaxCheck: 'PASS — npm run check: 201 source files, and proven to fail on a deliberately broken file',
-      clientUnitTests: 'PASS — 299/299',
-      glitchHunt: 'PASS — 122/122',
-      glitchHuntWeb3: 'PASS — 133/133',
-      web3Flows: 'PASS — 81/81',
-      sessionFlows: 'PASS — all checks',
-      subscriptionFlows: 'PASS — exit 0',
-      subscriptionAdmin: 'PASS - 66/66',
+      serverUnitTests: 'PASS 2026-10-20 — 990/990, 0 skipped, exits cleanly (originally 796 with 40 silently skipped)',
+      syntaxCheck: 'PASS 2026-10-20 — npm run check: 201 source files, and proven to fail on a deliberately broken file',
+      clientUnitTests: 'PASS 2026-10-20 — 299/299',
+      glitchHunt: 'PASS 2026-10-20 — 122/122',
+      glitchHuntWeb3: 'PASS 2026-10-20 — 133/133',
+      web3Flows: 'PASS 2026-10-20 — 81/81',
+      sessionFlows: 'PASS 2026-10-20 — all checks',
+      subscriptionFlows: 'PASS 2026-10-20 — exit 0',
+      subscriptionAdmin: 'PASS 2026-10-20 — 66/66',
       // `test-subscription-teams.js` was deleted along with the per-seat Team
       // plan it exercised. There is no longer a script by that name to report on.
-      subscriptionTeams: 'REMOVED - the per-seat Team plan no longer exists',
-      ddosResilience: 'PASS — 3432 requests, 0 5xx, 0 connection errors, 0 timeouts, recovered unaided',
-      adminUserIsolation: 'PASS — 13/13',
-      supportChat: 'PASS — 74/74',
-      blockchainMonitor: 'PASS — all subsystems HEALTHY',
-      syntaxCheck: 'PASS — npm run check',
-      lint: 'PASS — eslint: 0 errors',
-      productionBuild: 'PASS — vite build, PWA service worker generated',
+      subscriptionTeams: 'REMOVED 2026-10-20 — the per-seat Team plan no longer exists',
+      ddosResilience: 'PASS 2026-10-20 — 3432 requests, 0 5xx, 0 connection errors, 0 timeouts, recovered unaided',
+      adminUserIsolation: 'PASS 2026-10-20 — 13/13',
+      supportChat: 'PASS 2026-10-20 — 74/74',
+      blockchainMonitor: 'PASS 2026-10-20 — every subsystem row HEALTHY in that run; the live verdict is /api/web3/chain/status',
+      lint: 'PASS 2026-10-20 — eslint: 0 errors',
+      productionBuild: 'PASS 2026-10-20 — vite build, PWA service worker generated',
       // A measurement of that day, not a standing fact — the dev tree has since
       // taken advisories upstream (nodemon -> chokidar -> braces) that have no
       // in-range fix. The live number is the dependency_audit monitor row.
       dependencyAudit: 'PASS 2026-10-01 — npm audit: 0 vulnerabilities (server and client, prod + dev)',
-      liveBrowser: 'PASS — app renders, routes guard correctly, CSP observed enforcing, no app console errors',
-      secretSweep: 'PASS — no hash or TOTP-seed shaped values in tracked docs; server/.env is untracked',
+      liveBrowser: 'PASS 2026-10-20 — app renders, routes guard correctly, CSP observed enforcing, no app console errors',
+      secretSweep: 'PASS 2026-10-20 — no hash or TOTP-seed shaped values in tracked docs; server/.env is untracked',
     },
   },
 

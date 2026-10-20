@@ -146,6 +146,20 @@ test('proposal fails on a tie', () => {
   assert.equal(tally.passed, false);
 });
 
+test('a proposal is expired only after its own deadline', () => {
+  // The field used to be `!Number.isFinite(now) || now >= 0`, which is true for
+  // every timestamp that exists: a vote closing next week reported itself closed.
+  const votes = [{ address: '0xa', choice: 'for', weight: 100 }];
+  const now = Date.UTC(2026, 8, 24);
+  assert.equal(tallyProposal(votes, {}, now, new Date(now + 86400000)).expired, false);
+  assert.equal(tallyProposal(votes, {}, now, new Date(now - 1)).expired, true);
+  assert.equal(tallyProposal(votes, {}, now, new Date(now)).expired, true);
+  // No deadline on the document is not the same as a passed deadline.
+  assert.equal(tallyProposal(votes, {}, now, null).expired, false);
+  assert.equal(tallyProposal(votes, {}, now, '').expired, false);
+  assert.equal(tallyProposal(votes, {}, now, 'not a date').expired, false);
+});
+
 // ── Check-in streaks ───────────────────────────────────────────────────────
 test('streak counts consecutive days ending today', () => {
   const today = '2026-09-24';
@@ -1010,8 +1024,195 @@ test('the seal covers every field the fast path trusts', () => {
   }
 });
 
-// ── Monitor single-flight (regression) ─────────────────────────────────────
+// ── Public proof window ────────────────────────────────────────────────────
 //
+// This is the primitive a bottle scanner and a health-credential verifier run
+// through, and it exists because the code it replaced could not fail: the old
+// public check called `checkBlock(block, block.prevHash)`, i.e. it compared a
+// block's stored prevHash against the same stored prevHash. That assertion is
+// true for every block ever written, including a forged one, so `verified: true`
+// on a scanned bottle meant "this document has a hash", not "this record is
+// intact". The tests below pin the three things that fix actually buys.
+
+const { assessProofWindow, GENESIS_PREV_HASH } = ledgerSingleton;
+
+/** A genesis plus `count` chained blocks, mined for real at difficulty 2. */
+function buildChain(count) {
+  const docs = [mineV1({ index: 0, timestamp: 1700000000000, prevHash: GENESIS_PREV_HASH, txs: [txOf()] })];
+  for (let index = 1; index <= count; index += 1) {
+    docs.push(mineV2({
+      index,
+      timestamp: 1700000000000 + index,
+      prevHash: docs[index - 1].hash,
+      txs: [txOf({ data: { amount: 5 + index } })],
+    }));
+  }
+  return new Map(docs.map((doc) => [doc.index, doc]));
+}
+
+/** A checkpoint shaped exactly the way `saveCheckpoint` persists one. */
+function sealedCheckpoint(blocks, upTo) {
+  const record = {
+    upTo,
+    prevHash: blocks.get(upTo).hash,
+    sealed: { index: upTo, hash: blocks.get(upTo).hash },
+  };
+  return { ...record, seal: computeSeal(record) };
+}
+
+test('a clean window over a sealed chain proves intact and anchored', () => {
+  const blocks = buildChain(3);
+  const result = assessProofWindow({
+    indexes: [1, 2],
+    blocksByIndex: blocks,
+    checkpoint: sealedCheckpoint(blocks, 3),
+  });
+  assert.equal(result.valid, true);
+  assert.equal(result.requested, 2);
+  assert.equal(result.missing.length, 0);
+  assert.deepEqual(result.blocks.map((b) => b.intact), [true, true]);
+  assert.equal(result.integrity.seal, 'ok');
+  assert.equal(result.integrity.anchored, true, 'the sealed checkpoint reaches past this window');
+});
+
+test('a rewritten block is caught at its SUCCESSOR, which the self-referential check missed', () => {
+  const blocks = buildChain(4);
+  // The attack someone with database write access can actually afford: rewrite
+  // block 2's payload, re-derive its txHash and digest, and RE-MINE its hash.
+  // There is no network to convince and no key to steal — just a few thousand
+  // SHA-256 rounds at difficulty 2. Every invariant inside block 2 then holds.
+  const target = blocks.get(2);
+  const rewrittenTx = normalizeTx({ type: 'test:anchor', actor: target.txs[0].actor, data: { amount: 999999 } });
+  const rewritten = mineV2({
+    index: 2,
+    timestamp: target.timestamp,
+    prevHash: target.prevHash,
+    txs: [rewrittenTx],
+  });
+  const doctored = new Map(blocks);
+  doctored.set(2, rewritten);
+
+  // Exactly what the old public check looked at: the block and its own stored
+  // prevHash. It reports nothing wrong, which is why a scanned bottle used to
+  // read `verified: true` over rewritten history.
+  assert.equal(checkBlock(rewritten, rewritten.prevHash), null,
+    'a re-mined block is internally flawless — judging it against itself proves nothing');
+
+  // Judged against what is ACTUALLY stored one block below, the edit cannot be
+  // contained: block 3 still chains from the original hash of block 2.
+  const result = assessProofWindow({
+    indexes: [2, 3],
+    blocksByIndex: doctored,
+    checkpoint: sealedCheckpoint(blocks, 4),
+  });
+  assert.equal(result.valid, false);
+  assert.equal(result.blocks[0].intact, true, 'the rewritten block does look fine on its own');
+  assert.equal(result.blocks[1].intact, false, 'and its successor exposes it');
+  assert.equal(result.blocks[1].linked, false);
+  assert.equal(result.blocks[1].reason, 'prevHash mismatch');
+});
+
+test('a claim pointing at a missing block is a failure, not a skip', () => {
+  const blocks = buildChain(3);
+  blocks.delete(2); // the tail-delete that `if (!block) continue` used to hide
+  const result = assessProofWindow({
+    indexes: [1, 2, 3],
+    blocksByIndex: blocks,
+    checkpoint: sealedCheckpoint(blocks, 3),
+  });
+  assert.equal(result.requested, 3, 'every claim is counted, including the unresolvable one');
+  assert.deepEqual(result.missing, [2]);
+  assert.equal(result.present, 2);
+  assert.equal(result.valid, false);
+});
+
+test('a block with no predecessor cannot have its linkage proven', () => {
+  const blocks = buildChain(3);
+  blocks.delete(1);
+  const result = assessProofWindow({ indexes: [2], blocksByIndex: blocks });
+  assert.equal(result.valid, false);
+  assert.equal(result.blocks[0].intact, false);
+  assert.match(result.blocks[0].reason, /block 1 is missing/);
+});
+
+test('genesis links to the zero hash, not to a missing predecessor', () => {
+  const blocks = buildChain(2);
+  const result = assessProofWindow({ indexes: [0], blocksByIndex: blocks });
+  assert.equal(result.valid, true, 'index 0 has no predecessor to load, and does not need one');
+});
+
+test('an edited payload inside the window fails even when the header was re-mined', () => {
+  const blocks = buildChain(3);
+  const target = blocks.get(2);
+  const edited = { ...target, txs: [{ ...target.txs[0], data: { amount: 999999 } }] };
+  const tampered = new Map(blocks);
+  tampered.set(2, edited);
+  const result = assessProofWindow({
+    indexes: [2],
+    blocksByIndex: tampered,
+    checkpoint: sealedCheckpoint(blocks, 3),
+  });
+  assert.equal(result.valid, false);
+  assert.equal(result.blocks[0].intact, false);
+});
+
+test('a window is only anchored by a seal that actually verifies', () => {
+  const blocks = buildChain(3);
+  const honest = sealedCheckpoint(blocks, 3);
+
+  const forgedHeight = { ...honest, sealed: { index: 99, hash: 'a'.repeat(64) } };
+  assert.equal(
+    assessProofWindow({ indexes: [3], blocksByIndex: blocks, checkpoint: forgedHeight }).integrity.anchored,
+    false,
+    'raising the high-water mark without the key must not anchor anything',
+  );
+
+  const tamperedSeal = { ...honest, seal: 'f'.repeat(64) };
+  assert.equal(
+    assessProofWindow({ indexes: [3], blocksByIndex: blocks, checkpoint: tamperedSeal }).integrity.seal,
+    'bad',
+  );
+  assert.equal(
+    assessProofWindow({ indexes: [3], blocksByIndex: blocks, checkpoint: null }).integrity.seal,
+    'absent',
+    'no checkpoint is "nothing proven", never a pass',
+  );
+  // Intact blocks plus a broken seal: the chain re-hashes, but nothing signs the
+  // claim that the whole prefix was ever checked.
+  const broken = assessProofWindow({ indexes: [3], blocksByIndex: blocks, checkpoint: tamperedSeal });
+  assert.equal(broken.valid, true, 'the window itself still re-hashes');
+  assert.equal(broken.integrity.anchored, false, 'and it is still not anchored');
+});
+
+test('a checkpoint stored in the nested shape seals the high-water mark', () => {
+  // Regression: the on-disk anchor writes `sealedIndex`/`sealedHash` flat and
+  // the database checkpoint writes `sealed: { index, hash }`. `sealPayload`
+  // destructured the flat names only, so a persisted record was sealed over
+  // `sealedIndex: NaN, sealedHash: ''` — it matched itself on verify and reported
+  // 'ok' while authenticating NOTHING about the height that truncation detection
+  // depends on.
+  const nested = { upTo: 12, prevHash: 'a'.repeat(64), sealed: { index: 12, hash: 'a'.repeat(64) } };
+  const flat = { upTo: 12, prevHash: 'a'.repeat(64), sealedIndex: 12, sealedHash: 'a'.repeat(64) };
+  assert.equal(computeSeal(nested), computeSeal(flat), 'both shapes must seal the same bytes');
+  const seal = computeSeal(nested);
+  assert.equal(verifySeal({ ...nested, seal }), 'ok');
+  assert.equal(verifySeal({ ...nested, sealed: { index: 4, hash: 'a'.repeat(64) }, seal }), 'bad',
+    'lowering the high-water mark launders a truncation — the seal must reject it');
+  assert.equal(verifySeal({ ...nested, sealed: { index: 12, hash: 'b'.repeat(64) }, seal }), 'bad');
+});
+
+test('an empty window proves nothing, and dirty indexes are normalised', () => {
+  assert.equal(assessProofWindow({ indexes: [], blocksByIndex: new Map() }).valid, false);
+  const blocks = buildChain(2);
+  const result = assessProofWindow({
+    indexes: [1, 1, '1', null, undefined, -3, 1.5],
+    blocksByIndex: blocks,
+  });
+  assert.equal(result.requested, 1, 'heights are de-duplicated and non-heights dropped');
+  assert.equal(result.valid, true);
+});
+
+
 // `GET /admin/security/monitor` runs ~48 probes. It cached its result for 60 s,
 // but the cache is only populated once a run COMPLETES, so a 30 s poll, a
 // "Sync now" click and a report download landing together each started their

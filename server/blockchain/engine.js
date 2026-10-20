@@ -119,7 +119,14 @@ async function anchor(type, actor, { public: pub = null, secret = null }) {
     ]);
   } catch (err) {
     console.error('[web3 anchor]', type, err.message);
-    return { index: -1, hash: '', txs: [''] };
+    // The failure is made explicit rather than left as `index: -1` for each
+    // caller to remember to test. Every route reads `tx.txs[0] || ''`, so a
+    // failed anchor used to look like a successful one that happened to have an
+    // empty hash — the health ledger then stored a row saying "anchored at block
+    // -1", rendered it to the member as an anchor, and paid the anchor reward
+    // for a block that does not exist. `anchored === false` is the signal a
+    // caller must check before claiming anything was proven.
+    return { index: -1, hash: '', txs: [''], anchored: false, error: err.message };
   }
 }
 
@@ -133,7 +140,9 @@ async function anchorMany(entries) {
     return await ledger.append(entries);
   } catch (err) {
     console.error('[web3 anchorMany]', err.message);
-    return { index: -1, hash: '', txs: entries.map(() => '') };
+    // Same explicit failure as anchor(): positional alignment is kept so
+    // `txs[i]` still corresponds to `entries[i]`.
+    return { index: -1, hash: '', txs: entries.map(() => ''), anchored: false, error: err.message };
   }
 }
 

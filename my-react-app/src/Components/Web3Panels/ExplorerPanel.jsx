@@ -49,9 +49,14 @@ export default function ExplorerPanel() {
     try {
       setBusy(true);
       clear();
-      const res = await verifyChain();
+      const res = await verifyChain({ full: true });
       setVerify(res);
-      if (res.valid) ok(`Chain valid ✓ — ${res.checked} blocks recomputed at difficulty ${res.difficulty}.`);
+      // A deep audit that has not finished is not a verdict. `valid: true` with
+      // `pending: true` means "nothing has been found wrong yet", and claiming
+      // "Chain valid ✓ — N blocks recomputed" for a check that recomputed none of
+      // them is how a broken chain gets a green tick.
+      if (res.pending) info(`Full check still running — ${res.checked ?? 0} blocks counted, nothing proven yet. The verdict appears when the audit finishes.`);
+      else if (res.valid) ok(`Chain valid ✓ — ${res.checked} blocks recomputed at difficulty ${res.difficulty}.`);
       else fail({ message: `Chain BROKEN at block #${res.brokenAt}: ${res.reason} — everyone has been notified and the ledger is restarting on a fresh verified chain automatically.` });
     } catch (err) {
       fail(err, 'Could not verify the chain.');
@@ -92,7 +97,7 @@ export default function ExplorerPanel() {
     ? 'checking…'
     : verdict.valid === false
       ? 'BROKEN ✗'
-      : verdict.state === 'verifying'
+      : verdict.state === 'verifying' || verdict.pending
         ? 'checking…'
         : 'Valid ✓';
   const integrityTone = !verdict || verdict.valid === false
