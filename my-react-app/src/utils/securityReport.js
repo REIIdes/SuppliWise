@@ -3,11 +3,13 @@ import {
   REPORT_LAYOUT as L,
   cleanReportText,
   downloadPdf,
+  drawParagraph,
   drawPill,
   drawReportFooter,
   drawReportHeader,
   drawSectionHeading,
   formatReportDate,
+  measureParagraph,
   reportText,
 } from './reportTheme.js';
 import { isStaleChunkError, markChunkReloadHealthy, reloadOnceForStaleChunk } from './chunkReload.js';
@@ -116,41 +118,69 @@ const severityColor = (severity) => {
   }
 };
 
-function drawKpi(doc, x, y, width, height, value, label, color, fill) {
+export function drawKpi(doc, x, y, width, height, value, label, color, fill) {
   doc.setFillColor(...fill);
   doc.setDrawColor(...C.line);
   doc.setLineWidth(0.3);
   doc.roundedRect(x, y, width, height, 2.5, 2.5, 'FD');
   doc.setFillColor(...color);
   doc.rect(x, y, width, 2.5, 'F');
+  // Baselines are fractions of the box, not fixed offsets: the same helper draws
+  // both the 25 mm headline tiles and the shorter stat tiles, and a hard-coded
+  // `y + 19` sits outside a box that is only 21 mm tall.
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
+  doc.setFontSize(13);
   doc.setTextColor(...C.ink);
-  doc.text(reportText(value, '0'), x + 5, y + 12, { maxWidth: width - 10 });
+  doc.text(reportText(value, '0'), x + 5, y + height * 0.48, { maxWidth: width - 10 });
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.2);
   doc.setTextColor(...C.muted);
-  doc.text(reportText(label, '').toUpperCase(), x + 5, y + 19, { maxWidth: width - 10 });
+  doc.text(reportText(label, '').toUpperCase(), x + 5, y + height * 0.82, { maxWidth: width - 10 });
 }
 
-function drawMetaCell(doc, x, y, width, label, value, accent) {
+/**
+ * Draw one label/value pair and return the exact height it consumed.
+ *
+ * The value used to be a single `doc.text(..., { maxWidth })` call: jsPDF wraps
+ * that internally, so a long value ran a second line straight into the next
+ * row's label. Measuring the wrap here means the caller advances by the real
+ * height instead of a fixed 11 mm that was too generous for short values and
+ * too tight for long ones.
+ */
+export function drawMetaCell(doc, x, y, width, label, value, accent) {
+  const labelBlock = measureParagraph(doc, reportText(label, '').toUpperCase(), {
+    maxWidth: width, fontSize: 7.2, fontStyle: 'bold',
+  });
+  const valueBlock = measureParagraph(doc, reportText(value, '-'), { maxWidth: width, fontSize: 8.5 });
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7.2);
   doc.setTextColor(...accent);
-  doc.text(reportText(label, '').toUpperCase(), x, y, { maxWidth: width });
+  labelBlock.lines.forEach((line, index) => {
+    doc.text(line, x, y + labelBlock.em * 0.82 + index * labelBlock.lineHeight);
+  });
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(...C.ink);
-  doc.text(reportText(value, '-'), x, y + 5.2, { maxWidth: width });
+  const valueTop = y + labelBlock.height + 0.6;
+  valueBlock.lines.forEach((line, index) => {
+    doc.text(line, x, valueTop + valueBlock.em * 0.82 + index * valueBlock.lineHeight);
+  });
+  return labelBlock.height + 0.6 + valueBlock.height;
 }
 
-function drawFindingCard(doc, item, y, accent, ensureSpace) {
+export function drawFindingCard(doc, item, y, accent, ensureSpace) {
   const title = reportText(item?.title || item?.name, 'Security finding');
   const detail = reportText(item?.detail || item?.note || item?.description, 'No additional detail supplied.');
-  const titleLines = doc.splitTextToSize(title, L.contentWidth - 20);
-  const detailLines = doc.splitTextToSize(detail, L.contentWidth - 18);
-  const height = Math.max(22, 8 + titleLines.length * 4.5 + detailLines.length * 4.4 + 4);
-  y = ensureSpace(height + 4);
+  const textX = L.margin + 8;
+  const innerWidth = L.contentWidth - 13;   // 8 mm of rail + inset, 5 mm of right padding
+  const titleBlock = measureParagraph(doc, title, { maxWidth: innerWidth, fontSize: 8.5, fontStyle: 'bold' });
+  const detailBlock = measureParagraph(doc, detail, { maxWidth: innerWidth, fontSize: 7.8 });
+  const boxPadding = 3;
+  const labelGap = 1.2;
+  // Nothing else lives in this box, so its height is the text plus the padding —
+  // the old 22 mm minimum was pure blank card under every short finding.
+  const height = boxPadding * 2 + titleBlock.height + labelGap + detailBlock.height;
+  y = ensureSpace(height + 3);
   doc.setFillColor(...C.slateLight);
   doc.setDrawColor(...C.line);
   doc.setLineWidth(0.3);
@@ -160,23 +190,33 @@ function drawFindingCard(doc, item, y, accent, ensureSpace) {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
   doc.setTextColor(...C.ink);
-  doc.text(titleLines, L.margin + 8, y + 7);
+  const detailTop = y + boxPadding + titleBlock.height + labelGap;
+  drawParagraph(doc, titleBlock, textX, y + boxPadding);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.8);
   doc.setTextColor(...C.muted);
-  doc.text(detailLines, L.margin + 8, y + 8 + titleLines.length * 4.5);
-  return y + height + 4;
+  drawParagraph(doc, detailBlock, textX, detailTop);
+  return y + height + 3;
 }
 
-function drawRecommendationCard(doc, recommendation, index, y, ensureSpace) {
+export function drawRecommendationCard(doc, recommendation, index, y, ensureSpace) {
   const priority = reportText(recommendation?.priority, 'Medium');
   const accent = /critical|high/i.test(priority) ? C.rose : /low/i.test(priority) ? C.indigo : C.amber;
   const description = reportText(recommendation?.description || recommendation?.fix, 'Review this item in the security monitor.');
-  const titleLines = doc.splitTextToSize(reportText(recommendation?.title, `Action ${index + 1}`), L.contentWidth - 48);
-  const lines = doc.splitTextToSize(description, L.contentWidth - 19);
-  const height = Math.max(22, 12 + titleLines.length * 4.5 + lines.length * 4.5);
+  const titleX = L.margin + 36;
+  const titleBlock = measureParagraph(doc, reportText(recommendation?.title, `Action ${index + 1}`), {
+    maxWidth: L.contentWidth - 41, fontSize: 8.8, fontStyle: 'bold',
+  });
+  const detailBlock = measureParagraph(doc, description, { maxWidth: L.contentWidth - 13, fontSize: 7.8 });
+  const boxPadding = 3;
+  const pillHeight = 7;
+  // The pill sits in the header row beside the title, so the row has to be as
+  // tall as whichever of the two needs more room. Sizing it from the title alone
+  // let a one-line title pull the body copy up underneath the pill.
+  const headerHeight = Math.max(titleBlock.height, pillHeight + 1.5);
+  const height = boxPadding * 2 + headerHeight + 1.2 + detailBlock.height;
   const fill = accent === C.rose ? C.roseLight : accent === C.indigo ? C.indigoLight : C.amberLight;
-  y = ensureSpace(height + 4);
+  y = ensureSpace(height + 3);
 
   doc.setFillColor(...fill);
   doc.setDrawColor(...C.line);
@@ -184,16 +224,16 @@ function drawRecommendationCard(doc, recommendation, index, y, ensureSpace) {
   doc.roundedRect(L.margin, y, L.contentWidth, height, 2.5, 2.5, 'FD');
   doc.setFillColor(...accent);
   doc.roundedRect(L.margin, y, 4, height, 1.5, 1.5, 'F');
-  drawPill(doc, priority, L.margin + 8, y + 4, 24, accent, { height: 7, fontSize: 6.5 });
+  drawPill(doc, priority, L.margin + 8, y + boxPadding, 24, accent, { height: pillHeight, fontSize: 6.5 });
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.8);
   doc.setTextColor(...C.ink);
-  doc.text(titleLines, L.margin + 36, y + 8);
+  drawParagraph(doc, titleBlock, titleX, y + boxPadding);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.8);
   doc.setTextColor(...C.muted);
-  doc.text(lines, L.margin + 8, y + 13 + titleLines.length * 4.5);
-  return y + height + 4;
+  drawParagraph(doc, detailBlock, L.margin + 8, y + boxPadding + headerHeight + 1.2);
+  return y + height + 3;
 }
 
 /**
@@ -291,7 +331,7 @@ export async function downloadSecurityReport({ security = {}, overview = {}, req
     if (y + amount > L.pageHeight - L.footerHeight - 4) return addPage();
     return y;
   };
-  const tableMargin = { top: L.continuationContentTop, bottom: L.footerHeight + 5, left: L.margin, right: L.margin };
+  const tableMargin = { top: L.continuationContentTop, bottom: L.footerHeight + 2, left: L.margin, right: L.margin };
   const runTable = (options) => {
     // Same guard as the wellness report: autotable's built-in grid default is
     // rgb(200,200,200), which is outside the green/black/white palette.
@@ -322,34 +362,38 @@ export async function downloadSecurityReport({ security = {}, overview = {}, req
   const statusText = overallStatus === 'Secure'
     ? 'Controls and live probes are reporting a healthy posture.'
     : 'Review the highlighted controls and live monitor findings before release.';
-  y = ensureSpace(25);
+  // The posture band is a fixed card, so reserve exactly its height plus the gap
+  // that follows it. The old number asked for 25 mm and then advanced 27, which
+  // left a band of empty page under every copy of this card.
+  const postureHeight = 18;
+  y = ensureSpace(postureHeight + 3);
   doc.setFillColor(...(overallStatus === 'Secure' ? C.emeraldLight : overallStatus === 'Vulnerable' ? C.amberLight : C.roseLight));
   doc.setDrawColor(...overallColor);
   doc.setLineWidth(0.4);
-  doc.roundedRect(L.margin, y, L.contentWidth, 20, 2.5, 2.5, 'FD');
+  doc.roundedRect(L.margin, y, L.contentWidth, postureHeight, 2.5, 2.5, 'FD');
   doc.setFillColor(...overallColor);
-  doc.roundedRect(L.margin, y, 4, 20, 1.5, 1.5, 'F');
+  doc.roundedRect(L.margin, y, 4, postureHeight, 1.5, 1.5, 'F');
   drawPill(doc, overallStatus, L.margin + 9, y + 5, 29, overallColor, { height: 8, fontSize: 7.5 });
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9.2);
   doc.setTextColor(...C.ink);
-  doc.text('Current security posture', L.margin + 44, y + 8.5);
+  doc.text('Current security posture', L.margin + 44, y + 8);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.1);
   doc.setTextColor(...C.muted);
-  doc.text(statusText, L.margin + 44, y + 14, { maxWidth: L.contentWidth - 55 });
-  y += 27;
+  doc.text(statusText, L.margin + 44, y + 13.5, { maxWidth: L.contentWidth - 55 });
+  y += postureHeight + 3;
 
   const kpiGap = 4;
   const kpiWidth = (L.contentWidth - kpiGap * 3) / 4;
-  y = ensureSpace(27);
-  drawKpi(doc, L.margin, y, kpiWidth, 25, `${checks.length}`, 'Controls checked', C.indigo, C.indigoLight);
-  drawKpi(doc, L.margin + kpiWidth + kpiGap, y, kpiWidth, 25, `${healthyMonitors}`, 'Healthy monitors', C.emerald, C.emeraldLight);
-  drawKpi(doc, L.margin + (kpiWidth + kpiGap) * 2, y, kpiWidth, 25, `${criticalCount + criticalMonitors}`, 'Critical findings', C.rose, C.roseLight);
-  drawKpi(doc, L.margin + (kpiWidth + kpiGap) * 3, y, kpiWidth, 25, `${audit?.counts?.openOrAccepted ?? '—'}`, 'Open / accepted', C.amber, C.amberLight);
-  y += 33;
+  const kpiHeight = 21;
+  y = ensureSpace(kpiHeight + 3);
+  drawKpi(doc, L.margin, y, kpiWidth, kpiHeight, `${checks.length}`, 'Controls checked', C.indigo, C.indigoLight);
+  drawKpi(doc, L.margin + kpiWidth + kpiGap, y, kpiWidth, kpiHeight, `${healthyMonitors}`, 'Healthy monitors', C.emerald, C.emeraldLight);
+  drawKpi(doc, L.margin + (kpiWidth + kpiGap) * 2, y, kpiWidth, kpiHeight, `${criticalCount + criticalMonitors}`, 'Critical findings', C.rose, C.roseLight);
+  drawKpi(doc, L.margin + (kpiWidth + kpiGap) * 3, y, kpiWidth, kpiHeight, `${audit?.counts?.openOrAccepted ?? '—'}`, 'Open / accepted', C.amber, C.amberLight);
+  y += kpiHeight + 3;
 
-  y = ensureSpace(35);
   const metaRows = [
     ['Report generated', generatedAt, 'Framework', 'STRIDE + OWASP Top 10'],
     ['Controls', `${checks.length} (${secureCount} secure, ${vulnerableCount} vulnerable, ${criticalCount} critical)`, 'Live monitors', `${monitors.length} (${healthyMonitors} healthy, ${warningMonitors} warning, ${criticalMonitors} critical)`],
@@ -357,11 +401,14 @@ export async function downloadSecurityReport({ security = {}, overview = {}, req
     ['Last scan', security?.lastScanned ? formatReportDate(security.lastScanned, true) : 'Not recorded', 'Last monitor sync', syncedAt ? formatReportDate(syncedAt, true) : 'Not recorded'],
   ];
   metaRows.forEach((row) => {
-    drawMetaCell(doc, L.margin, y, 82, row[0], row[1], C.teal);
-    drawMetaCell(doc, L.margin + 94, y, 86, row[2], row[3], C.indigo);
-    y += 11;
+    // Each row reserves only its own measured height, so a long value wraps
+    // inside the row instead of colliding with the next one — and a short value
+    // no longer costs a fixed 11 mm of blank page.
+    y = ensureSpace(11);
+    const leftHeight = drawMetaCell(doc, L.margin, y, 82, row[0], row[1], C.teal);
+    const rightHeight = drawMetaCell(doc, L.margin + 94, y, 86, row[2], row[3], C.indigo);
+    y += Math.max(leftHeight, rightHeight) + 2.5;
   });
-  y += 3;
 
   // Security controls ------------------------------------------------------
   y = ensureSpace(20);
@@ -379,8 +426,8 @@ export async function downloadSecurityReport({ security = {}, overview = {}, req
     head: [['Status', 'Framework', 'Control', 'Recommended action']],
     body: controlBody,
     theme: 'grid',
-    headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7.5, fontStyle: 'bold', cellPadding: 4 },
-    bodyStyles: { fontSize: 7.5, textColor: C.ink, cellPadding: 3.5, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
+    headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7.5, fontStyle: 'bold', cellPadding: 2.8 },
+    bodyStyles: { fontSize: 7.5, textColor: C.ink, cellPadding: 2.6, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
     alternateRowStyles: { fillColor: C.slateLight },
     columnStyles: {
       0: { cellWidth: 22, fontStyle: 'bold' },
@@ -395,7 +442,7 @@ export async function downloadSecurityReport({ security = {}, overview = {}, req
         data.cell.styles.fillColor = color === C.rose ? C.roseLight : color === C.amber ? C.amberLight : C.emeraldLight;
       }
     },
-  }) + 8;
+  }) + 4;
 
   // Live monitor -----------------------------------------------------------
   y = ensureSpace(20);
@@ -414,8 +461,8 @@ export async function downloadSecurityReport({ security = {}, overview = {}, req
     head: [['Status', 'Monitor', 'Framework', 'Detail', 'Latency']],
     body: monitorBody,
     theme: 'grid',
-    headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7, fontStyle: 'bold', cellPadding: 3.5 },
-    bodyStyles: { fontSize: 6.7, textColor: C.ink, cellPadding: 3, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
+    headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7, fontStyle: 'bold', cellPadding: 2.6 },
+    bodyStyles: { fontSize: 6.7, textColor: C.ink, cellPadding: 2.4, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
     alternateRowStyles: { fillColor: C.tealLight },
     columnStyles: {
       0: { cellWidth: 20, fontStyle: 'bold' },
@@ -431,22 +478,28 @@ export async function downloadSecurityReport({ security = {}, overview = {}, req
         data.cell.styles.fillColor = color === C.rose ? C.roseLight : color === C.amber ? C.amberLight : color === C.indigo ? C.indigoLight : C.emeraldLight;
       }
     },
-  }) + 8;
+  }) + 4;
 
   // Audit record -----------------------------------------------------------
   if (audit) {
     const scope = reportText(audit.scope, 'Scope details were not supplied.');
-    const scopeLines = doc.splitTextToSize(scope, L.contentWidth - 18);
-    const scopeHeight = Math.max(19, 12 + scopeLines.length * 4.5);
-    // Reserve the heading and the scope card together, otherwise a table that
-    // ends near the bottom leaves the heading alone at the foot of a page.
-    y = ensureSpace(20 + scopeHeight);
+    const scopeInner = L.contentWidth - 13;
+    const scopeTitleBlock = measureParagraph(doc, 'AUDIT SCOPE', {
+      maxWidth: scopeInner, fontSize: 7.5, fontStyle: 'bold',
+    });
+    const scopeBlock = measureParagraph(doc, scope, { maxWidth: scopeInner, fontSize: 8 });
+    const boxPadding = 3;
+    // Measured, like every other box in the report: the old `12 + lines * 4.5`
+    // guess was too tall for a one-line scope and too short for a long one, so
+    // the copy either floated in blank card or ran past the border.
+    const scopeHeight = boxPadding * 2 + scopeTitleBlock.height + 1.2 + scopeBlock.height;
+    y = ensureSpace(20);
     y = drawSectionHeading(doc, 'Security audit record', y, C.violet);
-    y = ensureSpace(scopeHeight);
+    y = ensureSpace(scopeHeight + 3);
     doc.setFillColor(...C.violetLight);
-    // Must be spread: passing the array itself makes jsPDF compute
-    // `array / 255` -> NaN and throw "Invalid argument passed to jsPDF.f2".
-    doc.setDrawColor(...[221, 214, 254]);
+    // C.line, not a hard-coded pastel: the palette is green, black and white,
+    // and this border was the one place a fourth ink could still leak in.
+    doc.setDrawColor(...C.line);
     doc.setLineWidth(0.3);
     doc.roundedRect(L.margin, y, L.contentWidth, scopeHeight, 2.5, 2.5, 'FD');
     doc.setFillColor(...C.violet);
@@ -454,12 +507,18 @@ export async function downloadSecurityReport({ security = {}, overview = {}, req
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(7.5);
     doc.setTextColor(...C.violet);
-    doc.text('AUDIT SCOPE', L.margin + 8, y + 7);
+    const scopeBodyTop = y + boxPadding + scopeTitleBlock.height + 1.2;
+    // The label keeps the accent colour, so it is placed line by line here:
+    // drawParagraph pins body copy to black, which is right for the text under
+    // it and wrong for a heading.
+    scopeTitleBlock.lines.forEach((line, lineIndex) => {
+      doc.text(line, L.margin + 8, y + boxPadding + scopeTitleBlock.em * 0.82 + lineIndex * scopeTitleBlock.lineHeight);
+    });
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
     doc.setTextColor(...C.muted);
-    doc.text(scopeLines, L.margin + 8, y + 13);
-    y += scopeHeight + 7;
+    drawParagraph(doc, scopeBlock, L.margin + 8, scopeBodyTop);
+    y += scopeHeight + 3;
 
     const counts = audit.counts || {};
     const statItems = [
@@ -470,27 +529,28 @@ export async function downloadSecurityReport({ security = {}, overview = {}, req
     ];
     const statGap = 4;
     const statWidth = (L.contentWidth - statGap * 3) / 4;
-    y = ensureSpace(24);
-    statItems.forEach(([label, value, color, fill], index) => drawKpi(doc, L.margin + index * (statWidth + statGap), y, statWidth, 23, value ?? '—', label, color, fill));
-    y += 31;
+    const statHeight = 21;
+    y = ensureSpace(statHeight + 3);
+    statItems.forEach(([label, value, color, fill], index) => drawKpi(doc, L.margin + index * (statWidth + statGap), y, statWidth, statHeight, value ?? '—', label, color, fill));
+    y += statHeight + 3;
 
     const findings = asArray(audit.headlineFindings);
     if (findings.length > 0) {
-      y = ensureSpace(45);
+      // Reserve the heading plus one card, not a whole section: a fixed 45 mm
+      // ask moved the heading to a fresh page while 40 mm of the current one
+      // was still empty, and the card itself already knows how to break.
+      y = ensureSpace(24);
       y = drawSectionHeading(doc, 'Headline findings', y, C.rose);
       findings.forEach((finding) => {
-        const estimated = 25;
-        y = ensureSpace(estimated);
         y = drawFindingCard(doc, finding, y, severityColor(finding?.severity), ensureSpace);
       });
     }
 
     const openItems = asArray(audit.openItems);
     if (openItems.length > 0) {
-      y = ensureSpace(50);
+      y = ensureSpace(24);
       y = drawSectionHeading(doc, 'Open and accepted items', y, C.amber);
       openItems.forEach((finding) => {
-        y = ensureSpace(25);
         y = drawFindingCard(doc, finding, y, severityColor(finding?.severity), ensureSpace);
       });
     }
@@ -498,10 +558,9 @@ export async function downloadSecurityReport({ security = {}, overview = {}, req
 
   // Recommendations -------------------------------------------------------
   if (recommendations.length > 0) {
-    y = ensureSpace(48);
+    y = ensureSpace(24);
     y = drawSectionHeading(doc, 'Recommended actions', y, C.orange);
     recommendations.forEach((recommendation, index) => {
-      y = ensureSpace(28);
       y = drawRecommendationCard(doc, recommendation, index, y, ensureSpace);
     });
   }
