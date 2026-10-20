@@ -103,9 +103,21 @@ function normalizeChatRequest(body) {
   if (typeof message !== 'string' || !message.trim()) {
     throw new ChatInputError('Please enter a message.');
   }
-  const normalizedMessage = message.trim();
-  if (normalizedMessage.length > MAX_MESSAGE_LENGTH) {
+  const trimmed = message.trim();
+  if (trimmed.length > MAX_MESSAGE_LENGTH) {
     throw new ChatInputError(`Please keep messages under ${MAX_MESSAGE_LENGTH} characters.`);
+  }
+  // The length check runs on the raw text so the refusal quotes what the member
+  // actually typed, then the turn is neutralized like every other channel here.
+  // History and the recommendation block already went through `neutralize`; the
+  // LIVE message did not, so a zero-width join or an `[INST]` in the current turn
+  // reached the provider, the retrieval index and the stored transcript untouched
+  // while the identical text one turn earlier was scrubbed. The cap is applied
+  // after, because stripping a token shortens the string rather than cutting a
+  // sentence in half.
+  const normalizedMessage = neutralize(trimmed, { maxLength: MAX_MESSAGE_LENGTH }).trim();
+  if (!normalizedMessage) {
+    throw new ChatInputError('Please enter a message.');
   }
 
   validateRecommendationContext(body.context);

@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
 const { preprocessUserInput, sanitizeMedicalField } = require('../utils/sanitize');
-const { completeWithFallback } = require('../utils/aiRouter');
+const { completeWithFallback, safeAttemptSummary } = require('../utils/aiRouter');
 const { simplifiedReasonFor, simplifiedEvidenceFor } = require('../utils/recommendationPlainLanguage');
 const { promptSafe, ASSESSMENT_SYSTEM_PROMPT, buildAssessmentPrompt } = require('../utils/assessmentPrompt');
 const { enforcePlanConsistency, classifySupplement } = require('../utils/planConsistency');
@@ -472,7 +472,9 @@ router.post('/', protect, async (req, res) => {
     } else if (Array.isArray(assessment.attempts) && assessment.attempts.length) {
       // Name every provider tried and why each one failed. A silent drop to the
       // rule engine is how an exhausted account keeps looking like a working one.
-      console.error(`[recommend] no provider answered: ${JSON.stringify(assessment.attempts)}`);
+      // The summary, not the raw attempts — a provider that refuses a prompt often
+      // quotes the member's answers back, and those are health data.
+      console.error(`[recommend] no provider answered: ${JSON.stringify(safeAttemptSummary(assessment.attempts))}`);
     }
 
     // Use AI result if valid, otherwise rule-based fallback.

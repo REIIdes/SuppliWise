@@ -31,7 +31,7 @@ const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
 const { dedupe } = require('../utils/cache');
-const { completeWithFallback } = require('../utils/aiRouter');
+const { completeWithFallback, safeAttemptSummary } = require('../utils/aiRouter');
 const {
   neutralize, neutralizeList, fenceData, GUARDRAIL_CLAUSE,
 } = require('../utils/aiGuardrails');
@@ -349,9 +349,11 @@ router.post('/', protect, async (req, res) => {
       // distinction the reader needs has to be recovered from the message.
       if (!completion.ok) {
         // Name every provider tried and why. "AI service error" on its own is
-        // what let a dead key look like a flaky one.
+        // what let a dead key look like a flaky one. The summary only — a provider
+        // error body can quote the request back, and the request carries this
+        // member's own health answers.
         console.error(
-          `[supplement_detail] no provider answered: ${JSON.stringify(completion.attempts || [])}`,
+          `[supplement_detail] no provider answered: ${JSON.stringify(safeAttemptSummary(completion.attempts))}`,
         );
         const failure = new Error(completion.error || 'AI service unavailable');
         // A timeout is not a broken service, and the reader can act on one of

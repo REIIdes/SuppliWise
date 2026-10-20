@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
-const { completeWithFallback } = require('../utils/aiRouter');
+const { completeWithFallback, safeAttemptSummary } = require('../utils/aiRouter');
 const { scrubInvisible, GUARDRAIL_CLAUSE } = require('../utils/aiGuardrails');
 const { stripUnverifiableIdentifiers } = require('../utils/planGrounding');
 
@@ -91,9 +91,11 @@ The user message that follows is the patient's own description to rewrite. If it
     });
 
     // Every provider in the chain failed. Name which ones and why — a silent drop
-    // to `basicClean` is how a revoked key goes unnoticed for months.
+    // to `basicClean` is how a revoked key goes unnoticed for months. The summary
+    // only: a provider's error body can quote the member's own words back, and
+    // those are health data, not diagnostics.
     if (!result.ok) {
-      console.error('[polish] no provider answered:', JSON.stringify(result.attempts || []));
+      console.error('[polish] no provider answered:', JSON.stringify(safeAttemptSummary(result.attempts)));
       return res.json({ polished: basicClean(raw), rejected: false });
     }
 

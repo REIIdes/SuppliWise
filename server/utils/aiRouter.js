@@ -591,6 +591,59 @@ function providerErrorDetail(bodyText) {
 }
 
 /**
+ * The attempt records in a shape that is safe to write to a log.
+ *
+ * `attempts[].error` is built from the provider's own error body (see
+ * `providerErrorDetail`), which is redacted for CREDENTIALS but not for people: a
+ * gateway that refuses a request often quotes the offending text back, and that
+ * text is a member's health question. A chat turn therefore logs this summary
+ * instead of the raw array — the operator still gets the provider, the status and
+ * the actionable prefix ("Key rejected (HTTP 401)"), and only the quoted remainder
+ * is dropped, with a flag that says a detail existed.
+ *
+ * @param {Array<{provider: string, ok: boolean, error: string|null}>} attempts
+ */
+function safeAttemptSummary(attempts) {
+  return (Array.isArray(attempts) ? attempts : []).map((attempt) => {
+    const detail = String(attempt && attempt.error || '');
+    // The generated half of every router error ends at the first em dash;
+    // everything after it came from the provider and may carry quoted input.
+    const head = detail.split(' — ')[0].trim().slice(0, 90);
+    return {
+      provider: String(attempt && attempt.provider || 'unknown'),
+      ok: Boolean(attempt && attempt.ok),
+      error: head || null,
+      detailOmitted: detail.length > head.length + 3,
+      latencyMs: Number.isFinite(attempt && attempt.latencyMs) ? attempt.latencyMs : null,
+    };
+  });
+}
+
+/**
+ * A deterministic sampling seed from any set of strings.
+ *
+ * Providers that honour `seed` reproduce a reply when the prompt and the seed are
+ * unchanged, which is the only cross-vendor way to make "the same question twice
+ * gives the same answer" true without setting temperature to 0 and flattening the
+ * assistant's tone. FNV-1a is used rather than `Math.random`, a counter or the
+ * object id: it survives a restart, it is not case- or locale-sensitive, and it is
+ * masked to a positive 31-bit integer because some gateways reject a seed the wire
+ * reads as a negative number.
+ */
+function stableSeed(parts) {
+  const key = (Array.isArray(parts) ? parts : [parts])
+    .map((part) => String(part == null ? '' : part).trim().toLowerCase())
+    .filter(Boolean)
+    .join('|');
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < key.length; i++) {
+    hash ^= key.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return (hash >>> 0) & 0x7fffffff;
+}
+
+/**
  * Parse a JSON object out of a model reply.
  *
  * A model asked for bare JSON routinely wraps it in a ```json fence or adds a
@@ -1112,6 +1165,8 @@ module.exports = {
   parseJsonObject,
   detectCreditExhausted,
   providerErrorDetail,
+  safeAttemptSummary,
+  stableSeed,
   complete,
   completeWithTarget,
   completeWithFallback,
