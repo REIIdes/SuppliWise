@@ -100,6 +100,79 @@ const ANSWER_LICENSES = [
 ];
 
 /**
+ * Names that are a FACT ABOUT A MEMBER rather than a wellness topic: lab
+ * analytes and prescription drugs.
+ *
+ * They are not in the questionnaire's symptom/condition lists, so the vocabulary
+ * built from it would never see them, and an invented "your ferritin is 12" or
+ * "because you take warfarin" would sail through the patient-fact check while
+ * reading exactly like a recollection. A model produces both shapes freely — one
+ * to justify a dose, one to sound personal.
+ *
+ * Putting them in the vocabulary does not make them forbidden: they are advice
+ * words as often as fact words ("your body absorbs iron better with vitamin C").
+ * They are only ever acted on together with an attribution shape, and a member
+ * who typed the value in their own medications or lab results licenses it through
+ * `freeText`, like every other reported fact.
+ *
+ * The analyte list is deliberately made of names that are ONLY a lab value. Every
+ * drug name below also feeds `MEDICATION_WORDS`, and "reduce sodium intake" is
+ * sound advice for hypertension — when `sodium` was in this list it joined that
+ * alternation and the verifier replaced a lifestyle line with a prescription
+ * warning. Bare nutrient words (`iron`, `glucose`, `potassium`, `vitamin d`) are
+ * left out for the same reason; the qualified forms stay, and they are the shape
+ * a fabricated result actually arrives in ("your ferritin is 12").
+ */
+const LAB_FACT_TERMS = [
+  'ferritin', 'hemoglobin', 'haemoglobin', 'hemoglobin a1c', 'hba1c', 'hb a1c',
+  'ldl', 'hdl', 'vldl', 'apolipoprotein b', 'triglycerides', 'fasting glucose',
+  'creatinine', 'kidney function', 'liver enzymes', 'tsh', 'thyroid panel',
+  'cortisol', 'testosterone', 'estradiol', 'dheas', 'homocysteine', 'crp', 'hs-crp',
+  'sed rate', 'uric acid', 'psa', 'albumin', 'bilirubin', 'c-peptide', 'serum iron',
+  'tibc', 'transferrin saturation', 'vitamin d level', '25-oh vitamin d',
+  'vitamin b12 level', 'folate level', 'omega-3 index', 'platelet count',
+];
+
+/**
+ * Conditions a member can be told they have that the questionnaire never asks
+ * about, so they can never be in anyone's answer list.
+ *
+ * The vocabulary otherwise comes straight from the instrument, which is right for
+ * symptoms and goals — but an invented "since you mentioned your epilepsy" is the
+ * most dangerous fabrication in this product, because it is the sentence that
+ * justifies a dangerous interaction warning. A condition nobody can select can
+ * still be selected BY the model, so the app keeps its own list of the ones that
+ * change what is safe to recommend.
+ */
+const SERIOUS_CONDITION_TERMS = [
+  'epilepsy', 'seizure disorder', 'seizures', 'cirrhosis', 'liver disease', 'kidney disease',
+  'kidney failure', 'dialysis', 'organ transplant', 'transplant recipient', 'hiv', 'hepatitis',
+  'lupus', 'multiple sclerosis', 'parkinson', 'parkinsons', 'alzheimer', 'alzheimers', 'dementia',
+  'bipolar disorder', 'schizophrenia', 'ptsd', 'heart failure', 'arrhythmia', 'irregular heartbeat',
+  'pacemaker', 'blood clot', 'thrombosis', 'deep vein thrombosis', 'stroke', 'cancer', 'tumour',
+  'tumor', 'chemotherapy', 'crohn', "crohn's", 'ulcerative colitis', 'colitis', 'celiac', 'celiac disease',
+  'gout', 'asthma', 'copd', 'emphysema', 'addison', 'myasthenia gravis', 'guillain-barre',
+  'sickle cell', 'hemochromatosis', 'wilson disease', 'porphyria', 'thyroid storm',
+  'parkinsonian', 'mesenteric ischemia', 'pulmonary fibrosis', 'sarcoidosis',
+];
+
+/** The common prescriptions a member of this app is actually on. */
+const PRESCRIPTION_DRUG_NAMES = [
+  'atorvastatin', 'simvastatin', 'rosuvastatin', 'pravastatin', 'fluvastatin', 'pitavastatin',
+  'lisinopril', 'ramipril', 'enalapril', 'losartan', 'valsartan', 'amlodipine', 'metoprolol',
+  'atenolol', 'carvedilol', 'propranolol', 'hydrochlorothiazide', 'furosemide', 'spironolactone',
+  'warfarin', 'coumadin', 'apixaban', 'eliquis', 'rivaroxaban', 'xarelto', 'clopidogrel',
+  'metformin', 'glipizide', 'glyburide', 'empagliflozin', 'semaglutide', 'ozempic', 'levothyroxine',
+  'sertraline', 'fluoxetine', 'escitalopram', 'citalopram', 'paroxetine', 'duloxetine', 'venlafaxine',
+  'bupropion', 'alprazolam', 'lorazepam', 'diazepam', 'clonazepam', 'zolpidem', 'gabapentin',
+  'pregabalin', 'prednisone', 'dexamethasone', 'albuterol', 'salbutamol', 'omeprazole', 'pantoprazole',
+  'esomeprazole', 'tramadol', 'oxycodone', 'hydrocodone', 'methotrexate', 'hydroxychloroquine',
+  'adalimumab', 'finasteride', 'tamsulosin', 'tamoxifen', 'letrozole', 'aspirin',
+];
+
+const PERSONAL_FACT_TERMS = [...LAB_FACT_TERMS, ...PRESCRIPTION_DRUG_NAMES];
+
+/**
  * A plan may only name a symptom/condition the member selected. The vocabulary
  * is the questionnaire's own option list, so this can never flag a fact about
  * a condition the app does not ask about (and therefore cannot claim).
@@ -159,6 +232,9 @@ function buildFactContext(profile = {}) {
 
   const vocabulary = new Map(); // term -> full label it came from
   const goalTerms = new Set(); // terms that come from a GOAL option
+  // The condition list only: names a member can be *said to have*, as opposed to
+  // a state of theirs the app may describe freely. See possessiveConditionMatcher.
+  const conditionTerms = new Set();
   for (const label of [...GENERAL_SYMPTOMS, ...CONDITION_SYMPTOMS, ...MEDICAL_CONDITIONS, ...GOAL_OPTIONS]) {
     const l = String(label).toLowerCase();
     const isGoal = GOAL_OPTIONS.includes(label);
@@ -169,7 +245,64 @@ function buildFactContext(profile = {}) {
       if (isGoal) goalTerms.add(t);
     }
   }
-  return { reported, reportedWords, freeText, vocabulary, goalTerms, hasAnyReport: reportedLabels.length > 0 };
+  for (const label of MEDICAL_CONDITIONS) {
+    const l = String(label).toLowerCase().trim();
+    if (l.length >= 4) conditionTerms.add(l);
+    labelTerms(l).forEach((t) => { if (t.length >= 5) conditionTerms.add(t); });
+  }
+  // Lab and drug names join the vocabulary (so an assertion using one is seen) and
+  // a set of their own (so the possessive shape "your ferritin" is checked). They
+  // stay out of `conditionTerms`: that set also feeds the "is being studied for"
+  // claim rules, where a drug name would be nonsense.
+  const personalTerms = new Set();
+  for (const term of PERSONAL_FACT_TERMS) {
+    const t = String(term).toLowerCase();
+    personalTerms.add(t);
+    if (!vocabulary.has(t)) vocabulary.set(t, term);
+  }
+  for (const term of SERIOUS_CONDITION_TERMS) {
+    const t = String(term).toLowerCase();
+    if (!vocabulary.has(t)) vocabulary.set(t, term);
+    conditionTerms.add(t);
+  }
+  return {
+    reported, reportedWords, freeText, vocabulary, goalTerms, conditionTerms, personalTerms,
+    hasAnyReport: reportedLabels.length > 0,
+  };
+}
+
+/**
+ * "Your diabetes is the reason for this." attributes a condition to the member
+ * without using any of the report verbs `PERSONAL_ATTRIBUTION` looks for.
+ *
+ * Restricted to listed MEDICAL_CONDITIONS, and deliberately not to symptoms or
+ * goals: a condition name is never a friendly way of addressing the reader, so
+ * "your endometriosis" can only be a claim about them — whereas "your sleep",
+ * "your energy" or "your digestion" are ordinary prose the app uses when giving
+ * advice ("take it at night for your sleep"), and deleting those true sentences
+ * would be exactly the failure this verifier exists to avoid.
+ *
+ * Being possessed is only the SHAPE; the clause is still dropped only when
+ * `unreportedClaims` says the member never named it, so a member who did select
+ * PCOS keeps "your PCOS" in their own plan.
+ */
+function possessiveConditionMatcher(ctx) {
+  if (!ctx._possessiveCondition) {
+    const terms = new Set([...(ctx.conditionTerms || []), ...(ctx.personalTerms || [])]);
+    const escaped = [...terms]
+      .sort((a, b) => b.length - a.length)
+      .map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    // The two-word gap is the point: the instrument lists `Osteoporosis / Bone
+    // Health`, so `arthritis` is a term and "your rheumatoid arthritis" — a
+    // qualifier the questionnaire never offers — would otherwise slip past a
+    // matcher that demands the term immediately after "your". Two words is enough
+    // for "your severe rheumatoid arthritis" and "your recently diagnosed
+    // diabetes" without reaching across a sentence to grab an unrelated noun.
+    ctx._possessiveCondition = escaped.length
+      ? new RegExp(`\\byour\\s+(?:[a-z0-9][a-z0-9'-]*\\s+){0,2}(?:${escaped.join('|')})\\b`, 'i')
+      : /(?!)/;
+  }
+  return ctx._possessiveCondition;
 }
 
 // One compiled matcher per questionnaire term, cached across plans. The
@@ -228,7 +361,7 @@ function groundTriggeredBy(text, ctx) {
 // mention a condition the patient does not have ("iron is often low in people
 // with heavy periods"). Only an assertion that THIS patient has it is a lie, so
 // the check fires on a second-person attribution, not on the word alone.
-const PERSONAL_ATTRIBUTION = /\b(you|your|you'r?e|since you|as you|given your|reported by you|patient reports?)\b[^.]{0,60}?\b(report(?:ed|ing)?|mention(?:ed|ing)?|state[ds]?|have|are experiencing|suffer(?:ing|ed)?|diagnos(?:ed|is|ing)|live with|deal(?:ing)? with|struggle(?:d|ing)? with|experience(?:d)?)\b/i;
+const PERSONAL_ATTRIBUTION = /\b(you|your|you'r?e|since you|as you|given your|reported by you|patient reports?)\b[^.]{0,60}?\b(report(?:ed|ing)?|mention(?:ed|ing)?|state[ds]?|have|are experiencing|suffer(?:ing|ed)?|diagnos(?:ed|is|ing)|live with|deal(?:ing)? with|struggle(?:d|ing)? with|experience(?:d)?|tak(?:e|es|ing)|prescrib(?:e|es|ed|ing)|are on|were on|been on|tested positive for)\b/i;
 
 // Clauses, not sentences: a plan row is often written as one breath — "Helps
 // support bone density — you reported muscle cramps." Deleting the whole
@@ -241,24 +374,48 @@ const CLAUSE_SPLIT = /\s+[—–-]\s+|(?<=[.!?])\s+/;
 /** Clauses that claim the patient personally has an unreported condition. */
 function fabricatedPersonalClaims(text, ctx) {
   if (typeof text !== 'string' || !text.trim() || !ctx.hasAnyReport) return [];
+  const possessive = possessiveConditionMatcher(ctx);
   return text
     .split(CLAUSE_SPLIT)
     .map((s) => s.trim())
     .filter((s) => s
-      && PERSONAL_ATTRIBUTION.test(s)
+      && (PERSONAL_ATTRIBUTION.test(s) || possessive.test(s))
       && unreportedClaims(s, ctx, { ignoreGoalLabels: true }).length > 0);
 }
 
 /** Drop the lying clauses; keep everything that is not a false attribution. */
+const CLAUSE_TOKENS = new RegExp(`(${CLAUSE_SPLIT.source})`, 'g');
+
 function groundProse(text, ctx, { fallback = '' } = {}) {
   const bad = fabricatedPersonalClaims(text, ctx);
   if (bad.length === 0) return { value: text, stripped: 0 };
-  const kept = String(text)
-    .split(CLAUSE_SPLIT)
-    .map((s) => s.trim())
-    .filter((s) => s && !bad.includes(s))
-    .join(' ');
-  return { value: kept.trim() || fallback, stripped: bad.length };
+  // Rebuilt clause by clause with the separators kept, because `split(CLAUSE_SPLIT)`
+  // throws them away and a deletion then FUSES the neighbouring sentences:
+  // "- Take 4000 mg daily - since you have X. Turmeric is a spice." came back as
+  // "- Take 4000 mg daily Turmeric is a spice.", which the next pass read as one
+  // instruction about turmeric and clamped the dose in it. Two things were wrong
+  // with that: the member's sentence was rewritten again on the second trip — so a
+  // guide re-verified on every cache read degrades a little each time — and the
+  // clamp itself was now a lie about a figure that had never been a turmeric dose.
+  // A boundary is owed wherever the deleted clause ended a sentence.
+  const tokens = String(text).split(CLAUSE_TOKENS);
+  let out = '';
+  let dropped = 0;
+  for (let i = 0; i < tokens.length; i += 2) {
+    const clause = String(tokens[i]);
+    const sep = tokens[i + 1] == null ? '' : String(tokens[i + 1]);
+    const trimmed = clause.trim();
+    if (!trimmed || !bad.includes(trimmed)) {
+      out += clause + sep;
+      continue;
+    }
+    dropped += 1;
+    if (!/[.!?]$/.test(trimmed)) continue; // a dash fragment leaves no boundary to keep
+    out = out.replace(/\s*[—–-]\s*$/, '').replace(/\s+$/, '');
+    if (out && !/[.!?]$/.test(out)) out += '.';
+    out += ' ';
+  }
+  return { value: out.trim() || fallback, stripped: dropped };
 }
 
 // ---------------------------------------------------------------------------
@@ -397,6 +554,31 @@ function parseFirstDose(text) {
   return { value, unit };
 }
 
+/** Metric mass is one quantity at three scales, so `5 g` is comparable to a 25,000 mg ceiling. */
+const MG_PER_UNIT = { mcg: 1 / 1000, mg: 1, g: 1000 };
+
+/** `null` means "not comparable" — IU measures activity, not mass, and never converts. */
+function toMg(parsed) {
+  if (!parsed) return null;
+  const factor = MG_PER_UNIT[parsed.unit];
+  return factor == null ? null : parsed.value * factor;
+}
+
+const ceilingOf = (entry) => (entry.ceiling.unit === 'IU'
+  ? { unit: 'iu', value: entry.ceiling.value }
+  : { unit: 'mg', value: toMg({ value: entry.ceiling.value, unit: entry.ceiling.unit }) });
+
+/**
+ * True when a stated amount sits past a nutrient's ceiling. Mass is compared in
+ * mg, activity in IU, and the two are never compared against each other.
+ */
+function doseExceeds(entry, parsed) {
+  const ceiling = ceilingOf(entry);
+  if (ceiling.unit === 'iu') return parsed.unit === 'iu' && parsed.value > ceiling.value;
+  const mg = toMg(parsed);
+  return mg != null && mg > ceiling.value;
+}
+
 /**
  * True when the stated dose is within the app's ceiling for that nutrient, or
  * when the app has no ceiling to assert (unknown nutrient, or IU-vs-mg mismatch
@@ -407,8 +589,7 @@ function checkDose(name, dosageText) {
   if (!entry) return { ok: true, reason: '' };
   const parsed = parseFirstDose(dosageText);
   if (!parsed) return { ok: true, reason: '' }; // "Per label", "as directed"
-  if (parsed.unit !== entry.ceiling.unit) return { ok: true, reason: '' };
-  if (parsed.value <= entry.ceiling.value) return { ok: true, reason: '' };
+  if (!doseExceeds(entry, parsed)) return { ok: true, reason: '' };
   return {
     ok: false,
     reason: `${parsed.value}${parsed.unit} exceeds the ${entry.ceiling.value}${entry.ceiling.unit} ceiling this app will dose ${entry.alias[0]} at`,
@@ -591,23 +772,37 @@ function groundPlan(plan, profile = {}, options = {}) {
 
   const out = { ...plan, recommendations: recs };
 
+  // Every member-facing string the row checks above do not own — the summary,
+  // lifestyle advice, action plan, meals, warnings, avoid list, and the narrative
+  // fields inside each row — gets the same six-step pass a chat reply gets.
+  // `evidence`, `dosage` and `foods` are skipped because a dedicated verifier
+  // already read them and knows more about those fields than prose rules can.
+  //
+  // This runs BEFORE the dose-clamp warnings are appended on purpose: the app's
+  // own safety sentences must not be rewritten by the tool that exists to rewrite
+  // the model's, and the one thing a clamped dose must still say is the number it
+  // was clamped to.
+  const prose = verifyDocumentDeep(out, { ctx, allowedPmids, fallback: '' });
+  for (const r of prose.repairs) record(r.field, `prose-${r.kind}`, r.detail);
+  const verified = compactSections(prose.value);
+
   // A clamped dose is a safety-relevant change; tell the member, in the section
   // the client already renders.
   if (clampedDoses.length > 0) {
-    const warnings = Array.isArray(out.warnings) ? [...out.warnings] : [];
+    const warnings = Array.isArray(verified.warnings) ? [...verified.warnings] : [];
     for (const c of clampedDoses) {
       const text = `The dose suggested for ${c.name} was above this app's safety ceiling and was replaced with the standard range for it: ${c.standard}.`.slice(0, 300);
       if (!warnings.includes(text)) warnings.push(text);
     }
-    out.warnings = warnings;
+    verified.warnings = warnings;
   }
 
   const counts = {};
   for (const a of actions) counts[a.kind] = (counts[a.kind] || 0) + 1;
   // No timestamp: groundPlan is a pure function of (plan, profile), so running
   // it twice on an already-grounded plan changes nothing it can detect.
-  out.grounding = { verified: true, actions, counts };
-  return out;
+  verified.grounding = { verified: true, actions, counts };
+  return verified;
 }
 
 /**
@@ -643,6 +838,14 @@ function groundingViolations(plan, profile = {}, options = {}) {
 const PMID_TOKEN = /\bPMIDs?\b[:\s]*\d{4,8}(?:\s*,\s*\d{4,8})*/gi;
 /** A bare citation-shaped number in parentheses, e.g. `(2019; 12: 3456)` is NOT matched — only numbers someone could look up. */
 const DOI_TOKEN = /\bhttps?:\/\/doi\.org\/\S+|\b10\.\d{4,9}\/[^\s),;]+\b/gi;
+/**
+ * The other registries a model names when it wants a citation to look real: a
+ * trial registration number, an arXiv id, or the bare host typed without a
+ * scheme (`pubmed.ncbi.nlm.nih.gov/99999999/`), which a scheme-anchored URL
+ * pattern never sees. Same reasoning as DOI_TOKEN — this app's registry holds no
+ * trial ids, so any id it asserts is one it cannot check.
+ */
+const REGISTRY_TOKEN = /\b(?:NCT|NRCT|EudraCT|UDAP|ACTRN|ChiCTR)[-]?\d{6,12}\b|\barXiv[:\s]\S+\b|\b(?:www\.)?(?:pubmed\.ncbi\.nlm\.nih\.gov|ncbi\.nlm\.nih\.gov|clinicaltrials\.gov|doi\.org|scholar\.google\.com)[^\s.,;)]*/gi;
 
 /**
  * Strip the hard identifiers a reply asserts but the app cannot vouch for.
@@ -686,6 +889,17 @@ function stripUnverifiableIdentifiers(text, { allowedPmids } = {}) {
     removed.push(`DOI ${whole.slice(0, 40)}`);
     return '';
   });
+  value = value.replace(REGISTRY_TOKEN, (whole, ...rest) => {
+    // The last two args of a capture-free replace are (offset, string). A host
+    // that is part of a full `https://…` URL belongs to URL_IN_TEXT below, which
+    // keeps registry links whose PMIDs ARE in the allowlist — cutting the host
+    // out of a citation the app stands behind would destroy a correct link.
+    const offset = rest[rest.length - 2];
+    const source = rest[rest.length - 1];
+    if (source.slice(Math.max(0, offset - 9), offset).includes('://')) return whole;
+    removed.push(String(whole).slice(0, 40));
+    return '';
+  });
   value = value.replace(URL_IN_TEXT, (whole) => {
     if (!ALLOWED_URL_HOSTS.some((host) => whole.toLowerCase().includes(host))) {
       removed.push(`URL ${whole.slice(0, 40)}`);
@@ -707,8 +921,20 @@ function stripUnverifiableIdentifiers(text, { allowedPmids } = {}) {
   // becomes "()", "see  ." becomes "see  .". Repair those, because a reader who
   // sees an empty parenthesis immediately knows something was hidden from them —
   // which is worse than an answer that never cited a number at all.
+  //
+  // But only when something WAS taken. The repairs are whitespace-collapsing by
+  // nature, and running them on an untouched paragraph turned every double
+  // newline in a chat reply into a single space — the verifier reformatting an
+  // answer it had nothing to correct.
+  if (!removed.length) return { value: raw.trim(), removed };
   value = value
     .replace(/[（(]\s*[)）]/g, '')
+    // An identifier that sat at the end of a clause leaves the connective that
+    // introduced it behind: "read more at <URL> and <NCT12345678>." loses both
+    // targets and becomes "read more at and .". These two shapes are the residue,
+    // and a reader who sees them knows something was cut.
+    .replace(/\s+(?:and|or)\s+(?=[.,;:!?]|$)/gi, ' ')
+    .replace(/\b(?:see|read more(?:\s+at)?|at|in|from|via|available at|published in)\s+(?=[.,;:!?])/gi, '')
     .replace(/\s{2,}/g, ' ')
     .replace(/\s+([,.;:!?])/g, '$1')
     .trim();
@@ -717,51 +943,667 @@ function stripUnverifiableIdentifiers(text, { allowedPmids } = {}) {
 }
 
 /**
- * Apply `stripUnverifiableIdentifiers` to every string inside a parsed reply.
+ * Walk every string inside a parsed document and run it through `onString`.
  *
  * The supplement guide is JSON with nested arrays and objects, and a fabricated
- * PMID can sit in any of them — most often a `keyBenefits[].description`. Doing
+ * claim can sit in any of them — most often a `keyBenefits[].description`. Doing
  * this per-field at the call site is how one field gets forgotten, and a guide
  * is written to the shared store BEFORE it is served: one missed field means
- * every later reader of that profile sees the invented citation, from cache,
- * forever. So the whole document is walked, and the total of what was removed
- * comes back with it so the route can log it.
+ * every later reader of that profile sees the invention, from cache, forever. So
+ * the whole document is walked.
  *
  * Arrays and plain objects are rebuilt rather than mutated, because the parsed
  * reply is also what the caller returns to the client.
  *
- * @param {*} value
- * @param {{allowedPmids?: Set<string>}} [options]
- * @returns {{value: *, removed: string[]}}
+ * `skipKeys` is how a field with its own owner stays out of the prose pass:
+ * `evidence` is verified by `verifyCitation` against the registry, `dosage` by
+ * `checkDose` against the row's nutrient, and the guide's `disclaimer` is text
+ * the app writes — rewriting our own legal sentence would be the verifier
+ * damaging the one string it cannot be wrong about.
+ *
+ * @param {*} node
+ * @param {(text: string, key: string) => string} onString
+ * @param {{skipKeys?: Iterable<string>, maxDepth?: number}} [options]
  */
+function walkStrings(node, onString, options = {}, depth = 0) {
+  const skip = options.skipKeys instanceof Set ? options.skipKeys : new Set(options.skipKeys || []);
+  const maxDepth = options.maxDepth == null ? 6 : options.maxDepth;
+  if (typeof node === 'string') return onString(node, options.key || '');
+  if (depth > maxDepth || node == null || typeof node !== 'object') return node;
+  if (Array.isArray(node)) return node.map((item) => walkStrings(item, onString, { ...options, key: '' }, depth + 1));
+  const out = {};
+  for (const [key, item] of Object.entries(node)) {
+    out[key] = skip.has(key) ? item : walkStrings(item, onString, { ...options, key }, depth + 1);
+  }
+  return out;
+}
+
 function stripIdentifiersDeep(value, options = {}) {
   const removed = [];
-  const walk = (node, depth) => {
-    if (typeof node === 'string') {
-      const cleaned = stripUnverifiableIdentifiers(node, options);
-      removed.push(...cleaned.removed);
-      return cleaned.value;
-    }
-    if (depth > 6 || node == null || typeof node !== 'object') return node;
-    if (Array.isArray(node)) return node.map((item) => walk(item, depth + 1));
-    const out = {};
-    for (const [key, item] of Object.entries(node)) out[key] = walk(item, depth + 1);
+  const value2 = walkStrings(value, (text) => {
+    const cleaned = stripUnverifiableIdentifiers(text, options);
+    removed.push(...cleaned.removed);
+    return cleaned.value;
+  }, options);
+  return { value: value2, removed };
+}
+
+// ---------------------------------------------------------------------------
+// 8. Free prose — what a paragraph is allowed to assert
+// ---------------------------------------------------------------------------
+
+/**
+ * A plan has a schema; a chat reply and a supplement guide are paragraphs. The
+ * prose surfaces were verified for exactly one thing until this section: a hard
+ * identifier (PMID / DOI / URL) the app cannot resolve. Every other shape a model
+ * produces with total confidence walked past that filter untouched:
+ *
+ *   "Magnesium reduces migraine frequency by 40%."    an invented effect size
+ *   "Vitamin D deficiency affects 42% of adults."      an invented prevalence
+ *   "A 2021 randomized trial in 200 patients showed…"  a recalled study, no identifier
+ *   "Take 10,000 IU of vitamin D daily."               past this app's own ceiling
+ *   "Ashwagandha cures anxiety."                       a curative claim the disclaimer denies
+ *   "You can stop your metformin and use berberine instead."  a treatment change that can hurt someone
+ *   "Since you mentioned your diabetes…"               a patient fact the patient never reported
+ *
+ * Each shape is repaired here, deterministically, always in the direction of
+ * LESS certainty than the model wrote — the verifier never strengthens a claim,
+ * so a passing sentence was never made truer by the app than the model asserted
+ * it. That asymmetry is the whole safety argument for editing a member's answer
+ * at all.
+ */
+
+/**
+ * Sentence splitter that KEEPS its separators. `split` with a capture group
+ * returns [text, sep, text, sep, …], so a rewrite can replace one sentence
+ * without flattening the paragraph's line breaks — a guide description and a
+ * chat reply are both multi-paragraph text, and collapsing them would be its own
+ * kind of damage.
+ */
+const SENTENCE_SPLIT = /((?<=[.!?])\s+|\n+)/;
+
+function mapSentences(text, rewrite) {
+  const parts = String(text == null ? '' : text).split(SENTENCE_SPLIT);
+  const repairs = [];
+  for (let i = 0; i < parts.length; i += 2) { // odd slots are the captured separators
+    const before = parts[i];
+    if (!before) continue;
+    parts[i] = rewrite(before, (kind, detail) => repairs.push({ kind, detail: String(detail).slice(0, 200) }));
+  }
+  return { value: parts.join(''), repairs };
+}
+
+// -- a. Treatment advice ------------------------------------------------------
+
+/**
+ * Drug words an assistant must never tell a member to change. Deliberately
+ * narrow: "magnesium may interact with your thyroid medication" is correct,
+ * useful safety advice and matches none of these patterns, because the patterns
+ * require a VERB that changes the treatment, not a noun that names it.
+ *
+ * The named drugs are not decoration either. "Stop your medication" is caught by
+ * the class word, but the sentence a model actually writes names the molecule —
+ * "you can stop your atorvastatin" — and a rule that only knows the word
+ * "statins" let that through. This is the highest-stakes hallucination the app
+ * can produce, so the list is the common prescriptions a member of this app
+ * would be on, taken from the same names PERSONAL_FACT_TERMS licenses.
+ */
+const PRESCRIPTION_NAME_WORDS = PRESCRIPTION_DRUG_NAMES.join('|');
+
+const MEDICATION_WORDS = '(?:your |the |any |a |prescribed |doctor-prescribed )?'
+  + '(?:medication|medicine|prescription|drugs?|treatment|statins?|insulin|metformin|'
+  // `n?` is not decoration: "thinner" and "thinning" double the n, and a pattern
+  // written as thin(er|ing) matches neither — the miss was found by testing the
+  // plain sentence "this replaces your blood thinner".
+  + 'blood[\\s-]+thin(?:n?er|n?ing)s?|levothyroxine|thyroid\\s+(?:medication|pill|drug)|'
+  + `antidepressant|blood[- ]pressure\\s+(?:pill|medication|drugs?)|${PRESCRIPTION_NAME_WORDS})`;
+
+const MED_SAFETY_PATTERNS = [
+  new RegExp(`\\b(?:stop|stopping|quit|quitting|pause|pausing|skip|skipping|hold|holding|cut|cutting|reduc(?:e|es|ing)|lower|drop|halv(?:e|es|ing)|chang(?:e|es|ing))\\s+(?:out\\s+on\\s+)?${MEDICATION_WORDS}\\b`, 'i'),
+  new RegExp(`\\bwean(?:s|ing|ed)?\\s+(?:off|onto)\\s+${MEDICATION_WORDS}\\b`, 'i'),
+  new RegExp(`\\b(?:instead|replacement|alternative|substitut(?:e|es|ing|ion))\\b[^.!?]{0,48}?\\b(?:of|to|for)\\s+${MEDICATION_WORDS}\\b`, 'i'),
+  // Equivalence claims are how a supplement gets offered as a substitute without
+  // the words "instead of": "works as well as your lisinopril" is the same advice
+  // wearing a comparison.
+  new RegExp(`\\b(?:in place of|rather than|beats?|better than|stronger than|safer than|as effective as|as well as|works? (?:just )?as well as|as good as|just as good as)\\s+${MEDICATION_WORDS}\\b`, 'i'),
+  new RegExp(`\\breplac(?:e|es|ing|ed)\\b[^.!?]{0,32}?${MEDICATION_WORDS}\\b`, 'i'),
+  new RegExp(`\\b(?:no longer need|don'?t need|do not need|you can stop|skip taking)\\b[^.!?]{0,32}?${MEDICATION_WORDS}\\b`, 'i'),
+  // `instead` on its own, when the sentence also names a drug: "take this instead"
+  // is a treatment change even when the prepositional phrase is in the previous
+  // sentence and therefore invisible to the patterns above.
+  new RegExp(`\\b(?:take|use|try|switch to|move to)\\b[^.!?]{0,40}\\binstead\\b[^.!?]{0,20}${MEDICATION_WORDS}`, 'i'),
+];
+
+/**
+ * The disclaimer shape: a negation in front of a change verb in front of a drug.
+ * "This does not replace your medication" and "supplements are not an alternative
+ * to your treatment" are the app telling a member to STAY on their prescription,
+ * which is the opposite of what the patterns above hunt for. The negation has to
+ * come first — "you can stop your statin, it is not risky" stays caught.
+ */
+const NOT_A_SUBSTITUTE = new RegExp(
+  `\\b(?:not|never|without|cannot|can'?t|won'?t|doesn'?t|does not|don'?t|isn'?t|neither|no)\\b`
+  + `[^.!?]{0,40}?\\b(?:replac(?:e|es|ing|ed|ement)|substitut(?:e|es|ion)|alternativ(?:e|es)|instead of|stop|skip|change|alter|reduce)\\b`
+  + `[^.!?]{0,32}?${MEDICATION_WORDS}\\b`, 'i');
+
+/**
+ * What this app says instead — the same sentence, whoever it lands on.
+ *
+ * It is written so that it cannot match its own patterns. An earlier draft said
+ * "do not stop or replace a prescribed medication", which the replacement rules
+ * read as a fresh violation, so verifying an already-repaired reply appended a
+ * second copy of the warning to itself. A safety line that re-triggers the
+ * verifier is a bug factory, and the guard below is what keeps a future rewording
+ * from quietly reintroducing it.
+ */
+const MED_SAFETY_LINE = 'Only the clinician who prescribes your treatment can safely change it. SuppliWise recommends food and supplements, never treatment changes.';
+const MED_SAFETY_MARKER = 'Only the clinician who prescribes';
+
+function enforceMedicationSafety(text) {
+  let announced = false;
+  let dropped = 0;
+  const out = mapSentences(text, (sentence, report) => {
+    if (sentence.includes(MED_SAFETY_MARKER)) { announced = true; return sentence; }
+    // A negated mention is the app warning the member AWAY from a treatment
+    // change — "this does not replace your blood pressure medication" is the
+    // safest sentence a reply can contain. Replacing it with the safety line
+    // would delete the one true thing the model said, so the negated span is
+    // masked out and only what is left is tested against the patterns.
+    const masked = sentence.replace(NOT_A_SUBSTITUTE, (whole) => `\u0001${whole.length}\u0001`);
+    if (!MED_SAFETY_PATTERNS.some((re) => re.test(masked))) return sentence;
+    report('medication-safety', sentence.slice(0, 140));
+    // One warning per document. A guide that questions three prescriptions would
+    // otherwise print the same sentence three times, which reads as a broken
+    // template rather than as care — and a member who has already been told
+    // cannot be told again by deleting the advice, so later copies go silent.
+    if (announced) { dropped += 1; return ''; }
+    announced = true;
+    return MED_SAFETY_LINE;
+  });
+  // Only after a real removal: a paragraph taken out mid-document leaves its
+  // flanking blank lines behind, and one at the end leaves the reader looking at
+  // a hole where the advice was. Three newlines in a row reads as a broken page,
+  // and untouched text keeps its own spacing.
+  if (dropped === 0) return out;
+  return {
+    value: out.value.replace(/\n{3,}/g, '\n\n').replace(/\s+$/, ''),
+    repairs: out.repairs,
+  };
+}
+
+// -- b. Curative and absolute claims -----------------------------------------
+
+/**
+ * Rewrites that keep the sentence and remove the certainty. Ordered so the
+ * longer shapes go first: `will completely cure` must be consumed as one unit,
+ * or the bare-verb rule would leave "will completely may help with" behind.
+ */
+const CLAIM_REWRITES = [
+  // A named disease being treated or prevented — the claim the app's own
+  // disclaimer explicitly denies ("does not diagnose, treat, cure, or prevent
+  // any disease"). The condition is kept; only the verb changes.
+  [/\b(?:treats?|prevents?|cures?)\s+(cancer|diabetes|type\s+2\s+diabetes|hypertension|high\s+blood\s+pressure|heart\s+disease|stroke|dementia|Alzheimer'?s(?:\s+disease)?|depression|anxiety\s+disorder|asthma|arthritis|infections?|inflammation)\b(?:\s+(?:completely|entirely|totally|fully|permanently|100%))?/gi,
+    'is being studied for $1'],
+  // The adverb has to go with the verb, not after it: rewriting "cures anxiety
+  // completely" one rule at a time would leave "may help with anxiety
+  // completely", which asserts more than the app means to.
+  [/\b(?:cures?|heals?|reverses?|eliminates?|resolves?|gets?\s+rid\s+of)\s+([^.!?]{1,40}?)\s+(?:completely|entirely|totally|fully|permanently|100%)\b/gi,
+    'may help with $1'],
+  // "clinically proven to" is the marketing shape of a claim this app cannot
+  // clear; "proven to" on its own is the same claim without the adjective.
+  [/\b(?:clinically|scientifically|medically|statistically)\s+proven\s+(?:to|that)\b/gi, 'reported to'],
+  [/\bproven\s+(?:to|that)\b/gi, 'shown in some studies to'],
+  // Curative verbs, with the modal and intensifier that usually ride in front of
+  // them, so the replacement stays grammatical.
+  [/\b(?:will|can|could|may|might|helps?(?:\s+to)?)\s+(?:completely|entirely|totally|fully|permanently|rapidly|quickly|naturally|effectively)?\s*(?:cures?|cured|heals?|healed|reverses?|reversed|eliminates?|eliminated|resolves?|resolved|fixes?|fixed|gets?\s+rid\s+of)\b/gi,
+    'may help with'],
+  [/\b(?:cures?|heals?|reverses?|eliminates?|resolves?|fixes?)\b/gi, 'may help with'],
+  [/\b(?:cured|healed|reversed|eliminated|resolved|fixed)\b/gi, 'improved'],
+  // Safety absolutes: the claim a member is most likely to act on, and the one
+  // no supplement has any basis for.
+  [/\b(?:100%|100\s*percent|completely|absolutely|totally|entirely|perfectly)\s+(?:safe|harmless|risk[- ]free|side[- ]effect[- ]free|natural|pure|bioavailable)\b/gi,
+    'generally well tolerated'],
+  // The leading "with" is part of the claim, so it goes with it; leaving it would
+  // produce "is generally well tolerated with side effects do happen".
+  [/\bwith\s+(?:no|zero)\s+(?:known\s+|serious\s+|notable\s+)?side\s+effects?(?:\s+(?:whatsoever|at\s+all|observed|reported|noted|seen))?\b/gi,
+    ', though side effects do happen'],
+  // A trailing intensifier belongs to the verb, not to the replacement, or
+  // "It has no side effects whatsoever" would come out as
+  // "It may cause side effects whatsoever" — a repaired claim wearing a broken
+  // sentence. Every one of these forms asserts that nothing is wrong with the
+  // supplement; the app can only say it cannot rule something out.
+  [/\b(?:has|have|had|causes?|causing|produce?s?|report(?:s|ed)?|carries?|show?s?|expect(?:s|ed)?|demonstrate?s?)\s+(?:no|zero)\s+(?:known\s+|serious\s+|notable\s+)?side\s+effects?(?:\s+(?:whatsoever|at\s+all|observed|reported|noted|seen))?\b/gi,
+    'may cause side effects'],
+  [/\bthere\s+(?:is|are|was|were|have\s+been|'s|'re|'ll)\s+(?:no|zero)\s+(?:known\s+|serious\s+|notable\s+)?side\s+effects?(?:\s+(?:whatsoever|at\s+all|observed|reported|noted|seen))?\b/gi,
+    'side effects cannot be ruled out'],
+  [/\b(?:with\s+)?no\s+(?:known\s+|serious\s+|notable\s+)?side\s+effects?(?:\s+(?:whatsoever|at\s+all|observed|reported|noted|seen))?\b/gi,
+    ', though side effects do happen'],
+  [/\bguaranteed\s+to\b/gi, 'likely to'],
+  [/\bguaranteed\b/gi, 'promised'],
+  [/\bguarantees?\b/gi, 'promises'],
+  [/\bmiracle\b/gi, 'much-promoted'],
+];
+
+/**
+ * A denied curative claim — the shape of this app's own disclaimer, "does not
+ * diagnose, treat, or cure any disease".
+ *
+ * The curative-verb rules above are written to catch an assertion, and a
+ * negation is the opposite of one; rewriting that disclaimer's "cure" produced
+ * "does not diagnose, treat, or may help with any disease", i.e. the verifier
+ * corrupting the single sentence whose job is to limit what the app claims.
+ * Denied claims are therefore masked out before the rewrites and restored
+ * afterwards, so the protection is scoped to this function and can never leak a
+ * control character into text that gets stored.
+ */
+const NEGATED_CURATIVE = /\b(?:do(?:e)?s?\s+not|doesn'?t|will\s+not|cannot|can'?t|may\s+not|not)\s+[^.!?]{0,60}\b(?:cure|cures|treat|treats|heal|heals|reverse|reverses|prevent|prevents|fix|fixes|eliminate|eliminates|resolve|resolves|diagnos\w*)\b/gi;
+
+function downgradeAbsoluteClaims(text) {
+  const raw = String(text == null ? '' : text);
+  const protectedPhrases = [];
+  const value0 = raw.replace(NEGATED_CURATIVE, (whole) => {
+    protectedPhrases.push(whole);
+    return `\u0001${protectedPhrases.length - 1}\u0001`;
+  });
+  let value = value0;
+  const repairs = [];
+  for (const [re, to] of CLAIM_REWRITES) {
+    re.lastIndex = 0;
+    const hits = value.match(re);
+    if (!hits) continue;
+    value = value.replace(re, to);
+    repairs.push({ kind: 'claim-downgraded', detail: `${hits.slice(0, 3).join(' | ')} → ${to}` });
+  }
+  if (protectedPhrases.length) {
+    value = value.replace(/\u0001(\d+)\u0001/g, (m, i) => {
+      const original = protectedPhrases[Number(i)];
+      return original == null ? m : original;
+    });
+  }
+  if (repairs.length) {
+    // Two rules can fire on the same sentence ("clinically proven to eliminate
+    // anxiety" → "reported to may help with anxiety"), which is grammatically
+    // broken in a way the member would notice. The reporting frame is the part
+    // that no longer adds anything once the verb is hedged, so it goes.
+    value = value.replace(/\bis\s+(?:reported to|shown in some studies to)\s+(?=(?:may|might|can|could|helps?)\b)/gi, '');
+    // A rewrite that swallows a sentence's first word ("There are no side
+    // effects" → "side effects cannot be ruled out") would leave a lowercase
+    // sentence start, which reads as a rendering bug rather than as a repair.
+    // Only runs on text this pass already touched.
+    value = mapSentences(value, (sentence) => sentence
+      .replace(/^(\s*["'([]?)([a-z])/, (m, pre, ch) => pre + ch.toUpperCase())).value;
+  }
+  return { value, repairs };
+}
+
+// -- c. Statistics nobody supplied -------------------------------------------
+
+/**
+ * The honest sentence that replaces an unsourced population figure. With the
+ * number deleted the sentence would be a fragment ("… of adults are
+ * deficient"), and a fragment reads like a bug rather than like a limit, so the
+ * app states its limit instead.
+ */
+const UNSOURCED_STAT_LINE = 'The evidence for that is modest and mixed, so this app will not quote a figure for it — ask a clinician about what applies to you.';
+
+const EFFECT_NOUNS = '(reductions?|decreases?|drops?|falls?|declines?|lowerings?|improvements?|increases?|rises?|boosts?|gains?|losses?|lifts?)';
+/**
+ * `40% reduction`, `a 12 percent increase` — the figure in front of its outcome.
+ * The leading article is part of the match: leaving it behind is how "a 30%
+ * reduction" became "a a reduction" when only the number was removed.
+ */
+const EFFECT_PERCENT_BEFORE_NOUN = new RegExp(
+  `\\b(?:a|an|the)?\\s*\\d+(?:[.,]\\d+)?\\s*(?:%|per\\s?cent|percent)\\s+(?:in\\s+)?${EFFECT_NOUNS}\\b`, 'gi');
+/** `reduces LDL by 25%`, `by up to 60%`, `cut latency by 62 minutes` — the same figure behind its outcome. */
+// No trailing `\b`: `%` is not a word character, so a boundary assertion after it
+// fails against a following space and the whole rule silently matches nothing.
+// The units are here because an effect size does not always arrive as a
+// percentage: "melatonin cut sleep onset by 62 minutes" is the same invented
+// magnitude with a clock on it, and only the number is unverifiable.
+const EFFECT_UNITS = '(?:%|per\\s?cent|percent|minutes?|mins?|hours?|days?|weeks?|months?|points?|mm\\s?hg|mg\\s?/?\\s?dl|ng\\s?/?\\s?ml|IU|kcal|pounds?|lbs?|kilograms?|kg|units?|scores?)';
+const BY_PERCENT = new RegExp(`\\s+by(?:\\s+(?:up\\s+to|approximately|about|roughly|nearly|over|under))?\\s+\\d+(?:[.,]\\d+)?\\s*${EFFECT_UNITS}(?![a-z0-9])`, 'gi');
+/** `42% of adults` — the shape a model writes when it recalls a prevalence. */
+const PREVALENCE = /\b\d+(?:[.,]\d+)?\s*(?:%|per\s?cent|percent)\s+of\s+(?:the\s+)?(?:adults?|patients?|participants?|subjects?|people|women|men|older\s+adults|general\s+population|population|Americans?|US\s+adults|UK\s+adults|Canadians?)\b/i;
+/** `200 patients`, `in 45 women` — a sample size is a citation wearing a number. */
+const SAMPLE_SIZE = /\b\d{2,}\s+(?:randomi[sz]ed\s+|double[- ]blind\s+|placebo[- ]controlled\s+)*(?:patients?|participants?|subjects?|women|men|older\s+adults)\b/i;
+/** `across 14 studies`, `in 3 trials`. */
+const STUDY_COUNT = /\b(?:across|in|among|including|from|spanning|over)\s+\d{1,4}\s+(?:published\s+|clinical\s+|randomi[sz]ed\s+)*(?:studies|trials|reviews|meta[- ]analyses?|articles|papers)\b/i;
+/** `a 2021 randomized trial showed` — the recall shape that has no identifier to strip. */
+const YEAR_CITATION = /\b(?:a|an|the|in|from|of)\s+(?:19|20)\d{2}\s+(?:randomi[sz]ed\s+|double[- ]blind\s+|placebo[- ]controlled\s+)*(?:trial|trials|study|studies|review|reviews|meta[- ]analyses?|publication|paper)s?\b/i;
+const UNSOURCED_SHAPES = [PREVALENCE, SAMPLE_SIZE, STUDY_COUNT, YEAR_CITATION];
+
+function stripUnsourcedStatistics(text, { allowedPmids } = {}) {
+  const allowed = allowedPmids instanceof Set && allowedPmids.size ? allowedPmids : allowlistedPmids();
+  const repairs = [];
+
+  // Effect sizes lose the number and keep the direction: "reduces migraine
+  // frequency by 40%" → "reduces migraine frequency" is still the same advice,
+  // minus the figure nobody can check.
+  const stripEffectNumbers = (sentence) => {
+    let out = sentence.replace(EFFECT_PERCENT_BEFORE_NOUN, (whole, noun) => {
+      repairs.push({ kind: 'statistic-removed', detail: String(whole).slice(0, 60) });
+      const word = String(noun).toLowerCase();
+      // "40% reduction" needs an article once the figure goes; "40% improvements"
+      // must not gain one, or the repair would leave broken English behind.
+      return /s$/.test(word) ? word : `${/^[aeiou]/.test(word) ? 'an' : 'a'} ${word}`;
+    });
+    out = out.replace(BY_PERCENT, (whole) => {
+      repairs.push({ kind: 'statistic-removed', detail: String(whole).trim().slice(0, 60) });
+      return '';
+    });
     return out;
   };
-  return { value: walk(value, 0), removed };
+
+  // Deciding per sentence, before touching its numbers, is what keeps the record
+  // honest: a figure inside a sentence that is going to be replaced outright was
+  // never a separate repair, and logging it as one inflates the count the
+  // benchmark reports.
+  const pass = mapSentences(String(text == null ? '' : text), (sentence, report) => {
+    const ids = extractPmids(sentence);
+    // A sentence that carries an allowlisted PMID is quoting the registry the app
+    // ships — the one place where a figure has a source behind it.
+    const sourced = ids.length > 0 && ids.every((id) => allowed.has(String(id)));
+    if (!sourced && UNSOURCED_SHAPES.some((re) => re.test(sentence))) {
+      report('unsourced-statistic', sentence.slice(0, 140));
+      return UNSOURCED_STAT_LINE;
+    }
+    return stripEffectNumbers(sentence);
+  });
+  return { value: pass.value, repairs: [...repairs, ...pass.repairs] };
+}
+
+// -- d. Doses stated in prose -------------------------------------------------
+
+/**
+ * Gram-scale bulks are excluded from the prose pass on purpose. Protein,
+ * collagen, creatine, HMB and citrulline are eaten in food-scale amounts, and
+ * "aim for 90 g of protein a day" is correct dietary advice — clamping it to a
+ * supplement serving would be the verifier damaging information it does not
+ * understand. The entries that stay in scope are the ones where a wrong number
+ * is a toxicology problem: vitamins, minerals and actives.
+ */
+const PROSE_DOSE_MAX_MG = 10000;
+const PROSE_QUANTITY = /\b(\d[\d,]*(?:\.\d+)?)\s*(mcg|µg|ug|mg|g|iu)\b/gi;
+const proseUnit = (raw) => {
+  const u = String(raw).toLowerCase();
+  return u === 'µg' || u === 'ug' ? 'mcg' : u;
+};
+
+/** The nearest word-boundary position of any alias in the text, or -1. */
+function aliasIndex(text, aliases) {
+  const lower = String(text).toLowerCase();
+  let best = -1;
+  for (const alias of aliases) {
+    const matcher = termMatcher(alias);
+    matcher.lastIndex = 0;
+    const hit = matcher.exec(lower);
+    if (!hit) continue;
+    const at = lower.indexOf(alias, hit.index);
+    if (at !== -1 && (best === -1 || at < best)) best = at;
+  }
+  return best;
+}
+
+/**
+ * The amount part of a standard dose, for dropping into a sentence.
+ *
+ * `entry.standard` is written as a plan instruction ("2000-4000 IU daily"), which
+ * is right for a dosage field and wrong inside prose: replacing "take 10,000 IU
+ * of vitamin D daily" with it produced "take 2000-4000 IU daily of vitamin D
+ * daily". The numbers are the repair; the sentence keeps its own shape.
+ */
+const STANDARD_AMOUNT = /^(?:under\s+)?[\d.,]+\s*(?:[-–—]\s*[\d.,]+)?\s*(?:mg|mcg|µg|ug|g|iu)\b/i;
+
+function standardAmount(entry) {
+  const m = STANDARD_AMOUNT.exec(String(entry.standard || '').trim());
+  return m ? m[0] : String(entry.standard || '').trim();
+}
+
+/**
+ * A number that is being used as a THRESHOLD, not as a dose to take.
+ *
+ * "Long-term high doses (>40mg) may deplete copper" is a safety warning; clamping
+ * its number to the 1-2mg copper range would silently rewrite a warning into
+ * nonsense. Prose clamping therefore bows out when the figure is framed as a
+ * limit. "up to" is deliberately NOT in this list: "up to 3000mg of vitamin C
+ * daily" is a taken dose with a ceiling word in front of it, and that is the
+ * shape a hallucination actually arrives in.
+ */
+const DOSE_THRESHOLD_FRAME = /(>|<|≥|≤|\babove\b|\bbelow\b|\bover\b|\bunder\b|more than|less than|exceed|limit|max(?:imum)?|at least)/i;
+
+function clampDosesInProse(text) {
+  return mapSentences(text, (sentence, report) => {
+    // Collect every amount first, then decide. Editing while scanning would shift
+    // the offsets the proximity test depends on, so replacements are applied from
+    // the end of the sentence backwards.
+    const quantities = [];
+    PROSE_QUANTITY.lastIndex = 0;
+    let m;
+    while ((m = PROSE_QUANTITY.exec(sentence)) !== null) {
+      quantities.push({ index: m.index, matched: m[0], value: m[1], unit: m[2] });
+    }
+    if (quantities.length === 0) return sentence;
+    // One alias scan per sentence, reused for every amount in it.
+    const aliases = [];
+    for (const entry of DOSE_TABLE) {
+      const ceilingMg = entry.ceiling.unit === 'IU' ? null : toMg(entry.ceiling);
+      if (ceilingMg != null && ceilingMg >= PROSE_DOSE_MAX_MG) continue;
+      const at = aliasIndex(sentence, entry.alias);
+      if (at !== -1) aliases.push({ entry, at });
+    }
+    const edits = [];
+    for (const q of quantities) {
+      // Each amount belongs to the NUTRIENT IT IS CLOSEST TO, not to the first
+      // table entry that happens to be nearby: "calcium (1300mg/day), protein and
+      // iron" made the iron ceiling clamp a calcium figure, turning a correct
+      // adolescent RDA into an adult iron dose.
+      let nearest = null;
+      for (const a of aliases) {
+        const d = Math.abs(q.index - a.at);
+        if (d > 70) continue;
+        if (!nearest || d < nearest.distance) nearest = { entry: a.entry, distance: d };
+      }
+      if (!nearest) continue;
+      const frame = sentence.slice(Math.max(0, q.index - 24), q.index);
+      if (DOSE_THRESHOLD_FRAME.test(frame)) continue;
+      const parsed = { value: Number(String(q.value).replace(/,/g, '')), unit: proseUnit(q.unit) };
+      if (!Number.isFinite(parsed.value) || parsed.value <= 0) continue;
+      if (!doseExceeds(nearest.entry, parsed)) continue;
+      const amount = standardAmount(nearest.entry);
+      edits.push({ ...q, amount, entry: nearest.entry });
+    }
+    if (edits.length === 0) return sentence;
+    let out = sentence;
+    for (const e of edits.sort((a, b) => b.index - a.index)) {
+      report('dose-clamped', `${e.matched} for ${e.entry.alias[0]} → ${e.amount}`);
+      out = `${out.slice(0, e.index)}${e.amount}${out.slice(e.index + e.matched.length)}`;
+    }
+    return out;
+  });
+}
+
+// -- e. The prose pass --------------------------------------------------------
+
+/**
+ * What a member-facing paragraph may not assume about the member.
+ *
+ * A plan row's patient facts come from the validated assessment, which the route
+ * already holds. A chat reply has two sources of fact: what the member selected
+ * in the questionnaire AND what they typed here, in this conversation. Both
+ * license a claim; neither alone is enough. A member who selected "Heavy Periods"
+ * and never typed the word is legitimately told "you reported heavy periods" —
+ * deleting that sentence would be the verifier destroying the true thing it
+ * exists to protect. Conversely a member who has never taken the assessment can
+ * still be corrected when the assistant invents a condition they did not name.
+ */
+function buildConversationContext(profile, memberText) {
+  const ctx = buildFactContext(profile || {});
+  const extra = String(memberText == null ? '' : memberText).toLowerCase();
+  if (!extra.trim()) return ctx;
+  for (const word of extra.split(/[^a-z0-9'+-]+/)) {
+    if (word.length >= 4) ctx.reportedWords.add(word);
+  }
+  ctx.freeText = `${ctx.freeText} ${extra}`;
+  // Typing anything at all is a report. Without this the whole check stays off
+  // for a member who has never done an assessment, which is exactly who an
+  // invented "since you mentioned your diabetes" is most likely to mislead.
+  if (!ctx.hasAnyReport) ctx.hasAnyReport = true;
+  return ctx;
+}
+
+/** Said when a reply was entirely built on facts the member never reported. */
+const PROSE_FACT_FALLBACK = 'I can only speak to what you have told me, so I will not assume anything else about your health.';
+
+/**
+ * Prose fields that belong to another verifier, or to the app itself.
+ *
+ * `evidence` is checked against the citation registry by `verifyCitation`, and
+ * `dosage` against the row's nutrient by `checkDose` — running the paragraph
+ * rules over them would double-edit a value that already has an owner. `name`,
+ * `timing`, `foods` and the schedule `items` are labels, not claims.
+ * `disclaimer` is the app's own legal sentence: it is the one string here the
+ * verifier must never rewrite, because a member reading a rewritten disclaimer
+ * has no way to know it was ever anything else.
+ */
+const PLAN_PROSE_SKIP_KEYS = new Set([
+  'name', 'id', '_id', '__v', 'evidence', 'dosage', 'timing', 'foods', 'items',
+  'disclaimer', 'priority', 'confidenceScore', 'severityLevel', 'consultDoctor',
+  'grounding', 'adaptation', 'createdAt', 'updatedAt', 'user', 'assessmentId',
+  'symptoms', 'medicalConditions', 'healthGoals', 'lifestyleHabits', 'image', 'images',
+]);
+
+/**
+ * Verify one paragraph. The order is the argument:
+ *
+ *   1. identifiers  — a PMID/DOI/URL is the claim's anchor, and removing it
+ *                     changes what the sentence asserts, so everything after
+ *                     this step reads the text the app actually stands behind;
+ *   2. treatment advice — the only shape where the whole sentence is replaced,
+ *                     and the only one that can physically harm someone;
+ *   3. curative / absolute claims — verb-level rewrites, applied before the
+ *                     numeric passes so a hedged sentence is not re-counted;
+ *   4. statistics, 5. doses — number-level repairs inside sentences the earlier
+ *                     steps kept;
+ *   6. patient facts last, so the check against what the member reported runs on
+ *                     the text that is actually going to be shown.
+ *
+ * Idempotent: every replacement is a string the same pass does not match again,
+ * and `tidyProse` runs last to absorb the orphan spacing/punctuation a rewrite
+ * can leave behind (a clause deleted before its comma yields " ,", which would
+ * otherwise be re-cut on the second trip). That is what lets the guide verifier
+ * run before a store AND on the way out of a cache read without the text
+ * degrading on the second trip.
+ */
+function tidyProse(text) {
+  // Spaces and tabs only. A newline is content here — bullet lists and
+  // paragraph breaks travel inside these strings — so `\s+` would flatten them.
+  return text
+    .replace(/[ \t]+([,.;:!?])/g, '$1')
+    .replace(/[ \t]{2,}/g, ' ');
+}
+
+function verifyProse(text, options = {}) {
+  if (typeof text !== 'string' || !text.trim()) return { value: text, repairs: [] };
+  const repairs = [];
+  let value = text;
+
+  const ids = stripUnverifiableIdentifiers(value, options);
+  for (const detail of ids.removed) repairs.push({ kind: 'identifier', detail });
+  value = ids.value;
+
+  for (const step of [
+    () => enforceMedicationSafety(value),
+    () => downgradeAbsoluteClaims(value),
+    () => stripUnsourcedStatistics(value, options),
+    () => clampDosesInProse(value),
+    () => (options.ctx
+      ? groundProse(value, options.ctx, { fallback: options.fallback == null ? PROSE_FACT_FALLBACK : options.fallback })
+      : { value, stripped: 0 }),
+  ]) {
+    const result = step();
+    if (typeof result.stripped === 'number') {
+      if (result.stripped > 0) repairs.push({ kind: 'patient-fact', detail: `${result.stripped} clause(s) asserted an unreported patient fact` });
+    } else {
+      repairs.push(...result.repairs);
+    }
+    value = result.value;
+  }
+
+  return { value: tidyProse(value), repairs };
+}
+
+/** The same pass applied to every prose string in a parsed document. */
+function verifyDocumentDeep(value, options = {}) {
+  const repairs = [];
+  const walked = walkStrings(value, (text, key) => {
+    const result = verifyProse(text, options);
+    for (const repair of result.repairs) repairs.push({ ...repair, field: key || 'text' });
+    return result.value;
+  }, { ...options, skipKeys: options.skipKeys || PLAN_PROSE_SKIP_KEYS });
+  return { value: walked, repairs };
+}
+
+/**
+ * Remove the list items the fact check emptied, and keep the two fields that are
+ * read as sentences when they are the only thing on the page.
+ *
+ * The prose pass runs with `fallback: ''` on purpose: a warnings list where five
+ * entries have been replaced by the same boilerplate is more damaged than one
+ * with an entry missing, so an item whose entire content was a fabricated
+ * attribution disappears instead of being padded. `summary` and
+ * `simplifiedSummary` are the exception — an empty summary reads as a broken
+ * result page, so those two get a sentence that claims nothing about the member.
+ */
+const PLAN_SUMMARY_FALLBACK = 'This plan is written from the answers you gave in your assessment.';
+const PLAN_LIST_SECTIONS = ['warnings', 'avoidList', 'lifestyleAdvice', 'actionPlan', 'mealRecommendations', 'dailySchedule'];
+
+function compactSections(plan) {
+  if (!plan || typeof plan !== 'object') return plan;
+  const out = plan;
+  for (const field of PLAN_LIST_SECTIONS) {
+    const list = out[field];
+    if (!Array.isArray(list)) continue;
+    out[field] = list
+      .map((item) => {
+        if (item && typeof item === 'object' && !Array.isArray(item)) {
+          // A meal/schedule card whose only prose is the meal itself.
+          return Object.values(item).some((v) => typeof v === 'string' && v.trim()) ? item : null;
+        }
+        return typeof item === 'string' && !item.trim() ? null : item;
+      })
+      .filter((item) => item !== null);
+  }
+  for (const field of ['summary', 'simplifiedSummary']) {
+    if (out[field] !== undefined && String(out[field] || '').trim() === '') out[field] = PLAN_SUMMARY_FALLBACK;
+  }
+  return out;
+}
+
+/** One line for the log: what the verifier did, in the order it did it. */
+function describeProseRepairs(repairs) {
+  if (!Array.isArray(repairs) || repairs.length === 0) return '';
+  const kinds = {};
+  for (const r of repairs) kinds[r.kind] = (kinds[r.kind] || 0) + 1;
+  return `${repairs.length} repair(s): ${Object.entries(kinds).map(([k, n]) => `${k}×${n}`).join(', ')}`;
 }
 
 module.exports = {
   NEUTRAL_TRIGGER,
   GOAL_OPTIONS,
   DOSE_TABLE,
+  MED_SAFETY_LINE,
+  UNSOURCED_STAT_LINE,
+  PLAN_PROSE_SKIP_KEYS,
+  CLAIM_REWRITES,
   buildFactContext,
+  buildConversationContext,
   unreportedClaims,
   fabricatedPersonalClaims,
   groundTriggeredBy,
   groundProse,
   verifyCitation,
   checkDose,
+  doseExceeds,
   parseFirstDose,
   doseEntry,
   rejectReason,
@@ -770,4 +1612,13 @@ module.exports = {
   groundingViolations,
   stripUnverifiableIdentifiers,
   stripIdentifiersDeep,
+  walkStrings,
+  enforceMedicationSafety,
+  downgradeAbsoluteClaims,
+  stripUnsourcedStatistics,
+  clampDosesInProse,
+  verifyProse,
+  verifyDocumentDeep,
+  describeProseRepairs,
+  tidyProse,
 };

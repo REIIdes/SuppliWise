@@ -700,7 +700,7 @@ test('a slow provider is waited out, not reported as a failure', () => withRoute
 // instead, and what is removed before the write.
 // ---------------------------------------------------------------------------
 
-const { evidenceBlock, stripGuide } = require('../routes/supplement_detail');
+const { evidenceBlock, verifyGuide } = require('../routes/supplement_detail');
 const { registeredEvidence, ENTRIES } = require('../utils/supplementEvidenceRegistry');
 const { extractPmids } = require('../utils/supplementEvidenceRegistry');
 
@@ -713,14 +713,14 @@ test('the guide prompt offers the curated citation and forbids any other', () =>
   assert.ok(evidenceBlock("Devil's Claw").includes(registeredEvidence("Devil's Claw")));
 });
 
-test('stripGuide removes invented identifiers from every nested field', () => {
+test('verifyGuide removes invented identifiers from every nested field', () => {
   const bad = ENTRIES.find((e) => extractPmids(e.citation).length === 0) || ENTRIES[0];
   const guide = {
     overview: `Studied for sleep (PMID: 32722093) in ${bad.nutrient}.`,
     keyBenefits: [{ title: 'Sleep', description: 'See https://example.com/study' }],
     considerations: ['Take with food.'],
   };
-  const out = stripGuide(guide);
+  const out = verifyGuide(guide);
   assert.ok(!JSON.stringify(out).includes('32722093'), JSON.stringify(out));
   assert.ok(!JSON.stringify(out).includes('example.com'), JSON.stringify(out));
   assert.deepEqual(out.considerations, ['Take with food.'], 'true guidance is never deleted');
@@ -736,5 +736,5 @@ test('a guide that is already clean passes through unchanged', () => {
     availability: 'Softgels and capsules.',
     disclaimer: 'Consult a clinician.',
   };
-  assert.deepEqual(stripGuide(guide), guide);
+  assert.deepEqual(verifyGuide(guide), guide);
 });

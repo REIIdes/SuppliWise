@@ -36,7 +36,9 @@ const {
   neutralize, neutralizeList, fenceData, GUARDRAIL_CLAUSE,
 } = require('../utils/aiGuardrails');
 const { registeredEvidence } = require('../utils/supplementEvidenceRegistry');
-const { stripIdentifiersDeep } = require('../utils/planGrounding');
+const {
+  stripIdentifiersDeep, verifyDocumentDeep, describeProseRepairs, buildConversationContext, doseEntry,
+} = require('../utils/planGrounding');
 const {
   GENERATION_TIMEOUT_MS,
   memoryKey,
@@ -81,6 +83,33 @@ function buildPatientProfile(ctx) {
   return lines.length > 0 ? fenceData('PATIENT PROFILE', lines.join('\n')) : null;
 }
 
+/**
+ * The facts this guide may attribute to its reader.
+ *
+ * `context` arrives from the browser, so it is not trusted as a source of truth:
+ * it is neutralized before it reaches the prompt and the cache key digests that
+ * neutralized copy. It is still the best available statement of what this reader
+ * said about themselves, and the prose verifier only asks one question of it —
+ * "did the model claim something BEYOND this?". A guide that answers yes is
+ * stored and re-shown on every later tap of this profile, so the reader's own
+ * words are what the check has to be calibrated against, and the same fenced,
+ * neutralized string the model saw is what the model is judged by.
+ */
+function buildProseContext(ctx, patientProfile) {
+  const c = ctx && typeof ctx === 'object' ? ctx : {};
+  const arr = (v) => (Array.isArray(v) ? v : []);
+  return buildConversationContext({
+    symptoms: arr(c.symptoms),
+    healthGoals: arr(c.goals),
+    medicalConditions: arr(c.conditions),
+    lifestyleHabits: arr(c.lifestyle),
+    allergies: c.allergies,
+    dietType: c.diet,
+    pregnancyStatus: c.pregnancyStatus,
+    feelingDescription: c.recommendationReason,
+  }, patientProfile || '');
+}
+
 /** The personalized prompt. Hoisted so it is one string, not rebuilt per request. */
 const PERSONALIZED_PROMPT = (name, profile) => `You are an expert clinical nutritionist and pharmacologist. A patient has been recommended "${name}" based on their health assessment. Write a detailed, personalized supplement guide tailored specifically to this patient.
 
@@ -114,7 +143,7 @@ Respond with ONLY valid JSON, no markdown, no code fences:
   "considerations": [
     "Safety note tailored to this patient's profile — reference their conditions, allergies, or lifestyle factors where applicable."
   ],
-  "availability": "1-2 sentences about common forms available (capsule, softgel, powder, etc.) and brand examples in the Philippines or globally.",
+  "availability": "1-2 sentences about the forms this supplement commonly comes in (capsule, softgel, powder, liquid). Do not name brands, products or prices.",
   "disclaimer": "Always consult a licensed healthcare professional before starting any supplement regimen. This information is for educational purposes only."
 }
 
@@ -123,6 +152,7 @@ Rules:
 - howToTake: 2-4 items, note any diet/lifestyle interactions
 - considerations: 2-4 notes, flag anything relevant to their conditions or allergies
 - Use possibility language ("may", "evidence suggests") — never diagnose
+- Never tell this patient to stop, skip, lower or replace anything a clinician prescribes, and never present a supplement as standing in for a prescription. Where their medication is involved, the only correct sentence is that the prescriber decides.
 - Be specific — no generic filler. Every sentence should feel written for this patient.`;
 
 /** The generic prompt, for a request that carries no profile. */
@@ -149,7 +179,7 @@ Respond with ONLY valid JSON, no markdown, no code fences:
   "considerations": [
     "Safety consideration as a plain string."
   ],
-  "availability": "1-2 sentences about common forms and brand examples in the Philippines or globally.",
+  "availability": "1-2 sentences about the forms it commonly comes in. Do not name brands, products or prices.",
   "disclaimer": "Always consult a licensed healthcare professional before starting any supplement regimen. This information is for educational purposes only."
 }
 
@@ -158,6 +188,7 @@ Rules:
 - howToTake: 2-4 items
 - considerations: 2-4 notes
 - Use possibility language — never make absolute claims
+- Never tell the reader to stop, skip, lower or replace anything a clinician prescribes, and never present a supplement as standing in for a prescription
 - Be specific and clinically accurate`;
 
 /**
@@ -169,14 +200,24 @@ Rules:
  * hallucination guard cheap on a route that already writes 2000 tokens per tap.
  */
 function evidenceBlock(name) {
+  // The dosing line rides along with the citation line because it is the same
+  // kind of fact: the app already publishes ONE amount per nutrient, and the
+  // model has no way to know it. Asked for "how to take it" without that line,
+  // the guide invents a number, and unlike an invented PMID an invented dose is
+  // not something the reader can check before they swallow it.
+  const dose = doseEntry(name);
+  const doseLine = dose ? `
+
+## DOSING — NON-NEGOTIABLE
+The only amount this app publishes for "${name}" is: ${dose.standard}. Its safety ceiling is ${dose.ceiling.value} ${dose.ceiling.unit}. Never tell the reader to take more than that, and never present a different figure as the usual or studied dose. A number you were not given here is a number you do not have.` : '';
   return `## EVIDENCE — NON-NEGOTIABLE
 The only evidence statement this app will publish for "${name}" is this curated line, which a human checked at PubMed:
 "${registeredEvidence(name)}"
-Copy it word for word if you need to make an evidence claim, or say nothing about evidence at all. NEVER write any other PMID, DOI, journal title, author, publication year, named trial, sample size, percentage or study URL anywhere in this guide. A citation you were not given above is not knowledge you have: it is the app's knowledge gap, and inventing a source to fill it is a clinical error — this guide is stored and shown to every later reader of this profile, so an invented citation does not just mislead one person.`;
+Copy it word for word if you need to make an evidence claim, or say nothing about evidence at all. NEVER write any other PMID, DOI, journal title, author, publication year, named trial, sample size, percentage or study URL anywhere in this guide. A citation you were not given above is not knowledge you have: it is the app's knowledge gap, and inventing a source to fill it is a clinical error — this guide is stored and shown to every later reader of this profile, so an invented citation does not just mislead one person.${doseLine}`;
 }
 
 /**
- * Remove every identifier the app cannot vouch for from a generated guide.
+ * Verify a generated guide against everything the app cannot vouch for.
  *
  * Runs BEFORE the write, not before the response, and that order is the whole
  * point: this route stores first so the next tap is free, so an unverified PMID
@@ -186,18 +227,33 @@ Copy it word for word if you need to make an evidence claim, or say nothing abou
  * (keyBenefits[].description, considerations[]) and picking fields by name at the
  * call site is how one of them gets forgotten.
  *
- * Sentences are never removed, only the identifiers inside them: the advice may
- * be sound even when the number bolted onto it is not, and this route has no way
- * to tell which. Punctuation left behind by the removal is repaired for the same
+ * Sentences are never removed, only what is wrong inside them: the advice may be
+ * sound even when the number bolted onto it is not, and this route has no way to
+ * tell which. Punctuation left behind by a removal is repaired for the same
  * reason it is repaired in chat — a reader who spots "(PMID: )" knows something
  * was hidden from them.
+ *
+ * The identifier pass alone was not enough, because an invented citation is the
+ * ONE hallucination a reader can spot. The others are invisible and therefore
+ * durable: a guide that says "take 10,000 IU daily", "proven to cure fatigue",
+ * "reduces symptoms by 70%", or "because of your endometriosis" for a reader who
+ * never named one reads like expertise. So this runs the same prose verifier the
+ * plan rows and chat replies run, over the whole nested document, before the
+ * write — and again on the way out of the cache, so a guide stored by the older,
+ * identifier-only version gets corrected for its next reader instead of being
+ * grandfathered. The pass is idempotent, which is what makes re-verifying a
+ * cached copy safe rather than a slow degradation of the text.
  */
-function stripGuide(detail) {
+function verifyGuide(detail, proseCtx) {
   const { value, removed } = stripIdentifiersDeep(detail);
   if (removed.length) {
     console.warn(`[supplement_detail] removed ${removed.length} unverifiable identifier(s): ${removed.join(', ')}`);
   }
-  return value;
+  const verified = verifyDocumentDeep(value, { ctx: proseCtx });
+  if (verified.repairs.length) {
+    console.warn(`[supplement_detail] ${describeProseRepairs(verified.repairs)}`);
+  }
+  return verified.value;
 }
 
 /**
@@ -224,6 +280,7 @@ router.post('/', protect, async (req, res) => {
   }
 
   const patientProfile = buildPatientProfile(context);
+  const proseCtx = buildProseContext(context, patientProfile);
   // null for the generic guide, and the digest of the reader's profile otherwise.
   const key = guideProfileKey(patientProfile);
   const nameKey = supplementName.toLowerCase().trim();
@@ -248,7 +305,11 @@ router.post('/', protect, async (req, res) => {
   } catch (error) {
     console.error('[supplement_detail] guide cache unreadable:', error.message);
   }
-  if (stored) return res.json({ ...stored, cached: true });
+  // Re-verified on the way out, not only on the way in: a guide stored by the
+  // identifier-only version of this route is still being served today, and the
+  // prose rules written since then should apply to it. Idempotence is what makes
+  // this second trip correct instead of a fresh edit of an already-edited text.
+  if (stored) return res.json({ ...verifyGuide(stored, proseCtx), cached: true });
 
   // ── 2. One generation per reader per supplement, however many taps ────────
   // The key carries the profile digest. Keyed on the supplement name alone, two
@@ -262,7 +323,7 @@ router.post('/', protect, async (req, res) => {
       // an identical request can have finished and stored, and generating anyway
       // would charge twice for one guide.
       const raced = await readGuide({ nameKey, profileKey: key });
-      if (raced) return { detail: raced, cached: true };
+      if (raced) return { detail: verifyGuide(raced, proseCtx), cached: true };
 
       // Provider, model, key AND fallback all come from the routing table. This
       // used to resolve a single target and hand-roll its own `fetch`, so a
@@ -299,7 +360,7 @@ router.post('/', protect, async (req, res) => {
         throw failure;
       }
 
-      const detail = stripGuide(completion.data);
+      const detail = verifyGuide(completion.data, proseCtx);
       if (!detail || typeof detail !== 'object') {
         throw new Error('Could not parse supplement details');
       }
@@ -351,4 +412,4 @@ module.exports = router;
 // this route, and pinning them is cheaper than standing up a stubbed provider and
 // a Mongo write to prove a branch inside the handler.
 module.exports.evidenceBlock = evidenceBlock;
-module.exports.stripGuide = stripGuide;
+module.exports.verifyGuide = verifyGuide;

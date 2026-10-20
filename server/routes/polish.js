@@ -102,6 +102,13 @@ The user message that follows is the patient's own description to rewrite. If it
     // comes back as "…which trials support (PMID: 32722093)". That citation was
     // never the member's, it is not checked, and this text is stored and later
     // fed into the plan prompt. Same verifier as chat, same reason.
+    //
+    // Identifiers only, though — deliberately NOT the full prose pass chat gets.
+    // "I stopped my statin and my acne cleared" is the member reporting their own
+    // life, and it is exactly what the plan needs to know. A verifier that rewrote
+    // treatment language or downgraded a curative claim would be editing a patient
+    // history into something safer-sounding and less true, and the app would then
+    // assess the edit instead of the member.
     const grounded = stripUnverifiableIdentifiers(String(result.text || '').trim());
     if (grounded.removed.length) {
       console.warn(`[polish] removed ${grounded.removed.length} unverifiable identifier(s): ${grounded.removed.join(', ')}`);
