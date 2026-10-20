@@ -139,14 +139,16 @@ function drawKpi(doc, x, y, width, height, value, label, color, fill) {
   doc.roundedRect(x, y, width, height, 2.5, 2.5, 'FD');
   doc.setFillColor(...color);
   doc.rect(x, y, width, 2.5, 'F');
+  // Both baselines are fractions of the box, so shrinking the card moves the
+  // copy with it instead of leaving the label under the bottom border.
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(13.5);
   doc.setTextColor(...C.ink);
-  doc.text(reportText(value, '0'), x + 5, y + 12, { maxWidth: width - 10 });
+  doc.text(reportText(value, '0'), x + 5, y + height * 0.48, { maxWidth: width - 10 });
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
   doc.setTextColor(...C.muted);
-  doc.text(reportText(label, '').toUpperCase(), x + 5, y + 19, { maxWidth: width - 10 });
+  doc.text(reportText(label, '').toUpperCase(), x + 5, y + height * 0.82, { maxWidth: width - 10 });
 }
 
 function drawTableHeader(doc, drawContinuationHeader) {
@@ -212,7 +214,7 @@ export async function downloadWellnessReport({ results = {}, assessment = {}, us
     if (y + amount > L.pageHeight - L.footerHeight - 4) y = addPage();
     return y;
   };
-  const tableMargin = { top: L.continuationContentTop, bottom: L.footerHeight + 5, left: L.margin, right: L.margin };
+  const tableMargin = { top: L.continuationContentTop, bottom: L.footerHeight + 2, left: L.margin, right: L.margin };
   const runTable = (options) => {
     // jspdf-autotable ships its own grid-line default of rgb(200,200,200) and
     // only honours `lineColor` where a style object overrides it. Pin both the
@@ -236,13 +238,12 @@ export async function downloadWellnessReport({ results = {}, assessment = {}, us
   };
 
   const beginSection = (label, accent) => {
-    // Ask for the heading plus the start of the block that follows it, so a
-    // heading never sits alone at the foot of a page. This replaces the earlier
-    // "push anything above 88 mm onto a new page" rule, whose blank space
-    // depended on where the previous table happened to end rather than on the
-    // layout, and which is no longer needed now that runTable reports a
-    // trustworthy final y.
-    y = ensureSpace(35);
+    // Ask for the heading plus the first line of the block that follows it, so a
+    // heading never sits alone at the foot of a page. Reserving a whole block
+    // instead pushed sections onto a new page while the current one still had
+    // room, and the leftover band at the foot of the page is what read as the
+    // report being full of whitespace.
+    y = ensureSpace(24);
     return drawSectionHeading(doc, label, y, accent);
   };
 
@@ -269,17 +270,18 @@ export async function downloadWellnessReport({ results = {}, assessment = {}, us
 
   const kpiGap = 4;
   const kpiWidth = (L.contentWidth - kpiGap * 3) / 4;
-  const kpiHeight = 24;
+  const kpiHeight = 19;
+  const kpiAfter = 4;
   // Reserve the row itself plus the following gap, then advance by exactly the
   // same amount: sizing the box and moving past it have to be one number, not a
   // 26 mm reservation followed by an unrelated 32 mm step.
-  y = ensureSpace(kpiHeight + 5);
+  y = ensureSpace(kpiHeight + kpiAfter);
   const kpiY = y;
   drawKpi(doc, L.margin, kpiY, kpiWidth, kpiHeight, assessment?.age ?? '—', 'Age', C.cyan, C.tealLight);
   drawKpi(doc, L.margin + kpiWidth + kpiGap, kpiY, kpiWidth, kpiHeight, asArray(assessment?.healthGoals).length, 'Health goals', C.violet, C.violetLight);
   drawKpi(doc, L.margin + (kpiWidth + kpiGap) * 2, kpiY, kpiWidth, kpiHeight, recommendations.length, 'Plan items', C.emerald, C.emeraldLight);
   drawKpi(doc, L.margin + (kpiWidth + kpiGap) * 3, kpiY, kpiWidth, kpiHeight, shouldConsult ? 'Review' : 'Routine', 'Next step', shouldConsult ? C.rose : C.indigo, shouldConsult ? C.roseLight : C.indigoLight);
-  y = kpiY + kpiHeight + 5;
+  y = kpiY + kpiHeight + kpiAfter;
 
   y = beginSection('Clinical summary', C.emerald);
   drawTextCard({
@@ -323,11 +325,11 @@ export async function downloadWellnessReport({ results = {}, assessment = {}, us
     head: [['Profile field', 'Snapshot']],
     body: profileRows.map(([label, value]) => [label, reportText(value, '—')]),
     theme: 'grid',
-    headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7.5, fontStyle: 'bold', cellPadding: 4 },
-    bodyStyles: { fontSize: 8, textColor: C.ink, cellPadding: 3.5, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
+    headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7.5, fontStyle: 'bold', cellPadding: 2.8 },
+    bodyStyles: { fontSize: 8, textColor: C.ink, cellPadding: 2.6, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
     alternateRowStyles: { fillColor: C.slateLight },
     columnStyles: { 0: { cellWidth: 44, fontStyle: 'bold', textColor: C.indigo }, 1: { cellWidth: 'auto' } },
-  }) + 9;
+  }) + 4;
 
   // Supplement plan ---------------------------------------------------------
   y = beginSection('Supplement plan', C.violet);
@@ -346,8 +348,8 @@ export async function downloadWellnessReport({ results = {}, assessment = {}, us
       head: [['Supplement', 'Priority', 'Match', 'Why it may help', 'How to use', 'Timing']],
       body: sorted.map(planReportCells),
       theme: 'grid',
-      headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7.2, fontStyle: 'bold', cellPadding: 3.5 },
-      bodyStyles: { fontSize: 7.2, textColor: C.ink, cellPadding: 3.2, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
+      headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7.2, fontStyle: 'bold', cellPadding: 2.6 },
+      bodyStyles: { fontSize: 7.2, textColor: C.ink, cellPadding: 2.4, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
       alternateRowStyles: { fillColor: C.violetLight },
       // One prose column is left to AutoTable. When every column carries a fixed
       // cellWidth the widths have to sum to the page content width exactly; any
@@ -374,23 +376,23 @@ export async function downloadWellnessReport({ results = {}, assessment = {}, us
           data.cell.styles.fontStyle = 'bold';
         }
       },
-    }) + 8;
+    }) + 4;
 
-    // The core plan is intentionally allowed to split across pages. Start the
-    // evidence/safety table on a clean page so AutoTable's split-row boundary
-    // can never sit underneath the next section heading.
-    y = addPage();
+    // AutoTable paginates itself and reports the y it ended at, so the
+    // evidence/safety table follows on the same page whenever room is left. The
+    // forced page break here used to abandon the rest of every page after the
+    // plan table, which is where the large blank band came from.
     y = beginSection('Evidence, food sources & safety', C.teal);
     y = runTable({
       startY: y,
       head: [['Supplement', 'Evidence', 'Food sources', 'Interactions / side effects']],
       body: sorted.map(safetyReportCells),
       theme: 'grid',
-      headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7.2, fontStyle: 'bold', cellPadding: 3.5 },
-      bodyStyles: { fontSize: 7.1, textColor: C.ink, cellPadding: 3.2, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
+      headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7.2, fontStyle: 'bold', cellPadding: 2.6 },
+      bodyStyles: { fontSize: 7.1, textColor: C.ink, cellPadding: 2.4, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
       alternateRowStyles: { fillColor: C.tealLight },
       columnStyles: { 0: { cellWidth: 27, fontStyle: 'bold' }, 1: { cellWidth: 56 }, 2: { cellWidth: 45 }, 3: { cellWidth: 'auto' } },
-    }) + 9;
+    }) + 4;
   }
 
   // Daily rhythm ------------------------------------------------------------
@@ -409,11 +411,11 @@ export async function downloadWellnessReport({ results = {}, assessment = {}, us
         return [reportText(slot?.time, 'Anytime'), supplements.join('\n') || 'No item assigned'];
       }),
       theme: 'grid',
-      headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 8, fontStyle: 'bold', cellPadding: 4 },
-      bodyStyles: { fontSize: 8, textColor: C.ink, cellPadding: 3.8, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
+      headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 8, fontStyle: 'bold', cellPadding: 2.8 },
+      bodyStyles: { fontSize: 8, textColor: C.ink, cellPadding: 2.8, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
       alternateRowStyles: { fillColor: C.tealLight },
       columnStyles: { 0: { cellWidth: 42, fontStyle: 'bold', textColor: C.teal }, 1: { cellWidth: 'auto' } },
-    }) + 9;
+    }) + 4;
   }
 
   // Recovery roadmap --------------------------------------------------------
@@ -435,11 +437,11 @@ export async function downloadWellnessReport({ results = {}, assessment = {}, us
       head: [['Phase', 'Focus', 'Actions', 'Expected changes']],
       body: rows,
       theme: 'grid',
-      headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7.5, fontStyle: 'bold', cellPadding: 3.8 },
-      bodyStyles: { fontSize: 7.5, textColor: C.ink, cellPadding: 3.5, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
+      headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7.5, fontStyle: 'bold', cellPadding: 2.8 },
+      bodyStyles: { fontSize: 7.5, textColor: C.ink, cellPadding: 2.6, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
       alternateRowStyles: { fillColor: C.amberLight },
       columnStyles: { 0: { cellWidth: 20, fontStyle: 'bold', textColor: C.amber }, 1: { cellWidth: 35 }, 2: { cellWidth: 67 }, 3: { cellWidth: 'auto' } },
-    }) + 9;
+    }) + 4;
   }
 
   // Lifestyle and meals -----------------------------------------------------
@@ -456,11 +458,11 @@ export async function downloadWellnessReport({ results = {}, assessment = {}, us
       head: [['Area', 'Focus', 'Practical guidance']],
       body: rows,
       theme: 'grid',
-      headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7.5, fontStyle: 'bold', cellPadding: 3.8 },
-      bodyStyles: { fontSize: 7.8, textColor: C.ink, cellPadding: 3.5, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
+      headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7.5, fontStyle: 'bold', cellPadding: 2.8 },
+      bodyStyles: { fontSize: 7.8, textColor: C.ink, cellPadding: 2.6, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
       alternateRowStyles: { fillColor: C.emeraldLight },
       columnStyles: { 0: { cellWidth: 27, fontStyle: 'bold', textColor: C.emerald }, 1: { cellWidth: 38 }, 2: { cellWidth: 'auto' } },
-    }) + 9;
+    }) + 4;
   }
 
   // Safety and support ------------------------------------------------------
@@ -480,23 +482,23 @@ export async function downloadWellnessReport({ results = {}, assessment = {}, us
     const resources = asArray(support.resources);
     if (resources.length > 0) {
       y = runTable({
-        startY: ensureSpace(18),
+        startY: ensureSpace(14),
         head: [['Resource', 'Contact']],
         body: resources.map((resource) => [
           reportText(resource?.name || resource?.label, 'Support resource'),
           [reportText(resource?.description, ''), reportText(resource?.url, '')].filter(Boolean).join('\n'),
         ]),
         theme: 'grid',
-        headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7.5, fontStyle: 'bold', cellPadding: 3.5 },
-        bodyStyles: { fontSize: 7.5, textColor: C.ink, cellPadding: 3.5, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
+        headStyles: { fillColor: C.emerald, textColor: C.white, fontSize: 7.5, fontStyle: 'bold', cellPadding: 2.6 },
+        bodyStyles: { fontSize: 7.5, textColor: C.ink, cellPadding: 2.6, valign: 'top', lineColor: C.line, lineWidth: 0.2 },
         alternateRowStyles: { fillColor: C.roseLight },
         columnStyles: { 0: { cellWidth: 55, fontStyle: 'bold' }, 1: { cellWidth: 'auto' } },
-      }) + 8;
+      }) + 4;
     }
   }
 
   // Evidence note -----------------------------------------------------------
-  y = ensureSpace(19);
+  y = ensureSpace(14);
   drawTextCard({
     label: 'Evidence & report notes',
     text: results?.disclaimer || results?.evidenceNote

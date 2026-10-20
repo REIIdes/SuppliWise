@@ -62,7 +62,10 @@ export const REPORT_LAYOUT = Object.freeze({
   margin: 15,
   contentWidth: 180,
   footerHeight: 11,
-  firstContentTop: 67,
+  // The cover header is 58 mm tall; content starts just below it instead of
+  // nine millimetres down the page, because that band of blank read as a gap
+  // the report had run out of things to say about.
+  firstContentTop: 61,
   continuationContentTop: 27,
 });
 
@@ -215,12 +218,13 @@ export function drawMeasuredTextCard(doc, {
   });
   // The label sits on the first fragment only; the rest continue the same box
   // without repeating a heading that would read as a new section.
-  const headerHeight = labelBlock.lines.length ? labelBlock.height + 2.5 : 0;
-  const boxPadding = 4;
+  const labelGap = 1.8;
+  const headerHeight = labelBlock.lines.length ? labelBlock.height + labelGap : 0;
+  const boxPadding = 3;
 
   if (!body.lines.length && !labelBlock.lines.length) return y;
 
-  const boxGap = 4;
+  const boxGap = 3;
   const bottomLimit = REPORT_LAYOUT.pageHeight - REPORT_LAYOUT.footerHeight - 4;
   let cursor = Number.isFinite(Number(y)) ? Number(y) : 0;
   let remaining = body.lines.length ? body.lines : [[]];
@@ -252,7 +256,7 @@ export function drawMeasuredTextCard(doc, {
       doc.setFontSize(7.3);
       doc.setTextColor(...safeAccent);
       doc.text(labelBlock.lines.join(' '), margin + railWidth + inset, textTop + labelBlock.em * 0.82);
-      textTop += labelBlock.height + 2.5;
+      textTop += labelBlock.height + labelGap;
     }
 
     doc.setFont('helvetica', 'normal');
@@ -404,7 +408,9 @@ export function drawSectionHeading(doc, label, y, accent = REPORT_COLORS.emerald
   doc.setDrawColor(...REPORT_COLORS.line);
   doc.setLineWidth(0.35);
   doc.line(margin, safeY + 10, margin + contentWidth, safeY + 10);
-  return safeY + 15;
+  // The rule sits 10 mm down the heading block; the block that follows starts
+  // just under it. Anything more became the blank band between sections.
+  return safeY + 12.5;
 }
 
 export function drawPill(doc, text, x, y, width, color, { height = 8, fontSize = 7.5 } = {}) {

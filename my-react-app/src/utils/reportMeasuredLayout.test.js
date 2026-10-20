@@ -161,7 +161,9 @@ test('a short description still draws one correctly sized box', () => {
   assert.equal(doc.internal.getNumberOfPages(), 1);
   const body = measureParagraph(doc, 'Sleep quality improved.', { maxWidth: L.contentWidth - 16.5, fontSize: 9 });
   const label = measureParagraph(doc, 'SUMMARY', { maxWidth: L.contentWidth - 16.5, fontSize: 7.3, fontStyle: 'bold' });
-  const expected = 4 + label.height + 2.5 + body.lines.length * body.lineHeight + 4;
+  // The card is exactly its own chrome plus its own lines — no fixed 15 mm
+  // reservation, which is what used to leave a blank band under short text.
+  const expected = 3 + label.height + 1.8 + body.lines.length * body.lineHeight + 3;
   assert.ok(Math.abs(boxes[0].h - expected) < 0.001, `box ${boxes[0].h} vs measured ${expected}`);
   const firstText = calls.find((call) => call.name === 'text');
   assert.ok(firstText.y > boxes[0].y && firstText.y < boxes[0].y + boxes[0].h, 'text drawn outside its own card');
@@ -240,6 +242,33 @@ test('the exported date and file name come from the saved record, not the export
   const results = { recommendations: [{ name: 'Magnesium Glycinate', reason: 'r', dosage: '200 mg' }] };
   const run = await downloadWellnessReport({ save: false, results, assessment });
   assert.match(run.filename, /_2026-10-20_00-00-00\.pdf$/, 'the file name followed the click, not the assessment');
+});
+
+test('the report fills its pages instead of abandoning the tail of each one', async () => {
+  const { downloadWellnessReport } = await import('./wellnessReport.js');
+  const assessment = { createdAt: '2026-10-20T00:00:00.000Z', userName: 'Test Person', age: 34, healthGoals: ['Energy'], symptoms: ['Fatigue'] };
+  const row = (reason) => ({
+    name: 'Magnesium Glycinate', priority: 'Medium', confidenceScore: 80, reason,
+    dosage: '200 mg', timing: 'Evening', evidence: 'NIH ODS guidance.',
+    foods: ['spinach'], sideEffects: 'None identified', interactions: 'None identified',
+  });
+  const compact = {
+    recommendations: [row('Short rationale.'), row('Short rationale.')],
+    summary: 'A grounded plan.',
+    dailySchedule: [{ time: 'Morning', supplements: ['Magnesium Glycinate'] }],
+  };
+  const run = await downloadWellnessReport({ save: false, results: compact, assessment });
+  // The same content used to need three pages: the evidence section always
+  // started on a fresh sheet, and every section reserved a whole block of room
+  // before it, so each page gave up while the report still had rows to print.
+  assert.equal(run.pageCount, 2, 'a two-item plan should fit the pages it has');
+
+  const long = {
+    ...compact,
+    recommendations: Array.from({ length: 12 }, (_, index) => row(`A long rationale. ${index} `.repeat(40))),
+  };
+  const grown = await downloadWellnessReport({ save: false, results: long, assessment });
+  assert.ok(grown.pageCount > run.pageCount, 'denser must not mean squeezed: long prose still has to add pages');
 });
 
 test('the last-resort renderer still produces a readable multi-page report for a malformed row', async () => {
