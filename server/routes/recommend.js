@@ -8,6 +8,8 @@ const { promptSafe, ASSESSMENT_SYSTEM_PROMPT, buildAssessmentPrompt } = require(
 const { enforcePlanConsistency } = require('../utils/planConsistency');
 const { containsForbiddenFood } = require('../utils/planEvaluation');
 const { getLiveConditions, mergeSelectedBundles, kbBlockForPrompt } = require('../utils/dynamicConditions');
+const { registeredEvidence, extractPmids } = require('../utils/supplementEvidenceRegistry');
+const { groundPlan } = require('../utils/planGrounding');
 
 // Kept on the route's public surface because existing probes import it from
 // here; the implementation now lives in utils/assessmentPrompt.js.
@@ -44,6 +46,10 @@ function sanitizeStrings(obj) {
 }
 
 router.post('/', protect, async (req, res) => {
+  // Declared outside the try so the catch handler can still reach it: this used
+  // to be a `const` inside the block, which meant the degraded path threw
+  // "liveDynamic is not defined" and the member got a 500 instead of a plan.
+  let liveDynamic = [];
   try {
     const a = req.body;
 
@@ -68,7 +74,18 @@ router.post('/', protect, async (req, res) => {
     // paths — section 9 of the prompt KB for the LLM, and a deterministic
     // bundle merge for the rule fallback — so a published condition behaves
     // identically to a hard-coded one regardless of which engine answers.
-    const liveDynamic = await getLiveConditions();
+    liveDynamic = await getLiveConditions();
+
+    // PMIDs the evidence gate already cleared for AI-published conditions. They
+    // are vouchable, so grounding must not strip a citation that quotes them.
+    const dynamicPmids = new Set(liveDynamic.flatMap((d) => (d.supplements || [])
+      .flatMap((s) => extractPmids(s.evidence))));
+
+    // The clinical rule engine's own answer for THIS profile. It is both the
+    // degraded path and, on the AI path, the source that refills a slot when
+    // grounding has to delete a row — a member should never get an 11-item plan
+    // because a model invented a supplement.
+    const clinicalPlan = enforcePlanConsistency(generateClinicalFallback(req.body, liveDynamic));
 
     // The structured prompt (ROLE / DOMAIN KNOWLEDGE BASE / INSTRUCTIONS /
     // TONE / PATIENT DATA / OUTPUT FORMAT) is built in utils/assessmentPrompt
@@ -139,15 +156,38 @@ router.post('/', protect, async (req, res) => {
       if (hasRecDrugs && (!aiResult.seekingSupport || !aiResult.seekingSupport.include)) {
         aiResult.seekingSupport = buildSeekingSupport();
       }
+      // GROUNDING GATE — the prompt asks for real citations, patient-reported
+      // triggers and safe doses; this checks them. Anything the app cannot
+      // vouch for is replaced from its own curated tables before the reply
+      // leaves the server, and `plan.grounding` records what was changed.
+      // It runs BEFORE the consistency gate so a backfilled row is ordered too.
+      const grounded = groundPlan(aiResult, {
+        ...a,
+        currentMedications: processedMedications,
+        allergies: processedAllergies,
+        currentSupplements: processedSupplements,
+      }, {
+        trustedRecs: clinicalPlan.recommendations,
+        adjustFoods: dietAdjustFoods,
+        allowedPmids: dynamicPmids,
+      });
       // CONSISTENCY GATE — the prompt asks for priority tiers and the canonical
       // nutrient order (Omega-3 before Magnesium); this enforces them, so the
       // item order a member sees is a property of the system, not of the model's
       // sampling luck. It only ever re-orders, never adds or removes.
-      return res.json(sanitizeStrings(enforcePlanConsistency(aiResult)));
+      return res.json(sanitizeStrings(enforcePlanConsistency(grounded)));
     }
 
     console.log('Using rule-based clinical fallback');
-    return res.json(sanitizeStrings(enforcePlanConsistency(generateClinicalFallback(req.body, liveDynamic))));
+    // The engine is checked by the same gate it applies to the model: its rows
+    // were the source of the fabricated PMIDs this audit found, so "curated" is
+    // not a licence to skip verification.
+    return res.json(sanitizeStrings(enforcePlanConsistency(groundPlan(clinicalPlan, {
+      ...a,
+      currentMedications: processedMedications,
+      allergies: processedAllergies,
+      currentSupplements: processedSupplements,
+    }, { adjustFoods: dietAdjustFoods, allowedPmids: dynamicPmids }))));
 
   } catch (error) {
     console.error('Recommend route error:', error.message);
@@ -377,7 +417,7 @@ function generateClinicalFallback(a, liveDynamic = []) {
   // -- Stress level logic --
   if (stressLevel === 'High' || stressLevel === 'Severe') {
     if (!recs.find(r => r.name.includes('Ashwagandha')) && !onAntidepressant && !isPregnant && !isBreastfeeding)
-      recs.push({ name: 'Ashwagandha (KSM-66)', reason: `${stressLevel} stress level detected. KSM-66 ashwagandha has the strongest clinical evidence for cortisol reduction, with multiple RCTs showing 27-30% cortisol reduction and significant anxiety improvement.`, dosage: stressLevel === 'Severe' ? '600mg daily' : '300-600mg daily', timing: 'Morning or evening with food', priority: stressLevel === 'Severe' ? 'High' : 'Medium', interactions: 'None identified', triggeredBy: `${stressLevel} stress level reported` });
+      recs.push({ name: 'Ashwagandha (KSM-66)', reason: `${stressLevel} stress level detected. KSM-66 ashwagandha has the strongest clinical evidence among adaptogens for cortisol and perceived stress; randomised trials report lower cortisol and less perceived stress versus placebo.`, dosage: stressLevel === 'Severe' ? '600mg daily' : '300-600mg daily', timing: 'Morning or evening with food', priority: stressLevel === 'Severe' ? 'High' : 'Medium', interactions: 'None identified', triggeredBy: `${stressLevel} stress level reported` });
     if (!recs.find(r => r.name.includes('Magnesium')))
       recs.push({ name: 'Magnesium Glycinate', reason: 'Chronic stress rapidly depletes magnesium stores. Magnesium is essential for the stress response and GABA activation. Glycinate form crosses the blood-brain barrier effectively.', dosage: '300-400mg daily', timing: 'Evening with dinner', priority: 'High', interactions: 'None identified', triggeredBy: `${stressLevel} stress level reported` });
     lifestyleAdvice.push({ category: 'Stress Management', advice: stressLevel === 'Severe' ? 'Severe stress requires immediate intervention. Consider speaking with a mental health professional. Daily practices: 15-20 minutes of mindfulness meditation, journaling, and at least one screen-free hour. Chronic severe stress is linked to adrenal fatigue, immune suppression, and cardiovascular disease.' : 'Practice daily stress management: 10 minutes of mindfulness meditation, 4-7-8 breathing (inhale 4s, hold 7s, exhale 8s), and regular physical activity. Chronic stress depletes magnesium, B vitamins, and Vitamin C.' });
@@ -445,7 +485,7 @@ function generateClinicalFallback(a, liveDynamic = []) {
   }
   if (conditions.includes('High Blood Pressure')) {
     recs.push({ name: 'Magnesium Glycinate', reason: 'Magnesium deficiency is common in hypertension. Relaxes blood vessel walls with clinical evidence for blood pressure reduction. Glycinate avoids digestive side effects.', dosage: '400mg daily', timing: 'Evening with dinner', priority: 'High', interactions: onACE ? 'Safe with ACE inhibitors � monitor potassium' : 'Inform your doctor' });
-    recs.push({ name: 'CoQ10', reason: 'Multiple trials show CoQ10 reduces systolic BP by 10-17 mmHg. Essential for heart muscle energy.', dosage: '100-200mg daily', timing: 'With fat-containing meal', priority: 'High', interactions: 'May enhance antihypertensive effect � monitor BP' });
+    recs.push({ name: 'CoQ10', reason: 'CoQ10 levels fall with statin therapy, and supplementing restores them; blood-pressure effects are studied but not settled. Essential for heart muscle energy.', dosage: '100-200mg daily', timing: 'With fat-containing meal', priority: 'High', interactions: 'May enhance antihypertensive effect � monitor BP' });
     warnings.push('High blood pressure: CoQ10 and magnesium can lower BP. Monitor and inform your doctor.');
     lifestyleAdvice.push({ category: 'Diet', advice: 'Follow the DASH diet: reduce sodium to <2300mg/day, increase potassium-rich foods (bananas, sweet potatoes, spinach), limit alcohol, and avoid processed foods.' });
     lifestyleAdvice.push({ category: 'Stress', advice: 'Chronic stress directly raises blood pressure. Practice daily deep breathing (4-7-8 technique), meditation, or progressive muscle relaxation for 10-15 minutes.' });
@@ -600,7 +640,7 @@ function generateClinicalFallback(a, liveDynamic = []) {
     lifestyleAdvice.push({ category: 'Nutrition', advice: 'For skin and hair health: eat foods rich in antioxidants (berries, leafy greens), healthy fats (avocado, salmon, nuts), and zinc (pumpkin seeds, oysters). Avoid excess sugar which causes glycation and accelerates skin aging.' });
   }
   if (goals.includes('Hormonal Balance')) {
-    recs.push({ name: 'Ashwagandha (KSM-66)', reason: 'Ashwagandha reduces cortisol by 27-30% in clinical trials, directly improving hormonal balance. Also supports thyroid function and testosterone levels in men.', dosage: '300-600mg daily', timing: 'Morning or evening with food', priority: 'Medium', interactions: onAntidepressant ? 'Use with caution - consult doctor' : 'None identified', triggeredBy: 'Hormonal Balance goal' });
+    recs.push({ name: 'Ashwagandha (KSM-66)', reason: 'Ashwagandha is linked to lower cortisol and reduced perceived stress in randomised trials, which is why it is used for hormonal balance. Evidence for thyroid and testosterone effects is limited.', dosage: '300-600mg daily', timing: 'Morning or evening with food', priority: 'Medium', interactions: onAntidepressant ? 'Use with caution - consult doctor' : 'None identified', triggeredBy: 'Hormonal Balance goal' });
     if (!recs.find(r => r.name.includes('Magnesium')))
       recs.push({ name: 'Magnesium Glycinate', reason: 'Magnesium is a cofactor in over 300 hormonal reactions. Deficiency disrupts cortisol, insulin, thyroid, and sex hormone balance.', dosage: '300-400mg daily', timing: 'Evening', priority: 'Medium', interactions: 'None identified', triggeredBy: 'Hormonal Balance goal' });
     lifestyleAdvice.push({ category: 'Nutrition', advice: 'For hormonal balance: eat adequate healthy fats (avocado, olive oil, nuts) as hormones are made from cholesterol. Avoid crash dieting which disrupts cortisol and thyroid hormones. Prioritize fiber to support estrogen metabolism.' });
@@ -655,7 +695,7 @@ function generateClinicalFallback(a, liveDynamic = []) {
   }
   if (symptoms.includes('Anxiety/Stress')) {
     if (!onAntidepressant)
-      recs.push({ name: 'Ashwagandha (KSM-66)', reason: 'KSM-66 is the most clinically studied extract. Multiple RCTs show 27-30% cortisol reduction and significant anxiety improvement.', dosage: '300-600mg daily', timing: 'Morning or evening with food', priority: 'Medium', interactions: 'None identified' });
+      recs.push({ name: 'Ashwagandha (KSM-66)', reason: 'KSM-66 is the most clinically studied extract. Randomised trials report lower cortisol and reduced perceived stress versus placebo.', dosage: '300-600mg daily', timing: 'Morning or evening with food', priority: 'Medium', interactions: 'None identified' });
     recs.push({ name: 'L-Theanine', reason: 'Promotes alpha brain wave activity � calm alertness without sedation. Works with caffeine to reduce jitteriness. No dependency risk.', dosage: '200mg daily', timing: 'Morning or as needed', priority: 'Medium', interactions: onAntidepressant ? 'Safe with SSRIs' : 'None identified' });
     lifestyleAdvice.push({ category: 'Stress', advice: 'Practice daily stress management: 10 minutes of mindfulness meditation, journaling, or deep breathing. The 4-7-8 breathing technique activates the parasympathetic nervous system within minutes.' });
     lifestyleAdvice.push({ category: 'Exercise', advice: 'Exercise is one of the most effective anxiety treatments. 30 minutes of moderate cardio 3-5x/week reduces cortisol and increases GABA and serotonin naturally.' });
@@ -672,7 +712,7 @@ function generateClinicalFallback(a, liveDynamic = []) {
   }
   if (symptoms.includes('Frequent Colds') || goals.includes('Boost Immunity')) {
     recs.push({ name: 'Zinc Picolinate', reason: 'Most bioavailable zinc form. Essential for T-cell immune function. Reduces cold duration and severity in clinical trials.', dosage: '15-30mg daily', timing: 'With meals to prevent nausea', priority: 'Medium', interactions: onThyroid ? '2+ hours from thyroid medication' : 'None identified' });
-    lifestyleAdvice.push({ category: 'Sleep', advice: 'Sleep is the most powerful immune booster. During sleep, your body produces cytokines that fight infection. Aim for 7-9 hours. Even one night of poor sleep reduces immune cell activity by 70%.' });
+    lifestyleAdvice.push({ category: 'Sleep', advice: 'Sleep is the most powerful immune booster. During sleep, your body produces cytokines that fight infection. Aim for 7-9 hours. Even a single night of poor sleep measurably dampens immune cell activity.' });
     lifestyleAdvice.push({ category: 'Diet', advice: 'Eat immune-supporting foods daily: citrus fruits, bell peppers (highest Vitamin C), garlic, ginger, turmeric, and fermented foods like yogurt and kefir.' });
   }
   if (symptoms.includes('Muscle Weakness') || a.activityLevel === 'Very') {
@@ -694,7 +734,7 @@ function generateClinicalFallback(a, liveDynamic = []) {
 
     if (/headache|migraine|head\s*pain|head\s*ache/.test(fd)) {
       if (!recs.find(r => r.name.includes('Magnesium')))
-        recs.push({ name: 'Magnesium Glycinate', reason: 'Magnesium deficiency is found in up to 50% of migraine sufferers. Clinical trials show magnesium supplementation reduces migraine frequency by 41%. It relaxes blood vessels and reduces neurological excitability.', dosage: '400mg daily', timing: 'Evening with dinner', priority: 'High', interactions: 'None identified' });
+        recs.push({ name: 'Magnesium Glycinate', reason: 'Magnesium deficiency is more common among people with migraines, and randomised trials suggest supplementation can reduce how often they occur. It relaxes blood vessels and reduces neurological excitability.', dosage: '400mg daily', timing: 'Evening with dinner', priority: 'High', interactions: 'None identified' });
       recs.push({ name: 'Riboflavin (Vitamin B2)', reason: 'Riboflavin at high doses has strong clinical evidence for migraine prevention, reducing frequency by up to 50% in trials. It improves mitochondrial energy production in brain cells.', dosage: '400mg daily', timing: 'With breakfast', priority: 'High', interactions: 'None identified � very safe' });
       lifestyleAdvice.push({ category: 'Hydration', advice: 'Dehydration is one of the most common headache triggers. Drink at least 2-3L of water daily. Keep a water bottle visible as a reminder. Electrolyte imbalance (low sodium, magnesium) also triggers headaches.' });
       lifestyleAdvice.push({ category: 'Sleep', advice: 'Irregular sleep is a major headache trigger. Maintain consistent sleep and wake times even on weekends. Both too little and too much sleep can trigger migraines.' });
@@ -722,7 +762,7 @@ function generateClinicalFallback(a, liveDynamic = []) {
 
     if (/stress|overwhelm|anxious|anxiety|worried|burnout/.test(fd) && !symptoms.includes('Anxiety/Stress')) {
       if (!onAntidepressant)
-        recs.push({ name: 'Ashwagandha (KSM-66)', reason: 'The patient reports stress and anxiety. KSM-66 ashwagandha has the strongest clinical evidence for cortisol reduction and stress relief among adaptogens, with multiple RCTs showing 27-30% cortisol reduction.', dosage: '300-600mg daily', timing: 'Morning or evening with food', priority: 'High', interactions: 'None identified' });
+        recs.push({ name: 'Ashwagandha (KSM-66)', reason: 'The patient reports stress and anxiety. KSM-66 ashwagandha has the strongest clinical evidence for cortisol reduction and stress relief among adaptogens; randomised trials report lower cortisol and reduced perceived stress versus placebo.', dosage: '300-600mg daily', timing: 'Morning or evening with food', priority: 'High', interactions: 'None identified' });
       recs.push({ name: 'L-Theanine', reason: 'L-Theanine promotes calm alertness by increasing alpha brain waves. Particularly effective for stress-related tension without causing drowsiness.', dosage: '200mg as needed', timing: 'During stressful periods or morning', priority: 'Medium', interactions: onAntidepressant ? 'Safe with SSRIs' : 'None identified' });
       lifestyleAdvice.push({ category: 'Stress', advice: 'For burnout and chronic stress, implement daily recovery practices: 10-minute morning meditation, journaling before bed, and at least one screen-free hour daily. Chronic stress depletes magnesium, B vitamins, and Vitamin C � all addressed in your supplement plan.' });
     }
@@ -994,73 +1034,11 @@ function inferSeverity(priority, symptoms, a) {
 }
 
 // -- Helper: infer evidence reference --
+// The strings themselves moved to utils/supplementEvidenceRegistry.js so the
+// prompt can show the model the same table and planGrounding.js can check the
+// reply against it. One copy of the curated citations, three uses.
 function inferEvidence(name) {
-  const n = name.toLowerCase();
-  if (n.includes('magnesium')) return 'Supported by NIH studies on magnesium and sleep quality (PMID: 23853635) and multiple RCTs on magnesium deficiency.';
-  if (n.includes('b12')) return 'Supported by NIH Office of Dietary Supplements guidelines on B12 and neurological function.';
-  if (n.includes('omega') || n.includes('fish oil')) return 'Supported by American Heart Association guidelines and PubMed meta-analyses on omega-3 and cardiovascular/cognitive health.';
-  if (n.includes('vitamin d')) return 'Supported by Endocrine Society guidelines and NIH studies on Vitamin D deficiency prevalence and health outcomes.';
-  if (n.includes('ashwagandha')) return 'Supported by double-blind RCTs published in Medicine (2019) showing 27% cortisol reduction with KSM-66 extract.';
-  if (n.includes('zinc')) return 'Supported by Cochrane Review on zinc and immune function, and Mayo Clinic guidelines on zinc for cold prevention.';
-  if (n.includes('probiotic')) return 'Supported by World Gastroenterology Organisation guidelines and PubMed meta-analyses on probiotics and gut health.';
-  if (n.includes('coq10')) return 'Supported by meta-analysis in Journal of Human Hypertension showing 10-17 mmHg BP reduction with CoQ10.';
-  if (n.includes('curcumin')) return 'Supported by systematic review in Journal of Medicinal Food on curcumin and inflammatory joint conditions.';
-  if (n.includes('iron')) return 'Supported by WHO guidelines on iron deficiency and NIH Office of Dietary Supplements iron fact sheet.';
-  if (n.includes('lion')) return 'Supported by Li et al. (2020) Biomedical Research on Lion\'s Mane and cognitive function improvement (PMID: 32549918).';
-  if (n.includes('berberine')) return 'Supported by Ye et al. (2021) Frontiers in Pharmacology meta-analysis on berberine and blood glucose regulation (PMID: 34335261).';
-  if (n.includes('vitamin c')) return 'Supported by Carr & Maggini (2017) Nutrients review on Vitamin C and immune function (PMID: 29099763).';
-  if (n.includes('vitamin b6') || n.includes('pyridoxine')) return 'Supported by NIH Office of Dietary Supplements Vitamin B6 Fact Sheet and Calderón-Ospina & Nava-Mesa (2020) CNS Neuroscience & Therapeutics on B6 in neurotransmitter synthesis (PMID: 31490017).';
-  if (n.includes('vitamin k2') || n.includes('mk-7') || n.includes('menaquinone')) return 'Supported by Hariri et al. (2021) Critical Reviews in Food Science and Nutrition on Vitamin K2 and bone health (PMID: 33016090).';
-  if (n.includes('vitamin k')) return 'Supported by NIH Office of Dietary Supplements Vitamin K Fact Sheet and studies on bone and cardiovascular health.';
-  if (n.includes('vitamin a') || n.includes('retinol')) return 'Supported by NIH Office of Dietary Supplements Vitamin A Fact Sheet and WHO guidelines on Vitamin A deficiency.';
-  if (n.includes('vitamin e') || n.includes('tocopherol')) return 'Supported by NIH Office of Dietary Supplements Vitamin E Fact Sheet and antioxidant research.';
-  if (n.includes('folate') || n.includes('folic')) return 'Supported by CDC and WHO guidelines on folate for neural tube defect prevention and NIH folate fact sheet.';
-  if (n.includes('riboflavin') || n.includes('vitamin b2')) return 'Supported by NIH Office of Dietary Supplements Riboflavin Fact Sheet and studies on migraine prevention (PMID: 9484373).';
-  if (n.includes('niacin') || n.includes('vitamin b3')) return 'Supported by NIH Office of Dietary Supplements Niacin Fact Sheet and AHA guidelines on niacin for lipid management.';
-  if (n.includes('thiamine') || n.includes('vitamin b1')) return 'Supported by NIH Office of Dietary Supplements Thiamine Fact Sheet and studies on neurological function.';
-  if (n.includes('biotin') || n.includes('vitamin b7')) return 'Supported by Patel et al. (2017) Skin Appendage Disorders review on biotin and hair/nail health (PMID: 28879195).';
-  if (n.includes('calcium')) return 'Supported by NIH Office of Dietary Supplements Calcium Fact Sheet and National Osteoporosis Foundation guidelines on bone health.';
-  if (n.includes('selenium')) return 'Supported by Ferreira et al. (2021) Current Nutrition Reports systematic review on selenium and human health (PMID: 33025461) and NIH Selenium Fact Sheet.';
-  if (n.includes('iodine')) return 'Supported by WHO guidelines on iodine deficiency disorders and NIH Office of Dietary Supplements Iodine Fact Sheet.';
-  if (n.includes('potassium')) return 'Supported by NIH Office of Dietary Supplements Potassium Fact Sheet and AHA guidelines on potassium and blood pressure.';
-  if (n.includes('copper')) return 'Supported by NIH Office of Dietary Supplements Copper Fact Sheet and studies on copper in immune function and antioxidant defense.';
-  if (n.includes('manganese')) return 'Supported by NIH Office of Dietary Supplements Manganese Fact Sheet and studies on manganese in bone formation and antioxidant enzymes.';
-  if (n.includes('molybdenum')) return 'Supported by NIH Office of Dietary Supplements Molybdenum Fact Sheet and studies on molybdenum as an essential trace mineral cofactor.';
-  if (n.includes('chromium')) return 'Supported by Anderson et al. (2020) Journal of Trace Elements in Medicine and Biology review on chromium and glycemic control (PMID: 31952883) and NIH evidence updates.';
-  if (n.includes('krill')) return 'Supported by Cheung et al. (2020) Nutrients study comparing krill oil and fish oil bioavailability and cardiovascular benefits (PMID: 32512814).';
-  if (n.includes('rhodiola')) return 'Supported by Lekomtseva et al. (2017) Phytomedicine systematic review on Rhodiola rosea and stress-related fatigue (PMID: 28219487).';
-  if (n.includes('ginseng') || n.includes('panax')) return 'Supported by Kim et al. (2018) Journal of Ginseng Research systematic review on Panax ginseng and cognitive performance (PMID: 29719460).';
-  if (n.includes('maca')) return 'Supported by Dording et al. (2015) CNS Neuroscience & Therapeutics RCT on maca and sexual function (PMID: 25483044) and Brooks et al. (2008) systematic review.';
-  if (n.includes('valerian')) return 'Supported by Shinjyo et al. (2020) BMC Complementary Medicine and Therapies systematic review on valerian and sleep quality (PMID: 32819402).';
-  if (n.includes('elderberry') || n.includes('sambucus')) return 'Supported by Hawkins et al. (2019) Complementary Therapies in Medicine RCT on elderberry and cold/flu symptoms (PMID: 30670267).';
-  if (n.includes('echinacea')) return 'Supported by David & Cunningham (2019) Integrative Medicine systematic review on echinacea and upper respiratory infections (PMID: 30881399).';
-  if (n.includes('milk thistle') || n.includes('silymarin')) return 'Supported by Gillessen & Schmidt (2020) Nutrients review on silymarin and liver protection (PMID: 32650533).';
-  if (n.includes('ginkgo')) return 'Supported by Tan et al. (2021) Journal of Alzheimer\'s Disease systematic review on Ginkgo biloba and cognitive function (PMID: 33252073).';
-  if (n.includes('bacopa')) return 'Supported by Roodenrys et al. (2016) Journal of Alternative and Complementary Medicine systematic review on Bacopa monnieri and memory enhancement (PMID: 12006124) and meta-analysis by Kongkeaw et al. (2014, PMID: 24252777).';
-  if (n.includes('theanine') || n.includes('l-theanine')) return 'Supported by Williams et al. (2020) Nutrients review on L-theanine and relaxed alertness (PMID: 32722093).';
-  if (n.includes('alpha-lipoic') || n.includes('lipoic')) return 'Supported by Akbari et al. (2018) Diabetes Research and Clinical Practice meta-analysis on alpha-lipoic acid and glycemic control (PMID: 30098934).';
-  if (n.includes('resveratrol')) return 'Supported by Li et al. (2018) Nutrients meta-analysis on resveratrol and cardiovascular biomarkers (PMID: 29690515).';
-  if (n.includes('glucosamine')) return 'Supported by Gregori et al. (2018) International Journal of Rheumatology systematic review on glucosamine for osteoarthritis (PMID: 30356428).';
-  if (n.includes('chondroitin')) return 'Supported by Honvo et al. (2019) Drugs & Aging meta-analysis on chondroitin for joint pain (PMID: 30931493).';
-  if (n.includes('collagen')) return 'Supported by Shaw et al. (2017) British Journal of Nutrition RCT on collagen peptides and joint pain in athletes (PMID: 28177710).';
-  if (n.includes('boswellia')) return 'Supported by Yu et al. (2020) Frontiers in Pharmacology meta-analysis on Boswellia serrata and joint inflammation (PMID: 32116669).';
-  if (n.includes('creatine')) return 'Supported by ISSN Position Stand on creatine monohydrate (Kreider et al., 2017, PMID: 28615996).';
-  if (n.includes('melatonin')) return 'Supported by Auld et al. (2017) Nutrition Journal meta-analysis on melatonin and sleep onset latency (PMID: 28274269).';
-  if (n.includes('5-htp')) return 'Supported by Maffei (2021) Nutrients review on 5-HTP and serotonin synthesis (PMID: 33467310).';
-  if (n.includes('tart cherry')) return 'Supported by Gao & Chilibeck (2020) Nutrients systematic review on tart cherry and muscle recovery (PMID: 32679613).';
-  if (n.includes('garlic') || n.includes('allicin')) return 'Supported by Ried et al. (2016) Journal of Nutrition meta-analysis on garlic and blood pressure (PMID: 26764327).';
-  if (n.includes('nattokinase')) return 'Supported by Chen et al. (2018) Medicine meta-analysis on nattokinase and blood pressure (PMID: 29384846).';
-  if (n.includes('saw palmetto')) return 'Supported by Russo et al. (2021) Current Urology Reports review on saw palmetto for benign prostatic hyperplasia (PMID: 33886021).';
-  if (n.includes('vitex') || n.includes('chaste')) return 'Supported by Cerqueira et al. (2017) Revista Brasileira de Ginecologia e Obstetricia systematic review on Vitex agnus-castus and premenstrual syndrome (PMID: 28977673).';
-  if (n.includes('tribulus')) return 'Supported by Roaiah et al. (2016) Journal of Sex & Marital Therapy RCT on Tribulus terrestris and sexual function (PMID: 26727646).';
-  if (n.includes('hyaluronic')) return 'Supported by Zhao et al. (2018) Nutrients systematic review on oral hyaluronic acid and skin hydration (PMID: 30513704).';
-  if (n.includes('astaxanthin')) return 'Supported by Davinelli et al. (2018) Nutrients review on astaxanthin and skin aging (PMID: 29401717).';
-  if (n.includes('phosphatidylserine')) return 'Supported by Kato-Kataoka et al. (2018) Journal of Clinical Biochemistry and Nutrition RCT on phosphatidylserine and cognitive function (PMID: 20520964) and meta-analysis by Glade & Smith (2021).';
-  if (n.includes('hmb') || n.includes('beta-hydroxy')) return 'Supported by Bear et al. (2019) Sports Medicine systematic review on HMB and muscle mass (PMID: 30737635).';
-  if (n.includes('citrulline')) return 'Supported by Gonzalez & Trexler (2020) Nutrients review on citrulline malate and exercise performance (PMID: 32580192).';
-  if (n.includes('beta-alanine')) return 'Supported by Saunders et al. (2017) Advances in Nutrition review on beta-alanine and exercise capacity (PMID: 28298271).';
-  if (n.includes('whey') || (n.includes('protein') && n.includes('supplement'))) return 'Supported by Morton et al. (2018) British Journal of Sports Medicine meta-analysis on protein supplementation and muscle mass (PMID: 28698222).';
-  return 'Supported by peer-reviewed research from 2020-2025 indexed in PubMed and current evidence-based guidelines from the NIH Office of Dietary Supplements. Evidence prioritizes systematic reviews, meta-analyses, and clinical practice guidelines. Consult a healthcare provider for personalized evidence review. This recommendation is provided as wellness guidance and does not diagnose, treat, cure, or prevent any disease.';
+  return registeredEvidence(name);
 }
 
 // -- Helper: infer food sources --

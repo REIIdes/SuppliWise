@@ -28,6 +28,7 @@
  */
 
 const { classifySupplement, isCanonicalOrder } = require('./planConsistency');
+const { verifyCitation, checkDose, rejectReason, unreportedClaims, fabricatedPersonalClaims, buildFactContext } = require('./planGrounding');
 
 const REQUIRED_TOP_FIELDS = [
   'summary', 'simplifiedSummary', 'recommendations', 'lifestyleAdvice',
@@ -178,10 +179,38 @@ function severityCarryRate(plan) {
 }
 
 /**
+ * 9-11. Grounding: does what the plan asserts survive the verifier in
+ * `planGrounding.js`? These are the metrics that answer "how often does it
+ * hallucinate" with a number — a citation the app cannot resolve, a symptom the
+ * patient never reported, or a dose past the safety ceiling each cost a row.
+ */
+function citationGroundingRate(plan, profile = {}) {
+  const recs = recsOf(plan);
+  const allowedPmids = profile._allowedPmids instanceof Set ? profile._allowedPmids : undefined;
+  const ok = recs.filter((r) => verifyCitation(r?.evidence, r?.name, { allowedPmids }).ok).length;
+  return rate(ok, recs.length);
+}
+
+function patientFactGroundingRate(plan, profile) {
+  const recs = recsOf(plan);
+  const ctx = buildFactContext(profile || {});
+  const ok = recs.filter((r) => unreportedClaims(r?.triggeredBy, ctx).length === 0
+    && fabricatedPersonalClaims(r?.reason, ctx).length === 0).length;
+  return rate(ok, recs.length);
+}
+
+function dosageSafetyRate(plan) {
+  const recs = recsOf(plan);
+  const ok = recs.filter((r) => !rejectReason(r?.name) && checkDose(r?.name, r?.dosage).ok).length;
+  return rate(ok, recs.length);
+}
+
+/**
  * Aggregate a plan into one numeric score card. `profile` is the assessment
- * payload (used for diet/allergy context). All weights are equal per metric
- * family: structure (schema, order, catalog) 50%, safety (diet, allergen) 30%,
- * quality (citations, personalisation, severity) 20%.
+ * payload (used for diet/allergy context). Weights per family: structure
+ * (schema, order, catalog) 40%, safety (diet, allergen) 25%, grounding
+ * (citations, patient facts, doses) 20%, quality (citations style,
+ * personalisation, severity) 15%.
  */
 function scorePlan(plan, profile = {}) {
   const metrics = {
@@ -193,11 +222,15 @@ function scorePlan(plan, profile = {}) {
     citationValidity: citationValidity(plan),
     personalizationRate: personalizationRate(plan),
     severityCarryRate: severityCarryRate(plan),
+    citationGroundingRate: citationGroundingRate(plan, profile),
+    patientFactGroundingRate: patientFactGroundingRate(plan, profile),
+    dosageSafetyRate: dosageSafetyRate(plan),
   };
   const overall = (
-    (metrics.schemaValidity.value + metrics.orderCompliance.value + metrics.catalogAdherence.value) / 3 * 50
-    + (metrics.dietCompliance.value + metrics.allergenCompliance.value) / 2 * 30
-    + (metrics.citationValidity.value + metrics.personalizationRate.value + metrics.severityCarryRate.value) / 3 * 20
+    (metrics.schemaValidity.value + metrics.orderCompliance.value + metrics.catalogAdherence.value) / 3 * 40
+    + (metrics.dietCompliance.value + metrics.allergenCompliance.value) / 2 * 25
+    + (metrics.citationGroundingRate.value + metrics.patientFactGroundingRate.value + metrics.dosageSafetyRate.value) / 3 * 20
+    + (metrics.citationValidity.value + metrics.personalizationRate.value + metrics.severityCarryRate.value) / 3 * 15
   );
   return { metrics, overall: Math.round(overall * 10) / 10 };
 }
@@ -274,6 +307,9 @@ module.exports = {
   citationValidity,
   personalizationRate,
   severityCarryRate,
+  citationGroundingRate,
+  patientFactGroundingRate,
+  dosageSafetyRate,
   scorePlan,
   comparePlans,
   priorityDistribution,

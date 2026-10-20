@@ -37,14 +37,16 @@ const SECURITY_AUDIT = {
   // because the code closed them. `openOrAccepted` counts the four entries that
   // are genuinely still open or deliberately tolerated (L3, L7, I1, I2); I3 is
   // listed as half-closed in its own `status` and is not counted twice.
+  // Re-counted 2026-10-20 for F13 — fabricated citations inside the app's own
+  // curated evidence table — which is a third critical and is closed in code.
   counts: {
-    total: 30,
-    critical: 2,
+    total: 31,
+    critical: 3,
     high: 8,
     medium: 9,
     low: 7,
     informational: 4,
-    remediatedInCode: 26,
+    remediatedInCode: 27,
     openOrAccepted: 4,
   },
 
@@ -456,6 +458,35 @@ const SECURITY_AUDIT = {
           '"file found" branch would leave a refresh on /dashboard framable while / looked protected.',
         status: 'fixed — production dist/ is covered, and asserted over real HTTP',
       },
+      {
+        id: 'F13',
+        severity: 'critical',
+        title: 'The app itself was shipping fabricated citations inside every wellness plan',
+        detail:
+          'The request was to stop the assessment model hallucinating, so the first thing measured was what the product ' +
+          'already asserts. `inferEvidence()` in routes/recommend.js held 65 curated "professional source" strings, and ' +
+          'resolving every PMID in them against NCBI found 33 of them wrong: the number resolved to a real paper that ' +
+          'had nothing to do with the nutrient. "L-Theanine … (PMID: 32722093)" pointed at a materials-science study on ' +
+          '316L stainless steel. Those strings were not model output — the rule engine put them in the plan, and the ' +
+          'prompt then showed the model a citation table and told it to follow it, so the LLM was being trained on the ' +
+          'fabrication every run. It is also the one field a member cannot check and a reviewer trusts.',
+        fix:
+          'Retrieval replaced recall, in three parts. (1) utils/supplementEvidenceRegistry.js is now the single source ' +
+          'of citable evidence: 37 citations were re-derived from NCBI by name+outcome+study-type and every PMID in the ' +
+          'table resolves to a paper whose title names that nutrient. eval/citationAudit.js re-checks that against ' +
+          'NCBI and exits non-zero on drift (`npm run eval:citations`); it needs network, so it is a pre-ship gate run ' +
+          'by hand rather than a CI step — see manualActions. (2) The assessment prompt prints that registry as the ONLY ' +
+          'allowed evidence strings, plus standard dose ranges and an approved-name list, so the model copies instead of '
+          + 'remembering, and is told to write "No specific source identified" rather than a study. (3) '
+          + 'utils/planGrounding.js verifies the reply: an unverifiable PMID or non-medical URL is replaced with the '
+          + 'registry copy, a row naming a prescription drug or an off-catalog product is dropped and refilled from the '
+          + 'rule engine, a dose past the nutrient ceiling is clamped and disclosed in warnings, and any symptom, '
+          + 'condition or medication the patient did not report is stripped from triggeredBy and from the prose. It runs '
+          + 'on the AI answer AND on the engine answer, records what it changed in plan.grounding, and is proven '
+          + 'idempotent. Test File/plan-grounding.test.js pins all of it, including the direction that matters most: a '
+          + 'true sentence must never be deleted, and every shipped baseline plan passes with zero repairs.',
+        status: 'fixed — registry re-verified at NCBI 2026-10-20 (65 entries, 48 PMIDs, 0 failing), the shipped baseline plans ground to 100% on citation / patient-fact / dose safety, the live routed model returned 100% grounded plans on all 4 benchmark profiles (one off-catalog row caught and repaired by the gate), and Test File/plan-grounding.test.js pins 30 behaviours',
+      },
     ],
     reVerification: {
       serverUnitTests: 'PASS — 990/990, 0 skipped, exits cleanly (originally 796 with 40 silently skipped)',
@@ -490,9 +521,14 @@ const SECURITY_AUDIT = {
   // Dates are part of the claim: an undated "PASS" is how F1's stale
   // "0 vulnerabilities" survived for a week.
   verification: {
-    unitTests: 'PASS 2026-10-19 — node --test "Test File/*.test.js": 1609/1609, 0 failed, 0 skipped',
-    clientTests: 'PASS 2026-10-19 — npm test in my-react-app: 715/715, 0 failed, 0 skipped',
-    syntaxCheck: 'PASS 2026-10-19 — npm run check: Syntax OK, 322 source file(s)',
+    unitTests: 'PASS 2026-10-20 — npm test ("node --test Test File/*.test.js"): 1403 passed, 0 failed, 56 skipped. The 56 are the ten pre-existing suites gated on MONGO_TEST_URI — they skip the same way in CI, which is why the count reads differently from a run that has a second database',
+    clientTests: 'PASS 2026-10-20 — npm test in my-react-app: 715/715, 0 failed, 0 skipped',
+    syntaxCheck: 'PASS 2026-10-20 — npm run check: Syntax OK, 327 source file(s)',
+    // F13 is a claim about generated content, so it is measured two ways: the
+    // citations the app itself asserts (static, against NCBI), and the plans the
+    // model actually returns (live, before and after the grounding gate).
+    citationRegistry: 'PASS 2026-10-20 — node eval/citationAudit.js: 65 registry entries, 48 asserted PMIDs, 0 failing at NCBI. `npm run eval:citations` is the same check',
+    liveAssessment: 'PASS 2026-10-20 — node eval/aiBenchmark.js --live --runs=1 against the routed assessment model (openrouter deepseek-v4-flash): all 4 profiles at citationGrounding 100.0%, patientFactGrounding 100.0%, dosageSafety 100.0%, orderCompliance 100.0%, schemaValidity 100.0%, overall 97.3 average. The gate found and repaired one fabrication on the stressed-student profile ("Bacopa Monnieri — off-catalog supplement name": row dropped and backfilled from the rule engine, its citation grounded), and the other three profiles needed no repair at all',
     // GitHub Actions is where this record stops being a local claim. The server
     // job hung twice and was cancelled only after the runner\'s six-hour job limit,
     // and a cancelled step\'s log is not readable without a token — so the step was
@@ -597,11 +633,21 @@ const SECURITY_AUDIT = {
     'OPERATIONAL: take a backup and PROVE it restores (`npm run backup` then `npm run backup:drill`). '
     + 'backup_currency reports a warning because no drill receipt exists yet; an undrilled dump is a hypothesis, '
     + 'and this project has already lost ledger history to exactly that assumption.',
+    'OPERATIONAL (F13): before editing utils/supplementEvidenceRegistry.js, derive each citation FROM NCBI — search '
+    + 'by nutrient plus the claimed outcome plus study type, and take the PMID of a paper whose title names the '
+    + 'nutrient. Then run `npm run eval:citations` (server/): it resolves every PMID in the registry against NCBI '
+    + 'E-utilities at 3 requests/second and exits non-zero on a drift or a title that does not name the nutrient. '
+    + 'It needs network and can fail on NCBI being unreachable, so it is a pre-ship gate, not a CI step. '
+    + '`npm run eval:ai:live` is the matching model-side gate: it sends the real assessment prompt for the four '
+    + 'baseline profiles and prints each plan twice — before and after utils/planGrounding.js — so a regression in '
+    + 'what the model returns is visible as repairs the gate had to make. It spends API tokens, so run it on demand, '
+    + 'not on every commit.',
   ],
 
   disclaimer:
-    'This audit covers the application source in this repository as reviewed on 2026-09-23, and re-read against the ' +
-    'code on 2026-10-19 (see `reverification`). It is not a penetration ' +
+    'This audit covers the application source in this repository as reviewed on 2026-09-23, re-read against the '
+    + 'code on 2026-10-19 (see `reverification`), and extended on 2026-10-20 with F13 — the fabricated citations the '
+    + 'app itself shipped in every wellness plan. It is not a penetration ' +
     'test and does not certify the system as secure or "100% protected". Infrastructure, the database cluster, the ' +
     'dependency supply chain, third-party APIs, and social-engineering vectors were out of scope. Several findings ' +
     'remain open until the manual rotations above are completed, and secrets that have ever been committed must be ' +

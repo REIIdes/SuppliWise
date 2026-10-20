@@ -26,7 +26,10 @@
   "backup:drill": "node scripts/backup-drill.js",
   "restore": "node scripts/restore.js",
   "eval:ai": "node eval/aiBenchmark.js",
-  "eval:ai:live": "node eval/aiBenchmark.js --live"
+  "eval:ai:live": "node eval/aiBenchmark.js --live",
+  "eval:citations": "node eval/citationAudit.js",
+  "eval:citations:rebuild": "node eval/citationAudit.js --rebuild",
+  "eval:fine-tune": "node eval/exportFineTune.js"
  },
  "dependencies": {
   "@simplewebauthn/server": "^14.0.3",

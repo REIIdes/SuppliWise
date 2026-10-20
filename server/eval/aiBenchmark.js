@@ -34,6 +34,7 @@ const { buildAssessmentPrompt, ASSESSMENT_SYSTEM_PROMPT } = require('../utils/as
 const { enforcePlanConsistency } = require('../utils/planConsistency');
 const { scorePlan, comparePlans, priorityDistribution } = require('../utils/planEvaluation');
 const { completeWithFallback } = require('../utils/aiRouter');
+const { groundPlan, groundingViolations } = require('../utils/planGrounding');
 const profiles = require('./baseline-profiles.json');
 
 const args = process.argv.slice(2);
@@ -50,6 +51,11 @@ const THRESHOLDS = {
   catalogAdherence: 0.8,
   dietCompliance: 0.95,
   allergenCompliance: 1,
+  // Post-gate grounding. These are what the member is actually shown, so a
+  // breach here means the verifier leaked — not that the model behaved.
+  citationGroundingRate: 1,
+  dosageSafetyRate: 1,
+  patientFactGroundingRate: 0.95,
   overall: 70,
 };
 
@@ -57,6 +63,7 @@ const pct = (v) => `${(v * 100).toFixed(1)}%`;
 const METRIC_KEYS = [
   'schemaValidity', 'orderCompliance', 'catalogAdherence', 'dietCompliance',
   'allergenCompliance', 'citationValidity', 'personalizationRate', 'severityCarryRate',
+  'citationGroundingRate', 'patientFactGroundingRate', 'dosageSafetyRate',
 ];
 const metricValue = (score, key) => score.metrics[key].value;
 
@@ -79,7 +86,9 @@ async function runBaseline() {
   printHeader();
   const rows = [];
   for (const profile of profiles) {
-    const plan = enforcePlanConsistency(generateClinicalFallback(profile));
+    // Scored through the same gates the route applies, so "baseline" means the
+    // deployed answer, not the engine's raw output.
+    const plan = groundPlan(enforcePlanConsistency(generateClinicalFallback(profile)), profile);
     const score = scorePlan(plan, profile);
     rows.push({ profile, plan, score });
     printRow(`${profile.id} [baseline]`, score, null);
@@ -116,12 +125,19 @@ async function runLive(baselineRows) {
         failures.push(`${row.profile.id} run${i + 1}: provider failure`);
         continue;
       }
-      const plan = enforcePlanConsistency(result.data);
+      const raw = enforcePlanConsistency(result.data);
+      // BEFORE/AFTER the gate, on the same reply: the raw score is how often the
+      // model hallucinated, the scored plan is what the member would be shown.
+      const violations = groundingViolations(raw, row.profile);
+      const plan = enforcePlanConsistency(groundPlan(raw, row.profile, { trustedRecs: row.plan.recommendations }));
       const score = scorePlan(plan, row.profile);
+      const rawScore = scorePlan(raw, row.profile);
       const comparison = comparePlans(plan, row.plan);
       runs.push({ plan, score, comparison });
       printRow(`${row.profile.id} run${i + 1} [${result.provider}]`, score, comparison);
-      console.log(`      latency=${latencyMs}ms recs=${plan.recommendations.length}`);
+      console.log(`      latency=${latencyMs}ms recs=${raw.recommendations.length}->${plan.recommendations.length}`);
+      console.log(`      BEFORE gate: overall=${rawScore.overall} citations=${pct(rawScore.metrics.citationGroundingRate.value)} facts=${pct(rawScore.metrics.patientFactGroundingRate.value)} doses=${pct(rawScore.metrics.dosageSafetyRate.value)} | violations=${violations.length} ${JSON.stringify(plan.grounding.counts || {})}`);
+      for (const v of violations.slice(0, 4)) console.log(`        - ${v.kind}: ${v.name} — ${v.reason}`);
     }
 
     if (runs.length >= 2) {
