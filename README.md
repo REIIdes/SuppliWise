@@ -886,7 +886,7 @@ All API routes are mounted under `/api`.
 | [Blockchain Feature Map](BLOCKCHAIN_FEATURES.md) | Developers: every one of the 20 features mapped to its implementing file and the check that proves it |
 | [Auth Security Report](docs/AUTH_SECURITY_REPORT.md) | Security: passkeys, TOTP encryption, step-up, sessions, recovery, event log |
 | [Security Audit Report](SECURITY_AUDIT_REPORT.md) | Security: 30 findings, remediations, open items, manual actions |
-| [AI Data Flow Analysis](docs/AI_DATA_FLOW_ANALYSIS.md) | Security + developers: what each AI surface sends to a provider, what it stores, how the learning and fine-tune paths work, and the open gaps |
+| [AI Data Flow Analysis](docs/AI_DATA_FLOW_ANALYSIS.md) | Security + developers: what each AI surface sends to a provider, what it stores, how the learning, fine-tune and pharmacy-research inputs work, and the open gaps |
 | [Additions Summary](ADDITIONS_SUMMARY.md) | Developers: what changed in the security + recovery session, with architecture notes |
 | [Priority Assessment Override](PRIORITY_ASSESSMENT_OVERRIDE.md) | Developers: how an admin raises/releases a Priority review and when it is refused |
 | [Forgot Password Redesign](FORGOT_PASSWORD_REDESIGN.md) | Developers: why the reset flow is a link flow, not a modal |
