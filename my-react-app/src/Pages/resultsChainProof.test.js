@@ -44,9 +44,12 @@ const aiPanel = read('../Components/Web3Panels/AiProofPanel.jsx');
 test('the plan screen reads the receipt under the name the server sends', () => {
   assert.match(assessment, /saveAssessmentResults\(assessmentId, recommendations\)/);
   assert.match(assessment, /recommendationProof = resultsSave\?\.recommendationProof \|\| null/);
-  assert.match(assessment, /healthProof = saveResult\?\.chainProof \|\| null/);
   assert.match(assessment, /recommendationProof,/g, 'and passes it into the results route');
   assert.match(results, /recommendationProof = null \} = location\.state/);
+  // The health-ledger snapshot the same events anchor is not carried here: the
+  // hub's anchor history already lists it, and threading a receipt no screen
+  // prints is dead state.
+  assert.doesNotMatch(assessment, /healthProof/);
 });
 
 test('the chip only renders when a receipt exists', () => {

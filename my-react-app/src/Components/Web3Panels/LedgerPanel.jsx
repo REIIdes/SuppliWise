@@ -264,7 +264,7 @@ export default function LedgerPanel() {
         <div className="w3-card-title">⚓ Anchor history</div>
         <p className="w3-card-sub">Newest first — each row points at its block and transaction.</p>
         {anchors.length === 0 ? (
-          <Empty icon="⚓">No snapshots anchored yet. One is written automatically each time you save an assessment; the button above anchors your ledger exactly as it stands right now.</Empty>
+          <Empty icon="⚓">No snapshots anchored yet. One is written automatically each time you save an assessment or a plan; the button above anchors your ledger exactly as it stands right now.</Empty>
         ) : (
           <div className="w3-table-wrap">
             <table className="w3-table">

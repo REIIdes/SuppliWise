@@ -629,12 +629,12 @@ const SECURITY_AUDIT = {
   // Dates are part of the claim: an undated "PASS" is how F1's stale
   // "0 vulnerabilities" survived for a week.
   verification: {
-    unitTests: 'PASS 2026-10-21 — npm test ("node --test Test File/*.test.js"): 1741 passed, 0 failed, 56 skipped (1797 run). The 56 are the ten pre-existing suites gated on MONGO_TEST_URI — they skip the same way in CI, which is why the count reads differently from a run that has a second database',
-    clientTests: 'PASS 2026-10-21 — npm test in my-react-app: 744/744, 0 failed, 0 skipped',
-    syntaxCheck: 'PASS 2026-10-21 — npm run check: Syntax OK, 370 source file(s)',
+    unitTests: 'PASS 2026-10-21 — npm test ("node --test Test File/*.test.js"): 1743 passed, 0 failed, 56 skipped (1799 run). The 56 are the ten pre-existing suites gated on MONGO_TEST_URI — they skip the same way in CI, which is why the count reads differently from a run that has a second database',
+    clientTests: 'PASS 2026-10-21 — npm test in my-react-app: 744/744, 0 failed, 0 skipped; vite build clean',
+    syntaxCheck: 'PASS 2026-10-21 — npm run check: Syntax OK, 371 source file(s)',
     // The chain only means anything if it covers events the product actually
     // produces, so the claim recorded here is about the wiring, not the ledger.
-    productEventProofs: 'PASS 2026-10-21 — Test File/web3-product-proofs.test.js: 16/16. Saving an assessment anchors the health ledger and saving AI results anchors the plan, from routes/assessment.js, gated on the same web3 entitlement the hub gates on; the commitment is one implementation shared by the automatic anchor and the manual button; a refused or throwing append returns anchored:false and stores no block claim, pays no reward and cannot fail the save. src/Pages/resultsChainProof.test.js: 4/4 for the receipt reaching the plan screen',
+    productEventProofs: 'PASS 2026-10-21 — Test File/web3-product-proofs.test.js: 18/18. Saving an assessment anchors the health ledger; saving AI results anchors the plan and the record it left behind in ONE mined block; both gated on the same web3 entitlement the hub gates on; the commitment is one implementation shared by the automatic anchor and the manual button; a refused or throwing append returns anchored:false and stores no block claim, pays no reward and cannot fail the save. src/Pages/resultsChainProof.test.js: 4/4 for the receipt reaching the plan screen. MEASURED LIVE 2026-10-21 against a throwaway Atlas database (suppliwise_chainproof1, port 5070, seeded DELUXE session): POST /api/assessment → chainProof block 32, PATCH /api/assessment/:id/results → recommendationProof block 33, GET /api/web3/recommendations/anchor/:id → valid:true with blockIntact, payloadCommitted, chain copy agrees and sealed:true after the deep audit, and the PUBLIC POST /api/web3/health/verify on a freshly exported credential → verified:true on all four checks (identity, signature, ledger, arithmetic)',
     // F13 is a claim about generated content, so it is measured two ways: the
     // citations the app itself asserts (static, against NCBI), and the plans the
     // model actually returns (live, before and after the grounding gate).

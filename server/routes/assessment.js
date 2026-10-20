@@ -20,7 +20,7 @@ const { guardRaisePriority, selfHealOpenPriority } = require('../utils/priorityG
 const {
   web3Enabled,
   anchorHealthLedger,
-  anchorRecommendation,
+  anchorPlanEvents,
 } = require('../blockchain/proofs');
 
 // Flag an assessment as Priority + notify the user and admins (best-effort,
@@ -635,20 +635,29 @@ router.patch('/:id/results', protect, async (req, res) => {
     // "the app suggested this" is a dated, tamper-evident claim rather than
     // something the member has to remember to prove later. Same commitment the
     // Web3 hub's own anchor button makes — one derivation, so the two can never
-    // disagree about what a plan hashes to.
+    // disagree about what a plan hashes to. The health ledger snapshot rides in
+    // the same block, because the record just moved and an export that follows
+    // must still find its digest on-chain.
     let recommendationProof = null;
+    let chainProof = null;
     if (web3Enabled(req.user)) {
-      const out = await anchorRecommendation(req.user, assessment._id);
+      const out = await anchorPlanEvents(req.user, assessment._id);
       if (out.anchored) {
         recommendationProof = {
           blockIndex: out.blockIndex,
-          txHash: out.txHash,
+          txHash: out.planTxHash,
           combinedHash: out.combinedHash,
           logicVersion: out.logicVersion,
         };
+        chainProof = {
+          blockIndex: out.blockIndex,
+          txHash: out.healthTxHash,
+          digest: out.digest,
+          assessmentCount: out.assessmentCount,
+        };
       }
     }
-    res.json({ message: 'Results saved', assessment, severityFlag, recommendationProof });
+    res.json({ message: 'Results saved', assessment, severityFlag, recommendationProof, chainProof });
   } catch (error) {
     console.error('[assessment PATCH /:id/results]', error.message);
     res.status(500).json({ message: 'Could not save results. Please try again.' });

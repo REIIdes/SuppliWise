@@ -2816,10 +2816,10 @@ function AssessmentPage() {
       let savedAt = null;
       let garbageFields = [];
       let lastSeverityFlag = { flagged: false, reasons: [] };
-      // Chain receipts the server hands back for the two events this flow
-      // produces. null simply means "no proof for this plan" — the member's
-      // plan is saved either way.
-      let healthProof = null;
+      // Chain receipt for the plan this flow produces. null simply means "no
+      // proof for this plan" — the member's plan is saved either way. The
+      // health-ledger snapshot the same events anchor is listed in the Web3
+      // hub's own anchor history, so it needs no state here.
       let recommendationProof = null;
       
       // In update mode: get AI recommendations BEFORE saving
@@ -2844,7 +2844,6 @@ function AssessmentPage() {
           savedAt = saveResult?.assessment?.createdAt || null;
           garbageFields = saveResult?.garbageFields || [];
           if (saveResult?.severityFlag) lastSeverityFlag = saveResult.severityFlag;
-          healthProof = saveResult?.chainProof || null;
           if (assessmentId) break;
         } catch (saveErr) {
           console.error(`Assessment save attempt ${attempt} failed:`, saveErr.message);
@@ -2895,7 +2894,6 @@ function AssessmentPage() {
           recommendations,
           assessment: { ...payload, _id: assessmentId || undefined, createdAt: savedAt || undefined },
           garbageFields,
-          healthProof,
           recommendationProof,
         },
       });

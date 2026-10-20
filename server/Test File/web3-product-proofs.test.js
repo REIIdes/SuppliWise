@@ -331,6 +331,70 @@ test('a plan append that throws cannot fail the results save', async () => {
   assert.match(out.error, /disk full/);
 });
 
+// ── The combined event a saved plan produces ──────────────────────────────
+// One plan save moves the record (its `updatedAt` is in the health digest) and
+// produces a commitment (the plan). Both must be anchored, and anchoring them
+// separately would pay for two mined blocks where one transaction each is
+// enough.
+function stubPlanReads(assessment) {
+  patch('Assessment.findOne.plan', Assessment, 'findOne', () => chainable(assessment));
+  patch(
+    'Assessment.find.plan',
+    Assessment,
+    'find',
+    () => chainable([{ _id: ASSESSMENT_ID, createdAt: new Date('2026-03-04T05:06:07.000Z'), updatedAt: new Date('2026-03-04T05:09:00.000Z'), priority: 'Standard' }])
+  );
+  patch('IntakeRecord.countDocuments.plan', IntakeRecord, 'countDocuments', async () => 0);
+  patch('IntakeRecord.findOne.plan', IntakeRecord, 'findOne', () => chainable(null));
+  patch('engine.getWalletDoc.plan', engine, 'getWalletDoc', async () => WALLET);
+}
+
+test('a saved plan anchors the plan and the record in one block', async () => {
+  const assessment = fixtureAssessment({ updatedAt: new Date('2026-03-04T05:09:00.000Z') });
+  stubPlanReads(assessment);
+  const expected = recommendationCommitment(assessment);
+  const row = { _id: 'r1', saved: false, save: async () => { row.saved = true; } };
+  const healthRows = [];
+  patch('RecAnchor.findOneAndUpdate', RecAnchor, 'findOneAndUpdate', async () => row);
+  patch('HealthAnchor.create', HealthAnchor, 'create', async (doc) => { healthRows.push(doc); return doc; });
+  let appended = null;
+  patch('engine.anchorMany', engine, 'anchorMany', async (entries) => {
+    appended = entries;
+    return { index: 31, hash: 'h31', txs: ['txPlan', 'txHealth'], anchored: true };
+  });
+
+  const out = await proofs.anchorPlanEvents(USER, ASSESSMENT_ID);
+  assert.equal(out.anchored, true);
+  assert.equal(appended.length, 2, 'two facts');
+  assert.equal(appended[0].type, 'rec:anchor');
+  assert.equal(appended[1].type, 'health:anchor');
+  assert.equal(out.blockIndex, 31, 'in ONE block');
+  assert.equal(row.blockIndex, 31);
+  assert.equal(row.txHash, 'txPlan');
+  assert.equal(healthRows[0].blockIndex, 31);
+  assert.equal(healthRows[0].txHash, 'txHealth');
+  assert.equal(out.combinedHash, expected.combinedHash);
+  // The snapshot is read after the results write, so the digest an export
+  // re-derives a minute later is the one on the chain.
+  assert.equal(healthRows[0].digest, out.digest);
+  assert.match(healthRows[0].digest, /^[0-9a-f]{64}$/);
+});
+
+test('a refused combined append anchors neither half', async () => {
+  stubPlanReads(fixtureAssessment());
+  const row = { _id: 'r1', saves: 0, save: async () => { row.saves += 1; } };
+  const healthRows = [];
+  patch('RecAnchor.findOneAndUpdate', RecAnchor, 'findOneAndUpdate', async () => row);
+  patch('HealthAnchor.create', HealthAnchor, 'create', async (doc) => { healthRows.push(doc); return doc; });
+  patch('engine.anchorMany.fail', engine, 'anchorMany', async () => ({ index: -1, hash: '', txs: ['', ''], anchored: false, error: 'busy' }));
+
+  const out = await proofs.anchorPlanEvents(USER, ASSESSMENT_ID);
+  assert.equal(out.anchored, false);
+  assert.equal(out.code, 'append_failed');
+  assert.equal(row.saves, 0);
+  assert.deepEqual(healthRows, [], 'no health row may claim a block that does not exist');
+});
+
 // ── The routes that call these ─────────────────────────────────────────────
 // The wiring is the other half of the claim: an anchor nobody calls is a
 // feature that exists in a file. Asserted against the source because the
@@ -338,7 +402,7 @@ test('a plan append that throws cannot fail the results save', async () => {
 test('the assessment routes anchor the events they produce', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'routes', 'assessment.js'), 'utf8');
   assert.match(src, /anchorHealthLedger\(req\.user\)/, 'saving an assessment anchors the health ledger');
-  assert.match(src, /anchorRecommendation\(req\.user, assessment\._id\)/, 'saving AI results anchors the plan');
+  assert.match(src, /anchorPlanEvents\(req\.user, assessment\._id\)/, 'saving AI results anchors the plan and the record it left behind');
   assert.match(src, /if \(web3Enabled\(req\.user\)\)/, 'and both only for accounts that include the chain');
   assert.match(src, /chainProof/, 'the receipt travels back to the client');
   assert.match(src, /recommendationProof/, 'so does the plan receipt');

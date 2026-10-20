@@ -218,6 +218,82 @@ async function anchorRecommendation(user, assessmentId) {
   }
 }
 
+// Both facts a saved plan produces, in ONE block: the plan commitment and the
+// health-ledger snapshot that now describes it.
+//
+// The snapshot has to be re-anchored with the plan, not only when the
+// assessment is first created. `updatedAt` is part of the health digest, so an
+// assessment anchored before its AI results existed describes a record that has
+// since moved on — and `/health/verify`, which looks the credential's CURRENT
+// digest up in the anchor table, then correctly answers "this record was never
+// anchored" for a member who did everything right. Mined separately that is two
+// blocks per plan save; `anchorMany` makes it one.
+async function anchorPlanEvents(user, assessmentId) {
+  try {
+    if (!assessmentId) return { anchored: false, code: 'invalid', error: 'no assessment id' };
+    const assessment = await Assessment.findOne({ _id: assessmentId, user: user._id }).lean();
+    if (!assessment) return { anchored: false, code: 'not_found', error: 'assessment not found' };
+    if (!assessment.aiResults) return { anchored: false, code: 'no_results', error: 'no AI results yet' };
+
+    const { inputHash, outputHash, combinedHash } = recommendationCommitment(assessment);
+    // Read AFTER the results write, so this snapshot is the state the plan left
+    // the record in — the same digest an export will re-derive minutes later.
+    const snapshot = await buildHealthDigest(user._id);
+    const wallet = await engine.getWalletDoc(user._id);
+    const anchorDoc = await RecAnchor.findOneAndUpdate(
+      { user: user._id, assessmentId: assessment._id },
+      { $set: { logicVersion: RECOMMENDER_LOGIC_VERSION, inputHash, outputHash, combinedHash } },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    const tx = await engine.anchorMany([
+      {
+        type: 'rec:anchor',
+        actor: wallet.address,
+        data: { assessment: String(assessment._id), logicVersion: RECOMMENDER_LOGIC_VERSION, combinedHash },
+      },
+      {
+        // digest-only, like the manual route: personal answers stay in the DB.
+        type: 'health:anchor',
+        actor: wallet.address,
+        data: { digest: snapshot.digest, assessmentCount: snapshot.assessmentCount, intakeCount: snapshot.intakeCount },
+        secret: snapshot.payload,
+      },
+    ]);
+    if (tx.anchored === false || !(tx.index >= 0)) {
+      return { anchored: false, code: 'append_failed', anchor: anchorDoc, error: tx.error || 'the ledger refused this block' };
+    }
+
+    anchorDoc.blockIndex = tx.index;
+    anchorDoc.txHash = tx.txs[0] || '';
+    await anchorDoc.save();
+    const healthRow = await HealthAnchor.create({
+      user: user._id,
+      digest: snapshot.digest,
+      assessmentCount: snapshot.assessmentCount,
+      intakeCount: snapshot.intakeCount,
+      latestAssessmentAt: snapshot.latestAssessmentAt,
+      blockIndex: tx.index,
+      txHash: tx.txs[1] || '',
+    });
+    return {
+      anchored: true,
+      blockIndex: tx.index,
+      combinedHash,
+      logicVersion: RECOMMENDER_LOGIC_VERSION,
+      planTxHash: tx.txs[0] || '',
+      healthTxHash: tx.txs[1] || '',
+      digest: snapshot.digest,
+      assessmentCount: snapshot.assessmentCount,
+      anchor: anchorDoc,
+      healthRow,
+    };
+  } catch (err) {
+    console.error('[proofs anchorPlanEvents]', err.message);
+    return { anchored: false, error: err.message };
+  }
+}
+
 module.exports = {
   RECOMMENDER_LOGIC_VERSION,
   jsonSafe,
@@ -226,4 +302,5 @@ module.exports = {
   web3Enabled,
   anchorHealthLedger,
   anchorRecommendation,
+  anchorPlanEvents,
 };
