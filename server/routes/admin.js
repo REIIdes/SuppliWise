@@ -2930,9 +2930,6 @@ router.post('/ai/check', async (req, res) => {
 const adminPicturesCache = new Map();
 const ADMIN_PICTURES_CACHE_MAX = 8;
 
-      // Always open a new verified segment, so a forced repair leaves the ledger
-      // on a chain a fresh walk can prove from genesis.
-      resync: true,
 function cacheAdminPictures(adminId, payload) {
   const key = String(adminId);
   adminPicturesCache.delete(key);
