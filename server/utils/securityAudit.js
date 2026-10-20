@@ -713,7 +713,7 @@ const SECURITY_AUDIT = {
     // `resolve`; the same pass named mfa-transaction.test.js, whose mail assertion
     // could not pass in a tree with no credentials. Both fixed, and the next run
     // was green — the server job now takes 1.6 minutes.
-    continuousIntegration: 'PASS 2026-10-19 — Actions run 39232170080 (commit 2d91411) is green on all three jobs: Server 1.6 min with Unit tests and the dependency audit both successful and the per-suite pinpoint step skipped because nothing hung, Client 0.7 min, Secret sweep 0.1 min. Two earlier runs had burned the full six-hour job limit on the hang',
+    continuousIntegration: 'PASS 2026-10-20 — check suite 106744561657 on commit f778442 (the RAG + identity + learning pass) is green on all three jobs: Server 1.6 min, Client 0.7 min, Secret sweep 0.1 min. The previous green was run 39232170080 (commit 2d91411) on 2026-10-19, the run that proved the bounded 20-minute test step and the per-suite pinpoint step — which has not needed to name a hanging suite since',
     productionBuild: 'PASS 2026-10-20 — npm run build in my-react-app: vite build clean, PWA v1.3.0 generateSW wrote dist/sw.js + workbox (96 precached entries, 2841.54 KiB). Re-taken for this pass; the same build succeeded on 2026-10-19',
     lint: 'PASS 2026-10-20 — npm run lint (eslint .) in my-react-app: 0 errors, 4 pre-existing react-hooks/exhaustive-deps warnings. .github/workflows/ci.yml\'s Lint step was fixed on 2026-10-19 (it passed --max-warnings=unlimited, which eslint rejects with exit 2 before linting anything)',
     // NOT a verdict any more. This line used to assert "npm audit: 0
