@@ -406,6 +406,17 @@ function recordStore(rows, zone) {
       for (const row of hits) { row.taken = update.$set.taken; row.takenAt = update.$set.takenAt; }
       return { modifiedCount: hits.length };
     },
+    /** The one write shape both seeders use: `$setOnInsert` under an upsert. */
+    async bulkUpsert(ops) {
+      let upserted = 0;
+      for (const op of ops) {
+        const { filter, update } = op.updateOne;
+        if (this.find(filter).length > 0) continue;
+        all.push({ _id: `s${all.length + 1}`, ...update.$setOnInsert });
+        upserted += 1;
+      }
+      return { upsertedCount: upserted, modifiedCount: 0, matchedCount: ops.length };
+    },
   };
 }
 
@@ -443,13 +454,20 @@ async function withDashboard(rows, window, fn) {
     streakAwardedToday: false,
     lastCompletedDay: null,
     lastTrackedDate: null,
+    // The missed-day backfill's resume pointer. Empty means "this plan has never
+    // been walked back over", which is exactly the state the gap tests below
+    // start from.
+    lastBackfilledDay: '',
     isActive: true,
     save: async function save() { return this; },
   };
   const assessmentDoc = {
     _id: ASSESSMENT_ID,
     user: USER_ID,
-    createdAt: new Date(),
+    // Two weeks of plan behind it, well inside one backfill pass: the gap tests
+    // need days that HAVE been and gone. A plan created "just now" would leave
+    // nothing to backfill and every assertion about the gap would pass vacuously.
+    createdAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000),
     aiResults: { wellnessBaseline: 20, recommendations: RECOMMENDATIONS, dailySchedule: DAILY_SCHEDULE },
   };
 
@@ -506,7 +524,11 @@ async function withDashboard(rows, window, fn) {
   };
   IntakeRecord.countDocuments = async (filter) => store.countDocuments(filter || {});
   IntakeRecord.updateMany = async (filter, update) => store.updateMany(filter, update);
-  IntakeRecord.bulkWrite = async () => ({ upsertedCount: 0 });
+  // Stands in for the upsert GET / and the missed-day backfill both issue: an
+  // insert-only write keyed on (user, assessment, supplementName, dayKey). A
+  // no-op stub here would make every backfill assertion below read as "nothing
+  // was written", which is the failure mode it must not be able to fake.
+  IntakeRecord.bulkWrite = async (ops) => store.bulkUpsert(ops);
   DashboardMetrics.findOne = () => chainableQuery(metricsDoc);
   DashboardMetrics.create = async () => metricsDoc;
   DashboardMetrics.prototype.save = async function save() { return this; };
@@ -589,20 +611,60 @@ test('GET / does not charge for a dose ticked late', async () => {
   const zone = zoneInLocalWindow(new Date(), ...MORNING_CLOSED);
   assert.ok(zone);
 
-  const { body } = await withDashboard(
+  const { body, store } = await withDashboard(
     [{ name: 'Vitamin D3', slot: 'morning', taken: true }],
     zone,
-    ({ call }) => call('/'),
+    ({ call, store }) => call('/').then((result) => ({ ...result, store })),
   );
 
   assert.equal(body.stats.wellnessToday.missed, 0);
   assert.equal(body.stats.wellnessToday.penaltyPoints, 0);
-  // `overallAdherence` is 0 here because GET / reads the stored lifetime figure
-  // rather than recounting history (POST /intake is what refreshes it), so the
-  // whole score comes from today's 100% plus the 20-point baseline.
+  // GET / recounts lifetime adherence from the database on every load (the
+  // missed-day backfill can add rows no POST ever touched), so the history term
+  // is whatever the store actually holds — not the 0 the row was created with.
+  const takenAll = store.rows.filter((r) => r.taken).length;
+  const overallAdherence = Math.round((takenAll / store.rows.length) * 100);
   assert.equal(body.stats.wellnessScore, calculateWellnessScore({
-    baseline: 20, overallAdherence: 0, todayAdherence: 100, streak: 0,
+    baseline: 20, overallAdherence, todayAdherence: 100, streak: 0,
   }));
+});
+
+test('a day nobody opened lowers the score once it is counted as missed', async () => {
+  // Today's window is still open, so the ONLY thing that can move the score in
+  // this response is the backfilled gap. That is the whole point of the feature:
+  // not opening the app used to be free, and the number sat where it was.
+  const zone = zoneInLocalWindow(new Date(), ...MORNING_OPEN);
+  assert.ok(zone);
+
+  const { body, store, metricsDoc } = await withDashboard(
+    [{ name: 'Vitamin D3', slot: 'morning' }],
+    zone,
+    ({ call, store, metricsDoc }) => call('/').then((result) => ({ ...result, store, metricsDoc })),
+  );
+
+  // Every gap day between the plan opening and today now carries the full plan,
+  // unticked — and today itself still has exactly its one live row.
+  const gapDays = [...new Set(store.rows.map((r) => r.dayKey))].filter((k) => k !== dayKey(zone));
+  assert.ok(gapDays.length >= 2, `the two weeks of plan should be judged, got ${gapDays.length} days`);
+  assert.ok(store.rows.every((r) => gapDays.includes(r.dayKey) ? !r.taken : true), 'a gap day is seeded unticked');
+  assert.equal(store.rows.filter((r) => r.dayKey === dayKey(zone)).length, 1, 'today is not re-seeded');
+
+  // The pointer is committed on the same load, so the walk does not repeat.
+  assert.ok(metricsDoc.lastBackfilledDay, 'the pass records how far back it judged');
+  assert.ok(metricsDoc.lastBackfilledDay < dayKey(zone), 'and never claims today');
+
+  const takenAll = store.rows.filter((r) => r.taken).length;
+  const overallAdherence = Math.round((takenAll / store.rows.length) * 100);
+  assert.ok(overallAdherence < 50, `the missed days must drag lifetime down, got ${overallAdherence}`);
+
+  assert.equal(body.stats.wellnessScore, calculateWellnessScore({
+    baseline: 20, overallAdherence, todayAdherence: 100, streak: 0,
+  }));
+  // What the day looked like while it was still invisible to the score.
+  assert.ok(
+    body.stats.wellnessScore < calculateWellnessScore({ baseline: 20, overallAdherence: 100, todayAdherence: 100, streak: 0 }),
+    'a counted-as-missed day must score below an uncounted one',
+  );
 });
 
 test('the client timezone header is stored once and reused', async () => {

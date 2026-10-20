@@ -195,7 +195,7 @@ function StatIcon({ name }) {
   );
 }
 
-export default function AdminSupportChats({ request, secure, adminAccountId, focusThreadId = '', adminProfile = {} }) {
+export default function AdminSupportChats({ request, secure, adminAccountId, focusThreadId = '', adminProfile = {}, onUnreadChange }) {
 
   // Track broken profile pictures
   const [brokenPictures, setBrokenPictures] = useState(new Set());
@@ -215,6 +215,11 @@ export default function AdminSupportChats({ request, secure, adminAccountId, foc
 
   const [rows, setRows] = useState([]);
   const [counts, setCounts] = useState({ open: 0, pending: 0, resolved: 0, all: 0, unread: 0 });
+  // The sidebar dot lives outside this component, and while the queue is open it
+  // is the only surface that knows the real number — the dashboard deliberately
+  // stops polling when this tab is mounted, so reporting upward is what keeps the
+  // dot from freezing at whatever the last poll saw.
+  useEffect(() => { onUnreadChange?.(counts.unread || 0); }, [counts.unread, onUnreadChange]);
   const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');

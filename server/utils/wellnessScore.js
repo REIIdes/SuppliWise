@@ -32,6 +32,11 @@
  * So an unticked morning pill costs nothing at 8:30 and costs everything at
  * 12:01, and ticking it at 11:55 costs nothing at all. That is the difference
  * between a score that measures discipline and one that measures alarms.
+ *
+ * A day the app was never opened used to escape all of this — no rows, so
+ * nothing to miss. Those days are now seeded as unticked before they are scored;
+ * see utils/missedDayDoses.js. The arithmetic here did not change, only the
+ * completeness of what it is fed.
  */
 
 /** Ceiling of each term. They sum to 100, which is the scale the UI promises. */

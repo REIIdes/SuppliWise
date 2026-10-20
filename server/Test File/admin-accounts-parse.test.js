@@ -16,7 +16,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { hashPassword } = require('../utils/password');
-const { parseAdminAccounts, configuredAdminAccounts } = require('../utils/adminAccounts');
+const { parseAdminAccounts, configuredAdminAccounts, rewriteAdminTotpSecretText } = require('../utils/adminAccounts');
 
 const ARGON2_LIKE = '$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHR2YWx1ZQ$0Q1wJ8S0Y7bYl6m0Zx3kQ8x1Jq0k4h6l0mQ';
 const BCRYPT_LIKE = '$2a$12$mMRQcVk4IxFpvOeCdVqhqueRm73wg4sO.z1pJmZej4LLf4GbXG8oO';
@@ -132,4 +132,47 @@ test('an incomplete legacy trio contributes nothing', () => {
 
   const none = { ADMIN_ALIAS: 'AdminDevs', ADMIN_PASSWORD_HASH: ARGON2_LIKE };
   assert.deepStrictEqual(configuredAdminAccounts(none), []);
+});
+
+// ── Rewriting field 3 (the seed) without repeating the bug ─────────────────
+
+/** A .env text carrying the given packed value. */
+const envText = (packed) => [
+  'MONGO_URI=mongodb://example.invalid/db',
+  'ADMIN_ALIAS=AdminDevs',
+  `ADMIN_TOTP_SECRET=${SECRET_A}`,
+  `ADMIN_ACCOUNTS=${packed}`,
+  'EMAIL_USER=smtp@example.com',
+].join('\r\n');
+
+test('rewriting one seed leaves the other accounts\' argon2id hashes intact', () => {
+  const packed = `AdminDevs|${ARGON2_LIKE}|${SECRET_A},AdminJoma|${ARGON2_LIKE}|${SECRET_B}`;
+  const { text, replaced } = rewriteAdminTotpSecretText(
+    envText(packed), 'AdminJoma', 'NEWSIXTEENCHARSEED', { ADMIN_ALIAS: 'Nobody' }
+  );
+  assert.strictEqual(replaced, 1);
+
+  const rewritten = parseAdminAccounts(/ADMIN_ACCOUNTS=(.*)\r?\n/.exec(text)[1]);
+  assert.strictEqual(rewritten.length, 2, 'the rewritten value still yields two accounts, not four fragments');
+  assert.strictEqual(rewritten[0].passwordHash, ARGON2_LIKE, 'the untouched account\'s hash is byte-identical');
+  assert.strictEqual(rewritten[1].totpSecret, 'NEWSIXTEENCHARSEED');
+  assert.strictEqual(rewritten[1].passwordHash, ARGON2_LIKE);
+});
+
+test('rewriting the legacy alias updates ADMIN_TOTP_SECRET, not the packed list', () => {
+  const packed = `AdminJoma|${ARGON2_LIKE}|${SECRET_B}`;
+  const { text, replaced } = rewriteAdminTotpSecretText(envText(packed), 'AdminDevs', 'REPLACEMENTSEED123', { ADMIN_ALIAS: 'AdminDevs' });
+  assert.strictEqual(replaced, 1);
+  assert.match(text, /ADMIN_TOTP_SECRET=REPLACEMENTSEED123/);
+  assert.doesNotMatch(text, /REPLACEMENTSEED123\(/);
+  assert.strictEqual(/ADMIN_ACCOUNTS=(.*)\r?\n/.exec(text)[1], packed, 'the packed list is untouched');
+});
+
+test('a naive split of the rewritten value reproduces the original corruption', () => {
+  // The reason the writer must use ENTRY_SEPARATOR: this asserts what happens if
+  // somebody "simplifies" it back to `value.split(',')`.
+  const packed = `AdminDevs|${ARGON2_LIKE}|${SECRET_A}`;
+  const naive = packed.split(',');
+  assert.strictEqual(naive.length > 1, true, 'an argon2id hash really does contain a comma');
+  assert.strictEqual(parseAdminAccounts(packed).length, 1);
 });

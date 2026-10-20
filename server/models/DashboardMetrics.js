@@ -37,6 +37,13 @@ const dashboardMetricsSchema = new mongoose.Schema(
     lastCompletedDay: {
       type: String, // YYYY-MM-DD format - last day with 100% completion
     },
+    // The newest past plan day the missed-day backfill has judged
+    // (utils/missedDayDoses.js). A pointer, not a counter: it is the one thing
+    // that lets a dashboard load know which days it has already decided, so the
+    // backfill runs on the day's first request and never again for that day.
+    lastBackfilledDay: {
+      type: String, // YYYY-MM-DD format
+    },
     streakAwardedToday: {
       type: Boolean,
       default: false, // Prevents multiple +1 in the same day

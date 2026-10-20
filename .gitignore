@@ -122,6 +122,11 @@ docs/__pycache__/
 # scratch scripts were already tracked and are untracked by this commit.
 **/_*
 
+# The same scratch when it was not named with the convention: a stderr capture
+# written as `whatever.err` holds the same output as `_boot.err`, and stderr is
+# where a boot log prints a key id or a failing request's body.
+*.err
+
 # Generated evaluation artefacts. `node eval/exportFineTune.js` rebuilds the
 # fine-tune JSONL from the verified plans in seconds, and a 166KB training file
 # has no business in the repo history — it is derived data, not a source.

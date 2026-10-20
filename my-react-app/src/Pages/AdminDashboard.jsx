@@ -397,6 +397,10 @@ function AdminDashboard() {
   const [rotatedKey, setRotatedKey] = useState(null);
   const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
+  // Unread member messages in the support queue — drives the "new" dot on the
+  // sidebar's Chat management icon. While the tab is open, AdminSupportChats
+  // reports its own count live; from any other tab it is polled quietly.
+  const [chatsUnread, setChatsUnread] = useState(0);
   // Derived, never mirrored into its own state: the badge used to drift out of
   // sync with the list every time a row was read, deleted or refreshed.
   const unreadCount = notifications.filter(n => !n.read).length;
@@ -595,9 +599,37 @@ function AdminDashboard() {
       throw new Error(data?.message || 'Choose your own password before continuing.');
     }
     if (response.status === 401 || response.status === 403) { localStorage.removeItem('adminToken'); localStorage.removeItem('admin'); navigate('/admin/login'); throw new Error('Your admin session has expired.'); }
-    if (!response.ok) { const error = new Error(data?.message || 'Unable to load admin data.'); error.status = response.status; throw error; }
+    if (!response.ok) {
+      const error = new Error(data?.message || 'Unable to load admin data.');
+      error.status = response.status;
+      // A refused request can still carry a structured result — the credential
+      // delivery reports which mailboxes failed even when the call as a whole
+      // did not succeed. Without this the panel sees only the sentence.
+      error.data = data;
+      throw error;
+    }
     return data;
   }, [navigate]);
+
+  // Feed the sidebar dot from any tab except the queue itself, where the queue
+  // reports its own count. `limit=1` because only `counts.unread` is wanted —
+  // the thread page is fetched in full by the tab when it opens.
+  useEffect(() => {
+    if (tab === 'chats') return undefined;
+    let alive = true;
+    const pull = async () => {
+      try {
+        const data = await request('/chats?limit=1', { background: true });
+        if (alive) setChatsUnread(Number(data?.counts?.unread) || 0);
+      } catch { /* keep the last known count; the next tick retries */ }
+    };
+    pull();
+    const timer = window.setInterval(pull, 45000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [tab, request]);
 
   const [adminAccountId, setAdminAccountId] = useState(() => {
     try { return String(JSON.parse(localStorage.getItem('admin') || '{}').id || ''); } catch { return ''; }
@@ -1548,10 +1580,17 @@ function AdminDashboard() {
                 /* Labels are also hidden by the ≤820px media query (not only by
                    the collapsed class), so the tooltip must always be present. */
                 title={TAB_LABEL[item]}
-                aria-label={TAB_LABEL[item]}
+                aria-label={item === 'chats' && chatsUnread > 0
+                  ? `${TAB_LABEL[item]}, ${chatsUnread} unread message${chatsUnread === 1 ? '' : 's'}`
+                  : TAB_LABEL[item]}
                 aria-current={tab === item ? 'page' : undefined}
               >
-                <span className="sidebar-nav-icon">{TAB_ICONS[item]}</span>
+                <span className="sidebar-nav-icon">
+                  {TAB_ICONS[item]}
+                  {item === 'chats' && chatsUnread > 0 && (
+                    <span className="sidebar-nav-dot" aria-hidden="true" />
+                  )}
+                </span>
                 <span className="sidebar-nav-label">{TAB_LABEL[item]}</span>
               </button>
             ))}
@@ -1792,9 +1831,9 @@ function AdminDashboard() {
 
           {tab === 'overview'               && <div className="admin-tab-panel"><Overview overview={overview} onNavigate={navigateToTab} monitor={monitor} onOpenSecurity={openSecurityCenter} /></div>}
           {tab === 'users'                  && <div className="admin-tab-panel"><Users users={users} setUsers={setUsers} usersFetchedAt={usersFetchedAt} search={search} setSearch={value => { searchRef.current = value; setSearch(value); }} loadUsers={loadUsers} request={request} onSubscriptionChanged={applySubscriptionUpdate} updateAccount={updateAccount} deleteAccount={deleteAccount} deletingUserId={deletingUserId} unlockUser={unlockUser} expandedUser={expandedUser} setExpandedUser={setExpandedUser} /></div>}
-          {tab === 'admins'                 && <div className="admin-tab-panel"><Admins admins={admins} adminsFetchedAt={adminsFetchedAt} search={adminSearch} setSearch={value => { adminSearchRef.current = value; setAdminSearch(value); }} loadAdmins={loadAdmins} toggleAdmin={toggleAdmin} unlockAdmin={unlockAdmin} currentAdmin={profile} expandedAdmin={expandedAdmin} setExpandedAdmin={setExpandedAdmin} /></div>}
+          {tab === 'admins'                 && <div className="admin-tab-panel"><Admins admins={admins} adminsFetchedAt={adminsFetchedAt} search={adminSearch} setSearch={value => { adminSearchRef.current = value; setAdminSearch(value); }} loadAdmins={loadAdmins} toggleAdmin={toggleAdmin} unlockAdmin={unlockAdmin} currentAdmin={profile} expandedAdmin={expandedAdmin} setExpandedAdmin={setExpandedAdmin} request={request} /></div>}
           {tab === 'subscriptions'          && <div className="admin-tab-panel"><AdminSubscriptionRequests request={request} /></div>}
-          {tab === 'chats'                   && <div className="admin-tab-panel"><AdminSupportChats request={request} secure={adminSecureChat} adminAccountId={adminAccountId} focusThreadId={focusThreadId} adminProfile={appearance} /></div>}
+          {tab === 'chats'                   && <div className="admin-tab-panel"><AdminSupportChats request={request} secure={adminSecureChat} adminAccountId={adminAccountId} focusThreadId={focusThreadId} adminProfile={appearance} onUnreadChange={setChatsUnread} /></div>}
           {tab === 'assessment-management'  && <div className="admin-tab-panel"><AssessmentManagement users={allUsers} /></div>}
           {tab === 'proposals'              && <div className="admin-tab-panel"><ConditionProposals /></div>}
           {tab === 'ai'                     && <div className="admin-tab-panel"><AiPanel ai={ai} onCheckNow={checkAiNow} checking={checkingAi} reload={aiReload} /></div>}
@@ -3511,7 +3550,7 @@ function isSameAdmin(row, current) {
 // Every class here is namespaced `adm-`, so none of it can leak into — or be
 // moved by — the Users queue, the profile panel or the rest of the console.
 // ════════════════════════════════════════════════════════════════════════════
-function Admins({ admins, adminsFetchedAt, search, setSearch, loadAdmins, toggleAdmin, unlockAdmin, currentAdmin, expandedAdmin, setExpandedAdmin }) {
+function Admins({ admins, adminsFetchedAt, search, setSearch, loadAdmins, toggleAdmin, unlockAdmin, currentAdmin, expandedAdmin, setExpandedAdmin, request }) {
   const handleAdminToggle = (adminId) => {
     setExpandedAdmin(expandedAdmin === adminId ? null : adminId);
   };
@@ -3663,6 +3702,8 @@ function Admins({ admins, adminsFetchedAt, search, setSearch, loadAdmins, toggle
           </span>
         </p>
 
+        <CredentialDelivery request={request} admins={admins} />
+
         {/* Stat cards are the filter. Four tones: indigo everything, emerald
             enabled, amber administratively off, rose locked out. */}
         <div className="adm-stats" role="group" aria-label="Filter administrators by account state">
@@ -3804,6 +3845,26 @@ function Admins({ admins, adminsFetchedAt, search, setSearch, loadAdmins, toggle
                         <span className="adm-detail__value">{admin.email || 'No email on file'}</span>
                       </div>
 
+                      {/* A boolean, never the seed. This is the field that tells an
+                          operator why an administrator cannot get past the sign-in
+                          code — a stored value that is not a valid base32 seed can
+                          still verify on the server (it decodes to the first legal
+                          run) while producing a code no app will ever show. */}
+                      {admin.hasAuthenticator !== undefined && (
+                        <div className="adm-detail">
+                          <span className="adm-detail__label" aria-hidden="true"><UserStatIcon name="key" size={13} /> Authenticator</span>
+                          <span className="adm-detail__value">
+                            {admin.hasAuthenticator ? 'Key on file — usable' : 'Key on file is not usable'}
+                          </span>
+                          {!admin.hasAuthenticator && (
+                            <small className="adm-detail__hint">
+                              The stored seed is malformed, so this account cannot pass its sign-in
+                              code and its key is not emailed. Rotate it to mint a fresh one.
+                            </small>
+                          )}
+                        </div>
+                      )}
+
                       <div className="adm-detail">
                         <span className="adm-detail__label" aria-hidden="true"><UserStatIcon name="user" size={13} /> Status</span>
                         <span className="adm-detail__value">
@@ -3907,6 +3968,160 @@ function Admins({ admins, adminsFetchedAt, search, setSearch, loadAdmins, toggle
           })}
         </div>
       </div>
+    </section>
+  );
+}
+
+/**
+ * The one place an administrator's authenticator key leaves the server.
+ *
+ * It sits in the Admins panel because that is the screen that already answers
+ * "who holds console access", and it is deliberately a two-step action: pressing
+ * the button only opens the code field, and the send happens on the second press
+ * with a fresh authenticator code. A click that immediately mailed six mailboxes
+ * is not a UI, it is an accident waiting for a stray finger.
+ *
+ * WHAT THE MAIL CANNOT CONTAIN
+ * ----------------------------
+ * A password. The server stores only a one-way hash, so there is no plaintext to
+ * retrieve — the panel says this in the same words as the email, because an
+ * operator who expects a password and gets an email without one will keep looking
+ * for a bug that does not exist.
+ */
+function CredentialDelivery({ request, admins }) {
+  const [open, setOpen] = useState(false);
+  const [otp, setOtp] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+
+  // `hasAuthenticator` is absent on a server that predates this field, so an
+  // unknown counts as deliverable and the server's own report has the last word.
+  const reachable = useMemo(
+    () => (admins || []).filter(admin => admin.email && admin.hasAuthenticator !== false).length,
+    [admins]
+  );
+
+  const send = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      const data = await request('/admins/credential-delivery', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ otp }),
+      });
+      setResult({ ok: true, message: data.message, ...data });
+      setOtp('');
+      setOpen(false);
+    } catch (error) {
+      // A refused delivery still carries the per-recipient report, so the honest
+      // outcome ("3 failed, here is which") survives even though this is a 4xx/5xx.
+      const data = error.data || {};
+      setResult({ ok: false, message: error.message, ...data });
+      setOtp('');
+      setOpen(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const totals = result?.totals;
+
+  return (
+    <section className="adm-cd">
+      <div className="adm-cd__head">
+        <span className="adm-cd__mark" aria-hidden="true"><UserStatIcon name="mail" size={18} /></span>
+        <div className="adm-cd__text">
+          <strong>Credential delivery</strong>
+          <p>
+            Email every administrator their own sign-in alias and authenticator key, to the
+            address configured for them in <code>ADMIN_EMAILS</code>. Passwords are one-way
+            hashes, so they are never part of this — the recipient keeps the password they set.
+          </p>
+        </div>
+        {!open && (
+          <button type="button" className="adm-btn adm-btn--deliver" onClick={() => { setOpen(true); setResult(null); }}>
+            Email credentials
+          </button>
+        )}
+      </div>
+
+      {open && (
+        <form className="adm-cd__form" onSubmit={send}>
+          <div className="adm-cd__field">
+            <label htmlFor="cdOtp">Your authenticator code</label>
+            <input
+              id="cdOtp"
+              inputMode="numeric"
+              pattern="[0-9]{6}"
+              maxLength="6"
+              placeholder="6-digit code"
+              value={otp}
+              onChange={event => setOtp(event.target.value.replace(/\D/g, ''))}
+              autoComplete="one-time-code"
+              required
+            />
+          </div>
+          <p className="adm-cd__warn">
+            <span className="adm-cd__warn-icon" aria-hidden="true">i</span>
+            <span>
+              Sends one email to each of the {reachable} administrator{reachable === 1 ? '' : 's'} with an
+              address on this list. The mail carries a live authenticator key — send it deliberately.
+            </span>
+          </p>
+          <div className="adm-cd__buttons">
+            <button type="submit" className="adm-btn adm-btn--deliver" disabled={busy || otp.length !== 6}>
+              {busy ? 'Sending…' : 'Send now'}
+            </button>
+            <button type="button" className="adm-btn adm-btn--ghost" disabled={busy} onClick={() => { setOpen(false); setOtp(''); }}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
+      {result && (
+        <div className={`adm-cd__result adm-cd__result--${result.ok ? 'ok' : 'down'}`}>
+          <strong>{result.message}</strong>
+          {totals && (
+            <ul className="adm-cd__stats">
+              <li><span>{totals.delivered}</span> delivered</li>
+              <li><span>{totals.failed}</span> failed</li>
+              <li><span>{totals.missingEmail}</span> no email configured</li>
+              <li><span>{totals.missingKey}</span> no authenticator key</li>
+              {totals.unusableKey > 0 && <li><span>{totals.unusableKey}</span> key not usable</li>}
+              {totals.unknownEmail > 0 && <li><span>{totals.unknownEmail}</span> address without an account</li>}
+            </ul>
+          )}
+          {Array.isArray(result.report?.delivered) && result.report.delivered.length > 0 && (
+            <p className="adm-cd__line">
+              <strong>Delivered:</strong> {result.report.delivered.map(entry => entry.alias).join(', ')}
+            </p>
+          )}
+          {Array.isArray(result.report?.failed) && result.report.failed.length > 0 && (
+            <p className="adm-cd__line">
+              <strong>Failed:</strong> {result.report.failed.map(entry => `${entry.alias} (${entry.reason})`).join('; ')}
+            </p>
+          )}
+          {result.missingEmail?.length > 0 && (
+            <p className="adm-cd__line">
+              <strong>No address in .env for:</strong> {result.missingEmail.join(', ')}
+            </p>
+          )}
+          {result.unusableKey?.length > 0 && (
+            <p className="adm-cd__line">
+              <strong>Key is not a usable authenticator seed, so it was not sent:</strong>{' '}
+              {result.unusableKey.join(', ')} — rotate each one from that administrator's profile
+              to mint a fresh key.
+            </p>
+          )}
+          {result.unknownEmail?.length > 0 && (
+            <p className="adm-cd__line">
+              <strong>Addresses naming no admin account:</strong> {result.unknownEmail.join(', ')}
+            </p>
+          )}
+        </div>
+      )}
     </section>
   );
 }

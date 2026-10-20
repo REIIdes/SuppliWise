@@ -181,6 +181,114 @@ function persistAdminPasswordToEnv(alias, passwordHash, env = process.env) {
 }
 
 /**
+ * The pure half of `persistAdminTotpSecretToEnv`, taking the file's text rather
+ * than reading it. Exported so the comma handling can be tested without pointing
+ * a writer at the real config: a test run must not be able to corrupt a live
+ * authenticator seed.
+ *
+ * @param {string} rawEnv full text of server/.env
+ * @param {string} alias
+ * @param {string} totpSecret base32 seed
+ * @param {NodeJS.ProcessEnv} [env] read only for ADMIN_ALIAS
+ * @returns {{text: string, replaced: number, sawPackedList: boolean}}
+ */
+function rewriteAdminTotpSecretText(rawEnv, alias, totpSecret, env = process.env) {
+  const lines = String(rawEnv).split(/\r?\n/);
+  const legacyAlias = String(env.ADMIN_ALIAS || '').trim();
+  let replaced = 0;
+  let sawPackedList = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*ADMIN_TOTP_SECRET\s*=/.test(lines[i]) && legacyAlias && alias === legacyAlias) {
+      lines[i] = `ADMIN_TOTP_SECRET=${totpSecret}`;
+      replaced++;
+      continue;
+    }
+    if (/^\s*ADMIN_ACCOUNTS\s*=/.test(lines[i])) {
+      sawPackedList = true;
+      const eq = lines[i].indexOf('=');
+      const head = lines[i].slice(0, eq + 1);
+      const list = lines[i].slice(eq + 1);
+      // The comma-aware split is the whole point here. This function exists to
+      // repair entries that were broken by a NAIVE split; rewriting the line by
+      // splitting on every comma would corrupt every neighbouring argon2id hash
+      // in the value while looking like it worked.
+      lines[i] = head + list.split(ENTRY_SEPARATOR).map((entry) => {
+        const parts = entry.split('|').map((field) => field.trim());
+        if (parts[0] !== alias) return entry;
+        parts[2] = totpSecret;                    // field 3 = totpSecret
+        replaced++;
+        return parts.join('|');
+      }).join(',');
+    }
+  }
+  return { text: lines.join('\n'), replaced, sawPackedList };
+}
+
+/**
+ * Rewrite one admin's authenticator seed inside server/.env.
+ *
+ * WHY THIS IS NOT JUST THE PASSWORD WRITER WITH A DIFFERENT INDEX
+ * --------------------------------------------------------------
+ * `persistAdminPasswordToEnv` deliberately refuses to touch field 3, because a
+ * caller that could write both could desynchronise them. This does the mirror:
+ * field 3 only, and it also owns the legacy trio, whose whole purpose is to seed
+ * ONE account (`ADMIN_ALIAS`).
+ *
+ * The reason it exists at all is that a key rotation writes only the MongoDB
+ * document (`POST /profile/authenticator/rotate`), so .env keeps the SUPERSEDED
+ * seed — and index.js inserts any account whose document is missing from .env's
+ * value. A retired seed therefore starts working again the moment the document is
+ * gone: wiped collection, fresh clone, restored backup. Same failure the password
+ * writer above was created to stop, one field over.
+ *
+ * This is also the repair path for a seed corrupted by the comma bug: an
+ * `ADMIN_ACCOUNTS` entry whose value was cut and rejoined carries an argon2
+ * parameter block glued onto a base32 run (`…FA3C3,t=2,p=1$salt$hash`). speakeasy
+ * decodes up to the first illegal character and ignores the rest, so the server
+ * verifies a code that no authenticator app will ever produce — the account looks
+ * configured and is unusable. Replacing field 3 with a clean seed is the fix, and
+ * it has to land in .env as well as the document or the next boot re-corrupts it.
+ *
+ * Best-effort and never throwing, for the same reason as the password writer: a
+ * read-only .env must not fail a rotation that already succeeded in the database.
+ *
+ * @param {string} alias
+ * @param {string} totpSecret base32 seed, already generated
+ * @param {NodeJS.ProcessEnv} [env] injectable for tests
+ * @returns {{written: boolean, reason?: string, replaced: number}}
+ */
+function persistAdminTotpSecretToEnv(alias, totpSecret, env = process.env) {
+  if (!alias || !totpSecret) return { written: false, reason: 'missing alias or secret', replaced: 0 };
+  let raw;
+  try {
+    raw = fs.readFileSync(ENV_PATH, 'utf8');
+  } catch (error) {
+    return { written: false, reason: `cannot read ${ENV_PATH}: ${error.message}`, replaced: 0 };
+  }
+
+  const { text, replaced, sawPackedList } = rewriteAdminTotpSecretText(raw, alias, totpSecret, env);
+  // A packed list that names the alias alongside the legacy trio wins, exactly as
+  // configuredAdminAccounts resolves it; writing both would be writing the same
+  // account twice from two places that can drift.
+  if (replaced === 0) {
+    return {
+      written: false,
+      reason: sawPackedList
+        ? `alias "${alias}" is not in .env, so there is nothing to update`
+        : `alias "${alias}" is not in .env (not the ADMIN_ALIAS, and no ADMIN_ACCOUNTS entry)`,
+    };
+  }
+
+  try {
+    fs.writeFileSync(ENV_PATH, text, 'utf8');
+  } catch (error) {
+    return { written: false, reason: `cannot write ${ENV_PATH}: ${error.message}`, replaced };
+  }
+  return { written: true, replaced };
+}
+
+/**
  * Shape check for an address. Deliberately not RFC-complete: it rejects the
  * mistakes an operator can actually make in .env (missing `@`, missing domain,
  * stray whitespace, a pasted comment) and nothing subtler.
@@ -285,6 +393,8 @@ module.exports = {
   parseAdminAccounts,
   configuredAdminAccounts,
   persistAdminPasswordToEnv,
+  persistAdminTotpSecretToEnv,
+  rewriteAdminTotpSecretText,
   parseAdminEmails,
   configuredAdminEmails,
   ENTRY_SEPARATOR,

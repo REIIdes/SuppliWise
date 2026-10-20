@@ -854,6 +854,16 @@ mongoose
           + (tlsConfig.enabled ? ` (certificate ${tlsConfig.certFile})` : '')
           + `| hsts=${tls.shouldSendHsts() ? `max-age=${tls.hstsMaxAge()}s` : 'off'}`,
         );
+        // The ceilings are now configuration (utils/rateLimits.js), so the boot
+        // log has to state which values won. An operator who raises
+        // AUTH_RATE_LIMIT_MAX and sees nothing printed cannot tell a typo from
+        // a real override — and a too-low ceiling locks a whole shared-NAT
+        // network out of /api/auth, not just one request.
+        const rl = rateLimits.describe();
+        console.log(
+          `[rate-limits] auth=${rl.auth}/15min per IP auth-local=${rl.authLocal} `
+          + `security=${rl.security}${rl.test ? ' (NODE_ENV=test multiplier active)' : ''}`,
+        );
         if (!passkeys.configured) {
           // Not fatal outside production, but it is not fine either: the
           // security page would still offer a passkey button that cannot work.

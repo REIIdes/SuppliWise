@@ -679,7 +679,13 @@ router.get('/admins', async (req, res) => {
     const admins = await AdminAccount.find(filter)
       .sort({ createdAt: 1 })
       .limit(100)
-      .select('alias enabled lastLoginAt lastActivityAt createdAt updatedAt')
+      // `totpSecret` is read ONLY to derive the boolean below. It is dropped from
+      // the rows immediately and is never present in the response — the panel does
+      // not display keys, it just needs to know which account has a usable one.
+      // SECRET_FIELDS is both seed fields because a rotated account keeps its key
+      // sealed in `totpSecretEnc`; reading the legacy field alone would call those
+      // accounts keyless.
+      .select(`alias enabled lastLoginAt lastActivityAt createdAt updatedAt ${adminTotp.SECRET_FIELDS}`)
       .lean();
     // Live lockout state per admin (same ladder as users: 15 min → 24 h).
     // Admin login failures accumulate on the alias bucket, so the card always
@@ -692,11 +698,20 @@ router.get('/admins', async (req, res) => {
     // cached: editing .env and restarting is how an address changes, and a
     // cached copy would show a retired address for the life of the process.
     const { configuredAdminEmails } = require('../utils/adminAccounts');
+    const { isUsableBase32 } = require('../utils/adminCredentialDelivery');
     const emailByAlias = new Map(configuredAdminEmails().map(entry => [entry.alias, entry.email]));
     const withLockout = (admins || []).map(admin => {
       const info = lockInfo(accountKey('admin', admin.alias || ''));
+      // Derived from the seed, then the seed itself is discarded. A boolean is not
+      // a secret: it tells the operator "this account has an authenticator that an
+      // app can actually generate codes from" — which, for a seed carrying an
+      // argon2 fragment, is currently false for some aliases and was invisible.
+      const hasAuthenticator = isUsableBase32(adminTotp.readSeed(admin));
+      delete admin.totpSecret;
+      delete admin.totpSecretEnc;
       return {
         ...admin,
+        hasAuthenticator,
         email: emailByAlias.get(admin.alias) || '',
         lockout: info.locked
           ? { locked: true, remainingSeconds: info.remainingSeconds, ips: info.ips || [] }
@@ -779,6 +794,133 @@ router.delete('/admins/:id/lockout', async (req, res) => {
   } catch (error) {
     console.error('[admin/admin-lockout]', error.message);
     res.status(500).json({ message: 'Unable to clear the lockout.' });
+  }
+});
+
+// @route   POST /api/admin/admins/credential-delivery
+// @desc    Email every administrator their own alias + authenticator key, to the
+//          address configured for them in server/.env (ADMIN_EMAILS)
+// @access  Private (Admin), with a fresh authenticator code from the caller
+//
+// WHY THE CODE CARRIES A KEY BUT NOT A PASSWORD
+// ---------------------------------------------------------------------------
+// `AdminAccount.passwordHash` is a one-way argon2id hash. The plaintext exists
+// nowhere — not in the database, not in .env, not in this process — so "also send
+// the password" is not a field this route forgot: it is information that cannot
+// be retrieved. The mail says so, and the recipient keeps using the password
+// they already set.
+//
+// WHY A STEP-UP CODE
+// ------------------
+// This is the one admin action whose output is a working credential for every
+// other administrator, sent to addresses that live in a config file rather than
+// in the database. A stolen-but-idle session token must not be able to trigger it
+// on its own, so the caller has to prove they hold their own authenticator right
+// now — the same bar `PATCH /profile/password` and the key-rotation route clear.
+//
+// NO SECRET IN THE RESPONSE OR THE LOG
+// ------------------------------------
+// Aliases, counts, masked addresses and reasons. The report is built in
+// utils/adminCredentialDelivery.js, which masks every address it returns.
+router.post('/admins/credential-delivery', async (req, res) => {
+  const { otp } = req.body || {};
+  if (!/^\d{6}$/.test(String(otp || ''))) {
+    return res.status(400).json({ message: 'A 6-digit authenticator code is required.', code: 'OTP_REQUIRED' });
+  }
+  if (!mongoose.isValidObjectId(req.user._id)) {
+    return res.status(409).json({ message: 'Please sign in again before delivering credentials.' });
+  }
+  try {
+    const caller = await AdminAccount.findById(req.user._id).select(`alias ${adminTotp.SECRET_FIELDS}`);
+    if (!caller) return res.status(404).json({ message: 'Admin account not found.' });
+    // Spent once, like every other TOTP step-up here: a captured code cannot be
+    // replayed against this route inside its validity window.
+    if (!verifyTotpOnce(adminTotp.readSeed(caller), String(otp), caller.alias)) {
+      return res.status(401).json({ message: 'Invalid authenticator code.', code: 'OTP_INVALID' });
+    }
+
+    // Checked before any lookup: a delivery that cannot reach SMTP would otherwise
+    // read the whole collection and return a report with nothing in it.
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+      return res.status(503).json({
+        message: 'The email service is not configured, so nothing was sent. Set EMAIL_USER and EMAIL_PASSWORD in server/.env.',
+        code: 'EMAIL_UNCONFIGURED',
+      });
+    }
+
+    const { configuredAdminEmails } = require('../utils/adminAccounts');
+    const { buildCredentialRecipients, deliverAdminCredentials } = require('../utils/adminCredentialDelivery');
+    // The document's seed is authoritative — a rotated key updates the document
+    // and not .env — and `emailByAlias` is the same join GET /admins renders, so
+    // the panel and this delivery cannot disagree about who has an address.
+    const seededRows = await AdminAccount.find().sort({ createdAt: 1 }).limit(100)
+      .select(`alias enabled ${adminTotp.SECRET_FIELDS}`).lean();
+    // The delivery util reads `totpSecret`, so the sealed field is opened here and
+    // the plaintext is what leaves this function. Doing it in the route keeps
+    // utils/adminCredentialDelivery.js free of the storage scheme, which is why
+    // its tests can hand it a bare base32 string.
+    const accounts = seededRows.map((row) => ({ ...row, totpSecret: adminTotp.readSeed(row) }));
+    const { recipients, missingEmail, missingKey, unusableKey, unknownEmail } = buildCredentialRecipients(
+      accounts,
+      configuredAdminEmails()
+    );
+
+    if (recipients.length === 0) {
+      return res.status(400).json({
+        message: 'No administrator can be reached: none has a usable authenticator key and an address in ADMIN_EMAILS.',
+        code: 'NO_RECIPIENTS',
+        report: { recipients: [], delivered: [], failed: [], missingEmail, missingKey, unusableKey, unknownEmail },
+      });
+    }
+
+    const report = await deliverAdminCredentials({ recipients });
+    const deliveredCount = report.delivered.length;
+
+    await AdminEvent.create({
+      type: 'security',
+      title: 'Admin credentials emailed',
+      detail: `${adminActor(req)} delivered authenticator keys to ${deliveredCount} of ${report.total} administrator(s)`
+        + `${report.failed.length ? `, ${report.failed.length} failed` : ''}`
+        + `${missingEmail.length + missingKey.length + unusableKey.length ? `, ${missingEmail.length + missingKey.length + unusableKey.length} not deliverable` : ''}.`
+        + ' Passwords are one-way hashes and were not included.',
+      link: 'admins',
+      linkLabel: 'Open Admin management',
+    }).catch(() => {});
+
+    const body = {
+      report,
+      missingEmail,
+      missingKey,
+      unusableKey,
+      unknownEmail,
+      totals: {
+        reached: recipients.length,
+        delivered: deliveredCount,
+        failed: report.failed.length,
+        missingEmail: missingEmail.length,
+        missingKey: missingKey.length,
+        unusableKey: unusableKey.length,
+        unknownEmail: unknownEmail.length,
+      },
+    };
+
+    if (deliveredCount === 0) {
+      // Every send was attempted and none landed. That is a failure the operator
+      // has to see, not a success page — but the per-recipient reasons still ride
+      // along so the panel can show WHICH address refused.
+      return res.status(502).json({
+        message: `No credentials were delivered (${report.failed.length} send(s) failed).`,
+        code: 'DELIVERY_FAILED',
+        ...body,
+      });
+    }
+    res.json({
+      message: `Authenticator keys emailed to ${deliveredCount} of ${report.total} administrator(s).`,
+      ...body,
+    });
+  } catch (error) {
+    console.error('[admin/credential-delivery]', error.message);
+    res.status(500).json({ message: 'Unable to deliver the administrator credentials.' });
   }
 });
 
@@ -2653,6 +2795,9 @@ router.post('/security/chain/repair', async (req, res) => {
     const report = await ledger.repair({
       actor,
       keepTo: keepTo == null ? null : Number(keepTo),
+      // Always open a new verified segment, so a forced repair leaves the ledger
+      // on a chain a fresh walk can prove from genesis.
+      resync: true,
     });
 
     // A refusal (e.g. keepTo past the last good block) is a client mistake, not
@@ -3082,6 +3227,17 @@ router.post('/profile/authenticator/rotate', async (req, res) => {
     // leaving it readable in the database.
     adminTotp.writeSeed(account, secret.base32);
     await account.save();
+    // The hand-off copy in .env has to move with the document. Without this, the
+    // boot seeder — which inserts any account whose document is MISSING — would
+    // resurrect the SUPERSEDED seed after a wiped collection, a fresh clone or a
+    // restored backup, and the old authenticator would start working again.
+    // Best-effort: a read-only .env must not fail a rotation that already landed.
+    const { persistAdminTotpSecretToEnv } = require('../utils/adminAccounts');
+    const persisted = persistAdminTotpSecretToEnv(account.alias, secret.base32);
+    if (!persisted.written) {
+      console.warn('[admin/authenticator/rotate] .env not updated for ' + account.alias + ': ' + persisted.reason
+        + ' — if this account is ever recreated from .env it will come back on the retired seed.');
+    }
     res.json({ qrCode: await require('qrcode').toDataURL(secret.otpauth_url), secret: secret.base32, message: 'New authenticator key generated. Add it before signing out.' });
   } catch (error) {
     console.error('[admin/profile/authenticator/rotate]', error.message);

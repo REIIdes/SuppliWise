@@ -2095,18 +2095,6 @@ export const getPriorityStatus = async () => {
   return data;
 };
 
-// Ask the admin team to verify a Priority flag and clear it (medical review).
-// Also the re-request call after an admin replies "needs more info".
-export const requestMedicalReview = async (assessmentId) => {
-  const res = await apiFetch(`/assessment/${assessmentId}/review-request`, {
-    method: 'POST',
-    headers: { ...authHeader() },
-  });
-  const data = await parseJSON(res);
-  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
-  return data;
-};
-
 // Get dashboard data (latest assessment metrics)
 export const getDashboard = async () => {
   const res = await apiFetch('/dashboard', {

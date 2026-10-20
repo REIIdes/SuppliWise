@@ -320,7 +320,12 @@ router.get('/', async (req, res) => {
     // The console polls this every 12s while open, so a hit here means an
     // operator is at the chats screen right now — the member inbox shows
     // "Active Now" off this. See utils/supportPresence.js.
-    markAdminActivity();
+    //
+    // The sidebar dot is polled from every OTHER tab, and it says so with
+    // X-Admin-Background — the same "not a human looking at this screen" signal
+    // the session idle-clock honours (middleware/auth.js). Counting that poll
+    // would leave every member seeing "Active Now" while nobody is near the queue.
+    if (req.get('x-admin-background') !== 'true') markAdminActivity();
     const participant = participantFor(req);
     const statusParam = String(req.query.status || 'open').trim().toLowerCase();
     if (statusParam !== 'all' && !CHAT_STATUSES.includes(statusParam)) {

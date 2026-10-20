@@ -13,6 +13,10 @@ const { buildScheduleSlotIndex, resolveTimeSlot } = require('../utils/dailySched
 // owns the one `Intl` reader in the server — so the day a record belongs to and
 // the window it was due in are read by the same clock, from the same zone.
 const { cleanTimeZone, evaluateToday } = require('../utils/intakeWindows');
+// The day a plan day is made of, and the routine that seeds the days the user
+// never opened. Both live outside this route so the seeding shape exists once —
+// GET / uses it for today, the backfill for the days before it.
+const { buildDayDoseDocs, backfillMissedDays } = require('../utils/missedDayDoses');
 const {
   getWellnessBaseline,
   calculateWellnessScore,
@@ -328,6 +332,8 @@ const finalizeIntakeChange = async (req, assessmentId, planDay = {}) => {
           resolvedAt: new Date(),
           resolvedReason: 'intake-complete',
           expiresAt: expiryFromCreatedAt(assessmentDoc.createdAt),
+          reviewStatus: 'none',
+          reviewNote: '',
         },
       });
       priorityLifted = true;
@@ -367,6 +373,9 @@ const finalizeIntakeChange = async (req, assessmentId, planDay = {}) => {
           resolvedReason: '',
           expiresAt: null,
           flagReasons: ['Intake undone after auto-resolve — review reinstated'],
+          reviewStatus: 'none',
+          reviewNote: '',
+          reviewDecidedAt: null,
         },
       });
       priorityReflagged = true;
@@ -524,30 +533,12 @@ router.get('/', protect, async (req, res) => {
     // lists what needed to be taken. Untouched days automatically read as
     // MISSED (red) in the calendar and day-detail views.
     if (todayIntakeRecords.length === 0 && recommendations.length > 0) {
-      const seeds = recommendations.slice(0, 20)
-        .map(rec => {
-          const name = rec.name || rec.supplement;
-          // Schedule time first, recommendation timing second — same order the
-          // response mapping below uses, so a record never drifts from its card.
-          const slot = resolveTimeSlot({ name, timing: rec.timing }, scheduleSlotIndex);
-          return {
-            user: req.user._id,
-            assessment: latestAssessment._id,
-            supplementName: name,
-            dosage: rec.dosage || '',
-            priority: ['High', 'Medium', 'Low'].includes(rec.priority) ? rec.priority : 'Medium',
-            scheduledTime: slot.timeLabel || rec.timing || 'Anytime',
-            // Stored, not just derived: the wellness score needs to know when this
-            // dose's window closes, and re-deriving it from the schedule on every
-            // read is a fuzzy name match per row per request. Rows seeded before
-            // this field existed fall back to parsing `scheduledTime`.
-            timeSlot: slot.key,
-            taken: false,
-            date: new Date(),
-            dayKey: todayKey,
-          };
-        })
-        .filter(doc => doc.supplementName);
+      // Built by the same helper the missed-day backfill uses, so a dose has the
+      // same shape, the same priority fallback and the same slot whichever day it
+      // is written for — two inline seeders is how a hand-added row came to be
+      // judged by a different window than a seeded one.
+      const seeds = buildDayDoseDocs(recommendations, dailySchedule, { dayKey: todayKey, date: now })
+        .map(doc => ({ ...doc, user: req.user._id, assessment: latestAssessment._id }));
       if (seeds.length > 0) {
         // Bulk upsert: one round-trip instead of N (was a major bottleneck
         // for users with 15+ supplements — each upsert was a separate DB call)
@@ -568,6 +559,61 @@ router.get('/', protect, async (req, res) => {
         }).lean();
       }
     }
+
+    // THE DAYS NOBODY OPENED
+    // A past plan day with no records at all is invisible to every term of the
+    // score: nothing can be missed without a dose to miss, so a fortnight of not
+    // opening the app used to leave the number exactly where it was and the
+    // calendar exactly as blank. Seed those days as unticked, and they cost what
+    // a day opened and ignored would have cost — same rulebook, no second path.
+    // See utils/missedDayResolver.js for which days are eligible and why the
+    // walk is bounded.
+    if (recommendations.length > 0) {
+      try {
+        const backfill = await backfillMissedDays({
+          user: req.user._id,
+          assessment: latestAssessment._id,
+          recommendations,
+          dailySchedule,
+          metrics,
+          todayKey,
+          // The plan day the assessment opened on, read on the user's own clock:
+          // a plan created at 01:00 belongs to yesterday's running day, and
+          // nothing before the plan exists can be judged as missed.
+          sinceDayKey: planDayKey(latestAssessment.createdAt, timeZone),
+          now,
+        });
+        // The pointer moves only once the gap's write has landed, so a throw
+        // leaves it exactly where it was and the next load re-judges the same
+        // days — which is safe, because every write is an idempotent upsert.
+        // `judged`, not `days`: a pass that found the whole window already
+        // decided still moved the pointer, and that is the one piece of state
+        // that must survive it. Commit it before anything that might fail.
+        if (backfill.judged > 0) await metrics.save();
+      } catch (backfillError) {
+        // A backfill failure must not blank the dashboard. The cost is that the
+        // gap stays unjudged for this load, which is the old behaviour — a
+        // score that is too generous, not a broken page.
+        console.error('[dashboard GET /] missed-day backfill failed:', backfillError.message);
+      }
+    }
+
+    // Lifetime adherence, refreshed on every load. POST /intake has always
+    // recounted it, but GET / read the stored figure — so a day seeded only by
+    // the backfill above sat in the database uncounted and the 40% history term
+    // kept praising a record that no longer existed. Counted by aggregation,
+    // never by loading the history.
+    const [totalAll, takenAll] = await Promise.all([
+      IntakeRecord.countDocuments({ user: req.user._id, assessment: latestAssessment._id }),
+      IntakeRecord.countDocuments({ user: req.user._id, assessment: latestAssessment._id, taken: true }),
+    ]);
+    // Remembered because it is persisted below with the score, and the Web3
+    // export and Insights read the STORED figure: refreshing it in memory only
+    // would hand this response one number and leave every other reader on the
+    // stale one.
+    const refreshedAdherence = calculateAdherence(takenAll, totalAll);
+    const adherenceChanged = refreshedAdherence !== metrics.overallAdherence;
+    metrics.overallAdherence = refreshedAdherence;
 
     // Get wellness baseline from assessment
     const wellnessBaseline = getWellnessBaseline(latestAssessment);
@@ -590,8 +636,12 @@ router.get('/', protect, async (req, res) => {
       streak: validatedStreak,
     });
 
-    // Update metrics if changed
-    if (metrics.wellnessScore !== wellnessScore) {
+    // Update metrics if changed. The adherence term is in the test because it is
+    // refreshed above and rounding can leave the SCORE identical while the
+    // lifetime figure moved — and Insights and the Web3 export read the stored
+    // adherence, so a response that moved it without persisting it would leave
+    // those readers on a number this request already knows is wrong.
+    if (metrics.wellnessScore !== wellnessScore || adherenceChanged) {
       metrics.wellnessScore = wellnessScore;
       await metrics.save();
     }
@@ -629,7 +679,7 @@ router.get('/', protect, async (req, res) => {
       })
         .sort({ createdAt: -1 })
         .limit(3)
-        .select('createdAt flagReasons flaggedAt aiResults.recommendations')
+        .select('createdAt flagReasons flaggedAt reviewStatus reviewRequestedAt reviewRequestCount reviewNote aiResults.recommendations')
         .lean();
     }
     const priorityAssessments = (priorityDocs || []).map(doc => ({
@@ -637,6 +687,10 @@ router.get('/', protect, async (req, res) => {
       createdAt: doc.createdAt,
       flaggedAt: doc.flaggedAt,
       reasons: doc.flagReasons || [],
+      reviewStatus: doc.reviewStatus || 'none',
+      reviewRequestedAt: doc.reviewRequestedAt || null,
+      reviewRequestCount: doc.reviewRequestCount || 0,
+      reviewNote: doc.reviewNote || '',
       recommendations: (doc.aiResults?.recommendations || []).slice(0, 12).map(rec => ({
         name: rec.name || rec.supplement,
         dosage: rec.dosage || '',
