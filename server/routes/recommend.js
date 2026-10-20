@@ -10,6 +10,7 @@ const { containsForbiddenFood } = require('../utils/planEvaluation');
 const { getLiveConditions, mergeSelectedBundles, kbBlockForPrompt } = require('../utils/dynamicConditions');
 const { registeredEvidence, extractPmids } = require('../utils/supplementEvidenceRegistry');
 const { groundPlan } = require('../utils/planGrounding');
+const { loadMemberHistory, applyAdaptation } = require('../utils/memberHistory');
 
 // Kept on the route's public surface because existing probes import it from
 // here; the implementation now lives in utils/assessmentPrompt.js.
@@ -87,6 +88,24 @@ router.post('/', protect, async (req, res) => {
     // because a model invented a supplement.
     const clinicalPlan = enforcePlanConsistency(generateClinicalFallback(req.body, liveDynamic));
 
+    // Everything the app already knows about THIS member: the plan they are
+    // holding, what they reported then versus now, and how they actually followed
+    // it. A plan generated from one questionnaire alone cannot say "the fatigue
+    // you reported six weeks ago is gone", which is the whole point of retaking
+    // one. Declared outside the try so the degraded paths can still see it; a
+    // failure here costs the member the nicety, never their results.
+    let member = { block: null, previous: null, delta: { newlyReported: [], resolved: [], hasBaseline: false }, adherence: { percent: null } };
+    try {
+      member = await loadMemberHistory(req.user?._id, {
+        ...a,
+        currentMedications: processedMedications,
+        allergies: processedAllergies,
+        currentSupplements: processedSupplements,
+      }, { timeZone: req.headers['x-client-timezone'] || req.user?.timeZone || '' });
+    } catch (historyError) {
+      console.error('[recommend] member history unavailable, generating without it:', historyError.message);
+    }
+
     // The structured prompt (ROLE / DOMAIN KNOWLEDGE BASE / INSTRUCTIONS /
     // TONE / PATIENT DATA / OUTPUT FORMAT) is built in utils/assessmentPrompt
     // so the benchmark harness (eval/aiBenchmark.js) scores the exact prompt
@@ -97,6 +116,7 @@ router.post('/', protect, async (req, res) => {
       allergies: processedAllergies,
       currentSupplements: processedSupplements,
       _dynamicKb: kbBlockForPrompt(liveDynamic),
+      _historyBlock: member.block || null,
     });
 
     // -- Default AI call (assessment) ---------------------------------------
@@ -171,23 +191,29 @@ router.post('/', protect, async (req, res) => {
         adjustFoods: dietAdjustFoods,
         allowedPmids: dynamicPmids,
       });
+      // ADAPTATION GATE — a symptom this member has never reported before is
+      // raised to High, and `plan.adaptation` records what the plan did with
+      // their history. Runs after grounding (it reads the verified `triggeredBy`
+      // text) and before the order gate (a raised row belongs in the High tier).
       // CONSISTENCY GATE — the prompt asks for priority tiers and the canonical
       // nutrient order (Omega-3 before Magnesium); this enforces them, so the
       // item order a member sees is a property of the system, not of the model's
       // sampling luck. It only ever re-orders, never adds or removes.
-      return res.json(sanitizeStrings(enforcePlanConsistency(grounded)));
+      return res.json(sanitizeStrings(enforcePlanConsistency(applyAdaptation(grounded, member))));
     }
 
     console.log('Using rule-based clinical fallback');
     // The engine is checked by the same gate it applies to the model: its rows
     // were the source of the fabricated PMIDs this audit found, so "curated" is
-    // not a licence to skip verification.
-    return res.json(sanitizeStrings(enforcePlanConsistency(groundPlan(clinicalPlan, {
+    // not a licence to skip verification. It adapts on the same terms, so a
+    // degraded plan and an AI plan treat a newly-reported symptom identically.
+    const engineGrounded = groundPlan(clinicalPlan, {
       ...a,
       currentMedications: processedMedications,
       allergies: processedAllergies,
       currentSupplements: processedSupplements,
-    }, { adjustFoods: dietAdjustFoods, allowedPmids: dynamicPmids }))));
+    }, { adjustFoods: dietAdjustFoods, allowedPmids: dynamicPmids });
+    return res.json(sanitizeStrings(enforcePlanConsistency(applyAdaptation(engineGrounded, member))));
 
   } catch (error) {
     console.error('Recommend route error:', error.message);

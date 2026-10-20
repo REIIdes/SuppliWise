@@ -485,7 +485,7 @@ const SECURITY_AUDIT = {
           + 'on the AI answer AND on the engine answer, records what it changed in plan.grounding, and is proven '
           + 'idempotent. Test File/plan-grounding.test.js pins all of it, including the direction that matters most: a '
           + 'true sentence must never be deleted, and every shipped baseline plan passes with zero repairs.',
-        status: 'fixed — registry re-verified at NCBI 2026-10-20 (65 entries, 48 PMIDs, 0 failing), the shipped baseline plans ground to 100% on citation / patient-fact / dose safety, the live routed model returned 100% grounded plans on all 4 benchmark profiles (one off-catalog row caught and repaired by the gate), and Test File/plan-grounding.test.js pins 30 behaviours',
+        status: 'fixed — registry re-verified at NCBI 2026-10-20 (65 entries, 48 PMIDs, 0 failing), the shipped baseline plans ground to 100% on citation / patient-fact / dose safety, the live routed model returned 100% grounded plans on all 4 benchmark profiles (one citation naming no authoritative source caught and replaced by the gate), and Test File/plan-grounding.test.js pins 38 behaviours. Extended the same day past the plan: chat replies, polished text and stored supplement guides now pass through the same identifier verifier (utils/planGrounding.js stripUnverifiableIdentifiers / stripIdentifiersDeep), a truncated guide is served but never cached, and the routed model is no longer asked to cite at all in chat',
       },
     ],
     reVerification: {
@@ -521,14 +521,20 @@ const SECURITY_AUDIT = {
   // Dates are part of the claim: an undated "PASS" is how F1's stale
   // "0 vulnerabilities" survived for a week.
   verification: {
-    unitTests: 'PASS 2026-10-20 — npm test ("node --test Test File/*.test.js"): 1403 passed, 0 failed, 56 skipped. The 56 are the ten pre-existing suites gated on MONGO_TEST_URI — they skip the same way in CI, which is why the count reads differently from a run that has a second database',
-    clientTests: 'PASS 2026-10-20 — npm test in my-react-app: 715/715, 0 failed, 0 skipped',
-    syntaxCheck: 'PASS 2026-10-20 — npm run check: Syntax OK, 327 source file(s)',
+    unitTests: 'PASS 2026-10-20 — npm test ("node --test Test File/*.test.js"): 1464 passed, 0 failed, 56 skipped (1520 run). The 56 are the ten pre-existing suites gated on MONGO_TEST_URI — they skip the same way in CI, which is why the count reads differently from a run that has a second database',
+    clientTests: 'PASS 2026-10-20 — npm test in my-react-app: 715/715, 0 failed, 0 skipped. One of those 715 is the admin-monitor contract that refuses to pass when the server registers a probe the dashboard has no row for, which is how the new ai_learning row was caught before it could appear as a bare snake_case key',
+    syntaxCheck: 'PASS 2026-10-20 — npm run check: Syntax OK, 332 source file(s)',
     // F13 is a claim about generated content, so it is measured two ways: the
     // citations the app itself asserts (static, against NCBI), and the plans the
     // model actually returns (live, before and after the grounding gate).
     citationRegistry: 'PASS 2026-10-20 — node eval/citationAudit.js: 65 registry entries, 48 asserted PMIDs, 0 failing at NCBI. `npm run eval:citations` is the same check',
-    liveAssessment: 'PASS 2026-10-20 — node eval/aiBenchmark.js --live --runs=1 against the routed assessment model (openrouter deepseek-v4-flash): all 4 profiles at citationGrounding 100.0%, patientFactGrounding 100.0%, dosageSafety 100.0%, orderCompliance 100.0%, schemaValidity 100.0%, overall 97.3 average. The gate found and repaired one fabrication on the stressed-student profile ("Bacopa Monnieri — off-catalog supplement name": row dropped and backfilled from the rule engine, its citation grounded), and the other three profiles needed no repair at all',
+    liveAssessment: 'PASS 2026-10-20 — node eval/aiBenchmark.js --live --runs=1 against the routed assessment model (openrouter deepseek-v4-flash): all 4 profiles at citationGrounding 100.0%, patientFactGrounding 100.0%, dosageSafety 100.0%, orderCompliance 100.0%, schemaValidity 100.0%, overall 97.2 average, benchmark exit clean. The gate caught one unproven citation on the senior-statin profile before the member could see it ("Fiber (Psyllium Husk) — names no authoritative source": citation-replaced, plus two field-normalised rows); the other three profiles arrived clean (violations=0). Offline baseline re-run the same day: 4 profiles, all thresholds met',
+    // The two claims this pass exists to make true, measured the same way:
+    // a suite for the loop that decides what the app learns, and a suite for
+    // the layer that decides what it does with a member\'s own history.
+    selfLearning: 'PASS 2026-10-20 — Test File/condition-learning.test.js: 23/23. It pins the thresholds (24 h AND 25 unseen assessments, from the durable AiLearningRun ledger rather than process memory), the atomic lease that stops two processes spending the same quota, the kill switch, the no-file-writes rule for the scheduled path, the fact that index.js arms it, and that member contact fragments cannot reach a provider through an aggregate term',
+    memberAdaptation: 'PASS 2026-10-20 — Test File/member-history.test.js: 23/23, plus plan-grounding 38/38, chat-safety 10/10, supplement-guide-store 35/35, ai-routing 60/60. Covers the resubmit-vs-reassessment window, adherence corrected to the member\'s own clock, escalation on a first-time symptom, the never-demote rule, and the fenced history block being read as data after the answers it is compared against',
+
     // GitHub Actions is where this record stops being a local claim. The server
     // job hung twice and was cancelled only after the runner\'s six-hour job limit,
     // and a cancelled step\'s log is not readable without a token — so the step was
@@ -540,8 +546,8 @@ const SECURITY_AUDIT = {
     // could not pass in a tree with no credentials. Both fixed, and the next run
     // was green — the server job now takes 1.6 minutes.
     continuousIntegration: 'PASS 2026-10-19 — Actions run 39232170080 (commit 2d91411) is green on all three jobs: Server 1.6 min with Unit tests and the dependency audit both successful and the per-suite pinpoint step skipped because nothing hung, Client 0.7 min, Secret sweep 0.1 min. Two earlier runs had burned the full six-hour job limit on the hang',
-    productionBuild: 'PASS 2026-10-19 — npx vite build: 422 modules transformed, PWA v1.3.0 generateSW wrote dist/sw.js + workbox (96 precached entries)',
-    lint: 'PASS 2026-10-19 — npx eslint . in my-react-app: 0 errors, 4 pre-existing react-hooks/exhaustive-deps warnings; .github/workflows/ci.yml Lint step fixed the same day (it passed --max-warnings=unlimited, which eslint rejects with exit 2 before linting anything)',
+    productionBuild: 'PASS 2026-10-20 — npm run build in my-react-app: vite build clean, PWA v1.3.0 generateSW wrote dist/sw.js + workbox (96 precached entries, 2839.46 KiB). Re-taken for this pass; the same build succeeded on 2026-10-19',
+    lint: 'PASS 2026-10-20 — npm run lint (eslint .) in my-react-app: 0 errors, 4 pre-existing react-hooks/exhaustive-deps warnings. .github/workflows/ci.yml\'s Lint step was fixed on 2026-10-19 (it passed --max-warnings=unlimited, which eslint rejects with exit 2 before linting anything)',
     // NOT a verdict any more. This line used to assert "npm audit: 0
     // vulnerabilities" as a standing fact, which is the exact failure mode F1
     // documents: the sentence stays green while the tree rots. The number is
@@ -642,12 +648,27 @@ const SECURITY_AUDIT = {
     + 'baseline profiles and prints each plan twice — before and after utils/planGrounding.js — so a regression in '
     + 'what the model returns is visible as repairs the gate had to make. It spends API tokens, so run it on demand, '
     + 'not on every commit.',
+    'OPERATIONAL (the self-learning loop): it is armed from API boot (index.js → utils/conditionLearning.schedule()) '
+    + 'and needs no operator to remember it, which is exactly why it needs watching rather than trusting. Read the '
+    + 'ai_learning row in the admin Security Center: it says how many assessments are new since the last cycle, how '
+    + 'many learned conditions are live, and reports warning or critical when the loop is disabled, has never '
+    + 'completed, or has failed three cycles running. `npm run learning:conditions` runs one cycle by hand through the '
+    + 'same lease and the same evidence gate; `CONDITION_LEARNING=false` switches it off. Both spend provider quota '
+    + 'and read aggregate health data, so neither belongs in CI. What the loop may change is bounded by the gate: a '
+    + 'candidate publishes only when every supplement it carries cites an authoritative source with a well-formed '
+    + 'PMID, and rejected candidates are recorded in ConditionProposal with the reason — nothing there is a human '
+    + 'approval, and nothing a model invents becomes product.',
   ],
 
   disclaimer:
     'This audit covers the application source in this repository as reviewed on 2026-09-23, re-read against the '
     + 'code on 2026-10-19 (see `reverification`), and extended on 2026-10-20 with F13 — the fabricated citations the '
-    + 'app itself shipped in every wellness plan. It is not a penetration ' +
+    + 'app itself shipped in every wellness plan — and with the AI feature pass that closed the rest of that gap: '
+    + 'every generative surface (assessment plans, chat, polished text, supplement guides) is now verified against '
+    + 'the app\'s own evidence after generation instead of trusted before it, the questionnaire learns from real '
+    + 'assessment data on a schedule instead of when someone remembers to run a script, and a plan reads the '
+    + 'member\'s own previous plan, symptom delta and adherence instead of answering as if the member had never '
+    + 'been here before. It is not a penetration ' +
     'test and does not certify the system as secure or "100% protected". Infrastructure, the database cluster, the ' +
     'dependency supply chain, third-party APIs, and social-engineering vectors were out of scope. Several findings ' +
     'remain open until the manual rotations above are completed, and secrets that have ever been committed must be ' +

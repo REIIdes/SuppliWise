@@ -875,6 +875,61 @@ Object.assign(probes, {
     }
   },
 
+  // ── Self-learning loop: is the app actually learning, on its own? ────────
+  // The condition-gap analysis used to be a script, so "we learn from our own
+  // data" was only true on the days somebody remembered to run it. It is now a
+  // scheduled cycle with a durable ledger, and this row is what makes the
+  // difference observable instead of assumed: a loop that has silently stopped
+  // (disabled by env, a provider that never answers, a lease stranded by a
+  // crash) shows here rather than in a questionnaire that quietly never changes.
+  ai_learning: async () => {
+    try {
+      const { learningStatus } = require('./conditionLearning');
+      const s = await learningStatus();
+      if (!s.available) return { status: 'warning', detail: 'Learning ledger unreachable (no database connection).' };
+      if (s.disabled) {
+        return { status: 'warning', detail: 'CONDITION_LEARNING=false — the self-learning loop is switched off, so the condition list cannot change by itself.' };
+      }
+      const ledger = s.ledger;
+      if (!ledger || !ledger.finishedAt) {
+        return {
+          status: 'warning',
+          detail: `Learning cycle has never completed. ${s.newAssessments} assessment(s) new since the watermark (needs ${s.minNewAssessments}); reason: ${s.reason}.`,
+        };
+      }
+      const ageMs = Date.now() - new Date(ledger.finishedAt).getTime();
+      if (ledger.status === 'failed') {
+        const stalled = Number(ledger.consecutiveFailures) >= 3;
+        return {
+          status: stalled ? 'critical' : 'warning',
+          detail: `Last learning cycle FAILED (${String(ledger.consecutiveFailures || 0)} running): ${ledger.lastError || 'no reason recorded'}.`,
+        };
+      }
+      if (s.running) {
+        return { status: 'healthy', detail: `Learning cycle in progress — ${Number(ledger.newAssessments || 0)} new assessment(s) being ranked, ${s.liveConditions} condition(s) live.` };
+      }
+      // Due, eligible, and not running for a whole interval plus slack: the
+      // timer is not armed in this process (a boot that skipped the schedule,
+      // or a server that has been up less time than the boot delay thinks it
+      // needs is NOT this — hence the age test on finishedAt, not uptime).
+      if (s.eligible && ageMs > s.intervalMs * 2) {
+        return {
+          status: 'warning',
+          detail: `A cycle is due (${s.newAssessments} new assessment(s)) but none has run for ${Math.round(ageMs / 3600000)} h — the scheduled timer may not be armed.`,
+        };
+      }
+      return {
+        status: 'healthy',
+        detail: `Learns on its own: last cycle ${new Date(ledger.finishedAt).toISOString()} `
+          + `(${Number(ledger.accepted || 0)} accepted / ${Number(ledger.rejected || 0)} refused by the evidence gate), `
+          + `${s.liveConditions} AI-learned condition(s) live, ${s.newAssessments}/${s.minNewAssessments} new assessments toward the next cycle `
+          + `(also needs ${s.minHours} h since the last).`,
+      };
+    } catch (e) {
+      return { status: 'warning', detail: `Learning monitor threw (${e.name || e.message}) — verify the ledger manually.` };
+    }
+  },
+
   // ── JWT security: measured against the running verifier ─────────────────
   // WHAT THIS USED TO BE: sign a token with the app's own secret, ask jsonwebtoken
   // what lifetime it gave it, and report "tokens expire 12 h after issue; verified

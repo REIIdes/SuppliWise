@@ -33,6 +33,47 @@ import './ResultsPage.css';
 const priorityColor = { High: '#16a34a', Medium: '#d97706', Low: '#374151' };
 const priorityIcon = { High: '🔴', Medium: '🟡', Low: '🟢' };
 
+/* A plan that changes silently looks like a plan that is unreliable. The server
+   records `adaptation` whenever it had a previous assessment to compare
+   against; this renders that record in the member's own terms. A first plan, or
+   a plan saved before the field existed, has nothing to say and renders nothing. */
+function describeAdaptation(adaptation) {
+  const a = adaptation && typeof adaptation === 'object' ? adaptation : null;
+  if (!a?.previousAssessmentAt) return '';
+  const list = (v) => (Array.isArray(v) ? v.map((x) => String(x || '').trim()).filter(Boolean) : []);
+  const joinNames = (names) => {
+    const shown = names.slice(0, 2).join(', ');
+    return names.length > 2 ? `${shown}, and ${names.length - 2} more` : shown;
+  };
+  const parts = [];
+  const added = Number(a.itemsNew) || 0;
+  const kept = Number(a.itemsCarried) || 0;
+  const dropped = Number(a.itemsDropped) || 0;
+  if (added || kept || dropped) {
+    const counts = [];
+    if (added) counts.push(`${added} added`);
+    if (kept) counts.push(`${kept} carried over`);
+    if (dropped) counts.push(`${dropped} dropped`);
+    parts.push(counts.join(', '));
+  }
+  const fresh = list(a.symptomsNew);
+  if (fresh.length) parts.push(`${joinNames(fresh)} reported for the first time`);
+  const gone = list(a.symptomsResolved);
+  if (gone.length) parts.push(`${joinNames(gone)} no longer reported`);
+  const raised = list(a.escalated);
+  if (raised.length) parts.push(`${joinNames(raised)} raised to High priority`);
+  if (!parts.length) return '';
+  const line = parts.join(' · ');
+  return line.charAt(0).toUpperCase() + line.slice(1);
+}
+
+function adaptationDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 function ConfidenceBar({ score, delay = 0 }) {
   // Clamped by the shared reader, so an out-of-range or non-numeric score
   // can never reach the CSS width below as `width: NaN%`.
@@ -432,6 +473,8 @@ function ResultsPage() {
   const mealRecommendations = Array.isArray(r.mealRecommendations) ? r.mealRecommendations : [];
   const warnings = Array.isArray(r.warnings) ? r.warnings : [];
   const avoidList = Array.isArray(r.avoidList) ? r.avoidList : [];
+  const adaptationLine = describeAdaptation(r.adaptation);
+  const adaptationSince = adaptationDate(r.adaptation?.previousAssessmentAt);
 
   return (
     <div className="results-wrapper">
@@ -551,6 +594,15 @@ function ResultsPage() {
             </div>
           </div>
           <p className="results-summary">{fixChars(detailMode === 'detailed' ? r.summary : r.simplifiedSummary || r.summary)}</p>
+          {adaptationLine && (
+            <aside className="results-adaptation" role="note">
+              <span className="results-adaptation__icon" aria-hidden="true">↻</span>
+              <div>
+                <strong>Updated from your plan{adaptationSince ? ` of ${adaptationSince}` : ''}</strong>
+                <p>{adaptationLine}</p>
+              </div>
+            </aside>
+          )}
         </section>
 
         {/* Garbage input warning */}

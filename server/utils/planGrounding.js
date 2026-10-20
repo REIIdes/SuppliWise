@@ -635,6 +635,122 @@ function groundingViolations(plan, profile = {}, options = {}) {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// 7. Free prose (chat replies, supplement guides)
+// ---------------------------------------------------------------------------
+
+/** `PMID 12345678`, `PMID: 12345678`, `(PMID: 12345678)`, `PMIDs: 123, 456`. */
+const PMID_TOKEN = /\bPMIDs?\b[:\s]*\d{4,8}(?:\s*,\s*\d{4,8})*/gi;
+/** A bare citation-shaped number in parentheses, e.g. `(2019; 12: 3456)` is NOT matched — only numbers someone could look up. */
+const DOI_TOKEN = /\bhttps?:\/\/doi\.org\/\S+|\b10\.\d{4,9}\/[^\s),;]+\b/gi;
+
+/**
+ * Strip the hard identifiers a reply asserts but the app cannot vouch for.
+ *
+ * This is the prose-shaped version of `verifyCitation`, and it deliberately does
+ * less. A plan row has a schema and a curated replacement for every field, so a
+ * fabricated citation can be swapped for the registry copy. A chat reply is one
+ * paragraph the member asked for: deleting sentences would remove advice that
+ * may be perfectly sound, and the app cannot tell which. So only the
+ * *identifier* goes — the lookup number nobody checked — and the sentence it sat
+ * in stays. "Multiple trials (PMID: 32722093) support this" becomes "Multiple
+ * trials support this": still the same claim, no longer one presented as
+ * checkable when it is not.
+ *
+ * Same allowlist as the plan path, so chat and the results screen cannot
+ * disagree about what the app is willing to stand behind.
+ *
+ * @param {string} text
+ * @param {{allowedPmids?: Set<string>}} [options]
+ * @returns {{value: string, removed: string[]}}
+ */
+function stripUnverifiableIdentifiers(text, { allowedPmids } = {}) {
+  const raw = String(text == null ? '' : text);
+  if (!raw) return { value: raw, removed: [] };
+  const allowed = allowedPmids instanceof Set && allowedPmids.size
+    ? allowedPmids
+    : allowlistedPmids();
+  const removed = [];
+
+  const keepOrStrip = (whole) => {
+    const ids = extractPmids(whole);
+    const bad = ids.filter((id) => !allowed.has(String(id)));
+    if (!bad.length) return whole;
+    removed.push(...bad.map((id) => `PMID ${id}`));
+    return '';
+  };
+
+  let value = raw.replace(PMID_TOKEN, keepOrStrip);
+  value = value.replace(DOI_TOKEN, (whole) => {
+    // No DOI is in the registry, so any DOI a model asserts is unverifiable here.
+    removed.push(`DOI ${whole.slice(0, 40)}`);
+    return '';
+  });
+  value = value.replace(URL_IN_TEXT, (whole) => {
+    if (!ALLOWED_URL_HOSTS.some((host) => whole.toLowerCase().includes(host))) {
+      removed.push(`URL ${whole.slice(0, 40)}`);
+      return '';
+    }
+    // The host being allowed is not enough. `pubmed.ncbi.nlm.nih.gov/99999999/`
+    // points at a study that does not exist, and it is the shape a model reaches
+    // for when it wants a link to look real. Same rule `verifyCitation` applies.
+    const ids = extractPmids(whole);
+    const bad = ids.filter((id) => !allowed.has(String(id)));
+    if (bad.length) {
+      removed.push(...bad.map((id) => `PMID ${id}`));
+      return '';
+    }
+    return whole;
+  });
+
+  // Stripping leaves the artefacts the identifier was wrapped in: "(PMID: …)"
+  // becomes "()", "see  ." becomes "see  .". Repair those, because a reader who
+  // sees an empty parenthesis immediately knows something was hidden from them —
+  // which is worse than an answer that never cited a number at all.
+  value = value
+    .replace(/[（(]\s*[)）]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .trim();
+
+  return { value, removed };
+}
+
+/**
+ * Apply `stripUnverifiableIdentifiers` to every string inside a parsed reply.
+ *
+ * The supplement guide is JSON with nested arrays and objects, and a fabricated
+ * PMID can sit in any of them — most often a `keyBenefits[].description`. Doing
+ * this per-field at the call site is how one field gets forgotten, and a guide
+ * is written to the shared store BEFORE it is served: one missed field means
+ * every later reader of that profile sees the invented citation, from cache,
+ * forever. So the whole document is walked, and the total of what was removed
+ * comes back with it so the route can log it.
+ *
+ * Arrays and plain objects are rebuilt rather than mutated, because the parsed
+ * reply is also what the caller returns to the client.
+ *
+ * @param {*} value
+ * @param {{allowedPmids?: Set<string>}} [options]
+ * @returns {{value: *, removed: string[]}}
+ */
+function stripIdentifiersDeep(value, options = {}) {
+  const removed = [];
+  const walk = (node, depth) => {
+    if (typeof node === 'string') {
+      const cleaned = stripUnverifiableIdentifiers(node, options);
+      removed.push(...cleaned.removed);
+      return cleaned.value;
+    }
+    if (depth > 6 || node == null || typeof node !== 'object') return node;
+    if (Array.isArray(node)) return node.map((item) => walk(item, depth + 1));
+    const out = {};
+    for (const [key, item] of Object.entries(node)) out[key] = walk(item, depth + 1);
+    return out;
+  };
+  return { value: walk(value, 0), removed };
+}
+
 module.exports = {
   NEUTRAL_TRIGGER,
   GOAL_OPTIONS,
@@ -652,4 +768,6 @@ module.exports = {
   normaliseTrustFields,
   groundPlan,
   groundingViolations,
+  stripUnverifiableIdentifiers,
+  stripIdentifiersDeep,
 };

@@ -815,6 +815,19 @@ mongoose
         }
       })
       .then(() => {
+        // THE SELF-LEARNING LOOP. Until now the condition-gap analysis existed
+        // only as a script, so "the app learns from its own data" depended on an
+        // operator remembering to run it — which meant the questionnaire never
+        // actually changed. This arms it: a boot check and an hourly tick, both
+        // gated by the durable `AiLearningRun` thresholds (25 new assessments
+        // AND 24 h), one lease so two processes cannot both spend the quota, and
+        // nothing published unless the evidence gate accepts it.
+        //
+        // Non-blocking and wrapped: a learning cycle that cannot reach a
+        // provider is a cycle that is skipped, never an outage.
+        require('./utils/conditionLearning').schedule();
+      })
+      .then(() => {
         // A one-line, SECRET-FREE summary of how authentication is actually
         // configured, printed once at boot.
         //

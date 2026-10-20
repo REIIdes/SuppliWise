@@ -35,6 +35,8 @@ const { completeWithFallback } = require('../utils/aiRouter');
 const {
   neutralize, neutralizeList, fenceData, GUARDRAIL_CLAUSE,
 } = require('../utils/aiGuardrails');
+const { registeredEvidence } = require('../utils/supplementEvidenceRegistry');
+const { stripIdentifiersDeep } = require('../utils/planGrounding');
 const {
   GENERATION_TIMEOUT_MS,
   memoryKey,
@@ -82,6 +84,8 @@ function buildPatientProfile(ctx) {
 /** The personalized prompt. Hoisted so it is one string, not rebuilt per request. */
 const PERSONALIZED_PROMPT = (name, profile) => `You are an expert clinical nutritionist and pharmacologist. A patient has been recommended "${name}" based on their health assessment. Write a detailed, personalized supplement guide tailored specifically to this patient.
 
+${evidenceBlock(name)}
+
 ${profile}
 
 Your response must explain:
@@ -124,6 +128,8 @@ Rules:
 /** The generic prompt, for a request that carries no profile. */
 const GENERIC_PROMPT = (name) => `You are an expert clinical nutritionist and pharmacologist. Write a detailed, accurate supplement information guide for: "${name}"
 
+${evidenceBlock(name)}
+
 Respond with ONLY valid JSON, no markdown, no code fences:
 {
   "name": "Full supplement name with form",
@@ -153,6 +159,46 @@ Rules:
 - considerations: 2-4 notes
 - Use possibility language — never make absolute claims
 - Be specific and clinically accurate`;
+
+/**
+ * The one piece of evidence this guide is allowed to stand behind.
+ *
+ * A supplement guide is about a single named nutrient, so unlike the assessment
+ * prompt it does not need the whole registry in front of it — it needs its own
+ * line, and the instruction that nothing else counts. That keeps the anti-
+ * hallucination guard cheap on a route that already writes 2000 tokens per tap.
+ */
+function evidenceBlock(name) {
+  return `## EVIDENCE — NON-NEGOTIABLE
+The only evidence statement this app will publish for "${name}" is this curated line, which a human checked at PubMed:
+"${registeredEvidence(name)}"
+Copy it word for word if you need to make an evidence claim, or say nothing about evidence at all. NEVER write any other PMID, DOI, journal title, author, publication year, named trial, sample size, percentage or study URL anywhere in this guide. A citation you were not given above is not knowledge you have: it is the app's knowledge gap, and inventing a source to fill it is a clinical error — this guide is stored and shown to every later reader of this profile, so an invented citation does not just mislead one person.`;
+}
+
+/**
+ * Remove every identifier the app cannot vouch for from a generated guide.
+ *
+ * Runs BEFORE the write, not before the response, and that order is the whole
+ * point: this route stores first so the next tap is free, so an unverified PMID
+ * that reaches `storeGuide` is served from cache to every later reader of that
+ * name+profile — a fabrication becomes permanent infrastructure rather than one
+ * bad answer. Fields are walked recursively because the guide is nested
+ * (keyBenefits[].description, considerations[]) and picking fields by name at the
+ * call site is how one of them gets forgotten.
+ *
+ * Sentences are never removed, only the identifiers inside them: the advice may
+ * be sound even when the number bolted onto it is not, and this route has no way
+ * to tell which. Punctuation left behind by the removal is repaired for the same
+ * reason it is repaired in chat — a reader who spots "(PMID: )" knows something
+ * was hidden from them.
+ */
+function stripGuide(detail) {
+  const { value, removed } = stripIdentifiersDeep(detail);
+  if (removed.length) {
+    console.warn(`[supplement_detail] removed ${removed.length} unverifiable identifier(s): ${removed.join(', ')}`);
+  }
+  return value;
+}
 
 /**
  * Store a generated guide, never letting storage failure cost the reader theirs.
@@ -253,9 +299,19 @@ router.post('/', protect, async (req, res) => {
         throw failure;
       }
 
-      const detail = completion.data;
+      const detail = stripGuide(completion.data);
       if (!detail || typeof detail !== 'object') {
         throw new Error('Could not parse supplement details');
+      }
+
+      // A guide that hit the token ceiling is a half guide. It can still parse —
+      // the router's JSON extractor closes the last balanced object — and this
+      // route caches aggressively, so storing it would serve the same truncated
+      // panel to every later tap by this reader for this supplement. Return what
+      // we have, but write down nothing: the next tap regenerates.
+      if (completion.truncated) {
+        console.warn('[supplement_detail] provider stopped at max_tokens; serving this guide uncached');
+        return { detail, cached: false, uncached: true };
       }
 
       // Write it down BEFORE answering. If the process dies mid-response the
@@ -266,7 +322,12 @@ router.post('/', protect, async (req, res) => {
       return { detail, cached: false };
     });
 
-    return res.json(outcome.cached ? { ...outcome.detail, cached: true } : outcome.detail);
+    // `uncached` is forwarded so the browser does not do in a session what the
+    // server just refused to do persistently: keep a half guide and re-show it on
+    // every tap. `cached: true` marks a stored hit and is never combined with it.
+    return res.json(outcome.cached
+      ? { ...outcome.detail, cached: true }
+      : (outcome.uncached ? { ...outcome.detail, uncached: true } : outcome.detail));
   } catch (err) {
     const timedOut = err.timedOut === true || err.name === 'AbortError';
     console.error(`Supplement detail ${timedOut ? 'timeout' : 'error'}:`, err.message);
@@ -286,3 +347,8 @@ router.post('/', protect, async (req, res) => {
 });
 
 module.exports = router;
+// Exported for the tests: these two are the whole anti-hallucination contract of
+// this route, and pinning them is cheaper than standing up a stubbed provider and
+// a Mongo write to prove a branch inside the handler.
+module.exports.evidenceBlock = evidenceBlock;
+module.exports.stripGuide = stripGuide;

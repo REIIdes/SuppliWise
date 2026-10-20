@@ -447,6 +447,25 @@ function readCompletionText(data, wire = 'openai') {
 }
 
 /**
+ * True when the provider stopped mid-answer because it ran out of tokens.
+ *
+ * A completion that hit the ceiling is NOT a finished answer, and the two shapes
+ * are indistinguishable from the text alone — which matters most where a reply is
+ * stored as if it were complete. A supplement guide cut off at `max_tokens` can
+ * still parse as JSON (the parser closes the last balanced object) and then gets
+ * cached and served to every later reader of that profile. A chat reply cut off
+ * mid-sentence reads as a broken product.
+ *
+ * Both wires report it, under different field names.
+ */
+function wasTruncated(data, wire = 'openai') {
+  if (!data || typeof data !== 'object') return false;
+  if (wire === 'anthropic') return data.stop_reason === 'max_tokens';
+  const choice = Array.isArray(data.choices) ? data.choices[0] : null;
+  return !!choice && choice.finish_reason === 'length';
+}
+
+/**
  * Recognise "the key is fine, the account has no money" and say so.
  *
  * Anthropic answers a valid key with an exhausted balance as HTTP 400
@@ -684,9 +703,11 @@ async function completeWithTarget(target, {
   const text = outcome.text || '';
   if (!text) return failure('Provider returned an empty completion.', outcome.latencyMs);
 
+  const truncated = wasTruncated(outcome.data, target.wire);
+
   if (!json) {
     return {
-      ok: true, data: null, text, provider: target.provider, model: target.model,
+      ok: true, data: null, text, truncated, provider: target.provider, model: target.model,
       latencyMs: outcome.latencyMs, error: null,
     };
   }
@@ -696,7 +717,7 @@ async function completeWithTarget(target, {
     return failure('Provider reply was not a JSON object.', outcome.latencyMs);
   }
   return {
-    ok: true, data, text, provider: target.provider, model: target.model,
+    ok: true, data, text, truncated, provider: target.provider, model: target.model,
     latencyMs: outcome.latencyMs, error: null,
   };
 }
@@ -717,8 +738,8 @@ async function completeWithTarget(target, {
  *          maxTokens?: number, temperature?: number, timeoutMs?: number,
  *          json?: boolean, extraBody?: object, env?: NodeJS.ProcessEnv}} options
  * @returns {Promise<{ok: boolean, data: Record<string, unknown>|null, text: string,
- *                    provider: string, model: string|null, latencyMs: number|null,
- *                    error: string|null}>}
+ *                    truncated: boolean, provider: string, model: string|null,
+ *                    latencyMs: number|null, error: string|null}>}
  */
 async function complete(purpose, options = {}) {
   const { env = process.env } = options;
@@ -737,7 +758,8 @@ async function complete(purpose, options = {}) {
  *
  * @param {string} purpose
  * @param {object} options see `complete`
- * @returns {Promise<{ok: boolean, data: object|null, text: string, provider: string,
+ * @returns {Promise<{ok: boolean, data: object|null, text: string, truncated: boolean,
+ *                    provider: string,
  *                    model: string|null, latencyMs: number|null, error: string|null,
  *                    attempts: Array<{provider: string, ok: boolean, error: string|null}>}>}
  */
@@ -872,6 +894,7 @@ module.exports = {
   resolveChain,
   splitTimeout,
   readCompletionText,
+  wasTruncated,
   parseJsonObject,
   detectCreditExhausted,
   complete,

@@ -2041,6 +2041,7 @@ const runMonitorProbes = async (app) => {
           prompt_injection:    ['Prompt Injection (AI)', 'ai'],
           pii_ai_prompts:      ['PII in AI Prompts', 'ai'],
           ai_quota:            ['AI Quota Abuse', 'ai'],
+          ai_learning:         ['Self-Learning Loop (Condition Gaps)', 'ai'],
           jwt_security:        ['JWT Strength + Lifetime', 'jwt'],
           jwt_secret_rotation: ['JWT Secret Rotation Window', 'jwt'],
           seal_integrity:      ['Sealed Authenticator Seeds Open', 'crypto'],

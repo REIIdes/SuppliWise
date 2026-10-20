@@ -114,3 +114,34 @@ test('offline fallback still answers common app prompts safely', () => {
   assert.match(offlineFallback('Can I mix supplements?'), /interact/);
   assert.match(offlineFallback('What is vitamin D?'), /fat-soluble/);
 });
+
+// ---------------------------------------------------------------------------
+// Prose grounding: what the prompt promises and what the route enforces
+// ---------------------------------------------------------------------------
+
+const { atSentenceEnd } = require('../routes/chat');
+
+test('the chat prompt forbids citations outright, because chat ships none', () => {
+  const prompt = buildSystemPrompt(null);
+  assert.match(prompt, /EVIDENCE RULES/);
+  assert.match(prompt, /NEVER write a PMID, DOI/);
+  assert.match(prompt, /NEVER invent a number/);
+  assert.match(prompt, /Never generate a citation of your own/);
+});
+
+test('the chat prompt names no provider, so it cannot go stale against the routing table', () => {
+  const prompt = buildSystemPrompt(null);
+  for (const vendor of ['OpenRouter', 'DeepSeek', 'Anthropic', 'GPT', 'Claude', 'Llama']) {
+    assert.ok(!prompt.includes(vendor), `the feature guide must not claim the app runs on ${vendor}`);
+  }
+});
+
+test('a reply cut off by max_tokens ends at a sentence, and a short one is kept whole', () => {
+  assert.equal(atSentenceEnd('Magnesium may help with sleep. It also'), 'Magnesium may help with sleep.');
+  assert.equal(atSentenceEnd('A complete answer.'), 'A complete answer.');
+  // When most of the answer is the unfinished part, keeping the fragment beats
+  // trimming down to a single sentence and deleting everything the member asked.
+  const mostlyIncomplete = `Ok. ${'z'.repeat(200)}`;
+  assert.equal(atSentenceEnd(mostlyIncomplete), mostlyIncomplete);
+  assert.equal(atSentenceEnd(''), '');
+});

@@ -29,7 +29,10 @@
   "eval:ai:live": "node eval/aiBenchmark.js --live",
   "eval:citations": "node eval/citationAudit.js",
   "eval:citations:rebuild": "node eval/citationAudit.js --rebuild",
-  "eval:fine-tune": "node eval/exportFineTune.js"
+  "eval:fine-tune": "node eval/exportFineTune.js",
+  "learning:conditions": "node scripts/conditionGapAnalysis.js --cycle",
+  "learning:conditions:import": "node scripts/conditionGapAnalysis.js --import",
+  "learning:conditions:dry": "node scripts/conditionGapAnalysis.js --dry-run"
  },
  "dependencies": {
   "@simplewebauthn/server": "^14.0.3",

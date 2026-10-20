@@ -1034,3 +1034,18 @@ test('an empty conversation never reaches a provider', () => withCleanEnv(async 
   assert.equal(result.ok, false);
   assert.equal(calls.length, 0);
 }));
+
+// A completion that stopped because it ran out of tokens is not a finished
+// answer, and the text alone cannot tell the caller which it got. Both wires
+// report it, under different field names; the supplement guide needs the flag to
+// decide whether it is safe to cache, and chat needs it to decide whether to
+// trim to a sentence.
+test('truncation is detected on both wires and only on the stop reason', () => {
+  const { wasTruncated } = require('../utils/aiRouter');
+  assert.equal(wasTruncated({ choices: [{ finish_reason: 'length' }] }, 'openai'), true);
+  assert.equal(wasTruncated({ choices: [{ finish_reason: 'stop' }] }, 'openai'), false);
+  assert.equal(wasTruncated({ stop_reason: 'max_tokens' }, 'anthropic'), true);
+  assert.equal(wasTruncated({ stop_reason: 'end_turn' }, 'anthropic'), false);
+  assert.equal(wasTruncated(null, 'openai'), false, 'a missing body is not a truncation');
+  assert.equal(wasTruncated({ choices: [] }, 'openai'), false);
+});

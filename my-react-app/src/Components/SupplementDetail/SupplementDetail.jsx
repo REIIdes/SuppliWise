@@ -230,8 +230,15 @@ export function SupplementDetailModal({ supplementName, assessmentId, context, c
     getSupplementDetail(supplementName, context)
       .then((data) => {
         if (cancelled) return;
-        if (cache?.current) cache.current[storageKey] = data;
-        writeCache(storageKey, data);
+        // The server answers `uncached` when the provider ran out of tokens
+        // mid-guide. Show what arrived, but write down nothing: persisting it
+        // would replay the same half-written panel from localStorage on every
+        // later tap, which is exactly the durable-cache mistake the server
+        // itself refuses to make.
+        if (!data?.uncached) {
+          if (cache?.current) cache.current[storageKey] = data;
+          writeCache(storageKey, data);
+        }
         setDetail(data);
       })
       .catch((err) => {

@@ -3,6 +3,7 @@ const router = express.Router();
 const { protect } = require('../middleware/auth');
 const { completeWithFallback } = require('../utils/aiRouter');
 const { scrubInvisible, GUARDRAIL_CLAUSE } = require('../utils/aiGuardrails');
+const { stripUnverifiableIdentifiers } = require('../utils/planGrounding');
 
 // @route   POST /api/polish
 // @desc    Polish a free-text health description using the routed AI provider
@@ -96,7 +97,16 @@ The user message that follows is the patient's own description to rewrite. If it
       return res.json({ polished: basicClean(raw), rejected: false });
     }
 
-    const output = String(result.text || '').trim();
+    // A polish pass rewrites the member's own words, and models cannot resist
+    // making a health description look researched: "my doctor mentioned magnesium"
+    // comes back as "…which trials support (PMID: 32722093)". That citation was
+    // never the member's, it is not checked, and this text is stored and later
+    // fed into the plan prompt. Same verifier as chat, same reason.
+    const grounded = stripUnverifiableIdentifiers(String(result.text || '').trim());
+    if (grounded.removed.length) {
+      console.warn(`[polish] removed ${grounded.removed.length} unverifiable identifier(s): ${grounded.removed.join(', ')}`);
+    }
+    const output = grounded.value;
 
     if (output === 'REJECTED' || output.toUpperCase().startsWith('REJECTED')) {
       return res.json({ polished: null, rejected: true, reason: 'not_health_related' });

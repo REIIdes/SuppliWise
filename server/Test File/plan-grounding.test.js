@@ -356,3 +356,90 @@ test('inferEvidence delegates to the registry, so engine and verifier agree', ()
   assert.equal(registeredEvidence('Magnesium Glycinate'), evidenceEntry('Magnesium').citation);
   assert.notEqual(registeredEvidence("Devil's Claw"), HONEST_MARKER, 'the engine default is the generic source line');
 });
+
+// ---------------------------------------------------------------------------
+// Free prose: chat replies, polished notes, supplement guides
+//
+// A plan row has a schema and a curated replacement, so a fabricated citation can
+// be swapped. Prose has neither, so these tests pin the opposite property: the
+// identifier goes and the member's answer stays intact.
+// ---------------------------------------------------------------------------
+
+const { stripUnverifiableIdentifiers, stripIdentifiersDeep } = require('../utils/planGrounding');
+const REAL_PMID = extractPmids(ENTRIES[0].citation)[0];
+assert.ok(REAL_PMID, 'the registry needs at least one citable PMID for these tests');
+
+test('an invented PMID is removed and the sentence that carried it survives', () => {
+  const { value, removed } = stripUnverifiableIdentifiers(
+    'Multiple trials (PMID: 32722093) support this for sleep.',
+  );
+  assert.equal(value, 'Multiple trials support this for sleep.');
+  assert.deepEqual(removed, ['PMID 32722093']);
+  assert.ok(!value.includes('PMID'), 'no identifier token is left behind');
+});
+
+test('a registry PMID is kept, so chat and the Results page agree', () => {
+  const { value, removed } = stripUnverifiableIdentifiers(`Evidence: PMID ${REAL_PMID} and PMID 00000001.`);
+  assert.ok(value.includes(REAL_PMID), value);
+  assert.deepEqual(removed, ['PMID 00000001']);
+});
+
+test('a PubMed link to a number nobody checked goes; an allowed medical host stays', () => {
+  const { value, removed } = stripUnverifiableIdentifiers(
+    'See https://pubmed.ncbi.nlm.nih.gov/99999999/ and https://ods.od.nih.gov/factsheets/VitaminD-HealthProfessional/',
+  );
+  assert.ok(!value.includes('99999999'), value);
+  assert.ok(value.includes('ods.od.nih.gov'), 'NIH fact sheets are sources the app vouches for');
+  assert.ok(removed.includes('PMID 99999999'), JSON.stringify(removed));
+});
+
+test('a non-medical URL and any DOI are removed', () => {
+  const { value, removed } = stripUnverifiableIdentifiers(
+    'Read more at https://some-supplement-shop.example.com/mag or doi:10.1001/jamanet.2021.00001',
+  );
+  assert.ok(!value.includes('example.com'), value);
+  assert.ok(!value.includes('10.1001'), value);
+  assert.equal(removed.length, 2, JSON.stringify(removed));
+});
+
+test('stripping leaves no punctuation artefacts for the reader to notice', () => {
+  const { value } = stripUnverifiableIdentifiers('Studies (PMID: 32722093) show  a benefit . Confirmed.');
+  assert.ok(!value.includes('()'), value);
+  assert.ok(!/ {2,}/.test(value), value);
+  assert.ok(!value.includes(' .'), value);
+});
+
+test('empty and non-string input round-trips instead of throwing', () => {
+  for (const input of [undefined, null, '', 42]) {
+    const out = stripUnverifiableIdentifiers(input);
+    assert.ok(typeof out.value === 'string', String(input));
+    assert.deepEqual(out.removed, [], String(input));
+  }
+});
+
+test('stripIdentifiersDeep walks a guide document and removes nothing the reader needs', () => {
+  const guide = {
+    name: 'Magnesium Glycinate',
+    overview: 'Well studied (PMID: 32722093) for sleep quality.',
+    keyBenefits: [{ title: 'Sleep', description: 'Per a 2021 trial, PMID 12345678.' }],
+    howToTake: [{ title: 'Timing', description: 'Take 30-60 minutes before bed.' }],
+    considerations: ['May cause loose stools.'],
+    confidence: 88,
+  };
+  const { value, removed } = stripIdentifiersDeep(guide);
+  assert.equal(removed.length, 2, JSON.stringify(removed));
+  assert.ok(!JSON.stringify(value).includes('32722093'));
+  assert.ok(!JSON.stringify(value).includes('12345678'));
+  // The advice itself is untouched: doses, timing and cautions are what the
+  // member came for, and a verifier that deletes them is worse than the hallucination.
+  assert.equal(value.howToTake[0].description, 'Take 30-60 minutes before bed.');
+  assert.deepEqual(value.considerations, ['May cause loose stools.']);
+  assert.equal(value.confidence, 88, 'non-strings pass through');
+  assert.equal(guide.overview, 'Well studied (PMID: 32722093) for sleep quality.', 'input is not mutated');
+});
+
+test('a caller-supplied allowlist overrides the registry', () => {
+  const extra = new Set([String(REAL_PMID), '77777777']);
+  const { removed } = stripUnverifiableIdentifiers('PMID 77777777 cited here.', { allowedPmids: extra });
+  assert.deepEqual(removed, []);
+});

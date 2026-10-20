@@ -1,21 +1,26 @@
 const mongoose = require('mongoose');
 
 /**
- * One AI-suggested medical condition awaiting (or carrying) ratification by a
- * health professional.
+ * One AI-suggested medical condition and the verdict the evidence gate reached
+ * on it.
  *
- * The condition-gap analysis (scripts/conditionGapAnalysis.js) proposes; it
- * never ships. Suggestions land here as `pending` and only a signed-in admin
- * — the same health-professional panel that rates the instrument — can move a
- * proposal to `approved` or `rejected`, and every such decision is a required
- * non-empty comment appended to the verdicts audit trail. A fabricated verdict
- * is exactly the misconduct this queue exists to make impossible-by-construction:
- * nothing here lets a script mark anything as professionally tested.
+ * The learning loop (utils/conditionLearning.js, reachable by hand as
+ * scripts/conditionGapAnalysis.js) proposes; the gate decides. Nothing ships on
+ * the model's say-so: a candidate becomes a live questionnaire option only when
+ * every supplement it carries cites an authoritative health-professional source
+ * with a well-formed PMID, and everything else is refused with the missing-proof
+ * reason recorded verbatim in `verdicts`.
  *
- * `alreadyLive` records the honest fact that a human reviewer shipped the
- * option during the 2026-10 audit before this queue existed; the panel can
- * still ratify or retire it, and the chip tells the UI not to imply the
- * registry entry is unvetted.
+ * This collection used to be an approval queue a signed-in admin worked through
+ * by hand. That click is gone — an operator who never reads it was the reason
+ * conditions never got added — and what replaces it is stricter, not looser: a
+ * citation either survives the gate's checks or it does not, and a human cannot
+ * wave one through either. What is kept here is the audit trail: who proposed
+ * what, on how much evidence, and exactly why it was accepted or refused.
+ *
+ * `alreadyLive` records the honest fact that a human reviewer shipped the option
+ * during the 2026-10 audit before the gate existed, so the UI can avoid implying
+ * that a registry entry came from an unvetted model run.
  */
 const conditionProposalSchema = new mongoose.Schema(
   {
