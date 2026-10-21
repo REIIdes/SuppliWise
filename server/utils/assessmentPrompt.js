@@ -85,11 +85,18 @@ function buildPatientData(a) {
   const optionalLines = [];
   if (a.activityLevel) optionalLines.push(`- Activity Level: ${a.activityLevel}`);
   if (a.dietType) optionalLines.push(`- Diet Type: ${a.dietType}`);
-  const _goals = a.healthGoals?.length ? promptSafe(a.healthGoals.join(', ')) : null;
+  // Sort health goals for consistent AI prose ordering (arrays already sorted in
+  // canonicalization, but re-sort here to ensure consistent prompt regardless of
+  // when canonicalization runs)
+  const _goals = a.healthGoals?.length 
+    ? promptSafe([...a.healthGoals].sort((a, b) => String(a).localeCompare(String(b))).join(', '))
+    : null;
   if (_goals) optionalLines.push(`- Health Goals: ${_goals}`);
   const _activeSymptoms = (a.symptoms || []).filter((s) => s !== 'No current symptoms');
   if (_activeSymptoms.length > 0) {
-    const _symptomsStr = promptSafe(_activeSymptoms.map((s) => {
+    // Sort symptoms for consistent AI prose ordering
+    const sortedSymptoms = [..._activeSymptoms].sort((a, b) => String(a).localeCompare(String(b)));
+    const _symptomsStr = promptSafe(sortedSymptoms.map((s) => {
       const sev = a.symptomSeverity?.[s];
       return sev ? `${s} (${sev})` : s;
     }).join(', '));
@@ -99,7 +106,11 @@ function buildPatientData(a) {
   if (a.stressLevel) optionalLines.push(`- Daily Stress Level: ${a.stressLevel}`);
   if (a.waterIntake) optionalLines.push(`- Daily Water Intake: ${a.waterIntake}`);
   const _activeHabits = (a.lifestyleHabits || []).filter((h) => h !== 'None');
-  if (_activeHabits.length > 0) optionalLines.push(`- Lifestyle Habits: ${promptSafe(_activeHabits.join(', '))}`);
+  // Sort lifestyle habits for consistent AI prose ordering
+  if (_activeHabits.length > 0) {
+    const sortedHabits = [..._activeHabits].sort((a, b) => String(a).localeCompare(String(b)));
+    optionalLines.push(`- Lifestyle Habits: ${promptSafe(sortedHabits.join(', '))}`);
+  }
   if (a.pregnancyStatus && a.pregnancyStatus !== 'Not applicable')
     optionalLines.push(`- Pregnancy/Breastfeeding: ${a.pregnancyStatus}`);
   if (a.takingSupplements === 'Yes') {
@@ -113,7 +124,11 @@ function buildPatientData(a) {
     optionalLines.push('- Recent Blood Test: Yes (no results provided)');
   }
   const _activeMedConditions = (a.medicalConditions || []).filter((c) => c !== 'None');
-  if (_activeMedConditions.length > 0) optionalLines.push(`- Medical Conditions: ${promptSafe(_activeMedConditions.join(', '))}`);
+  // Sort medical conditions for consistent AI prose ordering
+  if (_activeMedConditions.length > 0) {
+    const sortedConditions = [..._activeMedConditions].sort((a, b) => String(a).localeCompare(String(b)));
+    optionalLines.push(`- Medical Conditions: ${promptSafe(sortedConditions.join(', '))}`);
+  }
   if (medsText !== 'None reported') optionalLines.push(`- Current Medications: ${promptSafe(medsText)}`);
   if (allergiesText !== 'None known') optionalLines.push(`- Known Allergies: ${promptSafe(allergiesText)}`);
   if (a.sunExposure) optionalLines.push(`- Daily Sun Exposure: ${a.sunExposure}`);

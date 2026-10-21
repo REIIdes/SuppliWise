@@ -80,9 +80,11 @@ function canonicaliseAnswers(payload) {
   for (const [field, value] of Object.entries(payload)) {
     if (field === 'symptomSeverity' && value && typeof value === 'object' && !Array.isArray(value)) {
       const severities = {};
-      for (const [symptom, severity] of Object.entries(value)) {
+      // FIX: Process symptom keys in sorted order for consistency
+      const sortedSymptoms = Object.keys(value).sort((a, b) => a.localeCompare(b));
+      for (const symptom of sortedSymptoms) {
         const key = VOCABULARY.get('symptoms').get(fold(symptom)) || tidy(symptom);
-        const level = canonical('symptomSeverity', severity);
+        const level = canonical('symptomSeverity', value[symptom]);
         if (typeof level === 'string' && level) severities[key] = level;
       }
       out[field] = severities;
@@ -92,9 +94,12 @@ function canonicaliseAnswers(payload) {
       const raw = Array.isArray(value)
         ? value
         : String(value === null || value === undefined ? '' : value).split(',');
+      // FIX: Sort multi-select fields for consistent ordering across identical submissions
+      // This ensures ['Fatigue', 'Chest Tightness'] === ['Chest Tightness', 'Fatigue']
       out[field] = raw
         .map((entry) => (typeof entry === 'string' ? canonical(field, entry) : entry))
-        .filter((entry) => typeof entry !== 'string' || entry.length > 0);
+        .filter((entry) => typeof entry !== 'string' || entry.length > 0)
+        .sort((a, b) => String(a).localeCompare(String(b)));
       continue;
     }
     if (VOCABULARY.has(field)) {

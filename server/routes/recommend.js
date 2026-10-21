@@ -331,10 +331,51 @@ router.post('/', protect, async (req, res) => {
   // to be a `const` inside the block, which meant the degraded path threw
   // "liveDynamic is not defined" and the member got a 500 instead of a plan.
   let liveDynamic = [];
+  
+  // CRITICAL FIX: Filter req.body to only include fields that are saved to the
+  // Assessment model. Extra fields (like bmi, physicalActivityLevel) are
+  // computed or transient and shouldn't affect the signature, since they won't
+  // be present when we read the assessment back from the database.
+  const ASSESSMENT_FIELDS = new Set([
+    'age', 'gender', 'weight', 'height', 'activityLevel',
+    'dietType', 'healthGoals',
+    'symptoms', 'symptomSeverity', 'stressLevel', 'sleepQuality', 'waterIntake',
+    'medicalConditions', 'currentMedications', 'allergies', 'feelingDescription',
+    'lifestyleHabits', 'pregnancyStatus', 'takingSupplements', 'currentSupplements',
+    'recentBloodTest', 'bloodTestResults',
+    'sunExposure', 'fitnessFocus', 'proteinIntake', 'recreationalDrugTypes',
+    'updatedFrom', // Volatile but still in schema
+  ]);
+  
+  const filteredBody = {};
+  for (const key of Object.keys(req.body)) {
+    if (ASSESSMENT_FIELDS.has(key)) {
+      filteredBody[key] = req.body[key];
+    }
+  }
+  
   // Canonical answers, also declared outside the try: an assessment that throws
   // halfway must be rescued from the same answers the main path was reading, or
   // the retry after an outage would be scored against a different profile.
-  const answers = canonicaliseAnswers(req.body);
+  const answers = canonicaliseAnswers(filteredBody);
+  
+  // DEBUG: Compare req.body vs canonicalized
+  const bodyKeys = Object.keys(req.body).filter(k => !k.startsWith('_')).sort();
+  const answerKeys = Object.keys(answers).filter(k => !k.startsWith('_')).sort();
+  console.log('[recommend] DEBUG - req.body has', bodyKeys.length, 'fields');
+  console.log('[recommend] DEBUG - canonicalized has', answerKeys.length, 'fields');
+  const onlyInBody = bodyKeys.filter(k => !answerKeys.includes(k));
+  const onlyInAnswers = answerKeys.filter(k => !bodyKeys.includes(k));
+  if (onlyInBody.length) console.log('[recommend] DEBUG - Only in req.body:', onlyInBody.join(', '));
+  if (onlyInAnswers.length) console.log('[recommend] DEBUG - Only in answers:', onlyInAnswers.join(', '));
+  
+  // DEBUG: Log canonicalized answers to see what's changing
+  console.log('[recommend] DEBUG - Canonicalized multi-select fields:');
+  console.log('  symptoms:', JSON.stringify(answers.symptoms));
+  console.log('  healthGoals:', JSON.stringify(answers.healthGoals));
+  console.log('  medicalConditions:', JSON.stringify(answers.medicalConditions));
+  console.log('  weight:', answers.weight, '  updatedFrom:', answers.updatedFrom || 'not set');
+  
   try {
     const a = req.body;
 
@@ -405,15 +446,19 @@ router.post('/', protect, async (req, res) => {
     // same thing and got a different plan", and it costs a generation to do it.
     // Only the digest is compared; no answer text is logged or sent to the query.
     const signature = answerSignature(answers, { liveDynamic });
+    console.log(`[recommend] computed signature: ${signature} for user ${req.user?._id}`);
     try {
       const prior = await Assessment.findOne({
         user: req.user?._id,
         'aiResults.planSignature': signature,
       }).sort({ createdAt: -1 }).select('aiResults').lean();
       const stored = prior?.aiResults;
+      console.log(`[recommend] cache lookup: ${prior ? `found assessment ${prior._id}` : 'no match'}`);
       if (stored && Array.isArray(stored.recommendations) && stored.recommendations.length > 0) {
-        console.log(`[recommend] reusing finalised plan ${signature} from assessment ${prior._id}`);
+        console.log(`[recommend] ✅ CACHE HIT - reusing finalised plan ${signature} from assessment ${prior._id}`);
         return res.json(sanitizeStrings({ ...stored, reusedFinalisedPlan: true }));
+      } else {
+        console.log(`[recommend] ❌ CACHE MISS - generating fresh plan (signature: ${signature})`);
       }
     } catch (reuseError) {
       // A lookup failure costs the member a regeneration, never their results.
@@ -567,6 +612,7 @@ router.post('/', protect, async (req, res) => {
       // with this finalised plan instead of a new generation; `selection` is the
       // audit of what the selection gate did with the model's rows.
       const finalised = enforcePlanConsistency(applyAdaptation(grounded, member));
+      console.log(`[recommend] ✅ Returning AI plan with signature: ${signature}`);
       return res.json(sanitizeStrings({ ...finalised, planSignature: signature, selection: aligned.audit }));
     }
 
@@ -585,6 +631,7 @@ router.post('/', protect, async (req, res) => {
     // Stamped on the degraded path too: an engine plan is just as finalised as
     // an AI one, and a member who retries after a provider outage should not get
     // a different plan than the one they were already shown.
+    console.log(`[recommend] ✅ Returning fallback plan with signature: ${signature}`);
     return res.json(sanitizeStrings({ ...engineFinalised, planSignature: signature }));
 
   } catch (error) {

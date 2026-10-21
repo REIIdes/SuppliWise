@@ -261,6 +261,25 @@ function Navbar() {
         </span>
         <span className="navbar-brand">SuppliWise</span>
       </Link>
+
+      {/* Center navigation links */}
+      {showSession && (
+        <div className="navbar-center">
+          <NavLink to={DASHBOARD_PATH} className="navbar-center-link">
+            HOME
+          </NavLink>
+          <NavLink to="/recommendations" className="navbar-center-link">
+            RECOMMENDATIONS
+          </NavLink>
+          <NavLink to="/track-intake" className="navbar-center-link">
+            TRACK INTAKE
+          </NavLink>
+          <NavLink to="/insights" className="navbar-center-link">
+            INSIGHTS
+          </NavLink>
+        </div>
+      )}
+
       <div className="navbar-right">
         {showSession ? (
           <>

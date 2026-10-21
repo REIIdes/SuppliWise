@@ -378,6 +378,71 @@
   outline-offset: 1px;
 }
 
+/* ── Page breadcrumb: shows current page location ────────────────── */
+.navbar-center {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.navbar-center-link {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: #64748b;
+  text-decoration: none;
+  padding: 8px 16px;
+  border-radius: 10px;
+  transition: color 0.2s ease, background 0.2s ease, transform 0.15s ease;
+  white-space: nowrap;
+}
+
+.navbar-center-link:hover {
+  color: #047857;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(34, 211, 238, 0.08));
+  transform: translateY(-1px);
+}
+
+.navbar-center-link.active {
+  color: #047857;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(34, 211, 238, 0.12));
+  border: 1.5px solid rgba(16, 185, 129, 0.3);
+}
+
+.navbar-center-link:focus-visible {
+  outline: 2px solid #10b981;
+  outline-offset: 2px;
+}
+
+@media (max-width: 1100px) {
+  .navbar-center {
+    gap: 4px;
+  }
+  .navbar-center-link {
+    font-size: 12px;
+    padding: 7px 12px;
+  }
+}
+
+@media (max-width: 900px) {
+  /* Hide center nav on tablets and below, they can use bottom nav or menu */
+  .navbar-center {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .navbar-center-link {
+    transition: none;
+  }
+  .navbar-center-link:hover {
+    transform: none;
+  }
+}
+
 /* The profile chip used to be a <NavLink> with its own avatar + username
    styles here. It is now ProfileActionsMenu's pill trigger, which owns its own
    avatar/label styling — so these rules went away with the markup. The

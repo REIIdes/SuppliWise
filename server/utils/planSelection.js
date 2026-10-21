@@ -154,10 +154,11 @@ ${lines.join('\n')}`;
 const VOLATILE_FIELDS = new Set([
   '_id', 'id', 'assessmentId', 'createdAt', 'updatedAt', '__v', 'aiResults',
   'result', 'results', 'plan', 'pdfUrl', 'shareId', 'token',
+  'updatedFrom',  // Update Health Assessment tracking - doesn't affect clinical recommendations
 ]);
 
 /** Version of the deterministic rules. Bump it to invalidate stored plans. */
-const SELECTION_RULES_VERSION = 'spine-1';
+const SELECTION_RULES_VERSION = 'spine-2-sorted';
 
 /**
  * A stable digest of "the same health information", so a plan that was already
