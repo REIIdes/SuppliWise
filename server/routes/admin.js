@@ -2094,7 +2094,11 @@ const runMonitorProbes = async (app) => {
     probe('ai_provider_billing', 'AI Provider Billing', 'openrouter', async () => {
       const { purposes, creditBlocked } = providerHealth();
       const blocked = creditBlocked
-        .map((b) => `${b.provider} (${b.count}×${b.lastAt ? ` since ${b.lastAt.slice(0, 10)}` : ''})`)
+        // The skip window is part of the sentence because without it the panel
+        // shows a provider as broken while the router quietly stops dialling it —
+        // an operator then probes a key that is not being used and reads that as a
+        // second, different fault.
+        .map((b) => `${b.provider} (${b.count}×${b.lastAt ? ` since ${b.lastAt.slice(0, 10)}` : ''}${b.coolingUntil ? `, skipped until ${b.coolingUntil.slice(11, 16)} UTC` : ''})`)
         .join(', ');
       const served = purposes.filter((p) => p.ok).map((p) => `${p.purpose} via ${p.provider}`);
 

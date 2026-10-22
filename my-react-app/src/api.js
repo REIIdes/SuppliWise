@@ -1206,6 +1206,26 @@ export const deleteChatThread = async (threadId) => {
   return data;
 };
 
+// ── What the assistant remembers about THIS member ───────────────────────
+// server/utils/memberMemory.js stores ids, weights and counts — topic ids, the
+// weights this member's own votes gave published notes, an adherence summary, a
+// language and a turn count. Never message text. The chat guardrail tells the
+// model that the member can see and clear this on their Profile page, so this is
+// the screen that makes that promise checkable instead of something to take on trust.
+export const getChatMemory = async () => {
+  const res = await apiFetch('/chat/memory', { headers: { ...authHeader() } });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data; // { memory: { topics[], adherence, language, turns, notesVoted, rememberedSince } }
+};
+
+export const clearChatMemory = async () => {
+  const res = await apiFetch('/chat/memory', { method: 'DELETE', headers: { ...authHeader() } });
+  const data = await parseJSON(res);
+  if (!res.ok) throw new Error(friendlyError(res.status, data?.message));
+  return data; // { cleared: true, memory: <the empty view> }
+};
+
 export const togglePinChatThread = async (threadId) => {
   const res = await apiFetch(`/chat/threads/${encodeURIComponent(threadId)}/pin`, {
     method: 'PATCH',

@@ -229,7 +229,7 @@ const DOSE_QUESTION = /\b(how much|what dose|dosage|dose|mg|mcg|iu per day|maxim
  * tunes which evidence gets handed over; it never writes evidence.
  *
  * @param {string} question
- * @param {{assessment?: object, live?: Array, priors?: Map|object, limit?: number, extraDocs?: Array}} [options]
+ * @param {{assessment?: object, live?: Array, priors?: Map|object, limit?: number, extraDocs?: Array, extraTerms?: string[]}} [options]
  */
 function retrieve(question, options = {}) {
   // A member writing Filipino or Taglish gets the same retrieval as a member writing
@@ -243,7 +243,14 @@ function retrieve(question, options = {}) {
   const extras = [...(options.extraDocs || []), ...planDocs(options.assessment), ...dynamicConditionDocs(options.live)];
   const idx = extras.length ? makeIndex([...buildCorpus(), ...extras]) : getIndex();
   const { terms: expandedTerms, matched } = expandQuestion(query);
-  const terms = discriminative(expandedTerms, idx);
+  // `extraTerms` is the memory channel (utils/memberMemory.js): this member's own
+  // habitual topics, folded into the term list so a turn too short to carry a
+  // question ("again?", "that one?") can still reach the notes it is about. It joins
+  // AFTER `expandQuestion`, and deliberately does not join `query` itself — the
+  // whole-phrase pin below reads the question the member typed, so a remembered topic
+  // can make a note reachable but can never name the answer.
+  const memoryTerms = Array.isArray(options.extraTerms) ? tokens(options.extraTerms.join(' ')) : [];
+  const terms = discriminative([...expandedTerms, ...memoryTerms], idx);
   const limit = Math.max(1, Math.min(Number(options.limit) || 6, 12));
 
   const all = idx.entries;

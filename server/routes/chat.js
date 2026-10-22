@@ -14,6 +14,10 @@ const { detectLanguage, replyLanguageName } = require('../utils/language');
 const { anchorText } = require('../utils/languageAnchors');
 const { priorsForRetrieval, invalidatePriors } = require('../utils/chatLearning');
 const {
+  loadMemory, memoryBlockFor, mergePriors, extraTermsFor, observeChatTurn,
+  describeMemory, clearMemory, noteFeedback, MEMORY_POLICY,
+} = require('../utils/memberMemory');
+const {
   ChatInputError,
   normalizeChatRequest,
   normalizeHistory,
@@ -81,6 +85,9 @@ You are a wellness assistant, not a literature database. The curated evidence th
  * - `references` — what the app knows. Retrieval (utils/ragRetriever.js) hands over
  *   the curated notes for this question, which replaces the previous instruction to
  *   be useful about supplements while being told the app's evidence was unavailable.
+ * - `memory` — what the app remembers about this member from earlier conversations
+ *   (utils/memberMemory.js). Absent for a member with nothing remembered, which is the
+ *   prompt every account used to get.
  * - `recContext` — unchanged: the member's own saved plan.
  *
  * `buildSystemPrompt(null)` still works, because eval/hallucinationAudit.js builds an
@@ -90,6 +97,7 @@ You are a wellness assistant, not a literature database. The curated evidence th
 function buildSystemPrompt(recContext, options = {}) {
   const identity = options.identity || {};
   const references = String(options.references || '');
+  const memory = String(options.memory || '');
   const evidenceRules = references ? GROUNDED_EVIDENCE_RULES : UN_GROUNDED_EVIDENCE_RULES;
   // A member who writes in Filipino is answered in Filipino. The instruction names the
   // language rather than translating anything: the notes stay English (they are the checked
@@ -126,6 +134,7 @@ ${identity.hasIdentity
     ? `${IDENTITY_POLICY}
 <member_identity>${identity.block}</member_identity>`
     : IDENTITY_POLICY}
+${memory ? `\n${MEMORY_POLICY}\n${memory}` : ''}
 ${references ? `\n## WHAT THIS APP KNOWS ABOUT THE QUESTION ASKED\n${references}` : ''}
 ## HEALTH & SUPPLEMENT KNOWLEDGE
 Deep knowledge about supplements, vitamins, minerals, nutrition, symptoms, diet, lifestyle, sleep, exercise, and wellness. Answer health questions fully — what a nutrient is generally used for, how it works, when to take it, what to watch out for, what the research broadly shows. Use possibility language ("may help", "evidence suggests") — never diagnose.
@@ -325,16 +334,44 @@ router.post('/', protect, requireFeature('chat'), chatLimiter, async (req, res) 
       const identity = identityForChat(req.user, memberProfile);
       const priorQuestion = [...aiHistory].reverse().find((m) => m.role === 'user');
       const retrievalQuery = q.length >= 24 || !priorQuestion ? q : `${priorQuestion.content} ${q}`;
-      const picked = retrieve(retrievalQuery, { assessment: memberProfile, priors: await priorsForRetrieval() });
+
+      // What this app remembers of this member's earlier conversations
+      // (utils/memberMemory.js). Three uses, in order of how much they change the
+      // answer: their habitual topics widen recall when a turn is too short to carry
+      // a question of its own, their own votes re-rank the notes that served them,
+      // and the block itself goes in the prompt so "that thing again" resolves to a
+      // real topic instead of a plausible guess. `null` — no history, or a failed
+      // read — gives this member byte-for-byte the prompt the app had yesterday.
+      const memory = await loadMemory(req.user._id, { language: req.user.preferredLanguage });
+      const memoryBlock = memoryBlockFor(memory);
+      const bareFollowUp = q.length < 24 && !priorQuestion;
+      const picked = retrieve(retrievalQuery, {
+        assessment: memberProfile,
+        priors: mergePriors(await priorsForRetrieval(), memory),
+        extraTerms: bareFollowUp ? extraTermsFor(memory) : [],
+      });
       const references = referencesBlock(picked);
+
       // Retrieval anchors the question so an English-written check can fire on Filipino
       // text; this is the mirror image — the answer goes back in the language it came in.
       const language = replyLanguage(q)
         || replyLanguage(priorQuestion?.content)
         || replyLanguagePreference(req.user.preferredLanguage);
 
+      // Recorded before the provider is dialled, so remembering costs this member no
+      // extra wait. Only topic ids and a turn count are written — never this message,
+      // which the transcript already keeps. `text` is matched against the app's own
+      // topic vocabulary, which is looser than retrieval's expansion triggers on
+      // purpose: "I have been sleeping badly" is a sleep question to a memory, even
+      // though the note-expander waits for "can't sleep".
+      observeChatTurn(req.user._id, {
+        topicIds: picked.expanded,
+        text: q,
+        language: language?.code || req.user.preferredLanguage,
+      }).catch(() => {});
+
       const messages = [
-        { role: 'system', content: buildSystemPrompt(recContext, { identity, references, language }) },
+        { role: 'system', content: buildSystemPrompt(recContext, { identity, references, language, memory: memoryBlock }) },
         ...aiHistory,
         { role: 'user', content: q },
       ];
@@ -363,7 +400,7 @@ router.post('/', protect, requireFeature('chat'), chatLimiter, async (req, res) 
         messages,
         maxTokens: 700,
         temperature: 0.4,
-        seed: stableSeed([threadId || 'new', retrievalQuery, identity.block]),
+        seed: stableSeed([threadId || 'new', retrievalQuery, identity.block, memoryBlock]),
         timeoutMs: 45000, // 45 seconds for longer conversations
         // Preserved from the hand-written body this route used to send. It is an
         // OpenRouter-GATEWAY field, so it is scoped by provider key rather than
@@ -424,7 +461,11 @@ router.post('/', protect, requireFeature('chat'), chatLimiter, async (req, res) 
         // quotes the offending text back into its error body, and the text it would
         // quote is this member's health question.
         console.error('[chat] no provider answered:', JSON.stringify(safeAttemptSummary(result.attempts)));
-        reply = offlineFallback(q, language?.code);
+        // A 429 that is not a billing refusal is a queue. Saying so is the only
+        // part of this the member can act on — "try again in a minute" is true and
+        // "I'm having trouble connecting" sends them to their own wifi.
+        const rateLimited = Number(result.status) === 429 && result.creditExhausted !== true;
+        reply = offlineFallback(q, language?.code, { rateLimited });
         source = 'fallback';
         turnMeta = { docs: picked.docs.map((d) => d.id), repairs: [], provider: 'fallback', clean: true };
       }
@@ -600,11 +641,54 @@ router.post('/feedback', protect, requireFeature('chat'), feedbackLimiter, async
     // The next reply in any conversation should see this. Cheaper than waiting out
     // the cache, and one vote cannot move a ranking on its own.
     invalidatePriors();
+    // And this member's next reply should see it in their own ranking too, which is
+    // the faster half: a personal prior is one vote, not five thousand.
+    await noteFeedback(req.user._id);
 
     return res.json({ ok: true, vote, docs: docIds.length });
   } catch (error) {
     console.error('[chat] feedback write failed:', error.message);
     return res.status(500).json({ message: 'Could not save that rating. Please try again.' });
+  }
+});
+
+// ── GET /api/chat/memory ───────────────────────────────────────
+// What this app remembers about the member, in the member's own terms.
+//
+// The memory is injected into their prompts, so the honest form of "the AI knows
+// what I said before" is that they can see it: one screen, showing labels rather
+// than a transcript, because that is literally what the collection holds. It is the
+// same answer the model is told to give when asked (chatIdentity's IDENTITY_POLICY),
+// now checkable instead of taken on trust.
+// @access  Private (Ultimate — same gate as the chat it feeds)
+router.get('/memory', protect, requireFeature('chat'), async (req, res) => {
+  try {
+    const memory = await loadMemory(req.user._id, { language: req.user.preferredLanguage });
+    return res.json({ memory: describeMemory(memory) });
+  } catch (error) {
+    console.error('[chat] memory read failed:', error.message);
+    return res.status(500).json({ message: 'Could not load what the assistant remembers.' });
+  }
+});
+
+// ── DELETE /api/chat/memory ────────────────────────────────────
+// "Forget what you noticed about me."
+//
+// Clears the record AND stamps `forgetBefore`, without which the next turn would
+// rebuild the same profile from the same assessment, dose logs and votes — an erase
+// that undoes itself. Conversations are not touched: this is about the derived
+// profile, and deleting a member's transcript is what their History menu is for.
+// @access  Private (Ultimate)
+router.delete('/memory', protect, requireFeature('chat'), async (req, res) => {
+  try {
+    const cleared = await clearMemory(req.user._id);
+    if (!cleared) {
+      return res.status(500).json({ message: 'Could not clear what the assistant remembers.' });
+    }
+    return res.json({ cleared: true, memory: describeMemory(null) });
+  } catch (error) {
+    console.error('[chat] memory clear failed:', error.message);
+    return res.status(500).json({ message: 'Could not clear what the assistant remembers.' });
   }
 });
 
@@ -757,6 +841,10 @@ const ENGLISH_FALLBACK = {
   logout: `To log out, go to your **Profile Settings** (click your avatar/name in the top-right navbar), then click the red **"Log Out"** button at the bottom.`,
   history: `Click the **clock icon** in the top-right navbar to view your History page with all past assessments.`,
   unavailable: `I'm having trouble connecting to my AI right now. Please try again in a moment — I'll have a full answer for you shortly!`,
+  // The provider answered "too many requests", which is a queue, not a fault: the
+  // honest sentence names the wait instead of implying the app is broken. It is a
+  // minute, because that is the window the limit is measured over.
+  busy: `The assistant is handling more questions than it can right now, so this one went unanswered. Nothing is wrong with your account — please try again in about a minute.`,
   generic: `I'm having a bit of trouble right now. Please try again in a moment! 🙏`,
 };
 
@@ -770,10 +858,11 @@ const FILIPINO_FALLBACK = {
   logout: 'Para mag-log out, puntahan ang **Profile Settings** (i-click ang avatar o pangalan mo sa navbar sa kanang itaas), pagkatapos i-click ang pulang **"Log Out"** button sa ibaba.',
   history: 'I-click ang **clock icon** sa navbar sa kanang itaas para buksan ang History page at makita lahat ng nakaraang assessment.',
   unavailable: 'May problema sa koneksyon ng AI ko ngayon. Pakisubukan ulit sandali lang — may buong sagot agad ako para sa iyo!',
+  busy: 'Abala ang assistant sa maraming tanong ngayon, kaya hindi nasagot ang sa iyo. Walang problema sa account mo — pakisubukan ulit sa loob ng isang minuto.',
   generic: 'May kaunting problema ako ngayon. Pakisubukan ulit sandali lang! 🙏',
 };
 
-function offlineFallback(q, languageCode) {
+function offlineFallback(q, languageCode, { rateLimited = false } = {}) {
   // Anchored first, appended last. Every branch below is either `^`-anchored or a
   // `\b`-bounded word test, so adding English at the END can only ever make a Filipino
   // message reach the branch its English equivalent would reach — it can never steal a
@@ -833,11 +922,14 @@ function offlineFallback(q, languageCode) {
     return copy.history;
   }
 
+  // A queue is not a connection fault. The product-knowledge branches above still
+  // fire — "how do I log out" has the same answer whether or not a provider is busy
+  // — but anything that would promise a reconnect gets the honest wait instead.
   if (has(HEALTH_WORDS) || has(APP_WORDS)) {
-    return copy.unavailable;
+    return rateLimited ? copy.busy : copy.unavailable;
   }
 
-  return copy.generic;
+  return rateLimited ? copy.busy : copy.generic;
 }
 
 module.exports = router;

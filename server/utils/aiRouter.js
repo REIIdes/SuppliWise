@@ -205,6 +205,16 @@ const DEFAULT_TIMEOUT_MS = 15000;
 const PRIMARY_BUDGET_FLOOR_MS = 5000;
 
 /**
+ * How long a provider that answered "this account has no credit" is skipped.
+ *
+ * A balance is refilled by a human, not by time, so this is not a recovery
+ * window — it is how long an operator is allowed to be slow. Long enough that a
+ * member's turn never pays for a known-dead key, short enough that funding the
+ * account takes effect without a restart.
+ */
+const CREDIT_COOLDOWN_MS = 5 * 60 * 1000;
+
+/**
  * The provider registry entry for a key, or null.
  * @param {unknown} key
  * @returns {typeof AI_PROVIDERS[number]|null}
@@ -446,6 +456,19 @@ function resolveChain(purpose, { env = process.env } = {}) {
   }
 
   const usable = chain.filter((target) => target.ok);
+  // A provider that answered "this account has no credit" is dialled again for
+  // CREDIT_COOLDOWN_MS. Measured on this deployment: an unfunded Anthropic primary
+  // and an unfunded OpenRouter fallback cost a chat member 655 ms + 478 ms of
+  // waiting on EVERY turn before the funded provider was reached, and the retry
+  // cannot succeed — a balance does not refill because you asked twice. Skipping
+  // them takes that 1.1 s off every turn until a human funds the account, and it
+  // stops a member's health question being re-sent to a provider that will refuse it.
+  //
+  // Only ever a filter on a chain that still has somebody left: if the cooling
+  // provider IS the chain, it stays, because "we tried the only key and it has no
+  // credit" is an actionable error and "nothing is configured" is a false one.
+  const withCredit = usable.filter((target) => !isCreditCooling(target.provider));
+  if (usable.length && withCredit.length) return withCredit;
   if (usable.length) return usable;
 
   // Nothing usable for this purpose. Rather than give up while the DEFAULT
@@ -615,6 +638,10 @@ function safeAttemptSummary(attempts) {
       error: head || null,
       detailOmitted: detail.length > head.length + 3,
       latencyMs: Number.isFinite(attempt && attempt.latencyMs) ? attempt.latencyMs : null,
+      // The status is the part of the answer an operator can act on — 429 means
+      // fund nothing and slow down, 401 means rotate a key, 400 means the payload
+      // changed. It is a number from the wire, never the body that may quote input.
+      status: Number.isFinite(attempt && attempt.status) ? attempt.status : null,
     };
   });
 }
@@ -737,9 +764,9 @@ async function completeWithTarget(target, {
   json = false,
   extraBody = null,
 } = {}) {
-  const failure = (error, latencyMs = null, creditExhausted = false) => ({
+  const failure = (error, latencyMs = null, creditExhausted = false, status = null) => ({
     ok: false, data: null, text: '', provider: target.provider,
-    model: target.model, latencyMs, error, creditExhausted,
+    model: target.model, latencyMs, error, creditExhausted, status,
   });
 
   if (!target.ok) return failure(target.error);
@@ -909,7 +936,9 @@ async function completeWithTarget(target, {
     outcome = await send(buildBody({ withJsonMode: false }));
   }
 
-  if (outcome.error) return failure(outcome.error, outcome.latencyMs, outcome.creditExhausted === true);
+  if (outcome.error) {
+    return failure(outcome.error, outcome.latencyMs, outcome.creditExhausted === true, outcome.status || null);
+  }
 
   const text = outcome.text || '';
   if (!text) return failure('Provider returned an empty completion.', outcome.latencyMs);
@@ -978,6 +1007,44 @@ async function complete(purpose, options = {}) {
 const purposeOutcomes = new Map();
 const creditFailures = new Map();
 
+/**
+ * provider -> unix ms until which the chain skips it.
+ *
+ * Derived from the same `creditExhausted` flag the admin card reads, so the
+ * skip and the report can never disagree about which key is unfunded. In
+ * memory on purpose: a restart re-dials once, learns the truth, and cools down
+ * again — a persisted cooldown could keep a funded provider locked out across a
+ * deploy for no reason a member would accept.
+ */
+const creditCooldown = new Map();
+
+function isCreditCooling(provider, now = Date.now()) {
+  const until = creditCooldown.get(String(provider || '')) || 0;
+  return until > now;
+}
+
+/** @returns {string|null} ISO time the provider becomes dialled again, or null. */
+function creditCoolingUntil(provider) {
+  const until = creditCooldown.get(String(provider || '')) || 0;
+  return until > Date.now() ? new Date(until).toISOString() : null;
+}
+
+/**
+ * Lift a cooldown — all providers, or one.
+ *
+ * Only tests call this in production code paths. There is no admin route that
+ * changes a key: the credentials come from the environment, so funding an
+ * account means a deploy, and a deploy empties the map. Exposed because a test
+ * that trips "no credit" would otherwise leave that provider skipped for the
+ * rest of the suite's process.
+ *
+ * @param {string} [provider]
+ */
+function clearCreditCooldown(provider) {
+  if (provider === undefined || provider === null) { creditCooldown.clear(); return; }
+  creditCooldown.delete(String(provider));
+}
+
 function recordPurposeOutcome(purpose, target, result) {
   purposeOutcomes.set(purpose, {
     purpose,
@@ -994,19 +1061,35 @@ function recordPurposeOutcome(purpose, target, result) {
   prior.model = target.model;
   prior.lastAt = new Date().toISOString();
   creditFailures.set(target.provider, prior);
+  creditCooldown.set(target.provider, Date.now() + CREDIT_COOLDOWN_MS);
 }
 
 /**
  * @returns {{purposes: Array<{purpose: string, provider: string, model: string|null,
  *                             ok: boolean, error: string|null, at: string}>,
- *            creditBlocked: Array<{provider: string, model: string|null, count: number, lastAt: string}>}}
+ *            creditBlocked: Array<{provider: string, model: string|null, count: number,
+ *                                   lastAt: string, coolingUntil: string|null}>}}
  */
 function providerHealth() {
-  return { purposes: [...purposeOutcomes.values()], creditBlocked: [...creditFailures.values()] };
+  return {
+    purposes: [...purposeOutcomes.values()],
+    creditBlocked: [...creditFailures.values()].map((entry) => ({
+      ...entry,
+      coolingUntil: creditCoolingUntil(entry.provider),
+    })),
+  };
 }
 
 /**
  * Walk a purpose's provider chain until one answers.
+ *
+ * A chain is walked once, and a rate limit is NOT re-attempted. The provider
+ * that answered HTTP 429 here is on a per-minute token window, and a retry two
+ * seconds later lands in the same window: it costs the member another 200 ms and
+ * a second metered request to produce the identical refusal. The honest fix is
+ * to tell the caller the chain is busy (`status` is preserved on the failure) and
+ * let the next turn — a minute later — try again. A balance and a rate window
+ * both refill on a human timescale, not on a retry timescale.
  *
  * The fallback is only reached when the primary genuinely cannot answer — no
  * key, rejected, exhausted, timed out, or an empty reply. `attempts` records
@@ -1073,7 +1156,10 @@ async function completeWithFallback(purpose, options = {}) {
       };
     }
     last = result;
-    attempts.push({ provider: target.provider, ok: false, error: result.error, latencyMs: result.latencyMs });
+    attempts.push({
+      provider: target.provider, ok: false, error: result.error,
+      latencyMs: result.latencyMs, status: result.status,
+    });
   }
 
   return { ...last, attempts };
@@ -1154,6 +1240,7 @@ module.exports = {
   AI_ROUTES,
   DEFAULT_TIMEOUT_MS,
   PRIMARY_BUDGET_FLOOR_MS,
+  CREDIT_COOLDOWN_MS,
   providerByKey,
   routeFor,
   declaredFallbacks,
@@ -1171,5 +1258,8 @@ module.exports = {
   completeWithTarget,
   completeWithFallback,
   providerHealth,
+  isCreditCooling,
+  creditCoolingUntil,
+  clearCreditCooldown,
   describeRouting,
 };

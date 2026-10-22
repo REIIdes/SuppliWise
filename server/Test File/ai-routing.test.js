@@ -45,6 +45,7 @@ const {
   splitTimeout,
   completeWithFallback,
   providerHealth,
+  clearCreditCooldown,
   readCompletionText,
   providerErrorDetail,
   parseJsonObject,
@@ -102,10 +103,16 @@ async function withCleanEnv(fn) {
   const saved = AI_VARS.map((name) => [name, process.env[name]]);
   for (const name of AI_VARS) delete process.env[name];
   clearDetectionCache();
+  // Each test asserts on the WHOLE walk, and a test that trips "no credit" cools
+  // that provider down for five minutes of real time. Without this, the suite's own
+  // outage tests would skip the provider they are trying to prove is reachable —
+  // a green pipeline that asserts a different chain than the code walks.
+  clearCreditCooldown();
   try {
     return await fn();
   } finally {
     clearDetectionCache();
+    clearCreditCooldown();
     delete globalThis.fetch;
     for (const [name, value] of saved) {
       if (value === undefined) delete process.env[name];
@@ -1013,6 +1020,45 @@ test('a chain of unfunded providers is walked to the funded one', () =>
     assert.match(result.attempts[0].error, /no credit/i);
     assert.match(result.attempts[1].error, /no credit/i);
     assert.equal(result.attempts[2].ok, true);
+  }));
+
+test('a provider that answered "no credit" is not dialled again on the next turn', () =>
+  withCleanEnv(async () => {
+    // Measured on this deployment: an unfunded Anthropic primary and an unfunded
+    // OpenRouter fallback cost a chat member 655 ms + 478 ms on EVERY turn before
+    // the funded key was reached. The walk above is the first turn, which has to
+    // learn the outage by dialling it; this is the second, which does not.
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-real';
+    process.env.GROQ_API_KEY = 'gsk-real';
+    const calls = stubFetch(async (url) => (String(url).includes('anthropic')
+      ? { status: 400, ok: false, text: async () => '{"error":{"message":"Your credit balance is too low to access the Anthropic API."}}' }
+      : completionResponse('funded')));
+
+    const first = await completeWithFallback('chat', { messages: [{ role: 'user', content: 'hi' }] });
+    assert.equal(first.ok, true);
+    assert.equal(first.provider, 'groq');
+    assert.deepEqual(first.attempts.map((a) => a.provider), ['anthropic', 'groq'], 'the first turn learns the outage by dialling it');
+
+    const second = await completeWithFallback('chat', { messages: [{ role: 'user', content: 'hi again' }] });
+    assert.equal(second.ok, true);
+    assert.deepEqual(second.attempts.map((a) => a.provider), ['groq'], 'the second turn goes straight to the funded key');
+    assert.equal(calls.length, 3, `a cooled provider is not dialled again (${calls.length} requests for two turns)`);
+
+    const blocked = providerHealth().creditBlocked.find((b) => b.provider === 'anthropic');
+    assert.ok(blocked && blocked.coolingUntil, 'the admin card says how long the skip runs for');
+  }));
+
+test('a cooling provider that is the whole chain is still dialled', () =>
+  withCleanEnv(async () => {
+    // The skip is a filter on a chain that has somebody left, never a way to empty
+    // it: with one key configured, "we tried it and it has no credit" is an
+    // actionable error and "nothing is configured" would be a false one.
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-real';
+    stubFetch(async () => ({ status: 400, ok: false, text: async () => '{"error":{"message":"Your credit balance is too low."}}' }));
+
+    await completeWithFallback('chat', { messages: [{ role: 'user', content: 'hi' }] });
+
+    assert.deepEqual(resolveChain('chat').map((t) => t.provider), ['anthropic']);
   }));
 
 test('an exhausted chain reports every provider it tried, and why', () =>

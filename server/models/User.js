@@ -522,6 +522,9 @@ userSchema.post('findOneAndDelete', async function (doc) {
     const SubscriptionCancelRequest = require('./SubscriptionCancelRequest');
     const ChatThread = require('./ChatThread');
     const ChatMessage = require('./ChatMessage');
+    const AiChatThread = require('./AiChatThread');
+    const AiChatFeedback = require('./AiChatFeedback');
+    const MemberMemory = require('./MemberMemory');
     // Messages first: a thread is the only handle that reaches them, so if the
     // process dies mid-cascade the transcript must not be left orphaned.
     const threadIds = await ChatThread.find({ user: doc._id }).select('_id').lean();
@@ -540,6 +543,13 @@ userSchema.post('findOneAndDelete', async function (doc) {
       // them without a lookup through ChatThread.
       ChatThread.deleteMany({ user: doc._id }),
       ChatMessage.deleteMany({ user: doc._id }),
+      // AI assistant data. These three were missing from the cascade, which meant
+      // that deleting an account left behind a plaintext transcript of the member's
+      // health questions and a derived profile built from it — the two collections
+      // the deletion was supposed to have taken with it.
+      AiChatThread.deleteMany({ user: doc._id }),
+      AiChatFeedback.deleteMany({ user: doc._id }),
+      MemberMemory.deleteMany({ user: doc._id }),
     ]);
     if (threadIds.length) {
       // Belt and braces: anything left by an interrupted earlier cascade.
@@ -557,6 +567,9 @@ userSchema.post('deleteOne', { document: true, query: false }, async function ()
   const SubscriptionCancelRequest = require('./SubscriptionCancelRequest');
   const ChatThread = require('./ChatThread');
   const ChatMessage = require('./ChatMessage');
+  const AiChatThread = require('./AiChatThread');
+  const AiChatFeedback = require('./AiChatFeedback');
+  const MemberMemory = require('./MemberMemory');
   const threadIds = await ChatThread.find({ user: this._id }).select('_id').lean();
   await Promise.all([
     Assessment.deleteMany({ user: this._id }),
@@ -566,6 +579,9 @@ userSchema.post('deleteOne', { document: true, query: false }, async function ()
     SubscriptionCancelRequest.deleteMany({ user: this._id }),
     ChatThread.deleteMany({ user: this._id }),
     ChatMessage.deleteMany({ user: this._id }),
+    AiChatThread.deleteMany({ user: this._id }),
+    AiChatFeedback.deleteMany({ user: this._id }),
+    MemberMemory.deleteMany({ user: this._id }),
   ]);
   if (threadIds.length) {
     await ChatMessage.deleteMany({ thread: { $in: threadIds.map((t) => t._id) } });

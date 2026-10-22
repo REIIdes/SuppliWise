@@ -139,7 +139,7 @@ member.
 
 ### 4.1 Chat
 
-Three separate blocks are added to the member's message:
+Four separate blocks are added to the member's message:
 
 1. **Identity block** — an allowlist projection built by `identityForChat()`
    (`routes/chat.js:304` → `utils/chatIdentity.js:109`). It carries the **first and last
@@ -155,6 +155,14 @@ Three separate blocks are added to the member's message:
 2. **Recommendation context** — name, priority, confidence and reason of up to 5 saved plan
    rows, capped 120/40/240 (`utils/chatSafety.js:126-147`).
 3. **Retrieved notes** — up to 6 BM25 hits, 3,200 chars total (section 8).
+4. **Memory block** — `<member_memory>`, this app's derived record of the member's own
+   history (`routes/chat.js:345-346` → `utils/memberMemory.js:322,415`). It is four things
+   and nothing else: topic ids their past questions matched, the weights **this member's
+   own votes** gave published notes, an adherence summary, and a language — rendered as at
+   most 900 characters (`memberMemory.js:80`), JSON-escaped, neutralised, and wrapped in
+   `MEMORY_POLICY` (`:441`), which states that a remembered topic is not a current symptom,
+   forbids "since you have X" on memory alone, forbids reciting the record, and tells the
+   model it may point the member at the Profile page to clear it. See 4.5.
 
 Age and gender come from the assessment rather than `User.dateOfBirth`, deliberately: the
 member reported a number, and the app never needs their actual birth date to answer "how old
@@ -166,6 +174,11 @@ The model is also **told what it cannot see**, by name, in `IDENTITY_POLICY`
 (`chatIdentity.js:175-186`). That is not decoration: a model that is not told it has no
 email address will invent one when asked, and a fabricated address on screen is something a
 member mails their lab results to.
+
+The memory is also the fourth seed input. `stableSeed()` (`routes/chat.js:403`) hashes
+thread id, retrieval query, identity block **and memory block**, so the same member asking
+the same question in the same thread gets the same reply, and a reply never contradicts the
+memory that was in front of the model when it was written.
 
 ### 4.2 Plan generation
 
@@ -199,6 +212,45 @@ member receives a severity flag, not the model's prose (`routes/assessment.js:26
 `polish` sends exactly the typed text plus a fixed system prompt
 (`routes/polish.js:59-84`) — zero database reads. `supplementDetail` sends the supplement
 name plus the neutralised client-supplied profile (`routes/supplement_detail.js:65-84,333`).
+
+### 4.5 The memory loop, and the member's view of it
+
+`utils/memberMemory.js` is a derive, not a log. Per turn `observeChatTurn()` (`:511`, called
+at `routes/chat.js:367` **before** the provider is dialled, so remembering costs the member no
+extra wait) unions the topic ids retrieval fired on with `topicsForText()` (`:123`) — a
+word-anchored, inflection-tolerant match of the member's own message against the app's
+curated `ALIASES` vocabulary — and writes ids plus a counter. Only ids that still exist in
+that table survive (`isTopicId`), so a drift in the table drops data rather than storing
+prose.
+
+Two deliberate asymmetries:
+
+- **The memory matcher is looser than retrieval's expansion triggers.** Retrieval widens a
+  query only on strong phrases ("can't sleep"); the memory fires on "I have been sleeping
+  badly" too. The cost of a false habit tag is one extra recall term on a follow-up; the
+  cost of a missed one is a memory that does not do its job. Recorded in the header at
+  `memberMemory.js:93-109`.
+- **Habit, not permanence.** Topics decay by `0.5^(ageDays/60)` and are dropped at 180 days
+  (`:66-67,156`), capped at 12 topics and 40 notes (`:69-70`). A member who stops asking
+  about sleep stops being profiled as a sleeper.
+
+What memory changes in the answer, in order of force: their votes re-rank notes through
+`mergePriors()` (`:457`), which clamps a personal weight to **half** the published range
+because three votes are not five thousand (`:474`); their topics widen BM25 terms — but only
+for a turn too short to carry a question of its own (`bareFollowUp`, `routes/chat.js:347-351`) —
+and the block itself resolves "that thing I asked about" into a real topic instead of a
+plausible guess. It can never promote an irrelevant note into the answer, because a prior is
+multiplied onto a note that already matched.
+
+The guardrail promises the member a screen, and the screen exists: **Profile → Personal
+info → "What the AI remembers about you"** (`my-react-app/src/Pages/ProfilePage.jsx`, card
+`id="profile-ai-memory"`), reading `GET /api/chat/memory` (`routes/chat.js:664`) through
+`getChatMemory()` (`src/api.js:1215`). It renders exactly what `describeMemory()`
+(`memberMemory.js:391`) returns — labels and counts, never text — and its clear button
+confirms before `DELETE /api/chat/memory` (`:682`) stamps `forgetBefore`
+(`memberMemory.js:546`), which is what makes an erase survive the next conversation instead
+of being rebuilt from the old one. Both endpoints sit behind `protect` **and**
+`requireFeature('chat')`, the same gate as the chat the data feeds.
 
 ---
 
@@ -254,8 +306,9 @@ routing time instead of dialing out with a literal string.
 `aiRouter.js:698-743` sends `model`, `messages` (role/content) or, on the Anthropic wire, a
 top-level `system` (`:705`), `max_tokens`, `temperature`, `stream: false`, and
 `response_format:{type:'json_object'}` when JSON is requested (`:741`). Defaults are 700
-tokens and 0.3 temperature (`:642-643`); callers override — chat 700/0.7/45 s
-(`routes/chat.js:327-331`), plan generation 16k tokens/0.2/180 s (`routes/recommend.js:135`),
+tokens and 0.3 temperature (`:642-643`); callers override — chat 700 tokens, 0.4 temperature,
+a per-conversation `seed` and 45 s (`routes/chat.js:399-404`), plan generation 16k
+tokens/0.2/180 s (`routes/recommend.js:135`),
 learning ranking 9000/0.2/90 s (`utils/conditionLearning.js:265-267`).
 
 No cookie, no bearer token, no session id and no database credential is on that request.
@@ -341,6 +394,7 @@ contract and is documented as a deliberate exclusion in `modelText.js`.
 |---|---|---|---|
 | `AiChatThread` | `messages[{role,text}]` `models/AiChatThread.js:24-27`, `turns[{i,docs,repairs,provider,clean}]` `:43-52`, `title`, `lastText`, `messageCount`, `pinned`, `archived` | **None** — plaintext at rest | No TTL. Auto-archives past 7 active non-pinned threads (`routes/chat.js:440-464`), archive list capped at 100 (`:593-596`), hard `deleteOne` on request (`:635`) |
 | `AiChatFeedback` | `vote`, `docIds`, `repairs`, `provider`, `(user,thread,messageIndex)` unique | n/a | No question or answer text is stored, by design: "a second copy of a member's health prose is a second place to leak it" (`models/AiChatFeedback.js:17-19`) |
+| `MemberMemory` | `topics[{id,hits,lastAt}]` `models/MemberMemory.js:40-46`, `docs[{docId,weight,lastAt}]` `:48-55`, `adherence{percent,leastTaken,days}`, `language`, `turns`, `builtAt`, `forgetBefore` `:57-83` — **ids, weights and counts only**. No message text, no questionnaire answer, no plan row (`:1-37`) | n/a — there is no prose in it to encrypt | Rolling 18-month TTL: Mongo reaps `expiresAt` on its own (`:85,88`), so a member who stops using the app stops being profiled without a cron job. `forgetBefore` makes the member's own clear survive the next rebuild (`utils/memberMemory.js:546`) |
 | `Assessment` | the full health record + `aiResults` | Plaintext | `expiresAt`, 5 calendar years; priority-flagged rows do not expire while under review (`models/Assessment.js:43-51`) |
 | `ConditionProposal` | AI-proposed conditions, append-only `verdicts` | n/a | Kept; rejects are a permanent record (`:25-62`) |
 | `DynamicCondition` | evidence-gate-published clinical bundles | n/a | Live until retired |
@@ -356,6 +410,12 @@ server, and feedback copies from it, never from the client (`routes/chat.js:505-
 The gap this table exposes is real and is restated in section 14: **AI transcripts are the
 only health prose in this product that is not encrypted at rest**, while human support chat
 is end-to-end encrypted.
+
+Deletion is not left to retention alone: all three AI collections are removed by the user
+cascade, on both the bulk and single-document delete hooks (`models/User.js:550-552,582-584`),
+so deleting an account deletes the transcript, the votes and the derived profile together.
+`Test File/member-memory.test.js` asserts that list by name, because a cascade that forgets
+the newest collection is invisible until a member asks to be deleted.
 
 ---
 
@@ -392,6 +452,15 @@ as data and escapes `<` so no document can close its own fence (`:281-308`).
 
 The learned prior multiplies the BM25 score and is itself clamped to 0.4–2.0, so a popular
 note can never beat a literal match (`:245-246`).
+
+Two of retrieval's inputs are per-member rather than whole-app, and both come from the memory
+in 4.5: `priors: mergePriors(await priorsForRetrieval(), memory)` adds **this member's own
+votes** on top of the published weights, clamped to half that range
+(`utils/memberMemory.js:457-476`), and `extraTerms` widens the query with the member's
+habitual topics — but only when the turn is too short to carry a question of its own
+(`routes/chat.js:347-351`). Widening is a term-list change, never the whole-phrase ×2.4 pin,
+so a habitual topic can bring a relevant note in but cannot lift an irrelevant one
+(`Test File/member-memory.test.js`).
 
 ---
 
@@ -451,6 +520,15 @@ inside a request, cached 5 minutes (60 s after a failure, keeping the last good 
 (`:34-35,88-107`). Its output is the retrieval multiplier in section 8, and its stats feed
 the `ai_chat_grounding` monitor row (`feedbackStats()` `:111-131`).
 
+A **third** path is the same arithmetic restricted to one member. `AiChatFeedback` rows are
+also read per user (`priorsFromVotes()` `utils/memberMemory.js:181-208`) and stored as
+`docs[{docId,weight}]`, so a member who consistently upvotes the note that finally helped
+them gets it ranked higher in *their* next answer without the app pretending their three
+votes are the population's. The two maps are merged, never substituted
+(`mergePriors()` `:457-476`), and a vote marks the member's memory stale (`noteFeedback()`
+`:298-309`, called at `routes/chat.js:646`) so the next turn re-reads it. This too makes zero
+provider calls.
+
 ---
 
 ## 11. Fine-tune export: what "train the model" means with API keys
@@ -485,6 +563,15 @@ So the levers that actually reduce hallucination today are the two in section 6 
 input and repaired output — and the export is a prepared artifact for a day when the route
 sits on a tunable model. There is **no automated training run and no scheduled export**.
 
+The per-member learning in section 10 is not a training set and cannot become one by
+accident: it is retrieval arithmetic inside this app's own database, and the export script
+reads no collection at all. That is now enforced rather than merely commented —
+`Test File/fine-tune-export.test.js` requires the script to contain no `../models/` require,
+no mongoose, no provider key, no HTTP client and no `aiRouter` call, and then runs it offline
+into a throwaway file and asserts the six rows that come out are grounded, verified plans.
+Adding a member-data source to this export is the edit that turns "synthetic supervision"
+into a health-data disclosure, and it now fails a test instead of a review.
+
 ---
 
 ## 12. Data that deliberately never reaches a model
@@ -500,6 +587,18 @@ sits on a tunable model. There is **no automated training run and no scheduled e
   `MedicalReviewAudit` are not in any prompt builder.
 - **Raw narrative during learning.** Reduced to counts, labels and top words first
   (section 9).
+- **A second copy of what the member already told the app.** The memory in 4.5 stores ids,
+  weights and counts only: topic ids from the curated alias table, note ids carrying the
+  weight this member's own votes produced, an adherence summary, a language, a turn count.
+  Questionnaire answers and saved plan rows are deliberately **not** mirrored into it — they
+  reach the prompt live from the assessment (`chatIdentity.js`), and a per-member aggregate
+  that copied health prose would be a second place for it to leak, with a second retention
+  clock and a second delete path (`models/MemberMemory.js:1-37`, `memberMemory.js:335-344`).
+  `topicsForText()` reads the member's sentence and returns only ids (`:123-129`), and
+  `Test File/member-memory.test.js` asserts every string in the document is ≤120 characters,
+  which is what turns "it stores no sentences" into a checked property instead of a claim.
+  The one plan string it keeps is the item this member most often leaves untaken, because
+  nothing else in the product computes that number.
 - **Support chat.** The human support channel is end-to-end encrypted; the AI pipeline does
   not read it and the server cannot (section 13.3).
 - **Secrets.** Provider keys are read from env at routing time and never serialized into a
@@ -644,7 +743,46 @@ These are findings, not todos dressed as findings.
 8. **The deployed stack is not this tree.** Production on `:5000` runs `Main-1`, whose chat
    route has no RAG, no identity projection, no `verifyProse` and no `turns` audit trail, and
    whose `AiChatThread` is `{role,text}` only. Every control in sections 6, 8, 9 and 10 is
-   `Main-3-F` only until it is deployed.
+   `Main-3-F` only until it is deployed. Memory (4.5) is `Main-3-F` only too, which also means
+   the Profile-page card has nothing to show until this tree ships.
+
+### 14.1 Closed by the memory and latency pass (recorded 2026-10-23)
+
+These were gaps in earlier readings of this document and are now code with tests:
+
+- **A credit-exhausted provider was dialled on every turn.** `aiRouter.js` now cools one down
+  for 5 minutes after it answers "no credit" (`CREDIT_COOLDOWN_MS` `:215`, stamped at `:1064`,
+  honoured by the chain filter `:470`), which is not a recovery window — a balance is refilled
+  by a human — it is how long an operator is allowed to be slow. Measured live on this tree
+  before/after: two consecutive member turns went **11 918 ms and 7 997 ms → 6 195 ms and
+  3 821 ms**, and a later three-turn conversation ran 2 397 ms and 2 362 ms. `api.err` shows
+  one provider attempt where it used to show three. The admin panel says why
+  (`ai_provider_billing` now prints `skipped until HH:MM UTC`).
+- **A rate limit was reported to the member as a connection fault.** The chain is walked once
+  and a 429 is deliberately not re-attempted (a retry two seconds later lands in the same
+  window), but the status is carried on the failure (`chat.js:929-932`), so a busy chain says
+  "the assistant is handling more questions than it can right now… nothing is wrong with your
+  account" — in English and in Filipino — instead of blaming a connection the member has to
+  go fix. Verified live: turn 3 of a rate-limited run returned the busy copy.
+- **Nothing told the member what the assistant remembers, and no way to stop it.** Sections
+  4.5 and 7: the derived record is now visible and clearable by the member, and clearing
+  stamps `forgetBefore` so it survives the next rebuild rather than being reconstructed from
+  the old conversation. Verified live: three turns produced `topics: ["energy","dose","hair",
+  "hormone","sleep"]`; the `DELETE` returned the empty view and the following `GET` was still
+  empty.
+- **Memory stored member prose it did not need.** The earlier draft copied questionnaire
+  answers and plan names into `MemberMemory`; both fields are gone from the model, the derive,
+  the prompt block and the view (section 12). This was found by its own test, not by review.
+- **Every conversation start read the Assessment document.** The derive no longer queries it
+  at all, which also keeps a stored `aiResults` blob (hundreds of kilobytes) out of the hot
+  path (`memberMemory.js:335-344`). The answers still reach the prompt — live, from the
+  single projection `chatIdentity` already makes.
+- **Deleting an account left AI data behind.** `models/User.js:550-552,582-584` now cascades
+  `AiChatThread`, `AiChatFeedback` **and** `MemberMemory` together (section 7).
+
+What this pass did **not** close: items 1, 2, 4, 5, 6, 7 and 8 above. The transcript is still
+plaintext at rest, the provider accounts are still unfunded apart from Groq, and there is
+still no AI kill switch.
 
 ---
 

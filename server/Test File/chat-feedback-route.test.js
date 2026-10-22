@@ -206,7 +206,8 @@ test('the learned ranking reaches retrieval as a map, not as the promise that ma
   // the assistant still answered, so nothing anywhere reported it.
   const { retrieve } = require('../utils/ragRetriever');
   const src = require('node:fs').readFileSync(require('node:path').resolve(__dirname, '../routes/chat.js'), 'utf8');
-  assert.match(src, /priors: await priorsForRetrieval\(\)/, 'the route must await the map');
+  assert.match(src, /priors: mergePriors\(await priorsForRetrieval\(\), memory\)/,
+    'the route must await the map — and merge the member\'s own votes over it, not instead of it');
 
   const q = 'can magnesium help with sleep';
   const base = retrieve(q);

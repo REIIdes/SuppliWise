@@ -2,13 +2,13 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import AccountSwitcher from '../Components/AccountSwitcher/AccountSwitcher';
-import { BASE_URL, getMyProfile, getNotifications, markNotificationRead, isSecurityNotification, getToken, getStoredUser, setStoredUser } from '../api';
+import { BASE_URL, getMyProfile, getNotifications, markNotificationRead, isSecurityNotification, getToken, getStoredUser, setStoredUser, getChatMemory, clearChatMemory } from '../api';
 import ProfileSecurityControls from '../Components/ProfileSecurityControls/ProfileSecurityControls';
 import ProfileAvatarImage from '../Components/ProfileAvatar/ProfileAvatarImage';
 import MyPlanRequests from '../Components/MyPlanRequests/MyPlanRequests';
 import MyPlanCancels from '../Components/MyPlanRequests/MyPlanCancels';
 import { useSubscription, SUBSCRIPTION_EVENT } from '../hooks/useSubscription';
-import { PLAN_LABELS, planFromUser, daysLeftFrom } from '../utils/plan';
+import { PLAN_LABELS, planFromUser, daysLeftFrom, canAccess } from '../utils/plan';
 import { planDisplayName } from '../subscription/catalogue';
 import { sanitizeNameInput, NAME_MAX, NAME_PATTERN_SOURCE, NAME_CHARS_HINT } from '../utils/nameValidation';
 import { pictureUrl } from '../utils/pictureUrl';
@@ -80,6 +80,25 @@ function languageCodeForControl(code) {
   return value === 'en' ? '' : value;
 }
 
+/**
+ * A remembered topic id rendered as a word.
+ *
+ * The server sends ids from its own curated alias table (server/utils/ragRetriever.js
+ * ALIASES), never the member's phrasing — that is what keeps a health sentence out of
+ * the memory collection. Display can therefore format them safely: there is no free
+ * text here to escape, only ~19 fixed identifiers.
+ */
+function memoryTopicLabel(id) {
+  return String(id || '').replace(/[_-]+/g, ' ').replace(/^./, (c) => c.toUpperCase());
+}
+
+/** The language the member actually writes in, as a name they recognise. */
+function memoryLanguageLabel(code) {
+  if (!code) return '';
+  const option = AI_LANGUAGE_OPTIONS.find((o) => languageCodeForControl(o.code) === languageCodeForControl(code));
+  return option?.label || String(code);
+}
+
 function ProfilePage() {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
@@ -110,6 +129,18 @@ function ProfilePage() {
   const [preferredLanguage, setPreferredLanguage] = useState(() => languageCodeForControl(storedUser.preferredLanguage));
   const [languageSaving, setLanguageSaving] = useState(false);
   const [languageNote, setLanguageNote] = useState('');
+
+  // ── What the assistant remembers about me ──────────────────────────────
+  // The chat prompt carries a derived per-member record (server/utils/memberMemory.js),
+  // and the guardrail around it tells the model it may point the member at "their
+  // Profile page" to clear it. The card below is what makes that sentence true
+  // instead of a promise nobody can check: the same view the model is told about,
+  // shown as labels and counts, with a clear button that actually stamps forgetBefore.
+  const [aiMemory, setAiMemory] = useState(null);
+  const [aiMemoryNote, setAiMemoryNote] = useState('');
+  const [aiMemoryError, setAiMemoryError] = useState('');
+  const [aiMemoryBusy, setAiMemoryBusy] = useState(false);
+  const [showClearMemoryConfirm, setShowClearMemoryConfirm] = useState(false);
 
   // Re-read the security facts after any of the cards changes one. Deliberately
   // a fresh /me rather than trusting the local response, so the card can never
@@ -360,6 +391,39 @@ const otpTickRef = useRef(null);
   // one of those links to an empty page.
   const PROFILE_VIEWS = ['security', 'accounts', 'billing'];
   const view = PROFILE_VIEWS.includes(urlView) ? urlView : 'personal';
+
+  // The memory is derived from chat turns and note votes, so the card only means
+  // something on a plan that has the assistant — and GET /api/chat/memory answers 403
+  // for everyone else. Front-end visibility only; the server decides again per request.
+  const hasChatAccess = canAccess('chat');
+
+  // Read when the card is opened, not on every profile load: it is one small
+  // aggregate, and a member who never opens this card never pays for it. The same
+  // call backs the Retry button, so a retry can never show a different number than
+  // the auto-read did.
+  const loadAssistantMemory = useCallback(async () => {
+    try {
+      const data = await getChatMemory();
+      // An empty view, never `null`: the card reads `aiMemory === null` as "still
+      // loading", and a member with nothing remembered is not still loading.
+      setAiMemory(data?.memory || { topics: [], adherence: null, turns: 0, rememberedSince: null });
+      setAiMemoryError('');
+    } catch (err) {
+      // A failed read is not a failed profile. It says so in this card and leaves the
+      // rest of the page alone — nothing here is needed to sign in or take a dose.
+      setAiMemoryError(err?.message || 'Could not load what the assistant remembers.');
+    }
+  }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async load populates state from the server
+    if (view === 'personal' && hasChatAccess) loadAssistantMemory();
+  }, [view, hasChatAccess, loadAssistantMemory]);
+
+  // Derived rather than tracked: setting a loading flag in this effect's own body is a
+  // second render for a card that has not arrived yet, which is the cascade React's
+  // rules exist to prevent.
+  const aiMemoryPending = aiMemory === null && !aiMemoryError;
 
   // The Security card still flashes when it is opened from a notification,
   // because that is the one case where its contents changed underneath the
@@ -746,6 +810,26 @@ const otpTickRef = useRef(null);
       setError(err.message || 'Something went wrong. Please try again.');
     } finally {
       setLanguageSaving(false);
+    }
+  };
+
+  // Deleting the record the assistant reads on every future turn. Confirmed first,
+  // because unlike clearing a cache this is not reversible inside the app: the server
+  // stamps `forgetBefore`, so the next conversation cannot rebuild the same profile
+  // from the same votes and dose logs (that is what makes the erase mean what it says).
+  const handleClearAssistantMemory = async () => {
+    setAiMemoryBusy(true);
+    setAiMemoryNote('');
+    setShowClearMemoryConfirm(false);
+    try {
+      const data = await clearChatMemory();
+      setAiMemory(data?.memory || { topics: [], adherence: null, turns: 0, rememberedSince: null });
+      setAiMemoryError('');
+      setAiMemoryNote('Cleared. The assistant starts from nothing on your next message.');
+    } catch (err) {
+      setAiMemoryError(err?.message || 'Could not clear what the assistant remembers.');
+    } finally {
+      setAiMemoryBusy(false);
     }
   };
 
@@ -1379,6 +1463,99 @@ const otpTickRef = useRef(null);
             </div>
             )}
 
+            {/* ── What the assistant remembers about me ──
+                The chat prompt carries a derived summary of this member: which topics
+                their questions have matched, the weights their OWN votes gave the app's
+                published notes, how closely they have followed their plan, the language
+                they write in and how many turns have been counted. The guardrail around
+                that block tells the model it may point the member here, so this card is
+                what makes the sentence true. It shows labels and counts because labels
+                and counts are literally what the collection stores — a member's sentences
+                are never written to it, and a per-member copy of them would be a second
+                place for health prose to leak. */}
+            {view === 'personal' && hasChatAccess && (
+            <div className="profile-section profile-section--memory" id="profile-ai-memory">
+              <h2 className="profile-section-title">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M9 3a3 3 0 0 0-3 3 3 3 0 0 0-2 3 3 3 0 0 0 1 3 3 3 0 0 0-1 3 3 3 0 0 0 2 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3z" />
+                  <path d="M15 3a3 3 0 0 1 3 3 3 3 0 0 1 2 3 3 3 0 0 1-1 3 3 3 0 0 1 1 3 3 3 0 0 1-2 3 3 3 0 0 1-3 3" />
+                </svg>
+                What the AI remembers about you
+              </h2>
+              <p className="profile-section-subtitle">
+                Not your conversations — deleting those is what the History page is for. This is a short summary the assistant reads so that a follow-up like "that thing I asked about" resolves to a real topic instead of a guess.
+              </p>
+
+              {aiMemoryPending ? (
+                <p className="assistant-memory__empty">Loading…</p>
+              ) : aiMemoryError ? (
+                <p className="assistant-memory__empty">
+                  {aiMemoryError}{' '}
+                  <button
+                    type="button"
+                    className="assistant-memory__retry"
+                    onClick={() => { setAiMemoryError(''); loadAssistantMemory(); }}
+                  >
+                    Try again
+                  </button>
+                </p>
+              ) : (
+                <>
+                  <dl className="assistant-memory">
+                    <div className="assistant-memory__row">
+                      <dt>Topics you keep asking about</dt>
+                      <dd>
+                        {(aiMemory?.topics || []).length ? (
+                          (aiMemory.topics || []).map((topic) => (
+                            <span key={topic} className="assistant-memory__tag">{memoryTopicLabel(topic)}</span>
+                          ))
+                        ) : <span className="assistant-memory__none">Nothing yet</span>}
+                      </dd>
+                    </div>
+                    <div className="assistant-memory__row">
+                      <dt>Plan follow-through</dt>
+                      <dd>
+                        {aiMemory?.adherence?.percent === null || aiMemory?.adherence == null
+                          ? <span className="assistant-memory__none">Nothing yet</span>
+                          : `${aiMemory.adherence.percent}% over the last ${aiMemory.adherence.days} days${(aiMemory.adherence.leastTaken || []).length ? ` — least taken: ${(aiMemory.adherence.leastTaken || []).slice(0, 2).join(', ')}` : ''}`}
+                      </dd>
+                    </div>
+                    <div className="assistant-memory__row">
+                      <dt>Language it replies in</dt>
+                      <dd>
+                        {memoryLanguageLabel(aiMemory?.language) || <span className="assistant-memory__none">Detected from your messages, nothing fixed yet</span>}
+                      </dd>
+                    </div>
+                    <div className="assistant-memory__row">
+                      <dt>Assistant messages counted</dt>
+                      <dd>
+                        {aiMemory?.turns ?? 0}
+                        {(aiMemory?.notesVoted ?? 0) > 0 ? ` · ${aiMemory.notesVoted} answers you rated` : ''}
+                      </dd>
+                    </div>
+                  </dl>
+                  <p className="assistant-memory__foot">
+                    {aiMemory?.rememberedSince
+                      ? `Last updated ${formatDay(aiMemory.rememberedSince)}. `
+                      : ''}
+                    It holds topic labels and counts, never anything you typed, and it is deleted on its own 18 months after you last used the app.
+                  </p>
+                  <div className="assistant-memory__actions">
+                    <button
+                      type="button"
+                      className="profile-btn profile-btn-secondary assistant-memory__clear"
+                      onClick={() => { setAiMemoryNote(''); setShowClearMemoryConfirm(true); }}
+                      disabled={aiMemoryBusy}
+                    >
+                      Forget what it remembers
+                    </button>
+                    {aiMemoryNote && <span className="profile-helper-text">{aiMemoryNote}</span>}
+                  </div>
+                </>
+              )}
+            </div>
+            )}
+
             {view === 'security' && (
             <div
               className={`profile-section profile-section--security${secFlash ? ' profile-section--flash' : ''}`}
@@ -1685,6 +1862,29 @@ const otpTickRef = useRef(null);
                 disabled={otpLoading || (disableNeedsPassword ? !disablePassword : twoFactorCode.length !== 6)}
               >
                 {otpLoading ? 'Verifying...' : 'Confirm Removal'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Clearing the assistant's memory of this member. Asked for in words the
+          consequence matches, because "Clear" alone hides that the next conversation
+          starts over — and that this cannot be undone from inside the app. */}
+      {showClearMemoryConfirm && (
+        <div className="profile-modal-overlay" onClick={() => !aiMemoryBusy && setShowClearMemoryConfirm(false)}>
+          <div className="profile-modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Forget what the assistant remembers?</h2>
+            <p>
+              This removes the summary above — the topics it associates with you, the ratings you gave its answers, your plan follow-through and the language it replies in. From your next message it starts from nothing.
+            </p>
+            <p className="profile-modal-note">
+              Your conversations are not deleted here; that is what the History page is for. This one cannot be undone.
+            </p>
+            <div className="profile-modal-actions">
+              <button type="button" className="profile-modal-btn profile-modal-btn-secondary" onClick={() => setShowClearMemoryConfirm(false)} disabled={aiMemoryBusy}>Keep it</button>
+              <button type="button" className="profile-modal-btn profile-modal-btn-primary" onClick={handleClearAssistantMemory} disabled={aiMemoryBusy}>
+                {aiMemoryBusy ? 'Clearing…' : 'Forget it'}
               </button>
             </div>
           </div>

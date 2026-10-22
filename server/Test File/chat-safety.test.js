@@ -178,8 +178,20 @@ test('a turn too short to carry a language inherits the question it follows', ()
 
 test('the chat route hands the member language to the prompt and to the offline reply', () => {
   const src = fs.readFileSync(path.resolve(__dirname, '../routes/chat.js'), 'utf8');
-  assert.match(src, /buildSystemPrompt\(recContext, \{ identity, references, language \}\)/);
-  assert.match(src, /offlineFallback\(q, language\?\.code\)/);
+  assert.match(src, /buildSystemPrompt\(recContext, \{ identity, references, language, memory: memoryBlock \}\)/);
+  assert.match(src, /offlineFallback\(q, language\?\.code, \{ rateLimited \}\)/);
+});
+
+test('a rate-limited chain says it is busy instead of blaming the connection', () => {
+  // A 429 is a queue with a known wait; "trouble connecting" sends a member to their
+  // own wifi and a support ticket. The product-answer branches still fire — the
+  // answer to "how do I log out" does not change because a provider is busy.
+  assert.match(offlineFallback('what magnesium do I need', 'en', { rateLimited: true }), /try again in about a minute/);
+  assert.match(offlineFallback('qwertyuiop', 'en', { rateLimited: true }), /try again in about a minute/);
+  assert.match(offlineFallback('qwertyuiop', 'fil', { rateLimited: true }), /isang minuto/);
+  assert.match(offlineFallback('how do I log out', 'en', { rateLimited: true }), /Profile Settings/);
+  // And the default is unchanged for every other failure mode.
+  assert.doesNotMatch(offlineFallback('what magnesium do I need'), /try again in about a minute/);
 });
 
 const FALLBACK_TRIGGERS = [
