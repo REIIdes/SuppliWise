@@ -45,6 +45,13 @@ function promptSafe(value) {
   return neutralize(value, { maxLength: Number.MAX_SAFE_INTEGER });
 }
 
+// Tick-list answers have no meaningful order, and the model reads the order it
+// is given: the same two symptoms listed as "Fatigue, Chest Tightness" and as
+// "Chest Tightness, Fatigue" are two different patients to it. Canonicalisation
+// sorts a fresh submission, but a record stored before it did can still be
+// re-prompted from the database, so the prompt sorts too.
+const ordered = (list) => [...list].sort((a, b) => String(a).localeCompare(String(b)));
+
 /**
  * The system prompt. Short on purpose: the heavy structure lives in the user
  * prompt so a provider that handles `system` differently (Anthropic takes it
@@ -85,11 +92,11 @@ function buildPatientData(a) {
   const optionalLines = [];
   if (a.activityLevel) optionalLines.push(`- Activity Level: ${a.activityLevel}`);
   if (a.dietType) optionalLines.push(`- Diet Type: ${a.dietType}`);
-  const _goals = a.healthGoals?.length ? promptSafe(a.healthGoals.join(', ')) : null;
+  const _goals = a.healthGoals?.length ? promptSafe(ordered(a.healthGoals).join(', ')) : null;
   if (_goals) optionalLines.push(`- Health Goals: ${_goals}`);
   const _activeSymptoms = (a.symptoms || []).filter((s) => s !== 'No current symptoms');
   if (_activeSymptoms.length > 0) {
-    const _symptomsStr = promptSafe(_activeSymptoms.map((s) => {
+    const _symptomsStr = promptSafe(ordered(_activeSymptoms).map((s) => {
       const sev = a.symptomSeverity?.[s];
       return sev ? `${s} (${sev})` : s;
     }).join(', '));
@@ -99,7 +106,7 @@ function buildPatientData(a) {
   if (a.stressLevel) optionalLines.push(`- Daily Stress Level: ${a.stressLevel}`);
   if (a.waterIntake) optionalLines.push(`- Daily Water Intake: ${a.waterIntake}`);
   const _activeHabits = (a.lifestyleHabits || []).filter((h) => h !== 'None');
-  if (_activeHabits.length > 0) optionalLines.push(`- Lifestyle Habits: ${promptSafe(_activeHabits.join(', '))}`);
+  if (_activeHabits.length > 0) optionalLines.push(`- Lifestyle Habits: ${promptSafe(ordered(_activeHabits).join(', '))}`);
   if (a.pregnancyStatus && a.pregnancyStatus !== 'Not applicable')
     optionalLines.push(`- Pregnancy/Breastfeeding: ${a.pregnancyStatus}`);
   if (a.takingSupplements === 'Yes') {
@@ -113,7 +120,7 @@ function buildPatientData(a) {
     optionalLines.push('- Recent Blood Test: Yes (no results provided)');
   }
   const _activeMedConditions = (a.medicalConditions || []).filter((c) => c !== 'None');
-  if (_activeMedConditions.length > 0) optionalLines.push(`- Medical Conditions: ${promptSafe(_activeMedConditions.join(', '))}`);
+  if (_activeMedConditions.length > 0) optionalLines.push(`- Medical Conditions: ${promptSafe(ordered(_activeMedConditions).join(', '))}`);
   if (medsText !== 'None reported') optionalLines.push(`- Current Medications: ${promptSafe(medsText)}`);
   if (allergiesText !== 'None known') optionalLines.push(`- Known Allergies: ${promptSafe(allergiesText)}`);
   if (a.sunExposure) optionalLines.push(`- Daily Sun Exposure: ${a.sunExposure}`);

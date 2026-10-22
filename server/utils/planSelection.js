@@ -154,10 +154,19 @@ ${lines.join('\n')}`;
 const VOLATILE_FIELDS = new Set([
   '_id', 'id', 'assessmentId', 'createdAt', 'updatedAt', '__v', 'aiResults',
   'result', 'results', 'plan', 'pdfUrl', 'shareId', 'token',
+  // Which record an update was cloned from is bookkeeping about the assessment
+  // chain, not an answer. Without it every "Update Health Assessment" pressed a
+  // new id and so looked like new clinical information to the reuse gate.
+  'updatedFrom',
 ]);
 
-/** Version of the deterministic rules. Bump it to invalidate stored plans. */
-const SELECTION_RULES_VERSION = 'spine-1';
+/**
+ * Version of the deterministic rules. Bump it to invalidate stored plans.
+ * `spine-2-sorted` — multi-select answers are now canonicalised into a sorted
+ * order, so a plan stored before that change is not the plan these answers
+ * select today and must not be handed back as if it were.
+ */
+const SELECTION_RULES_VERSION = 'spine-2-sorted';
 
 /**
  * A stable digest of "the same health information", so a plan that was already

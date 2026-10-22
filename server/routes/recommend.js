@@ -326,15 +326,66 @@ function sanitizeStrings(obj) {
   return obj;
 }
 
+// The answers a plan is actually built from: every question the Assessment
+// schema persists, and nothing else. Kept as an explicit list rather than read
+// off the schema because the schema also carries bookkeeping (`aiResults`,
+// `priority`, `expiresAt`, the flag lifecycle) that must not leak into a plan's
+// identity — a member who was flagged, then resolved, would otherwise look like
+// a different person asking the same questions.
+//
+// `ASSESSMENT_FIELDS.test.js` pins this list against the schema, because a
+// question added to the model and forgotten here silently stops influencing the
+// signature — two different health profiles then share one cached plan.
+const ASSESSMENT_FIELDS = new Set([
+  'age', 'gender', 'weight', 'height', 'activityLevel',
+  'dietType', 'healthGoals',
+  'symptoms', 'symptomSeverity', 'stressLevel', 'sleepQuality', 'waterIntake',
+  'medicalConditions', 'currentMedications', 'allergies', 'feelingDescription',
+  'lifestyleHabits', 'pregnancyStatus', 'takingSupplements', 'currentSupplements',
+  'recentBloodTest', 'bloodTestResults',
+  'sunExposure', 'fitnessFocus', 'proteinIntake', 'recreationalDrugTypes',
+  'updatedFrom',
+]);
+
+function pickAssessmentFields(body) {
+  const out = {};
+  for (const key of Object.keys(body || {})) {
+    if (!ASSESSMENT_FIELDS.has(key)) continue;
+    // An unanswered question is dropped rather than kept as null, '' or []. The
+    // form posts every field it knows about; a record read back from the
+    // database posts the ones the schema happened to write. Those two sets are
+    // only the same submission to the reuse gate if "not answered" is expressed
+    // the same way in both — which is "absent".
+    const value = body[key];
+    if (value === null || value === undefined) continue;
+    if (typeof value === 'string' && value.trim() === '') continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
 router.post('/', protect, async (req, res) => {
   // Declared outside the try so the catch handler can still reach it: this used
   // to be a `const` inside the block, which meant the degraded path threw
   // "liveDynamic is not defined" and the member got a 500 instead of a plan.
   let liveDynamic = [];
+
   // Canonical answers, also declared outside the try: an assessment that throws
   // halfway must be rescued from the same answers the main path was reading, or
   // the retry after an outage would be scored against a different profile.
-  const answers = canonicaliseAnswers(req.body);
+  //
+  // The signature is hashed from these answers and stored on the assessment, so
+  // "the same answers" must mean the same SET of fields too. The form posts
+  // derived values that the Assessment schema never keeps (`bmi`,
+  // `physicalActivityLevel`), and Update Health Assessment rebuilds its payload
+  // from a stored record that has no room for them. Hashed raw, the two
+  // submissions were never identical no matter what the member answered, so the
+  // reuse gate missed every time and an unchanged update cost a fresh
+  // generation. Keeping only what the schema persists makes one submission
+  // produce one digest whichever way it was assembled.
+  const answers = canonicaliseAnswers(pickAssessmentFields(req.body));
+
   try {
     const a = req.body;
 
@@ -1798,6 +1849,11 @@ module.exports.generateClinicalFallback = generateClinicalFallback;
 // Exposed for the determinism suite (Test File/plan-selection.test.js): the
 // selection rules have to be testable without calling a provider.
 module.exports.buildPlanSpine = buildPlanSpine;
+// Exposed for Test File/assessment-fields.test.js: the whitelist is only
+// correct while it mirrors the Assessment schema, and that has to be checked
+// against the schema itself rather than remembered by whoever adds a question.
+module.exports.ASSESSMENT_FIELDS = ASSESSMENT_FIELDS;
+module.exports.pickAssessmentFields = pickAssessmentFields;
 
 
 
