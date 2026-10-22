@@ -1150,7 +1150,7 @@ const SEVERITY_DESCRIPTIONS = {
 // Gender-specific symptoms are filtered in the component
 const ALL_SYMPTOMS = [
   // ── Cardiovascular & Metabolic ──────────────────────────────────────────
-  { name: 'Fatigue',                       genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Hypertension (High Blood Pressure)', 'High Cholesterol', 'Diabetes', 'Heart / Cardiovascular Disease', 'Obesity', 'Anemia', 'Thyroid Disorders', 'Chronic Kidney Disease', 'Liver Disease', 'Anxiety Disorder', 'Depression', 'Prediabetes / Insulin Resistance', 'Fatty Liver (NAFLD)', 'Sleep Apnea (Snoring / Paused Breathing)'] },
+  { name: 'Fatigue',                       genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Hypertension (High Blood Pressure)', 'High Cholesterol', 'Diabetes', 'Heart / Cardiovascular Disease', 'Obesity', 'Anemia', 'Thyroid Disorders', 'Chronic Kidney Disease', 'Liver Disease', 'Anxiety Disorder', 'Depression', 'Prediabetes / Insulin Resistance', 'Fatty Liver (NAFLD)', 'High Triglycerides', 'Sleep Apnea (Snoring / Paused Breathing)'] },
   { name: 'Shortness of Breath',           genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Heart / Cardiovascular Disease', 'Asthma', 'Obesity'] },
   { name: 'Chest Tightness',               genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Heart / Cardiovascular Disease', 'Asthma', 'Hypertension (High Blood Pressure)', 'GERD / Acid Reflux (Suan)'] },
   { name: 'Rapid or Irregular Heartbeat',  genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Heart / Cardiovascular Disease', 'Hypertension (High Blood Pressure)', 'Anxiety Disorder', 'Thyroid Disorders'] },
@@ -1158,7 +1158,7 @@ const ALL_SYMPTOMS = [
   { name: 'Frequent Headaches',            genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Hypertension (High Blood Pressure)', 'Migraine', 'Anxiety Disorder', 'Depression'] },
   { name: 'Excessive Thirst',              genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Diabetes'] },
   { name: 'Frequent Urination',            genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Diabetes', 'Chronic Kidney Disease', 'Prediabetes / Insulin Resistance'] },
-  { name: 'Blurred Vision',               genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Diabetes', 'Hypertension (High Blood Pressure)'] },
+  { name: 'Blurred Vision',               genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Diabetes', 'Hypertension (High Blood Pressure)', 'High Triglycerides'] },
   { name: 'Unexplained Weight Gain',       genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Thyroid Disorders', 'Obesity', 'Diabetes'] },
   { name: 'Unexplained Weight Loss',       genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Thyroid Disorders', 'Diabetes'] },
 
@@ -1173,13 +1173,19 @@ const ALL_SYMPTOMS = [
   { name: 'Bloating',                      genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['IBS (Irritable Bowel Syndrome)', 'Celiac / Gluten Sensitivity', 'Gastritis / Stomach Ulcer'] },
   { name: 'Digestive Issue',               genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['IBS (Irritable Bowel Syndrome)', 'Celiac / Gluten Sensitivity', 'Liver Disease', 'GERD / Acid Reflux (Suan)', 'Gastritis / Stomach Ulcer', 'Fatty Liver (NAFLD)'] },
   { name: 'Nausea',                        genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['IBS (Irritable Bowel Syndrome)', 'Migraine', 'Chronic Kidney Disease', 'Liver Disease', 'GERD / Acid Reflux (Suan)', 'Gastritis / Stomach Ulcer'] },
-  { name: 'Abdominal Pain / Cramps',       genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['IBS (Irritable Bowel Syndrome)', 'Celiac / Gluten Sensitivity', 'Gastritis / Stomach Ulcer', 'Kidney Stones'] },
+  // 'High Triglycerides' joins Fatigue, Blurred Vision, Abdominal Pain / Cramps
+  // and Skin Rashes / Flare-ups above and below: a built-in with zero
+  // ALL_SYMPTOMS rows renders no "Current Symptoms" block, so selecting it
+  // demands an answer the form never shows (2026-10 minor-bug round). Eruptive
+  // xanthomas and epigastric pain are the two visible signs of severe
+  // hypertriglyceridaemia; the rest are the metabolic-cluster overlap.
+  { name: 'Abdominal Pain / Cramps',       genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['IBS (Irritable Bowel Syndrome)', 'Celiac / Gluten Sensitivity', 'Gastritis / Stomach Ulcer', 'Kidney Stones', 'High Triglycerides'] },
   { name: 'Low Appetite',                  genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Liver Disease', 'Chronic Kidney Disease', 'Depression', 'IBS (Irritable Bowel Syndrome)'] },
 
   // ── Respiratory & Immune ─────────────────────────────────────────────────
   { name: 'Wheezing / Breathing Difficulty', genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Asthma'] },
   { name: 'Frequent Colds',               genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Autoimmune Disorders', 'Asthma'] },
-  { name: 'Skin Rashes / Flare-ups',      genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Autoimmune Disorders', 'Celiac / Gluten Sensitivity'] },
+  { name: 'Skin Rashes / Flare-ups',      genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Autoimmune Disorders', 'Celiac / Gluten Sensitivity', 'High Triglycerides'] },
   { name: 'Acne / Skin Issues',            genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Autoimmune Disorders'] },
   { name: 'Dry Skin',                      genders: ['Male', 'Female', 'Prefer not to say'], conditions: ['Thyroid Disorders', 'Autoimmune Disorders', 'Diabetes'] },
 
@@ -2284,7 +2290,17 @@ function reconstructSymptomKeys(assessment) {
     reconstructed.symptoms = reconstructedSymptoms;
     reconstructed.symptomSeverity = reconstructedSeverity;
   }
-  
+
+  // The Step 4 radios are client-only fields: the server persists just
+  // pregnancyStatus ('Pregnant' | 'Breastfeeding' | 'Not applicable'), the
+  // exact inverse of the handleChange sync below. Without this derivation,
+  // Assessment History and update mode showed the whole form EXCEPT the
+  // female-specific answers — the bug from the 2026-10 minor-bug round.
+  if (assessment.pregnancyStatus && !assessment.isPregnant && !assessment.isBreastfeeding) {
+    reconstructed.isPregnant = assessment.pregnancyStatus === 'Pregnant' ? 'Yes' : 'No';
+    reconstructed.isBreastfeeding = assessment.pregnancyStatus === 'Breastfeeding' ? 'Yes' : 'No';
+  }
+
   return reconstructed;
 }
 
@@ -2736,7 +2752,9 @@ function AssessmentPage() {
       }
       sessionStorage.removeItem(SESSION_KEY);
       setFormData(EMPTY_FORM);
-      navigate('/');
+      // Reached from History (Update Health Assessment, or a view carrying the
+      // history marker): Back must return to History — '/' was the bug.
+      navigate(isUpdateMode || routeState.from === 'history' ? '/history' : '/');
     }
   };
 

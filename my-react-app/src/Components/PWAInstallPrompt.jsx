@@ -1,6 +1,16 @@
 import { useState, useEffect } from 'react';
 import './PWAInstallPrompt.css';
 
+// The custom card is a mobile-only affordance. Chrome fires
+// beforeinstallprompt on desktop too, and this used to render the "Install
+// SuppliWise" modal over the desktop dashboard — the reviewer's
+// "Install for mobile modal showing" bug. Desktop Chrome/Edge already have a
+// native install icon in the address bar; the card only earns its screen
+// space where that chrome does not exist: touch devices.
+const isTouchDevice = () =>
+  window.matchMedia('(pointer: coarse) and (hover: none)').matches ||
+  /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
 export default function PWAInstallPrompt() {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [showPrompt, setShowPrompt] = useState(false);
@@ -14,25 +24,40 @@ export default function PWAInstallPrompt() {
     const dismissedUntil = localStorage.getItem('pwa-install-dismissed');
     const now = new Date().getTime();
     
-    if (isInstalled || (dismissedUntil && now < parseInt(dismissedUntil))) {
+    if (isInstalled || !isTouchDevice() || (dismissedUntil && now < parseInt(dismissedUntil))) {
       return;
     }
 
+    let timer;
     const handler = (e) => {
       // Prevent the mini-infobar from appearing on mobile
       e.preventDefault();
       // Stash the event so it can be triggered later
       setDeferredPrompt(e);
       // Show the install prompt after 3 seconds delay
-      setTimeout(() => setShowPrompt(true), 3000);
+      timer = setTimeout(() => setShowPrompt(true), 3000);
+    };
+
+    const onInstalled = () => {
+      setShowPrompt(false);
+      setDeferredPrompt(null);
     };
 
     window.addEventListener('beforeinstallprompt', handler);
+    window.addEventListener('appinstalled', onInstalled);
 
     return () => {
+      clearTimeout(timer);
       window.removeEventListener('beforeinstallprompt', handler);
+      window.removeEventListener('appinstalled', onInstalled);
     };
   }, []);
+
+  const rememberDismissal = () => {
+    // Remember dismissal for 7 days
+    const dismissedUntil = new Date().getTime() + (7 * 24 * 60 * 60 * 1000);
+    localStorage.setItem('pwa-install-dismissed', String(dismissedUntil));
+  };
 
   const handleInstallClick = async () => {
     if (!deferredPrompt) {
@@ -45,7 +70,9 @@ export default function PWAInstallPrompt() {
     // Wait for the user to respond to the prompt
     const { outcome } = await deferredPrompt.userChoice;
 
-    console.log(`User response to the install prompt: ${outcome}`);
+    // A declined native dialog is a dismissal too. Without this the card
+    // reappeared on every session after every "Cancel", which read as a bug.
+    if (outcome !== 'accepted') rememberDismissal();
 
     // Clear the deferred prompt variable
     setDeferredPrompt(null);
@@ -54,9 +81,7 @@ export default function PWAInstallPrompt() {
 
   const handleDismiss = () => {
     setShowPrompt(false);
-    // Remember dismissal for 7 days
-    const dismissedUntil = new Date().getTime() + (7 * 24 * 60 * 60 * 1000);
-    localStorage.setItem('pwa-install-dismissed', dismissedUntil);
+    rememberDismissal();
   };
 
   if (!showPrompt) {

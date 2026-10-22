@@ -323,7 +323,7 @@ function SupplementCard({ rec, index = 0, expanded, onToggle, onOpenDetail, deta
 function ResultsPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { recommendations: r, assessment, garbageFields: rawGarbageFields = [], recommendationProof = null } = location.state || {};
+  const { recommendations: r, assessment, garbageFields: rawGarbageFields = [], from, recommendationProof = null } = location.state || {};
   const garbageFields = (Array.isArray(rawGarbageFields) ? rawGarbageFields : [])
     .filter((field) => field && typeof field === 'object');
 
@@ -902,7 +902,9 @@ function ResultsPage() {
           </button>
           <button className="btn-secondary" onClick={() => navigate('/history')}>View History</button>
           <button className="btn-secondary" onClick={() => navigate('/assessment')}>Retake Assessment</button>
-          <button className="btn-primary" onClick={() => navigate('/')}>Back to Home</button>
+          <button className="btn-primary" onClick={() => navigate(from === 'history' ? '/history' : '/')}>
+            {from === 'history' ? 'Back to History' : 'Back to Home'}
+          </button>
         </div>
         {upgradeInfo && (
           <UpgradeModal

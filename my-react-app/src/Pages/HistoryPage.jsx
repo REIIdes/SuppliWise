@@ -869,7 +869,7 @@ function HistoryPage() {
                     className="btn-view-answers"
                     onClick={(e) => {
                       e.stopPropagation();
-                      navigate('/assessment', { state: { assessment: item, readOnly: true } });
+                      navigate('/assessment', { state: { assessment: item, readOnly: true, from: 'history' } });
                     }}
                     title="View Assessment"
                     aria-label="View assessment answers"
@@ -885,7 +885,7 @@ function HistoryPage() {
                       className="btn-view-results"
                       onClick={(e) => {
                         e.stopPropagation();
-                        navigate('/results', { state: { recommendations: item.aiResults, assessment: item } });
+                        navigate('/results', { state: { recommendations: item.aiResults, assessment: item, from: 'history' } });
                       }}
                       title="View Results"
                       aria-label="View results and recommendations"
@@ -1323,7 +1323,7 @@ function HistoryPage() {
                         onClick={(e) => {
                           e.stopPropagation();
                           if (!priorityBlocked) {
-                            navigate('/assessment', { state: { updateMode: true, assessmentId: item._id, assessmentData: item } });
+                            navigate('/assessment', { state: { updateMode: true, assessmentId: item._id, assessmentData: item, from: 'history' } });
                           }
                         }}
                         disabled={deadHours || priorityBlocked}
