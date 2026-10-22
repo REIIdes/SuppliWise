@@ -85,6 +85,8 @@ const ACTION_CARDS = [
    and importing a second one would leave two names meaning the same thing. */
 import { groupBySlot, pendingIds, sortPlan } from '../utils/timeSlots.js';
 import { layoutPlan, isTakenLate, isDeadHour, DEAD_HOURS } from '../utils/slotSchedule.js';
+import { deferredPlanView } from '../utils/planDeferred.js';
+import DeferredPlanSection from '../Components/DeferredPlanSection.jsx';
 
 /* Section icons. Inline SVG rather than emoji so they inherit `currentColor`
    and match the tracker exactly. */
@@ -157,7 +159,10 @@ const EMPTY_STATS = Object.freeze({
   energyLevel: 'Medium',
   todaysProgress: Object.freeze({ taken: 0, total: 0 }),
   wellnessToday: Object.freeze({
-    total: 0, taken: 0, missed: 0, awaiting: 0, decided: 0, adherence: 100, penaltyPoints: 0,
+    // `exempt` is the plan-activation bucket: doses whose window closed before
+    // this plan existed. Zero here, and named explicitly so the empty state and a
+    // real response have the same shape — scoreSyncLine reads it by name.
+    total: 0, taken: 0, missed: 0, awaiting: 0, exempt: 0, decided: 0, adherence: 100, penaltyPoints: 0,
   }),
 });
 
@@ -212,6 +217,22 @@ function DashboardPage() {
      and it used to print "Sunday 4 October" above doses belonging to the plan day
      that opened on the 3rd. */
   const [planDayKey, setPlanDayKey] = useState('');
+
+  /* When the server decided this plan arrived, and which of today's time frames
+     it is therefore not held to. A plan completed at 3:00 PM must not show a red
+     "Today Missed" tray for a morning that closed at noon — before it, the
+     user had never seen the plan. The server resolves this
+     (server/utils/planActivation.js) and hands the answer over, rather than the
+     page re-deriving it from the browser clock: the score and the tray are read
+     together, and two rulebooks disagreeing on screen is the bug this closes.
+     Null whenever there is nothing to forgive, which is every day but a plan's
+     first. */
+  const [planActivation, setPlanActivation] = useState(null);
+
+  /* The doses of this plan that are NOT today's rows — the frames whose window
+     had already closed when the plan was made. Listed as a start, never as a
+     miss. See server/utils/todayPlanSync.js and utils/planDeferred.js. */
+  const [planDeferred, setPlanDeferred] = useState(null);
 
   const scoreHelpRef = useRef(null);
   const scoreHelpBtnRef = useRef(null);
@@ -269,12 +290,18 @@ function DashboardPage() {
         setQuickStats(EMPTY_STATS);
         setPriorityBlock(data.priorityBlock || { blocked: false, count: 0 });
         setPriorityAssessments(data.priorityAssessments || []);
+        setPlanActivation(null);
+        setPlanDeferred(null);
         return;
       }
 
       // Adopt the server's plan day BEFORE anything reads it, so the heading and
       // the doses it labels are always the same day.
       setPlanDayKey(data.planDay?.todayKey || '');
+      // Null when the server has no exemption to give, which keeps every existing
+      // rendering path unchanged rather than reading `undefined` as an error.
+      setPlanActivation(data.planActivation || null);
+      setPlanDeferred(data.planDeferred || null);
       setTodaysSupplements(sortPlan(data.todaysSupplements || []));
       setWellnessScore(data.stats.wellnessScore || 0);
       setQuickStats({
@@ -427,8 +454,18 @@ function DashboardPage() {
 
   /* The page, laid out for the current moment: the one open frame, Anytime, and
      the tray of doses whose window has closed. The SAME function the tracker
-     uses, so the two pages cannot disagree about what is on screen. */
-  const plan = useMemo(() => layoutPlan(slotGroups, now), [slotGroups, now]);
+     uses, so the two pages cannot disagree about what is on screen — and the
+     same `planActivation` the score was computed with, so a frame the server
+     forgave cannot appear here as missed. */
+  const plan = useMemo(() => layoutPlan(slotGroups, now, planActivation), [slotGroups, now, planActivation]);
+
+  /* The doses that begin at the next reset rather than today. Recomputed from the
+     server's block, never from what got written, so the list survives a refresh at
+     9 PM exactly as the tracker's does. */
+  const deferredView = useMemo(
+    () => deferredPlanView(planDeferred, { todayKey: planDayKey }),
+    [planDeferred, planDayKey],
+  );
 
   // The dead hours close New Assessment here as well as on the form itself.
   const deadHours = isDeadHour(now);
@@ -1143,7 +1180,10 @@ function DashboardPage() {
               </div>
             )}
 
-            {!hasPlan ? (
+            {/* "No plan" is only true when nothing is starting either: an
+                afternoon assessment can have no rows it is still owed today and a
+                full list of doses that begin at the next reset. */}
+            {!hasPlan && !deferredView.active ? (
               <div className="empty-state">
                 <div className="empty-state-icon" aria-hidden="true">
                   <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -1248,6 +1288,14 @@ function DashboardPage() {
                   </>
                 )}
 
+                {/* PLAN-ACTIVATION NOTE — a plan completed mid-day keeps its already-
+                    closed frames on the page, takeable, instead of in the tray below.
+                    `layoutPlan` only reports this when such a frame actually has
+                    something left to take, so it never appears on an empty section. */}
+                {!plan.deadHour && plan.grace.active && (
+                  <p className="slots-idle" data-testid="plan-grace-note">{plan.grace.text}</p>
+                )}
+
                 {/* THE ACTIVE FRAME — the only timed section on the page. */}
                 {!plan.deadHour && plan.active.map(({ group, section }) => renderFrame(group, section))}
                 {!plan.deadHour && plan.active.length === 0 && plan.upcomingCount > 0 && (
@@ -1258,6 +1306,11 @@ function DashboardPage() {
 
                 {/* ANYTIME — no window, so never hidden, never locked. */}
                 {!plan.deadHour && plan.anytime && renderFrame(plan.anytime.group, plan.anytime.section)}
+
+                {/* STARTS AT THE NEXT RESET — the frames this plan was never
+                    given time for. Read-only, and not red: nothing here was ever
+                    due today. Same section, same rulebook, as the tracker's. */}
+                {!plan.deadHour && <DeferredPlanSection view={deferredView} />}
 
                 {/* TODAY MISSED — closed windows, parked at the very bottom. */}
                 {!plan.deadHour && plan.missed.total > 0 && (

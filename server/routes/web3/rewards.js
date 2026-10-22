@@ -9,7 +9,7 @@ const Assessment = require('../../models/Assessment');
 const IntakeRecord = require('../../models/IntakeRecord');
 const DashboardMetrics = require('../../models/DashboardMetrics');
 const engine = require('../../blockchain/engine');
-const { dayKey, sha256Hex, round2 } = require('../../blockchain/crypto');
+const { dayKey, sha256Hex, round2, strictNumber } = require('../../blockchain/crypto');
 const {
   checkinStreak,
   checkinReward,
@@ -265,7 +265,14 @@ router.post('/rewards/achievements/check', async (req, res) => {
 
     // Mints run concurrently — different kinds are independent rows, and the
     // (owner, kind) unique index is what makes a duplicate a duplicate.
-    const attempts = await Promise.all(eligible.map(async (achievement) => {
+    //
+    // allSettled, NOT all: `Promise.all` rejects the moment one branch throws,
+    // but by then the sibling branches' Nft.create calls have ALREADY COMMITTED.
+    // The rejection skipped the anchorMany + txHash backfill below, so those NFTs
+    // were stored with `txHash: ''` permanently — and because
+    // eligibleAchievements filters on kinds the caller does not own, they could
+    // never be anchored again. One flaky read orphaned every sibling mint.
+    const settledAttempts = await Promise.allSettled(eligible.map(async (achievement) => {
       try {
         const serial = (await Nft.countDocuments({ kind: achievement.kind })) + 1;
         const tokenId = `sw-${sha256Hex(`${achievement.kind}:${req.user._id}:${serial}`)}`;
@@ -287,7 +294,15 @@ router.post('/rewards/achievements/check', async (req, res) => {
         throw err;
       }
     }));
-    const minted = attempts.filter(Boolean);
+    for (const failed of settledAttempts) {
+      if (failed.status === 'rejected') {
+        console.error('[web3 achievements] mint failed', failed.reason && failed.reason.message);
+      }
+    }
+    const minted = settledAttempts
+      .filter((r) => r.status === 'fulfilled')
+      .map((r) => r.value)
+      .filter(Boolean);
 
     // Anchor every committed mint as ONE block and backfill the tx hashes in
     // ONE bulk write. Appending one block per mint serialized ~25 network
@@ -326,7 +341,7 @@ router.post('/rewards/achievements/check', async (req, res) => {
 // ── Staking (feature 11) ───────────────────────────────────────────────────
 router.post('/stake', async (req, res) => {
   try {
-    const amount = Number(req.body.amount);
+    const amount = strictNumber(req.body.amount);
     const result = await engine.stake(req.user._id, amount);
     const cfg = await engine.getConfig();
     res.json({
@@ -346,7 +361,7 @@ router.post('/stake', async (req, res) => {
 
 router.post('/unstake', async (req, res) => {
   try {
-    const amount = Number(req.body.amount);
+    const amount = strictNumber(req.body.amount);
     const result = await engine.unstake(req.user._id, amount);
     const cfg = await engine.getConfig();
     res.json({
@@ -395,28 +410,85 @@ router.get('/loyalty', async (req, res) => {
 //          issued — the transparent on-chain loyalty program.
 // @access  Private
 router.post('/loyalty/redeem', async (req, res) => {
+  // Burn-tracking for the compensation in `finally`. `succeeded` is what stops
+  // the reversal from firing on the happy path — a `finally` that cannot tell
+  // success from failure will happily hand the WELL straight back.
+  let burned = 0;
+  let burnedFrom = '';
+  let succeeded = false;
   try {
     const cfg = await engine.getConfig();
-    const amount = round2(Number(req.body.amount));
+    const amount = round2(strictNumber(req.body.amount));
     const min = Number(cfg.params.loyaltyRedeemRate) || 10;
-    if (!(amount >= min)) return res.status(400).json({ message: `Minimum redemption is ${min} WELL.` });
+    if (!Number.isFinite(amount) || !(amount >= min)) {
+      return res.status(400).json({ message: `Minimum redemption is ${min} WELL.` });
+    }
     const wallet = await engine.getWalletDoc(req.user._id);
-    const tx = await engine.transfer({
-      from: wallet.address,
-      to: 'sw_system_treasury',
-      amount,
-      type: 'loyalty:burn',
-      public: { reason: 'loyalty code issuance' },
-    });
-    const code = `LOY-${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
-    const doc = await LoyaltyCode.create({ code, owner: req.user._id, valueWell: amount });
-    res.status(201).json({ code: doc, txHash: tx.txHash, balance: tx.fromBalance });
+
+    // Mint the code FIRST, then burn the WELL.
+    //
+    // The other order lost money on a code collision: `code` is unique and the
+    // generator only had 5 bytes (40 bits, ~1.2M codes before the birthday bound
+    // bites), so a collision raised E11000 AFTER the transfer had already moved
+    // the WELL. `error.code` is numeric there, so the string-code branch below
+    // never matched and the request 500'd with the WELL gone and no code issued.
+    //
+    // Minting first makes a collision cost nothing — just draw again. If every
+    // draw fails (or the write fails for any other reason) NOTHING has been
+    // debited yet, so there is nothing to compensate.
+    let doc = null;
+    for (let attempt = 0; attempt < 5 && !doc; attempt += 1) {
+      const code = `LOY-${crypto.randomBytes(8).toString('hex').toUpperCase()}`;
+      try {
+        doc = await LoyaltyCode.create({ code, owner: req.user._id, valueWell: amount });
+      } catch (err) {
+        if (err && err.code === 11000) continue; // code taken — draw again
+        throw err;
+      }
+    }
+    if (!doc) {
+      return res.status(503).json({ message: 'Could not allocate a loyalty code. No WELL were spent — please try again.' });
+    }
+
+    try {
+      const tx = await engine.transfer({
+        from: wallet.address,
+        to: 'sw_system_treasury',
+        amount,
+        type: 'loyalty:burn',
+        public: { reason: 'loyalty code issuance', code: doc.code },
+      });
+      burned = amount;
+      burnedFrom = wallet.address;
+      await LoyaltyCode.updateOne({ _id: doc._id }, { $set: { burnTx: tx.txHash || '' } }).catch(() => {});
+      succeeded = true;
+      return res.status(201).json({ code: doc, txHash: tx.txHash, balance: tx.fromBalance });
+    } catch (err) {
+      // The burn failed (most likely INSUFFICIENT, which the guards above make
+      // unlikely but which a concurrent spend can still cause). The code was
+      // never charged for, so void it rather than leaving a free code behind.
+      await LoyaltyCode.deleteOne({ _id: doc._id, burnTx: '' }).catch(() => {});
+      throw err;
+    }
   } catch (error) {
     if (error.code && typeof error.code === 'string') {
       return res.status(400).json({ message: error.message, code: error.code });
     }
     console.error('[web3 POST /loyalty/redeem]', error.message);
     res.status(500).json({ message: 'Could not create the loyalty code.' });
+  } finally {
+    // Belt and braces: if anything above failed AFTER the burn committed, put
+    // the WELL back. Without this the single worst outcome in this route — a
+    // user debited for a code they never received — is silent and permanent.
+    if (!succeeded && burned > 0 && burnedFrom) {
+      await engine.transfer({
+        from: 'sw_system_treasury',
+        to: burnedFrom,
+        amount: burned,
+        type: 'loyalty:burn-reversal',
+        public: { reason: 'loyalty code issuance failed after the burn' },
+      }).catch((revErr) => console.error('[web3 loyalty reversal]', revErr.message));
+    }
   }
 });
 

@@ -202,6 +202,27 @@ function installFakes(store, opts = {}) {
     return doc;
   });
 
+  // `priorityGate.selfHealOpenPriority` reads `User.findById(id).select(...).lean()`
+  // to check whether the member is waiting to CONFIRM an approved medical review,
+  // and skips the self-release while they are. That read was added with the
+  // medical-review flow and this fixture never stubbed it, so the real
+  // Mongoose call ran against a connection that does not exist in a unit test:
+  // it buffered, timed out after ~20 s, and threw.
+  //
+  // The route's `catch` then logged and fell through to the conservative
+  // outcome — "do not release, block the submit" — which is correct production
+  // behaviour for a genuinely failed repair. So the symptom was not a crash but
+  // two members being 403'd with a message the test could not explain, and the
+  // suite went from 20 ms per case to 20 SECONDS per case. Two tests failed on
+  // the timeout and nobody could tell why from the assertion alone.
+  //
+  // Stubbed here rather than in the route: the route's behaviour is right, and
+  // the fixture was the thing that had fallen behind the code.
+  stub(User, 'findById', (id) => {
+    const doc = Object.values(store.users).find((u) => key(u._id) === key(id)) || null;
+    return chain(doc ? { ...doc } : null);
+  });
+
   return () => { for (const [obj, name, original] of saved) obj[name] = original; };
 }
 

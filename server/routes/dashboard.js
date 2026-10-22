@@ -13,10 +13,15 @@ const { buildScheduleSlotIndex, resolveTimeSlot } = require('../utils/dailySched
 // owns the one `Intl` reader in the server — so the day a record belongs to and
 // the window it was due in are read by the same clock, from the same zone.
 const { cleanTimeZone, evaluateToday } = require('../utils/intakeWindows');
-// The day a plan day is made of, and the routine that seeds the days the user
-// never opened. Both live outside this route so the seeding shape exists once —
-// GET / uses it for today, the backfill for the days before it.
-const { buildDayDoseDocs, backfillMissedDays } = require('../utils/missedDayDoses');
+// The days nobody opened, seeded by the routine that owns the dose shape.
+const { backfillMissedDays } = require('../utils/missedDayDoses');
+// Which doses of the plan are today's rows, and which start at the next 4 AM.
+// One routine, because both halves of a plan change — a new assessment and an
+// update — have to land on the same day. See utils/todayPlanSync.js.
+const { syncTodayPlan } = require('../utils/todayPlanSync');
+// When the plan arrived, and which of today's windows it may be held to at all.
+// A plan created at 3:00 PM cannot be charged for a morning that closed at noon.
+const { resolvePlanActivation, planActivationPayload } = require('../utils/planActivation');
 const {
   getWellnessBaseline,
   calculateWellnessScore,
@@ -113,15 +118,17 @@ const timezoneFor = async (req) => {
  *
  * `finalizeIntakeChange` and `GET /` used to score the day themselves, which is
  * how two readers of the same number drifted. One function, one rule: a dose
- * counts against the user only once its window has closed, and a dose ticked
- * late counts in full. See utils/intakeWindows.js for the rule and
+ * counts against the user only once its window has closed, a dose ticked late
+ * counts in full, and a dose whose window closed before the plan existed counts
+ * for nothing at all. See utils/intakeWindows.js for the rule,
+ * utils/planActivation.js for the plan-arrival exemption, and
  * utils/wellnessScore.js for the arithmetic.
  *
  * @param {Array} records Today's intake records (lean or hydrated).
- * @param {{now?: Date, timeZone?: string}} [options]
+ * @param {{now?: Date, timeZone?: string, activation?: object|null}} [options]
  */
-const scoreToday = (records, { now = new Date(), timeZone = 'UTC' } = {}) =>
-  evaluateToday(records, { now, timeZone });
+const scoreToday = (records, { now = new Date(), timeZone = 'UTC', activation = null } = {}) =>
+  evaluateToday(records, { now, timeZone, activation });
 
 /**
  * The `stats.wellnessToday` block: today's progress split by the rule, plus the
@@ -167,6 +174,30 @@ const planDayPayload = (now = new Date(), timeZone = 'UTC') => ({
   inDeadHours: isInDeadHours(now, timeZone),
   timeZone: cleanTimeZone(timeZone) || 'UTC',
 });
+
+/**
+ * The `planDeferred` block: the doses this plan is NOT today's work.
+ *
+ * A plan made at 3 PM has a Morning stack whose window shut at noon, and today's
+ * rows carry only the frames the day can still be judged on (see
+ * utils/todayPlanSync.js). Whatever is left over is reported here so the tracker
+ * can say "starts at the next 4 AM reset" instead of hiding doses the user is
+ * still going to need.
+ *
+ * `startsAt` is the next reset as an instant, not just "4:00 AM" — the note has
+ * to be able to say when without the client re-deriving the server's day.
+ */
+const planDeferredPayload = (deferred, now = new Date(), timeZone = 'UTC') => {
+  const safe = deferred && typeof deferred === 'object' ? deferred : {};
+  const items = Array.isArray(safe.items) ? safe.items : [];
+  return {
+    count: items.length,
+    items,
+    startsDayKey: str(safe.startsDayKey),
+    startsAtLabel: PLAN_DAY_RESET_LABEL,
+    startsAt: new Date(now.getTime() + minutesToNextReset(now, timeZone) * 60000).toISOString(),
+  };
+};
 
 /**
  * Validate and reset the streak if the previous day was missed.
@@ -241,8 +272,11 @@ const finalizeIntakeChange = async (req, assessmentId, planDay = {}) => {
       IntakeRecord.countDocuments({ user: req.user._id, assessment: assessmentId }),
       IntakeRecord.countDocuments({ user: req.user._id, assessment: assessmentId, taken: true }),
     ]),
-    // Only the slices needed downstream (wellness baseline + priority state)
-    Assessment.findById(assessmentId).select('aiResults.wellnessBaseline priority resolvedReason').lean(),
+    // Only the slices needed downstream (wellness baseline + priority state).
+    // `createdAt` is one of them because a plan is only held to a window that
+    // existed with it, so the activation is resolved here from a document this
+    // read already has — rather than costing an extra query on every tick.
+    Assessment.findById(assessmentId).select('createdAt aiResults.wellnessBaseline priority resolvedReason').lean(),
   ]);
 
   const totalToday = todayRecords.length;
@@ -258,8 +292,13 @@ const finalizeIntakeChange = async (req, assessmentId, planDay = {}) => {
   }
 
   // The window-aware view of today: `missed` is the only figure that costs
-  // points, and `awaiting` is those same rows one moment before they do.
-  const wellnessToday = scoreToday(todayRecords, { now, timeZone });
+  // points, `awaiting` is those same rows one moment before they do, and
+  // `exempt` is the plan-arrival exemption — see utils/planActivation.js. A plan
+  // created after its own Morning window closed must not have that morning
+  // re-decided on every tick, so the activation is resolved from the
+  // `createdAt` this function already read and travels with the recompute.
+  const activation = resolvePlanActivation({ createdAt: assessmentDoc && assessmentDoc.createdAt, timeZone });
+  const wellnessToday = scoreToday(todayRecords, { now, timeZone, activation });
 
   const today = todayKey;
 
@@ -469,6 +508,7 @@ router.get('/', protect, async (req, res) => {
         priorityAssessments: [],
         assessment: null,
         planDay: planDayPayload(now, timeZone),
+        planDeferred: planDeferredPayload(null, now, timeZone),
         todaysSupplements: [],
         stats: {
           wellnessScore: 0,
@@ -523,40 +563,52 @@ router.get('/', protect, async (req, res) => {
     const recommendations = latestAssessment.aiResults?.recommendations || [];
     const dailySchedule = latestAssessment.aiResults?.dailySchedule || [];
 
+    // WHEN THIS PLAN ARRIVED, and which of today's windows it may be held to.
+    // Resolved ONCE, here, so the score, the backfill and the payload the client
+    // lays out from all judge the same plan day by the same facts. A plan
+    // created at 3:00 PM arrives with a Morning stack whose window closed at
+    // noon: without this, those doses are missed before the user has seen them.
+    // See utils/planActivation.js.
+    const activation = resolvePlanActivation({
+      createdAt: latestAssessment.createdAt,
+      timeZone,
+    });
+
     // Morning / Afternoon / Evening buckets, taken from the AI daily schedule
     // (the same grouping the results page renders) so the tracker and the
     // results page can never disagree about which stack a supplement belongs to.
     const scheduleSlotIndex = buildScheduleSlotIndex(dailySchedule);
 
-    // Daily plan snapshot: on the first load of a day with an empty plan,
-    // seed today's records from the AI recommendations so the day always
-    // lists what needed to be taken. Untouched days automatically read as
-    // MISSED (red) in the calendar and day-detail views.
-    if (todayIntakeRecords.length === 0 && recommendations.length > 0) {
-      // Built by the same helper the missed-day backfill uses, so a dose has the
-      // same shape, the same priority fallback and the same slot whichever day it
-      // is written for — two inline seeders is how a hand-added row came to be
-      // judged by a different window than a seeded one.
-      const seeds = buildDayDoseDocs(recommendations, dailySchedule, { dayKey: todayKey, date: now })
-        .map(doc => ({ ...doc, user: req.user._id, assessment: latestAssessment._id }));
-      if (seeds.length > 0) {
-        // Bulk upsert: one round-trip instead of N (was a major bottleneck
-        // for users with 15+ supplements — each upsert was a separate DB call)
-        await IntakeRecord.bulkWrite(
-          seeds.map(doc => ({
-            updateOne: {
-              filter: { user: doc.user, assessment: doc.assessment, supplementName: doc.supplementName, dayKey: doc.dayKey },
-              update: { $setOnInsert: doc },
-              upsert: true,
-            },
-          })),
-          { ordered: false } // continue on error — one failure shouldn't block the rest
-        );
-        todayIntakeRecords = await IntakeRecord.find({
+    // Daily plan snapshot: today's rows are made to match this plan, once per
+    // plan per plan day, so the day always lists what still needs taking.
+    //
+    // This used to be `if (todayIntakeRecords.length === 0)` — seed only an empty
+    // day. That quietly broke both updates a plan can go through: a supplement
+    // ADDED by updating the assessment never appeared, because the old plan's rows
+    // were already on the page, and a frame whose window closed before the plan
+    // existed was still asked for at 3 PM. See utils/todayPlanSync.js.
+    let deferredPlan = null;
+    if (recommendations.length > 0) {
+      try {
+        const sync = await syncTodayPlan({
           user: req.user._id,
           assessment: latestAssessment._id,
-          dayKey: todayKey,
-        }).lean();
+          recommendations,
+          dailySchedule,
+          metrics,
+          todayKey,
+          now,
+          activation,
+        });
+        todayIntakeRecords = sync.records;
+        deferredPlan = sync.deferred;
+        // The marker commits with the rows it describes: a load that died before
+        // this save re-syncs, and every write it makes is an idempotent upsert.
+        if (sync.synced) await metrics.save();
+      } catch (syncError) {
+        // A failed sync must not blank the dashboard — the day just reads as the
+        // rows that are already there, which is the old behaviour.
+        console.error('[dashboard GET /] today plan sync failed:', syncError.message);
       }
     }
 
@@ -577,10 +629,14 @@ router.get('/', protect, async (req, res) => {
           dailySchedule,
           metrics,
           todayKey,
-          // The plan day the assessment opened on, read on the user's own clock:
-          // a plan created at 01:00 belongs to yesterday's running day, and
-          // nothing before the plan exists can be judged as missed.
-          sinceDayKey: planDayKey(latestAssessment.createdAt, timeZone),
+          // The oldest day that can be judged as missed. Not simply "the plan
+          // day the assessment opened on": when the plan arrived after some of
+          // its own windows had already closed, that first, partial day is
+          // exempt too, and seeding it here would reintroduce exactly the
+          // penalty utils/planActivation.js exists to remove — this time for a
+          // day the user never came back for. Read on the user's own clock, so
+          // a plan created at 01:00 belongs to yesterday's running day.
+          sinceDayKey: activation.firstJudgedDayKey,
           now,
         });
         // The pointer moves only once the gap's write has landed, so a throw
@@ -623,10 +679,10 @@ router.get('/', protect, async (req, res) => {
     const takenToday = todayIntakeRecords.filter(r => r.taken).length;
     const todayAdherence = calculateAdherence(takenToday, totalToday);
 
-    // The window-aware view of today, judged in the user's own timezone. `now`
-    // and `timeZone` come from the top of the handler so the whole response is
-    // scored against one clock.
-    const wellnessToday = scoreToday(todayIntakeRecords, { now, timeZone });
+    // The window-aware view of today, judged in the user's own timezone. `now`,
+    // `timeZone` and `activation` come from the top of the handler so the whole
+    // response is scored against one clock and one plan.
+    const wellnessToday = scoreToday(todayIntakeRecords, { now, timeZone, activation });
 
     // Update wellness score
     const wellnessScore = calculateWellnessScore({
@@ -722,6 +778,18 @@ router.get('/', protect, async (req, res) => {
         summary: latestAssessment.aiResults?.simplifiedSummary || latestAssessment.aiResults?.summary || '',
       },
       planDay: planDayPayload(now, timeZone),
+      // The frames this plan is NOT held to today, sent so the tracker lays the
+      // page out from the server's answer instead of re-deciding for itself. Its
+      // own copy of the rulebook would otherwise put a plan's first Morning in
+      // the red "Today Missed" tray directly beneath a score reading "nothing
+      // missed" — the two rulebooks disagreeing on screen, which is the whole
+      // failure this rule was added to fix. See utils/planActivation.js.
+      planActivation: planActivationPayload(activation),
+      // The doses of this plan that are NOT today's rows, because their frame
+      // closed before the plan existed. Reported separately rather than omitted:
+      // a plan made at 3 PM still has a Morning stack the user will need, and a
+      // page that quietly dropped it would look broken. See utils/todayPlanSync.js.
+      planDeferred: planDeferredPayload(deferredPlan, now, timeZone),
       todaysSupplements: todayIntakeRecords.map(rec => {
         const timing = timingMap[rec.supplementName] || rec.scheduledTime || 'Anytime';
         const slot = resolveTimeSlot({ name: rec.supplementName, timing }, scheduleSlotIndex);
@@ -948,7 +1016,13 @@ router.post('/energy', protect, async (req, res) => {
       assessment: latestAssessment._id,
       dayKey: getTodayKey(timeZone, now),
     }).select('taken timeSlot scheduledTime').lean();
-    const today = scoreToday(todayRecords, { now, timeZone });
+    // Same activation as every other scorer in this file: a plan created after
+    // its own Morning window closed is not re-penalised by a self-report.
+    const today = scoreToday(todayRecords, {
+      now,
+      timeZone,
+      activation: resolvePlanActivation({ createdAt: latestAssessment.createdAt, timeZone }),
+    });
     const wellnessBaseline = getWellnessBaseline(latestAssessment);
     metrics.wellnessScore = calculateWellnessScore({
       baseline: wellnessBaseline,
@@ -1363,7 +1437,14 @@ router.post('/add-supplement', protect, async (req, res) => {
       // Recalculate wellness score
       const wellnessBaseline = getWellnessBaseline(latestAssessment);
       // Named `windowedToday` because `today` in this block is the dayKey string.
-      const windowedToday = scoreToday(todayRecords, { now, timeZone });
+      // Activation included for the same reason as everywhere else: adding a
+      // dose must not re-decide the doses whose windows closed before the plan
+      // existed.
+      const windowedToday = scoreToday(todayRecords, {
+        now,
+        timeZone,
+        activation: resolvePlanActivation({ createdAt: latestAssessment.createdAt, timeZone }),
+      });
       metrics.wellnessScore = calculateWellnessScore({
         baseline: wellnessBaseline,
         overallAdherence: metrics.overallAdherence,

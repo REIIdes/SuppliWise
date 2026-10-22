@@ -35,7 +35,8 @@ const { answerSignature, SELECTION_RULES_VERSION } = require('../utils/planSelec
 // Anything else on the model MUST be in ASSESSMENT_FIELDS.
 const NOT_AN_ANSWER = new Set([
   'user', 'aiResults', 'expiresAt', 'priority', 'flagReasons', 'flaggedAt',
-  'resolvedAt', 'resolvedReason', 'userEmail', 'userName', '_id', '__v',
+  'resolvedAt', 'resolvedReason', 'flagSource', 'flagAiConfidence',
+  'flagAiEscalatedAt', 'userEmail', 'userName', '_id', '__v',
   'createdAt', 'updatedAt',
 ]);
 

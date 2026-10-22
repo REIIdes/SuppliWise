@@ -35,6 +35,21 @@
  * user out at the wrong hour for most of the planet. The client is therefore
  * also the only place these windows are enforced — which is a real limitation,
  * not an oversight (see the note at the bottom of this file).
+ *
+ * THE EXCEPTION: A PLAN IS NOT HELD TO A WINDOW THAT PREDATES IT
+ * A plan created at 3:00 PM arrives with a Morning stack whose window closed at
+ * noon. Judged by the rule above, those doses are `locked`, so they are marked
+ * MISSED and dropped into the red "Today Missed" tray — for a morning that ended
+ * before the user had ever seen the plan, and directly underneath a wellness
+ * score that had just been docked for it.
+ *
+ * So the server sends what it forgave (`planActivation.graceSlots`, resolved in
+ * server/utils/planActivation.js) and a forgiven frame is treated as OPEN here.
+ * The client does not re-derive it: `X-Client-Timezone` is this browser's own
+ * zone, so a locally-derived answer could only ever agree by luck, and one
+ * disagreement shows up as a score that says "nothing missed" above a red tray.
+ * The exemption is anchored to the plan day the plan arrived on, so it expires
+ * by itself at the 4 AM reset and the whole plan is judged normally from then on.
  */
 
 /** Minutes from local midnight. End is EXCLUSIVE, so a window is half-open:
@@ -111,6 +126,89 @@ export function minutesOfDay(now) {
   const date = now instanceof Date ? now : new Date(now);
   if (Number.isNaN(date.getTime())) return null;
   return date.getHours() * 60 + date.getMinutes();
+}
+
+/** Slot keys this build understands, `anytime` included. */
+const KNOWN_SLOT_KEYS = new Set([...Object.keys(SLOT_WINDOWS), 'anytime']);
+
+/** Day keys are zero-padded YYYY-MM-DD, so this is enough to trust one. */
+const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The frames this plan is not held to on the plan day it arrived on.
+ *
+ * `activation` is `planActivation` from GET /api/dashboard, resolved by
+ * utils/planActivation.js on the server. Only `activatedDayKey` and
+ * `graceSlots` are read, so an older server — or a client that drops the block
+ * — simply gets an empty list and the behaviour that has always existed.
+ *
+ * WHY THE DAY KEY IS RE-CHECKED HERE
+ * The block describes ONE plan day. Comparing it against the day being drawn is
+ * what stops a tab left open across the 4 AM reset from forgiving tomorrow's
+ * missed morning with yesterday's plan: the keys stop matching, the list empties,
+ * and the frame is judged normally again. It is also the only guard against a
+ * stale payload, and it costs one string comparison.
+ *
+ * @param {{activatedDayKey?: string, graceSlots?: string[]}|null} activation
+ * @param {Date} [now] The plan day being drawn — always the live day here.
+ * @returns {string[]} slot keys, lowercase, deduped. Empty when there is no
+ *   exemption to apply, which is every day but a plan's first.
+ */
+export function graceSlotsFor(activation, now = new Date()) {
+  if (!activation || typeof activation !== 'object') return [];
+
+  const activatedDayKey = asText(activation.activatedDayKey);
+  if (!DAY_KEY_RE.test(activatedDayKey)) return [];
+  if (activatedDayKey !== getPlanDayKey(now)) return [];
+
+  const slots = Array.isArray(activation.graceSlots) ? activation.graceSlots : [];
+  const exempt = [];
+  for (const slot of slots) {
+    const key = asText(slot).toLowerCase();
+    if (KNOWN_SLOT_KEYS.has(key) && !exempt.includes(key)) exempt.push(key);
+  }
+  return exempt;
+}
+
+/**
+ * Normalise whatever a caller passed as "the frames to forgive" into a Set.
+ *
+ * Accepts the server's `planActivation` block, a plain array of slot keys, or a
+ * Set, so `layoutPlan`, `sectionPlacement` and `slotSectionState` can each be
+ * called by a page or a test with whichever is to hand. Returns null for
+ * "nothing is forgiven", which is the cheap path and the one every existing
+ * caller takes.
+ */
+function toGraceSet(options) {
+  if (!options) return null;
+
+  const slots = options instanceof Set
+    ? [...options]
+    : Array.isArray(options)
+      ? options
+      : (Array.isArray(options.graceSlots) ? options.graceSlots : null);
+  if (!slots || slots.length === 0) return null;
+
+  const exempt = new Set();
+  for (const slot of slots) {
+    const key = asText(slot).toLowerCase();
+    if (KNOWN_SLOT_KEYS.has(key)) exempt.add(key);
+  }
+  return exempt.size > 0 ? exempt : null;
+}
+
+/**
+ * A slot's state, honouring a plan's arrival.
+ *
+ * A forgiven frame reads OPEN whatever the clock says. That is the whole point:
+ * the window is genuinely over, but the plan did not exist while it was, so
+ * nothing about the frame can be "locked" or "missed" today. Anything else would
+ * mean a fourth state, and every consumer here already knows what to do with an
+ * open frame — draw it, let it be ticked, count it as work to do.
+ */
+function placementState(slotKey, now, grace) {
+  if (grace && grace.has(asText(slotKey).toLowerCase())) return WINDOW_STATE.OPEN;
+  return windowState(slotKey, now);
 }
 
 /** The window for a slot key, or null when it has none (Anytime). */
@@ -322,11 +420,18 @@ export function isDeadHour(now = new Date()) {
  *
  * `canTick` is deliberately true even when locked: see the note at the top of
  * this file about late entries.
+ *
+ * @param {{key: string, items: Array}} group  A group from groupBySlot().
+ * @param {Date} now
+ * @param {object|Array|Set|null} [grace] Frames this plan is not held to — the
+ *   server's `planActivation`, a list of slot keys, or a Set. Omit it and the
+ *   section behaves exactly as it always has.
  */
-export function slotSectionState(group, now = new Date()) {
+export function slotSectionState(group, now = new Date(), grace = null) {
   const items = Array.isArray(group?.items) ? group.items : [];
   const key = asText(group?.key).toLowerCase();
-  const state = windowState(key, now);
+  const exempt = toGraceSet(grace);
+  const state = placementState(key, now, exempt);
 
   const taken = items.filter((item) => item?.taken).length;
   const pending = items.length - taken;
@@ -406,8 +511,9 @@ export const SECTION_PLACEMENT = {
  * A frame with nothing ticked stays hidden — which is the correct reading for a
  * genuinely fresh day that simply has not started yet.
  */
-function treatAsClosed(group, now) {
-  const state = windowState(asText(group?.key).toLowerCase(), now);
+function treatAsClosed(group, now, grace = null) {
+  const exempt = toGraceSet(grace);
+  const state = placementState(asText(group?.key).toLowerCase(), now, exempt);
   if (state === WINDOW_STATE.LOCKED) return true;
   if (state !== WINDOW_STATE.UPCOMING) return false;
 
@@ -419,27 +525,75 @@ function treatAsClosed(group, now) {
 }
 
 /** Whether a timed frame's window has closed for the day being shown. */
-export function frameHasClosed(group, now = new Date()) {
-  return treatAsClosed(group, now);
+export function frameHasClosed(group, now = new Date(), grace = null) {
+  return treatAsClosed(group, now, grace);
 }
 
-/** Which section a group belongs in right now. */
-export function sectionPlacement(group, now = new Date()) {
+/**
+ * Which section a group belongs in right now.
+ *
+ * @param {object} group From groupBySlot().
+ * @param {Date} now
+ * @param {object|Array|Set|null} [grace] Frames this plan is not held to; see
+ *   `slotSectionState`. A forgiven frame is placed as ACTIVE, never MISSED —
+ *   that is the whole difference between "your plan started mid-day" and a red
+ *   tray the user cannot argue with.
+ */
+export function sectionPlacement(group, now = new Date(), grace = null) {
   const key = asText(group?.key).toLowerCase();
 
   // Anytime has no window, so it is never hidden and never becomes missed. This
   // is the one category that survives every rule below.
   if (!windowFor(key)) return SECTION_PLACEMENT.ANYTIME;
 
-  if (windowState(key, now) === WINDOW_STATE.OPEN) return SECTION_PLACEMENT.ACTIVE;
+  if (placementState(key, now, toGraceSet(grace)) === WINDOW_STATE.OPEN) return SECTION_PLACEMENT.ACTIVE;
 
-  if (treatAsClosed(group, now)) {
+  if (treatAsClosed(group, now, grace)) {
     const items = Array.isArray(group?.items) ? group.items : [];
     const pending = items.filter((item) => !item?.taken).length;
     // Closed with nothing left is a finished frame, not a missed one.
     return pending > 0 ? SECTION_PLACEMENT.MISSED : SECTION_PLACEMENT.HIDDEN;
   }
   return SECTION_PLACEMENT.HIDDEN;
+}
+
+/** The wording a page prints above a plan's forgiven frames. */
+export const GRACE_NOTE =
+  'Your plan started after these times had passed, so they are not counted as missed. '
+  + 'Everything runs normally from tomorrow.';
+
+/**
+ * The "your plan started mid-day" note, or an empty one.
+ *
+ * Only reported when a forgiven frame actually has something left to take, and
+ * never for a frame the plan could not have used at all. A note that appears on
+ * every plan page is a note nobody reads, and one that appears over an empty
+ * section is a lie.
+ *
+ * @param {string[]} grace     Slot keys the server forgave, or none.
+ * @param {Array} [active]     The active sections, when they are known.
+ * @returns {{active: boolean, frames: string[], text: string}}
+ */
+function graceNote(grace, active = null) {
+  const frames = Array.isArray(grace) ? [...grace] : [];
+  if (frames.length === 0) return { active: false, frames: [], text: '' };
+
+  // With the layout in hand, restrict the note to frames that are actually on
+  // screen AND still have something to take. `null` (the dead-hours branch, and
+  // any direct caller without a layout) falls back to "the plan started late".
+  const sections = Array.isArray(active) ? active : null;
+  if (!sections) return { active: true, frames, text: GRACE_NOTE };
+
+  const pending = sections
+    .filter(({ group }) => frames.includes(asText(group?.key).toLowerCase()))
+    .filter(({ section }) => section && section.pending > 0);
+  if (pending.length === 0) return { active: false, frames: [], text: '' };
+
+  return {
+    active: true,
+    frames: pending.map(({ group }) => asText(group?.key).toLowerCase()),
+    text: GRACE_NOTE,
+  };
 }
 
 /**
@@ -454,14 +608,21 @@ export function sectionPlacement(group, now = new Date()) {
  *
  * @param {Array<{key: string, label: string, items: Array}>} groups From groupBySlot().
  * @param {Date} now
+ * @param {{activatedDayKey?: string, graceSlots?: string[]}|null} [activation]
+ *   The server's `planActivation` block. A plan created after some of its own
+ *   windows had closed is not judged against those windows on its first day —
+ *   see `graceSlotsFor`. Omit it and the layout is exactly what it always was.
  * @returns {{
- *   active: Array, anytime: object|null, missed: object,
+ *   active: Array, anytime: object|null, missed: object, grace: object,
  *   completedCount: number, upcomingCount: number, deadHour: boolean, hasWork: boolean
  * }}
  */
-export function layoutPlan(groups, now = new Date()) {
+export function layoutPlan(groups, now = new Date(), activation = null) {
   const list = Array.isArray(groups) ? groups : [];
   const deadHour = isDeadHour(now);
+  // Resolved once here and handed down as a plain list, so the three decisions
+  // below cannot each read the payload differently.
+  const grace = graceSlotsFor(activation, now);
 
   const active = [];
   const missedSections = [];
@@ -470,8 +631,8 @@ export function layoutPlan(groups, now = new Date()) {
   let upcomingCount = 0;
 
   for (const group of list) {
-    const section = slotSectionState(group, now);
-    const placement = sectionPlacement(group, now);
+    const section = slotSectionState(group, now, grace);
+    const placement = sectionPlacement(group, now, grace);
 
     if (placement === SECTION_PLACEMENT.ANYTIME) {
       // First one wins if the data somehow carries two Anytime groups; a second
@@ -491,7 +652,7 @@ export function layoutPlan(groups, now = new Date()) {
     // placed it decides whether it finished or is still to come — deriving the
     // two separately is how a merely-upcoming frame with a ticked row ended up
     // counted as a completed day.
-    if (frameHasClosed(group, now)) completedCount += 1;
+    if (frameHasClosed(group, now, grace)) completedCount += 1;
     else upcomingCount += 1;
   }
 
@@ -528,6 +689,8 @@ export function layoutPlan(groups, now = new Date()) {
         locked: false,
         endsAt: DEAD_HOURS.endsAt,
       },
+      // The note is suppressed too: it describes a day that is not on screen.
+      grace: graceNote([]),
       completedCount: 0,
       upcomingCount: list.length,
       deadHour: true,
@@ -551,6 +714,10 @@ export function layoutPlan(groups, now = new Date()) {
       locked: false,
       endsAt: DEAD_HOURS.endsAt,
     },
+    // Why a closed frame is on the page as a normal, takeable section instead of
+    // in the tray above. Shown only when such a frame actually has something
+    // left to take, so the common case stays silent.
+    grace: graceNote(grace, active),
     completedCount,
     upcomingCount,
     deadHour: false,

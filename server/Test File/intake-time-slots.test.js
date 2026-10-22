@@ -44,6 +44,9 @@ const authMiddleware = require('../middleware/auth');
 const USER_ID = '507f1f77bcf86cd799439011';
 const OTHER_USER_ID = '507f1f77bcf86cd799439099';
 const ASSESSMENT_ID = '507f1f77bcf86cd7994390aa';
+// The plan this user had BEFORE the update. Rows ticked under it are what the
+// new plan must inherit — see the plan-sync tests at the bottom of this file.
+const PREVIOUS_ASSESSMENT_ID = '507f1f77bcf86cd7994390ab';
 
 /**
  * The plan day these rows are seeded under.
@@ -61,9 +64,37 @@ const ASSESSMENT_ID = '507f1f77bcf86cd7994390aa';
  * Derived from `planDayKey` rather than restated, so this suite cannot drift from
  * the rule it is testing. Same fix as Test File/admin-override.test.js.
  */
-const { planDayKey } = require('../utils/planDay');
+const { planDayKey, shiftDayKey } = require('../utils/planDay');
 
 const dayKey = () => planDayKey(new Date(), 'UTC');
+
+/** The plan day after the one running now. */
+const nextDayKey = () => shiftDayKey(dayKey(), 1);
+
+/**
+ * "Now", but pinned to the opening minute of the RUNNING plan day.
+ *
+ * The suite's stub assessment used to be created at `new Date()`, which is a clock
+ * reading rather than a fact about the plan — and it silently made every
+ * assertion below depend on what time of day the suite happened to run. That was
+ * already true of the plan-day key; adding the plan-arrival rule (see
+ * utils/planActivation.js) made it worse, because an assessment created "now" in
+ * the afternoon has a morning window that closed before it existed.
+ *
+ * 04:00 is the one instant on a plan day that is unambiguously the beginning of
+ * it: no window has closed, so there is nothing to forgive, and the backfill floor
+ * is today. Every test that wants a different activation passes its own instant.
+ */
+const planDayOpening = () => {
+  const [y, m, d] = dayKey().split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d, 4, 0, 0));
+};
+
+/** A UTC instant at `hour`:`minute` on the current plan day's calendar date. */
+const planDayAt = (hour, minute = 0) => {
+  const [y, m, d] = dayKey().split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d, hour, minute, 0));
+};
 
 /** The plan as the results page renders it, so the test mirrors a real plan. */
 const DAILY_SCHEDULE = [
@@ -101,6 +132,11 @@ function recordStore() {
           dosage: item.dosage || '',
           priority: item.priority || 'Medium',
           scheduledTime: item.scheduledTime || item.timing || 'Anytime',
+          // What the seeder stores, and what "is this dose missed?" is decided
+          // from (utils/intakeWindows.js). Passed through so a test can state the
+          // slot directly instead of relying on the wording of `scheduledTime`;
+          // left undefined, the real fallback to the text still applies.
+          timeSlot: item.timeSlot,
           taken: !!item.taken,
           takenAt: item.taken ? new Date() : null,
           date: new Date(),
@@ -135,6 +171,29 @@ function recordStore() {
         row.takenAt = update.$set.takenAt;
       }
       return { modifiedCount: hits.length };
+    },
+    /**
+     * The one Mongoose behaviour the plan seeder relies on: `$setOnInsert` on an
+     * upsert keyed by (user, assessment, supplementName, dayKey). Emulated rather
+     * than stubbed flat, because "a row that is already here keeps its tick" is
+     * the property that stops an Update replaying a dose the user took at 8 AM —
+     * a no-op bulkWrite would let the seeding tests pass for the wrong reason.
+     */
+    async bulkWriteUpsert(ops = []) {
+      for (const op of ops) {
+        const filter = op.updateOne.filter;
+        const exists = rows.some((row) => String(row.user) === String(filter.user)
+          && String(row.assessment) === String(filter.assessment)
+          && row.dayKey === filter.dayKey
+          && row.supplementName === filter.supplementName);
+        if (exists) continue;
+        rows.push({
+          _id: `507f1f77bcf86cd799439e${String(rows.length).padStart(2, '0')}`,
+          takenAt: null,
+          ...op.updateOne.update.$setOnInsert,
+        });
+      }
+      return { acknowledged: true, upsertedCount: ops.length };
     },
     /** The single-record endpoint saves a hydrated doc; write it back in place. */
     persist(row) {
@@ -176,7 +235,7 @@ function chainableQuery(source) {
 }
 
 /** Mount the real dashboard router with the DB stubbed out. */
-async function withDashboard(fn, { assessment } = {}) {
+async function withDashboard(fn, { assessment, emulateUpsert = false } = {}) {
   const originals = {
     assessmentFindOne: Assessment.findOne,
     intakeFind: IntakeRecord.find,
@@ -205,7 +264,7 @@ async function withDashboard(fn, { assessment } = {}) {
   const assessmentDoc = assessment === null ? null : (assessment || {
     _id: ASSESSMENT_ID,
     user: USER_ID,
-    createdAt: new Date(),
+    createdAt: planDayOpening(),
     aiResults: { recommendations: RECOMMENDATIONS, dailySchedule: DAILY_SCHEDULE },
   });
 
@@ -230,7 +289,12 @@ async function withDashboard(fn, { assessment } = {}) {
   };
   IntakeRecord.countDocuments = async (filter) => store.countDocuments(filter || {});
   IntakeRecord.updateMany = async (filter, update) => store.updateMany(filter, update);
-  IntakeRecord.bulkWrite = async () => ({ upsertedCount: 0 });
+  // Flat by default: most of this file seeds its day through `store.seed`, so a
+  // seeder that also wrote rows would change what those tests read. A test that
+  // is ABOUT the seeder passes `emulateUpsert` and gets the real behaviour.
+  IntakeRecord.bulkWrite = emulateUpsert
+    ? async (ops) => store.bulkWriteUpsert(ops)
+    : async () => ({ upsertedCount: 0 });
   DashboardMetrics.findOne = () => chainableQuery(metricsDoc);
   DashboardMetrics.create = async () => metricsDoc;
   DashboardMetrics.prototype.save = async function save() { return this; };
@@ -646,4 +710,270 @@ test('GET /my-plan carries the same slot grouping as GET /', async () => {
     assert.equal(byName['Magnesium Glycinate'].timeSlot, 'evening');
     assert.equal(byName['Omega-3 Fish Oil (EPA/DHA)'].timeSlot, 'morning');
   }, {});
+});
+
+// ── A PLAN IS NOT HELD TO A WINDOW THAT CLOSED BEFORE IT EXISTED ───────────
+//
+// The case in the bug report, end to end. A user completes an assessment in the
+// afternoon; the plan that comes back has a Morning stack whose window shut at
+// noon. Opening the dashboard must not dock their score for it, must not call it
+// missed, and must not backfill it as missed if they never come back. The unit
+// rule is asserted in Test File/plan-activation.test.js; these prove the ROUTE
+// actually passes the activation through — the wiring is the part a unit test
+// cannot reach.
+
+test('a plan created this afternoon is not charged for this morning', async () => {
+  // Three unticked doses across three frames, and the plan arrived at 15:00 —
+  // after Morning (04:00-12:00) closed, before Afternoon (12:00-18:00) shut.
+  store.seed([
+    { name: 'Omega-3 Fish Oil (EPA/DHA)', timeSlot: 'morning', taken: false },
+    { name: 'Vitamin D3 (Cholecalciferol)', timeSlot: 'morning', taken: false },
+    { name: 'Zinc Picolinate', timeSlot: 'afternoon', taken: false },
+    { name: 'Magnesium Glycinate', timeSlot: 'evening', taken: false },
+  ]);
+
+  await withDashboard(async ({ call }) => {
+    const { status, body } = await call('/');
+    assert.equal(status, 200);
+
+    // The two morning doses are still in the day — visible, and recordable.
+    const names = body.todaysSupplements.map((s) => s.name);
+    assert.ok(names.includes('Omega-3 Fish Oil (EPA/DHA)'), 'the morning dose is not hidden');
+    assert.ok(names.includes('Vitamin D3 (Cholecalciferol)'));
+
+    const today = body.stats.wellnessToday;
+    assert.equal(today.missed, 0, 'a window that closed before the plan existed cannot be missed');
+    assert.equal(today.exempt, 2, 'and the exemption is reported, not silently dropped');
+    assert.equal(today.penaltyPoints, 0, 'nothing to pay for doses the user was never given time for');
+    // Afternoon is open and Evening has not opened — two different situations,
+    // kept apart rather than folded into the exempted count.
+    assert.equal(today.awaiting, 2);
+
+    // The tracker lays the page out from this block, so the client cannot put the
+    // morning stack in a red tray while the score above it says nothing is missed.
+    assert.equal(body.planActivation.activatedDayKey, dayKey());
+    assert.deepEqual(body.planActivation.graceSlots, ['morning', 'anytime']);
+    assert.equal(body.planActivation.isGraceDay, true);
+    // Everything is judged normally from the next plan day — which is 4 AM
+    // tomorrow, not midnight, so the key is derived from the rule.
+    assert.equal(body.planActivation.firstJudgedDayKey, nextDayKey());
+  }, { assessment: { _id: ASSESSMENT_ID, user: USER_ID, createdAt: planDayAt(15), aiResults: { recommendations: RECOMMENDATIONS, dailySchedule: DAILY_SCHEDULE } } });
+});
+
+test('a plan created before its first window closed is still judged in full', async () => {
+  // The other side of the rule: nothing is forgiven for a plan that arrived
+  // before any window shut, so the exemption cannot become a quiet way to avoid
+  // the morning.
+  store.seed([
+    { name: 'Omega-3 Fish Oil (EPA/DHA)', timeSlot: 'morning', taken: false },
+    { name: 'Vitamin D3 (Cholecalciferol)', timeSlot: 'morning', taken: false },
+  ]);
+
+  await withDashboard(async ({ call }) => {
+    const { body } = await call('/');
+    assert.deepEqual(body.planActivation.graceSlots, []);
+    assert.equal(body.planActivation.isGraceDay, false);
+    assert.equal(body.planActivation.firstJudgedDayKey, dayKey());
+    assert.equal(body.stats.wellnessToday.exempt, 0);
+  }, { assessment: { _id: ASSESSMENT_ID, user: USER_ID, createdAt: planDayOpening(), aiResults: { recommendations: RECOMMENDATIONS, dailySchedule: DAILY_SCHEDULE } } });
+});
+
+test('the activation is sent even when there is nothing to forgive', async () => {
+  // A client that branches on the block must not have to guess whether it was
+  // omitted because nothing applied or because the server forgot.
+  store.seed([{ name: 'Magnesium Glycinate', taken: true }]);
+
+  await withDashboard(async ({ call }) => {
+    const { body } = await call('/');
+    assert.ok(body.planActivation, 'the block is always present on a real response');
+    assert.equal(typeof body.planActivation.activatedAt, 'string');
+    assert.deepEqual(body.planActivation.graceSlots, []);
+  }, {});
+});
+
+test('ticking a forgiven morning does not change what was forgiven', async () => {
+  // The exemption is anchored to the plan day, not to the state of the plan, so
+  // the recompute on POST /intake has to reach the same answer GET / did. If the
+  // recompute forgot the activation it would re-decide the afternoon of the very
+  // day the user was forgiven on, and the score would move under them.
+  store.seed([
+    { name: 'Omega-3 Fish Oil (EPA/DHA)', timeSlot: 'morning', taken: false },
+    { name: 'Zinc Picolinate', timeSlot: 'afternoon', taken: false },
+  ]);
+
+  const assessment = {
+    _id: ASSESSMENT_ID,
+    user: USER_ID,
+    createdAt: planDayAt(15),
+    aiResults: { recommendations: RECOMMENDATIONS, dailySchedule: DAILY_SCHEDULE },
+  };
+
+  await withDashboard(async ({ call }) => {
+    const before = (await call('/')).body.stats.wellnessToday;
+    assert.equal(before.exempt, 1);
+
+    const id = store.rows.find((r) => r.supplementName === 'Omega-3 Fish Oil (EPA/DHA)')._id;
+    const { status, body } = await call('/intake', { recordId: id, taken: true });
+    assert.equal(status, 200);
+
+    assert.equal(body.stats.wellnessToday.missed, 0, 'a taken morning dose is taken, not missed');
+    assert.equal(body.stats.wellnessToday.exempt, 0);
+    // The other frame is unticked and its window is open, so the day is still
+    // open work rather than complete — which is honest, and is what keeps the
+    // streak from being awarded on a partly-unreachable day.
+    assert.equal(body.stats.wellnessToday.awaiting, 1);
+    assert.equal(body.stats.todaysProgress.taken, 1);
+  }, { assessment });
+});
+
+test('the missed-day backfill does not resurrect the day the plan arrived on', async () => {
+  // The floor handed to the backfill is the plan's first fully-judged day, not
+  // the day it happened to be created. Asserted through the pointer the pass
+  // writes, since the stubbed bulkWrite does not materialise the rows: if the
+  // floor were the creation day, the pointer would move onto a day the user was
+  // never held to.
+  store.seed([]);
+
+  await withDashboard(async ({ call }) => {
+    const { body } = await call('/');
+    assert.equal(body.hasAssessment, true);
+    assert.equal(body.planActivation.firstJudgedDayKey, nextDayKey());
+    // Nothing was walked, so the pointer never advanced past today.
+    assert.equal(metricsDoc.lastBackfilledDay, undefined);
+  }, { assessment: { _id: ASSESSMENT_ID, user: USER_ID, createdAt: planDayAt(15), aiResults: { recommendations: RECOMMENDATIONS, dailySchedule: DAILY_SCHEDULE } } });
+});
+
+// ── THE DAY IS WRITTEN FROM THE PLAN, ONCE PER PLAN PER DAY ─────────────────
+//
+// Everything above hands the route a day that already exists. These tests let it
+// build one — the wiring in routes/dashboard.js → utils/todayPlanSync.js that a
+// unit test cannot reach. `emulateUpsert` makes the stub honour `$setOnInsert`,
+// which is what makes "the row that is already ticked keeps its tick" a real
+// assertion rather than a description of a no-op.
+
+const afternoonAssessment = () => ({
+  _id: ASSESSMENT_ID,
+  user: USER_ID,
+  createdAt: planDayAt(15),
+  aiResults: { recommendations: RECOMMENDATIONS, dailySchedule: DAILY_SCHEDULE },
+});
+
+test('GET / does not write a closed frame of an afternoon plan into today', async () => {
+  // The user's rule, end to end: an assessment made in the afternoon does not
+  // have to be taken for this morning; the Morning stack activates at the next
+  // 4 AM reset.
+  await withDashboard(async ({ call }) => {
+    const { status, body } = await call('/');
+    assert.equal(status, 200);
+
+    const names = body.todaysSupplements.map((s) => s.name);
+    assert.deepEqual(names.sort(), ['Magnesium Glycinate', 'Zinc Picolinate']);
+    assert.ok(!names.includes('Omega-3 Fish Oil (EPA/DHA)'), 'the morning the plan never saw is not today\'s row');
+
+    assert.equal(body.planDeferred.count, 2);
+    assert.deepEqual(body.planDeferred.items.map((i) => i.name).sort(),
+      ['Omega-3 Fish Oil (EPA/DHA)', 'Vitamin D3 (Cholecalciferol)']);
+    assert.equal(body.planDeferred.items[0].timeSlot, 'morning');
+    assert.equal(body.planDeferred.startsDayKey, nextDayKey(), 'and it says WHEN they start');
+    assert.equal(body.planDeferred.startsAtLabel, '4:00 AM');
+
+    // A day with nothing chargeable in it is not a failed day.
+    assert.equal(body.stats.wellnessToday.total, 2);
+    assert.equal(body.stats.wellnessToday.missed, 0);
+    assert.equal(body.stats.wellnessToday.exempt, 0, 'nothing to exempt: the forgiven frames were never written');
+  }, { assessment: afternoonAssessment(), emulateUpsert: true });
+});
+
+test('the deferred doses are reported on every load, not only the first', async () => {
+  // The rows are written once per plan per day; the LIST is a read of the plan,
+  // so it cannot expire when the write does. A user who refreshes at 9 PM must
+  // still see the Morning they are being given until tomorrow.
+  await withDashboard(async ({ call }) => {
+    const first = (await call('/')).body;
+    assert.equal(first.planDeferred.count, 2);
+
+    const again = (await call('/')).body;
+    assert.equal(again.planDeferred.count, 2);
+    assert.deepEqual(again.todaysSupplements.map((s) => s.name).sort(), first.todaysSupplements.map((s) => s.name).sort());
+  }, { assessment: afternoonAssessment(), emulateUpsert: true });
+});
+
+test('GET / adds what an Update put into the plan beside the rows already there', async () => {
+  // The bug the old `todayIntakeRecords.length === 0` guard shipped: the day was
+  // only ever seeded when it was empty, so a supplement added by updating the
+  // assessment never reached the page.
+  store.seed([{ name: 'Zinc Picolinate', timeSlot: 'afternoon', taken: false }]);
+
+  await withDashboard(async ({ call }) => {
+    const { body } = await call('/');
+    const names = body.todaysSupplements.map((s) => s.name);
+    assert.ok(names.includes('Magnesium Glycinate'), 'the rest of the plan is written beside the row that was here');
+    assert.equal(names.filter((n) => n === 'Zinc Picolinate').length, 1, 'and the existing row is not duplicated');
+  }, {
+    assessment: {
+      ...afternoonAssessment(),
+      createdAt: planDayAt(4, 30),
+    },
+    emulateUpsert: true,
+  });
+});
+
+test('GET / keeps a dose ticked under the replaced plan ticked', async () => {
+  // "Hindi na kailangan itake ulit yung mga natake na." The tick lives on the OLD
+  // assessment's row for this plan day — the history migration may not have run,
+  // or may have failed — and the new plan must not ask for the pill a second time.
+  const takenAt = planDayAt(8, 5);
+  store.seed([
+    { name: 'Omega-3 Fish Oil (EPA/DHA)', timeSlot: 'morning', taken: true },
+    { name: 'Zinc Picolinate', timeSlot: 'afternoon', taken: false },
+  ]);
+  // Move the morning tick onto a row the new assessment cannot see.
+  store.rows[0].assessment = PREVIOUS_ASSESSMENT_ID;
+  store.rows[0].takenAt = takenAt;
+
+  await withDashboard(async ({ call }) => {
+    const { body } = await call('/');
+    const omega = body.todaysSupplements.find((s) => s.name === 'Omega-3 Fish Oil (EPA/DHA)');
+    assert.ok(omega, 'the dose taken today is still on today\'s page');
+    assert.equal(omega.taken, true, 'taken, not re-asked');
+    assert.equal(new Date(omega.takenAt).getTime(), takenAt.getTime(), 'with the hour it was actually taken at');
+    assert.equal(body.planDeferred.count, 1, 'and the other morning dose is the one that waits');
+  }, { assessment: afternoonAssessment(), emulateUpsert: true });
+});
+
+test('a dose already on the page is never also listed as deferred', async () => {
+  // Either today's row or tomorrow's start — the same card must not appear twice.
+  store.seed([{ name: 'Omega-3 Fish Oil (EPA/DHA)', timeSlot: 'morning', taken: false }]);
+
+  await withDashboard(async ({ call }) => {
+    const { body } = await call('/');
+    assert.ok(body.todaysSupplements.some((s) => s.name === 'Omega-3 Fish Oil (EPA/DHA)'));
+    assert.ok(!body.planDeferred.items.some((i) => i.name === 'Omega-3 Fish Oil (EPA/DHA)'));
+    assert.equal(body.planDeferred.count, 1);
+  }, { assessment: afternoonAssessment(), emulateUpsert: true });
+});
+
+test('a plan made before noon writes its whole day and defers nothing', async () => {
+  await withDashboard(async ({ call }) => {
+    const response = await call('/');
+    assert.equal(response.body.todaysSupplements.length, 4);
+    assert.equal(response.body.planDeferred.count, 0);
+    assert.deepEqual(response.body.planDeferred.items, []);
+    assert.ok(response.body.planDeferred.startsAt, 'the block is well-formed even when it is empty');
+  }, {
+    assessment: { ...afternoonAssessment(), createdAt: planDayAt(9) },
+    emulateUpsert: true,
+  });
+});
+
+test('a dashboard with no assessment still answers with an empty deferred block', async () => {
+  // A client reads `planDeferred.count` without a null check on every response.
+  await withDashboard(async ({ call }) => {
+    const { status, body } = await call('/');
+    assert.equal(status, 200);
+    assert.equal(body.hasAssessment, false);
+    assert.equal(body.planDeferred.count, 0);
+    assert.deepEqual(body.planDeferred.items, []);
+    assert.equal(body.planDeferred.startsAtLabel, '4:00 AM');
+  }, { assessment: null });
 });

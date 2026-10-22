@@ -8,11 +8,20 @@ const {
   Wallet,
 } = require('../../models/Web3');
 const engine = require('../../blockchain/engine');
-const { round2, sha256Hex } = require('../../blockchain/crypto');
+const { round2, sha256Hex, strictNumber } = require('../../blockchain/crypto');
 const { escrowSplit, disputeOutcome } = require('../../blockchain/rules');
 const { requireFeature } = require('../../utils/entitlements');
 
 const router = express.Router();
+
+// How long a dispute may sit holding its payout reservation before another
+// trigger is allowed to take it over. Generous enough that a slow-but-live
+// settlement is never stolen from, short enough that a process that died
+// mid-payout self-heals on the next dispute read instead of staying stuck
+// forever. The escrow claim inside the settle helpers is what actually makes
+// the takeover safe — the worst a thief of a live reservation can do is lose the
+// race and get ALREADY_SETTLED, never pay twice.
+const RESOLVING_STALE_MS = 60 * 1000;
 
 function userOnly(req, res, next) {
   if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
@@ -137,6 +146,16 @@ async function refundEscrow(order) {
   await order.save();
   // Return stock so a refunded order doesn't permanently eat inventory.
   await Listing.updateOne({ _id: order.listing }, { $inc: { stock: order.qty } }).catch(() => {});
+  // Return the loyalty code too. The buyer got every WELL of the order back, so
+  // the discount the code paid for is no longer a discount they actually spent —
+  // leaving it burnt meant one refunded order permanently destroyed a code the
+  // user had paid real WELL to mint.
+  if (order.discountCode) {
+    await LoyaltyCode.updateOne(
+      { code: order.discountCode, status: 'redeemed', redeemedOrder: order._id },
+      { $set: { status: 'unused', redeemedBy: null }, $unset: { redeemedOrder: 1 } }
+    ).catch(() => {});
+  }
   return { amount: order.total, txHash };
 }
 
@@ -157,9 +176,47 @@ async function selectJurors(order, excludeAddresses) {
   return staked.map((w) => w.address);
 }
 
+// Apply a verdict to the escrow. The ORDER is the thing that must move exactly
+// once, and it already guards itself with an atomic escrow→settled claim, so
+// this helper is what turns "the verdict exists" into "the money has moved".
+//
+// Re-reads the order first: `order` handed to tryResolve is often a snapshot
+// taken before the votes were cast, and a retry has to act on the CURRENT row
+// rather than decide from stale state.
+async function settleDisputeEscrow(order, outcome) {
+  const target = outcome === 'buyer' ? 'refunded' : 'released';
+  const live = await Order.findById(order._id);
+  if (!live) {
+    // The order row is gone. There is no escrow left to move and no way to
+    // ever move it, so retrying forever would be pointless — report it as a
+    // terminal condition and let the caller close the dispute with a note.
+    return { txHash: '', unexecutable: 'The order behind this dispute no longer exists.' };
+  }
+  // An earlier attempt already settled it (a retry after a partial failure, or
+  // a racing trigger that won the claim). The money has moved; all that is left
+  // is closing the dispute record. Treating this as success is what makes the
+  // retry path below safe instead of a permanent loop on ALREADY_SETTLED.
+  if (live.status === target) return { txHash: live.settleTx || '' };
+  if (live.status !== 'escrow') {
+    // Settled some OTHER way before the verdict could be applied — delivered and
+    // released while the dispute was being filed. The escrow is gone, so this
+    // verdict can never execute. Report it rather than retrying forever.
+    return {
+      txHash: live.settleTx || '',
+      unexecutable: `The order had already been settled as "${live.status}" before this verdict could be applied.`,
+    };
+  }
+  if (outcome === 'buyer') {
+    const refund = await refundEscrow(live);
+    return { txHash: refund.txHash };
+  }
+  const settle = await releaseEscrow(live, 'dispute→seller');
+  return { txHash: settle.txHash || live.settleTx };
+}
+
 // Try to finalize a dispute: majority verdict once every juror voted (or a
 // single clear verdict in an open jury). Payout happens exactly once, guarded
-// by the status transition to 'resolved'.
+// by the atomic escrow→settled claim inside the settle helpers.
 async function tryResolve(dispute, order) {
   if (dispute.status !== 'open') return null;
   const verdict = disputeOutcome(dispute.votes, dispute.jurors);
@@ -171,34 +228,69 @@ async function tryResolve(dispute, order) {
   if (!verdict.outcome) return null;
   const outcome = verdict.outcome;
 
-  // Atomic open→resolved claim: concurrent triggers (the vote POST plus lazy
-  // dispute-list GETs) can never both execute the payout.
+  // Claim the payout slot BEFORE moving money, so of N concurrent triggers
+  // (the vote POST plus lazy dispute-list GETs) exactly one runs the payout.
+  // This is a reservation, not a verdict: the dispute stays 'open' until the
+  // escrow has actually moved (see below).
   const claim = await Dispute.updateOne(
-    { _id: dispute._id, status: 'open' },
-    { $set: { status: 'resolved', outcome, resolvedAt: Date.now() } }
+    { _id: dispute._id, status: 'open', $or: [{ resolvingSince: 0 }, { resolvingSince: { $lt: Date.now() - RESOLVING_STALE_MS } }] },
+    { $set: { resolvingSince: Date.now() } }
   );
   if (claim.modifiedCount !== 1) return null;
+
+  let txHash = '';
+  let note = '';
+  try {
+    const settled = await settleDisputeEscrow(order, outcome);
+    txHash = settled.txHash;
+    note = settled.unexecutable || '';
+  } catch (err) {
+    // The verdict could not be turned into a payout. Releasing the reservation
+    // here is what keeps the dispute retryable: the votes are unchanged, so
+    // recomputing the verdict yields the same outcome and the next trigger
+    // (a further vote, or any dispute-list read) re-applies it. Claiming
+    // 'resolved' first and swallowing the error is what locked the buyer's
+    // escrowed WELL in the pool forever — nothing could ever retry it, and the
+    // UI reported a settlement that never happened.
+    console.error('[web3 dispute payout]', dispute._id, err.message);
+    await Dispute.updateOne(
+      { _id: dispute._id, status: 'open' },
+      { $set: { resolvingSince: 0 } }
+    ).catch(() => {});
+    return null;
+  }
+
+  // Escrow has moved (or was unrecoverably absent). Only NOW is the dispute
+  // genuinely closed — and only now may the jurors be paid, because they are
+  // paid for deciding it, not for a settlement that never happened. A verdict
+  // that could not execute pays nobody: there was no work delivered.
   dispute.status = 'resolved';
   dispute.outcome = outcome;
   dispute.resolvedAt = Date.now();
-
-  let txHash = '';
-  try {
-    if (outcome === 'buyer') {
-      const refund = await refundEscrow(order);
-      txHash = refund.txHash;
-    } else if (outcome === 'seller') {
-      const settle = await releaseEscrow(order, 'dispute→seller');
-      txHash = settle.txHash || order.settleTx;
+  dispute.resolvedTx = txHash;
+  dispute.note = note;
+  // Targeted update (not a full-doc save) so a concurrent juror vote pushed
+  // meanwhile is never overwritten away.
+  await Dispute.updateOne(
+    { _id: dispute._id },
+    {
+      $set: {
+        status: 'resolved', outcome, resolvedTx: txHash,
+        resolvedAt: dispute.resolvedAt, resolvingSince: 0, note,
+      },
     }
-  } catch (err) {
-    // The dispute is already claimed resolved — a payout failure is logged
-    // and retried via ops, never turned into a 500 or a second payout.
-    console.error('[web3 dispute payout]', err.message);
+  );
+  if (note) {
+    // Unexecutable verdict: the escrow was already gone, so the jurors get no
+    // bounty and an operator sees exactly why in the dispute record.
+    console.error('[web3 dispute unexecutable]', dispute._id, note);
+    return outcome;
   }
 
   // Jurors are paid for their work (feature 15), once per resolved dispute —
-  // minted straight to the juror's wallet address.
+  // minted straight to the juror's wallet address. grantReward is idempotent on
+  // (user, 'juror', disputeId), so a racing trigger that also reached this point
+  // cannot pay anybody twice.
   const cfg = await engine.getConfig();
   const jurorSet = dispute.jurors.length
     ? dispute.jurors
@@ -224,13 +316,9 @@ async function tryResolve(dispute, order) {
         });
       }
     } catch (err) {
-      console.error('[web3 juror payout]', err.message);
+      console.error('[web3 juror payout]', juror, err.message);
     }
   }
-  // Targeted update (not a full-doc save) so a concurrent juror vote pushed
-  // meanwhile is never overwritten away.
-  dispute.resolvedTx = txHash;
-  await Dispute.updateOne({ _id: dispute._id }, { $set: { resolvedTx: txHash } }).catch(() => {});
   return outcome;
 }
 
@@ -261,8 +349,11 @@ router.post('/market/listings', async (req, res) => {
     const description = String(req.body.description || '').slice(0, 2000);
     const brand = String(req.body.brand || '').slice(0, 80);
     const category = String(req.body.category || 'Other');
-    const priceWell = round2(Number(req.body.priceWell));
-    const stock = parseInt(req.body.stock, 10);
+    const priceWell = round2(strictNumber(req.body.priceWell));
+  // Strict numeric parse, matching POST /market/orders: parseInt silently
+  // truncated "3abc" → 3 and 3.9 → 3, so a malformed or fractional stock figure
+  // silently became a different, real listing instead of being rejected.
+    const stock = strictNumber(req.body.stock);
     if (title.length < 4) return res.status(400).json({ message: 'Title must be at least 4 characters.' });
     if (!Number.isFinite(priceWell) || !(priceWell > 0)) {
       return res.status(400).json({ message: 'Price must be greater than zero.' });
@@ -309,7 +400,7 @@ router.post('/market/orders', async (req, res) => {
     const listingId = String(req.body.listingId || '');
     // Strict numeric parse: parseInt used to silently truncate 1.5 → 1 (and
     // "1.5" too) — fractional/NaN quantities must be rejected outright.
-    const qty = Number(req.body.qty);
+    const qty = strictNumber(req.body.qty);
     if (!mongoose.isValidObjectId(listingId)) return res.status(400).json({ message: 'Invalid listing.' });
     if (!Number.isInteger(qty) || qty < 1 || qty > 100) return res.status(400).json({ message: 'Quantity must be 1–100.' });
 
@@ -493,6 +584,20 @@ router.post('/market/orders/:id/dispute', async (req, res) => {
     const jurors = await selectJurors(order, [order.buyerAddress, order.sellerAddress]);
     const dispute = await Dispute.create({ order: order._id, opener: req.user._id, reason, jurors });
 
+    // Close the confirm/dispute race. The escrow-status check above and this
+    // insert are separate operations, so a buyer firing `confirm` and `dispute`
+    // at the same moment could get the order released in between — leaving a
+    // dispute whose verdict can never execute. Re-read the order and undo the
+    // insert if it already left escrow, so the failure is a clean 400 rather
+    // than a permanently unresolvable dispute.
+    const recheck = await Order.findById(order._id).select('status').lean();
+    if (!recheck || recheck.status !== 'escrow') {
+      await Dispute.deleteOne({ _id: dispute._id }).catch(() => {});
+      return res.status(400).json({
+        message: 'This order was settled before the dispute could be opened.',
+      });
+    }
+
     const wallet = await engine.getWalletDoc(req.user._id);
     await engine.anchor('dispute:open', wallet.address, {
       public: { order: String(order._id), dispute: String(dispute._id), jurors: jurors.length },
@@ -584,6 +689,10 @@ function shape(dispute, order, myAddress, myStaked = 0) {
     reason: dispute.reason,
     status: dispute.status,
     outcome: dispute.outcome,
+    // Set when the verdict could not be turned into a payout (the escrow was
+    // already gone). Surfaced so the UI can explain a resolution that settled
+    // no money instead of silently showing a normal win.
+    note: dispute.note || '',
     jurors: dispute.jurors,
     votes: dispute.votes,
     canVote: dispute.status === 'open' && isJuror && !hasVoted && !needsStake,

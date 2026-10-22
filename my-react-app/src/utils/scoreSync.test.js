@@ -73,3 +73,57 @@ test('the tone follows the misses and nothing else', () => {
   assert.equal(scoreSyncTone(day({ missed: 0 })), 'ok');
   assert.equal(scoreSyncTone(day({ missed: 0, penaltyPoints: 3 })), 'ok', 'a stale penalty must not paint a penalty');
 });
+
+// ── The plan-arrival exemption ──────────────────────────────────────────────
+
+test('a plan created mid-day says why its early doses are not missed', () => {
+  // Without this, a user who completed an assessment at 3 PM opens their first
+  // dashboard, sees a stack of morning doses they were never on time for, and is
+  // told "In step — nothing has closed yet". That is a sentence about a day the
+  // clock already disagrees with, and it reads as a bug.
+  const line = scoreSyncLine({ total: 5, taken: 2, missed: 0, awaiting: 1, exempt: 2, penaltyPoints: 0 });
+  assert.match(line, /plan started mid-day/);
+  assert.match(line, /2 doses from earlier are not held against you/);
+  assert.match(line, /1 still open/);
+  // And it points at what the user actually wants to know: from when it counts.
+  assert.match(line, /from tomorrow/);
+  assert.doesNotMatch(line, /missed/i);
+  assert.equal(scoreSyncTone({ missed: 0, exempt: 2 }), 'ok', 'an exemption is not a penalty');
+});
+
+test('an exempt-only day with nothing left says the plan runs from tomorrow', () => {
+  const line = scoreSyncLine({ total: 3, taken: 0, missed: 0, awaiting: 0, exempt: 3, penaltyPoints: 0 });
+  assert.match(line, /3 doses from earlier/);
+  assert.match(line, /runs normally from tomorrow/);
+});
+
+test('an exempt-only day where the rest is taken says exactly that', () => {
+  const line = scoreSyncLine({ total: 4, taken: 2, missed: 0, awaiting: 0, exempt: 2, penaltyPoints: 0 });
+  assert.match(line, /2 doses from earlier/);
+  assert.match(line, /Everything else is taken\./);
+});
+
+test('a real miss is still reported when the plan also has forgiven frames', () => {
+  // The exemption lifts the charge on the frames that closed before the plan
+  // existed; it must not swallow the ones the user WAS given time for. This is a
+  // plan created at 3 PM that never took its evening dose.
+  const line = scoreSyncLine({ total: 6, taken: 2, missed: 1, awaiting: 1, exempt: 2, penaltyPoints: 8 });
+  assert.match(line, /^1 dose missed after their window closed, costing you 8 points\./);
+  assert.match(line, /1 still open/);
+  assert.match(line, /2 doses from before your plan started are not counted against you\./);
+  assert.equal(scoreSyncTone({ missed: 1, exempt: 2 }), 'penalty');
+});
+
+test('the exemption sentence agrees with its own number', () => {
+  assert.match(scoreSyncLine({ total: 1, exempt: 1, taken: 0, awaiting: 0 }), /1 dose from earlier/);
+});
+
+test('a missing or junky exemption is treated as none', () => {
+  // The block is additive, so an older server sends nothing at all. It must read
+  // as "no exemption", not as a NaN in the middle of the sentence.
+  for (const exempt of [undefined, null, 'x', -2, NaN, {}]) {
+    const line = scoreSyncLine({ total: 2, taken: 0, missed: 0, awaiting: 2, exempt, penaltyPoints: 0 });
+    assert.match(line, /2 still open/);
+    assert.doesNotMatch(line, /NaN|undefined|mid-day/);
+  }
+});

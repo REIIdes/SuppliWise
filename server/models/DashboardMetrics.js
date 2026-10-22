@@ -44,6 +44,15 @@ const dashboardMetricsSchema = new mongoose.Schema(
     lastBackfilledDay: {
       type: String, // YYYY-MM-DD format
     },
+    // The last plan the day's rows were written from (utils/todayPlanSync.js).
+    // A marker, not a cache: seeding on every load would resurrect supplements
+    // the user removed through POST /remove-supplement, because those rows are
+    // hard-deleted while the plan still names them. One sync per plan per plan
+    // day is what lets an Update add its new doses without undoing a removal.
+    planSynced: {
+      assessment: { type: String },
+      dayKey: { type: String }, // YYYY-MM-DD format
+    },
     streakAwardedToday: {
       type: Boolean,
       default: false, // Prevents multiple +1 in the same day

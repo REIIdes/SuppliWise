@@ -81,6 +81,18 @@ router.post('/trials/:id/optin', async (req, res) => {
     if (existing && existing.status === 'opted-in') {
       return res.status(400).json({ message: 'You already have an active consent record for this trial.' });
     }
+    // Enforce the trial's participant cap. `spots` was declared on the schema
+    // and shown nowhere in the UI, so a "100-participant" study accepted
+    // unlimited volunteers — the cap was documentation, not behaviour.
+    if (existing) {
+      // A re-consent (withdraw → opt in again) already holds a seat, so it must
+      // not consume another one.
+    } else {
+      const enrolled = await TrialConsent.countDocuments({ trial: trial._id, status: 'opted-in' });
+      if (enrolled >= (Number(trial.spots) || 0)) {
+        return res.status(400).json({ message: 'This trial has no places left.' });
+      }
+    }
     const consent =
       existing ||
       new TrialConsent({ user: req.user._id, trial: trial._id });
@@ -105,10 +117,23 @@ router.post('/trials/:id/optin', async (req, res) => {
     // Persist what was actually paid. The schema field was never written, so
     // GET /trials reported consent.reward = 0 for every participant even though
     // the WELL had been credited.
-    consent.reward = reward.amount;
-    consent.rewardTx = reward.txHash || '';
+    //
+    // Only overwrite on an actual payout. grantReward is keyed on the TRIAL id,
+    // so a withdraw → re-consent cycle is correctly idempotent and returns
+    // {alreadyClaimed: true, amount: 0}. Writing that back unconditionally
+    // erased the real payout record, and GET /trials (which surfaces
+    // consent.reward) then reported a reward of 0 for a trial the user HAD been
+    // paid for — permanently, because the claim can never be replayed.
+    if (reward.amount > 0) {
+      consent.reward = reward.amount;
+      consent.rewardTx = reward.txHash || '';
+    }
     await consent.save();
-    res.status(201).json({ consent, reward: reward.amount });
+    res.status(201).json({
+      consent,
+      reward: reward.amount,
+      rewardPreviouslyClaimed: reward.amount === 0 && (consent.reward > 0),
+    });
   } catch (error) {
     console.error('[web3 POST /trials/:id/optin]', error.message);
     res.status(500).json({ message: 'Could not record your consent.' });
@@ -215,7 +240,7 @@ router.post('/experts/:id/book', async (req, res) => {
     if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid professional.' });
     const expert = await Expert.findOne({ _id: req.params.id, active: true });
     if (!expert) return res.status(404).json({ message: 'Professional not found.' });
-    const hours = parseInt(req.body.hours, 10);
+    const hours = strictNumber(req.body.hours);
     if (!Number.isInteger(hours) || hours < 1 || hours > 8) {
       return res.status(400).json({ message: 'Hours must be between 1 and 8.' });
     }
@@ -235,26 +260,43 @@ router.post('/experts/:id/book', async (req, res) => {
       status: 'pending',
     });
 
-    let payment;
+    // The payment AND the save that records it are one all-or-nothing unit.
+    //
+    // Only the transfer was guarded before. A failure of the `save()` that
+    // follows left the WELL in the expert pool with the booking stuck at
+    // 'pending' — and POST /bookings/:id/cancel filters on status 'confirmed',
+    // so no code path could ever reach it. The user's money was gone with no
+    // refund and no way to ask for one.
+    let paid = false;
     try {
-      payment = await engine.transfer({
+      const payment = await engine.transfer({
         from: wallet.address,
         to: 'sw_system_expert_pool',
         amount: cost,
         type: 'consult:book',
         public: { expert: expert.name, hours, cost },
       });
+      paid = true;
+      booking.status = 'confirmed';
+      booking.txHash = payment.txHash;
+      await booking.save();
+      return res.status(201).json({ booking, txHash: payment.txHash, balance: payment.fromBalance });
     } catch (err) {
-      // Payment failed — drop the un-paid booking rather than leaving a
-      // 'pending' row no one can ever settle or cancel.
-      await Booking.deleteOne({ _id: booking._id, status: 'pending' }).catch(() => {});
+      if (paid) {
+        // Money already moved — hand it straight back before unwinding the row.
+        await engine.transfer({
+          from: 'sw_system_expert_pool',
+          to: wallet.address,
+          amount: cost,
+          type: 'consult:refund',
+          public: { booking: String(booking._id), reason: 'booking confirmation failed' },
+        }).catch((revErr) => console.error('[web3 booking reversal]', revErr.message));
+      }
+      // Drop the row either way: an un-paid 'pending' booking is dead weight,
+      // and a paid one has just been refunded.
+      await Booking.deleteOne({ _id: booking._id }).catch(() => {});
       throw err;
     }
-
-    booking.status = 'confirmed';
-    booking.txHash = payment.txHash;
-    await booking.save();
-    res.status(201).json({ booking, txHash: payment.txHash, balance: payment.fromBalance });
   } catch (error) {
     if (error.code && typeof error.code === 'string') {
       return res.status(400).json({ message: error.message, code: error.code });

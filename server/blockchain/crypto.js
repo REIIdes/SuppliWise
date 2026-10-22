@@ -203,6 +203,24 @@ function round2(n) {
   return Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 }
 
+// Strict parse of a user-supplied money/quantity field.
+//
+// `Number(x)` alone is NOT validation: it coerces `true` to 1 and `null` to 0,
+// so a JSON body of `{ priceWell: true }` produced a real listing priced at 1
+// WELL. It also accepts `""` as 0. `parseInt` is worse — it truncates "3abc" to
+// 3 and 3.9 to 3, so a malformed figure quietly became a different real value.
+//
+// Returns NaN for anything that is not a finite number or a non-empty numeric
+// string, which every caller's existing `Number.isFinite` guard rejects.
+function strictNumber(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : NaN;
+  if (typeof value !== 'string') return NaN;
+  const trimmed = value.trim();
+  if (trimmed === '') return NaN;
+  const n = Number(trimmed);
+  return Number.isFinite(n) ? n : NaN;
+}
+
 module.exports = {
   stableStringify,
   sha256Hex,
@@ -222,4 +240,5 @@ module.exports = {
   base32Encode,
   dayKey,
   round2,
+  strictNumber,
 };

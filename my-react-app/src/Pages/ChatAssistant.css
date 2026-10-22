@@ -812,6 +812,34 @@
 .chat-bubble.chat-error .md-ul,
 .chat-bubble.chat-error .md-ol { color: inherit; }
 
+/* A reply the provider cut off at its output ceiling. Deliberately NOT the
+   error treatment above: nothing failed, and painting it orange teaches members
+   to ignore the orange. The bubble is left intact and only the rail changes, so
+   the answer reads as an answer with a visible end marker rather than as a
+   problem — which is what it is. */
+.chat-bubble.chat-truncated {
+  border-bottom-right-radius: 5px;
+  box-shadow: inset 0 -2px 0 0 rgba(100, 116, 139, 0.28);
+}
+.chat-truncated-note {
+  margin: 10px 0 0;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(100, 116, 139, 0.3);
+  font-size: 12px;
+  line-height: 1.5;
+  color: #64748b;
+}
+.chat-truncated-note::before {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: #94a3b8;
+  vertical-align: middle;
+}
+
 /* ── Markdown elements inside bubbles ── */
 .md-p {
   margin: 0 0 6px 0;

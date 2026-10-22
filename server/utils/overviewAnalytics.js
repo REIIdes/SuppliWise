@@ -34,6 +34,15 @@ const TREND_BUCKET_DAYS = 30;
 const RANKED_LIST_LIMIT = 6;
 
 /**
+ * Longest symptom or supplement name the learned co-occurrence prior may carry.
+ *
+ * These are read back out of stored documents into a prompt, so the bound is
+ * about what may be SENT, not only about memory. A 10 KB string in a `symptoms`
+ * array must not be able to become a bullet in a third-party request.
+ */
+const MAX_SIGNAL_LENGTH = 64;
+
+/**
  * Coerce an aggregate bucket count to a non-negative integer.
  *
  * `$group` on a sparse collection returns `null` when every matched document was
@@ -427,6 +436,121 @@ function listValueMonthly(planBreakdown) {
 }
 
 /**
+ * Is the AI second opinion earning the review-queue space it takes?
+ *
+ * `priorityFlagging.js` runs a model on the clinical submit path so it can catch
+ * concern the keyword lists miss — and until the flag's ORIGIN was recorded
+ * (`Assessment.flagSource`), a rules flag and a rules+AI flag were the same
+ * document, so there was no way to tell afterwards which ones the model caused.
+ * That made the layer permanently unfalsifiable: its whole justification is "it
+ * catches what the rules miss", and nothing could ever confirm or refute that.
+ *
+ * This is the measurement. Of the flags the model alone raised, how many did an
+ * admin go on to release? A flag is counted as UPHELD when an admin cleared the
+ * Priority back to Standard; released-without-a-resolution-reason is treated as
+ * "no admin verdict recorded" and excluded rather than assumed either way, so
+ * the figure cannot be inflated by rows nobody actually looked at.
+ *
+ * WHAT THIS DELIBERATELY DOES NOT DO
+ * ---------------------------------
+ * It does not move `ESCALATION_MIN_CONFIDENCE`, or any other threshold. A safety
+ * gate that silently retunes itself on live clinical outcomes, with no test and
+ * no human in the loop, is the exact failure mode that layer's own header warns
+ * about — and a precision figure computed from a few dozen rows is not evidence
+ * enough to justify it. The number is for a human to read and then act on.
+ *
+ * @param {Date} since
+ * @returns {object[]} a Mongo aggregation pipeline
+ */
+function calibrationPipeline(since) {
+  const floor = since instanceof Date && !Number.isNaN(since.getTime()) ? since : new Date(0);
+  return [
+    // Only rows whose provenance is actually recorded. A pre-field assessment
+    // would otherwise land in `rules` and quietly improve the precision of the
+    // model's own record.
+    { $match: { flagSource: { $in: ['rules', 'rules+ai'] }, flaggedAt: { $gte: floor } } },
+    {
+      $facet: {
+        // Flags the model ALONE raised. The denominator of the whole question.
+        aiEscalations: [
+          { $match: { flagSource: 'rules+ai' } },
+          { $count: 'n' },
+        ],
+        // …of those, ones an admin released instead of confirming.
+        aiReleased: [
+          {
+            $match: {
+              flagSource: 'rules+ai',
+              resolvedAt: { $ne: null },
+              priority: 'Standard',
+            },
+          },
+          { $count: 'n' },
+        ],
+        // Excluded from both: the AI escalated but nobody has resolved the flag
+        // yet. Surfaced so the panel can say "9 of 20 still open" rather than
+        // quietly reporting precision over the 11 that are decided.
+        aiOpen: [
+          { $match: { flagSource: 'rules+ai', resolvedAt: null } },
+          { $count: 'n' },
+        ],
+        // The rules-only baseline, so the AI's precision can be read against the
+        // rate at which the deterministic engine's own flags are released. A
+        // model that flags at 90% precision when the rules run at 99% is adding
+        // load, not coverage.
+        rulesEscalations: [
+          { $match: { flagSource: 'rules' } },
+          { $count: 'n' },
+        ],
+        rulesReleased: [
+          {
+            $match: { flagSource: 'rules', resolvedAt: { $ne: null }, priority: 'Standard' },
+          },
+          { $count: 'n' },
+        ],
+      },
+    },
+  ];
+}
+
+/**
+ * Read the single faceted row a calibration pipeline produces.
+ *
+ * `precisionPct` is deliberately `null` rather than 0 or 100 when nothing has
+ * been decided yet. "No AI escalations recorded" is a fact about a young
+ * deployment, not a score of zero, and a panel that renders 0% would be
+ * reporting a failing model that has never run.
+ *
+ * @param {unknown} rows
+ * @returns {{aiEscalations: number, aiReleased: number, aiOpen: number,
+ *            aiPrecisionPct: number|null, rulesEscalations: number,
+ *            rulesReleased: number, rulesPrecisionPct: number|null}}
+ */
+function calibrationFrom(rows) {
+  const block = (Array.isArray(rows) ? rows[0] : null) || {};
+  const aiEscalations = facetCount(block.aiEscalations);
+  const aiReleased = facetCount(block.aiReleased);
+  const rulesEscalations = facetCount(block.rulesEscalations);
+  const rulesReleased = facetCount(block.rulesReleased);
+  const decided = aiEscalations - facetCount(block.aiOpen);
+  return {
+    aiEscalations,
+    aiReleased,
+    aiOpen: facetCount(block.aiOpen),
+    aiDecided: Math.max(0, decided),
+    // Precision over DECIDED escalations only — an open flag is not a failure, and
+    // counting it as one would understate the model for being early rather than
+    // wrong.
+    aiPrecisionPct: decided > 0 ? Math.round(((decided - aiReleased) / decided) * 100) : null,
+    rulesEscalations,
+    rulesReleased,
+    rulesPrecisionPct: rulesEscalations > 0
+      ? Math.round(((rulesEscalations - rulesReleased) / rulesEscalations) * 100)
+      : null,
+  };
+}
+
+/**
  * Activation: how many members have EVER produced an assessment, as a share of
  * the member count.
  *
@@ -445,9 +569,158 @@ function activationOf(assessors, totalUsers) {
   return { members, pct: users > 0 ? Math.round((members / users) * 100) : 0 };
 }
 
+/**
+ * The learned symptom→supplement co-occurrence prior, from the real corpus.
+ *
+ * WHAT THIS IS
+ * ------------
+ * A COUNT, not a model. For every assessment that actually carries a generated
+ * plan, tally which supplements appeared alongside which symptoms, then smooth.
+ * Over time this becomes the one signal in the retrieval layer that reflects what
+ * THIS population presents rather than what a hand-written table assumes.
+ *
+ * WHY COUNTING AND NOT TRAINING
+ * -----------------------------
+ * A supplement recommendation is a clinical judgement. There is no label set in
+ * this repository to train on, and self-training on a model's own output about
+ * health is how a system comes to hold a wrong belief confidently and at scale.
+ * A count is auditable — you can read it, question it, and recompute it — and it
+ * is used only to ORDER a vetted shortlist, never to introduce an item that is
+ * not already in the catalog.
+ *
+ * The smoothing divisor is the strongest co-occurrence in the same document, not
+ * a global constant: a member who selected nine symptoms would otherwise
+ * contribute nine times the evidence of a member who selected one, purely
+ * because the form is longer. Normalising within a document keeps the prior a
+ * statement about CO-OCCURRENCE ("these travel together") rather than about
+ * popularity ("somebody once reported these").
+ *
+ * @param {Date} since
+ * @returns {object[]} a Mongo aggregation pipeline
+ */
+function cooccurrencePipeline(since) {
+  const floor = since instanceof Date && !Number.isNaN(since.getTime()) ? since : new Date(0);
+  return [
+    { $match: { createdAt: { $gte: floor } } },
+    { $unwind: '$symptoms' },
+    {
+      // Symptoms live in a free-text-ish array, so documents with none, or with a
+      // non-string entry, would otherwise produce `_id: null` buckets that look
+      // like a symptom named "null" in the retrieved prompt.
+      $match: { symptoms: { $type: 'string' } },
+    },
+    { $unwind: '$aiResults.recommendations' },
+    {
+      $group: {
+        _id: '$symptoms',
+        pairs: { $push: '$aiResults.recommendations.name' },
+      },
+    },
+    { $unwind: '$pairs' },
+    {
+      $group: {
+        _id: { symptom: '$_id', supplement: '$pairs' },
+        count: { $sum: 1 },
+      },
+    },
+    { $sort: { count: -1 } },
+  ];
+}
+
+/**
+ * Fold the raw pairs into the shape the retrieval layer consumes.
+ *
+ * Two keys, because the symptoms are known one at a time at request time and the
+ * supplement list is known one at a time when scoring. `bySymptom` is the direct
+ * lookup; `bySupplement` is the mirror image, and is what makes a supplement
+ * that is usually paired with a symptom the member did NOT tick still reachable
+ * once it appears anywhere in their profile.
+ *
+ * Bounded on both sides, so one dominant symptom cannot produce an unbounded map.
+ *
+ * @param {unknown} rows raw `cooccurrencePipeline` output
+ * @param {{limit?: number}} [options]
+ * @returns {{bySymptom: Record<string, number>, bySupplement: Record<string, number>,
+ *            pairs: number, symptoms: number}}
+ */
+function cooccurrenceFrom(rows, { limit = 200 } = {}) {
+  const cap = Number.isFinite(Number(limit)) && Number(limit) > 0 ? Math.floor(Number(limit)) : 200;
+  const list = Array.isArray(rows) ? rows.slice(0, cap) : [];
+
+  const bySymptom = {};
+  const bySupplement = {};
+  // Pairs that survived the blank-name and zero-count filters. This used to report
+  // the number of rows READ, which made `pairs` a count of garbage whenever the
+  // pipeline produced any — and it is the number the admin panel shows as evidence
+  // that the prior is learning something, so it has to mean what it says.
+  let pairs = 0;
+
+  for (const row of list) {
+    const symptom = String(row?._id?.symptom ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_SIGNAL_LENGTH);
+    const supplement = String(row?._id?.supplement ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_SIGNAL_LENGTH);
+    const count = toCount(row?.count);
+    if (!symptom || !supplement || !count) continue;
+    pairs += 1;
+    bySymptom[symptom] = (bySymptom[symptom] || 0) + count;
+    bySupplement[supplement] = (bySupplement[supplement] || 0) + count;
+  }
+
+  // Normalise INSIDE the document, and by each map's own maximum rather than by
+  // the strongest single pair.
+  //
+  // Two things were wrong before. Aggregating first and scaling by the largest
+  // single PAIR let a symptom with two strong partners exceed 1 (Fatigue with
+  // Iron=40 and B12=20 sums to 60, and 60/40 = 1.5) — and a prior that reports
+  // 1.5 is a prior whose magnitude no longer means anything. Scaling each map by
+  // its own maximum makes both maps comparable and both bounded in [0, 1], which
+  // is what "relative strength" has to mean for `applyPrior` to use it.
+  const scale = (map) => {
+    let max = 0;
+    for (const value of Object.values(map)) max = Math.max(max, value);
+    if (max <= 0) return;
+    for (const key of Object.keys(map)) {
+      map[key] = Math.round((map[key] / max) * 1000) / 1000;
+    }
+  };
+  scale(bySymptom);
+  scale(bySupplement);
+
+  return {
+    bySymptom,
+    bySupplement,
+    pairs,
+    symptoms: Object.keys(bySymptom).length,
+  };
+}
+
+/**
+ * Merge both directions into the single flat map the retrieval layer reads.
+ *
+ * A union rather than a choice, because both directions are real evidence: the
+ * symptom→supplement direction answers "what usually goes with what they
+ * reported", and the supplement→symptom direction answers "is this supplement
+ * worth considering given they reported this at all".
+ *
+ * @param {{bySymptom?: object, bySupplement?: object}} cooccurrence
+ * @returns {Record<string, number>}
+ */
+function priorFrom(cooccurrence) {
+  if (!cooccurrence || typeof cooccurrence !== 'object') return {};
+  const merged = {};
+  for (const source of [cooccurrence.bySymptom, cooccurrence.bySupplement]) {
+    if (!source || typeof source !== 'object') continue;
+    for (const [key, value] of Object.entries(source)) {
+      if (!Number.isFinite(Number(value))) continue;
+      merged[key] = Math.max(merged[key] || 0, Number(value));
+    }
+  }
+  return merged;
+}
+
 module.exports = {
   TREND_BUCKET_DAYS,
   RANKED_LIST_LIMIT,
+  MAX_SIGNAL_LENGTH,
   toCount,
   rankBuckets,
   facetCount,
@@ -461,6 +734,11 @@ module.exports = {
   runwayFrom,
   reviewPipeline,
   reviewFrom,
+  calibrationPipeline,
+  calibrationFrom,
+  cooccurrencePipeline,
+  cooccurrenceFrom,
+  priorFrom,
   listValueMonthly,
   activationOf,
 };

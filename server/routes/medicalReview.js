@@ -35,16 +35,23 @@ router.post('/request', protect, async (req, res) => {
       title: 'Medical review requested',
       detail: 'Your medical review request has been submitted. An administrator will review your case shortly.',
       link: '/dashboard',
+      linkLabel: 'View your review status',
     });
 
     // Create admin event for visibility
     await AdminEvent.create({
       type: 'medical-review-requested',
       title: 'Medical review requested',
-      detail: `${user.email} has requested medical review for priority assessment`,
+      // NO member email. The admin bell is a SHARED queue, so a member's address
+      // in a detail string is a broadcast of personal data to every operator with
+      // the tab open — which is exactly what utils/memberPrivacy.js exists to
+      // prevent, and the boundary suite asserts against. The assessment row the
+      // link opens already carries the identity and is authorised to it.
+      detail: 'A member requested medical review for a priority assessment.',
       user: user._id,
       linkUserId: user._id,
       link: 'assessment-management',
+      linkLabel: 'Open Assessment Management',
     });
 
     res.status(200).json({
@@ -192,16 +199,19 @@ router.post('/admin/reviews/:userId/resolve', protect, adminOnly, async (req, re
         title: 'Medical review approved',
         detail: `Your medical review has been approved. Please check your dashboard to view the administrator's response and confirm to continue.${notes ? ` Note: ${notes}` : ''}`,
         link: '/dashboard',
+        linkLabel: 'View your review status',
       });
 
       // Create admin event
       await AdminEvent.create({
         type: 'medical-review-approved',
         title: 'Medical review approved',
-        detail: `${user.email} - Review approved by ${user.medicalReviewResolvedBy}${notes ? ` - ${notes}` : ''}`,
+        // No member email — shared admin queue, see utils/memberPrivacy.js.
+        detail: `Review approved${user.medicalReviewResolvedBy ? ` by ${user.medicalReviewResolvedBy}` : ''}${notes ? ` - ${notes}` : ''}`,
         user: userId,
         linkUserId: userId,
         link: 'assessment-management',
+        linkLabel: 'Open Assessment Management',
       });
     } else {
       // Request more info
@@ -211,16 +221,19 @@ router.post('/admin/reviews/:userId/resolve', protect, adminOnly, async (req, re
         title: 'Medical review needs more information',
         detail: `Your medical review requires additional information. ${notes || 'Please contact support for details.'}`,
         link: '/dashboard',
+        linkLabel: 'View your review status',
       });
 
       // Create admin event
       await AdminEvent.create({
         type: 'medical-review-needs-info',
         title: 'Medical review - more info requested',
-        detail: `${user.email} - ${user.medicalReviewResolvedBy} requested more information${notes ? ` - ${notes}` : ''}`,
+        // No member email — shared admin queue, see utils/memberPrivacy.js.
+        detail: `More information requested${user.medicalReviewResolvedBy ? ` by ${user.medicalReviewResolvedBy}` : ''}${notes ? ` - ${notes}` : ''}`,
         user: userId,
         linkUserId: userId,
         link: 'assessment-management',
+        linkLabel: 'Open Assessment Management',
       });
     }
 
@@ -320,10 +333,12 @@ router.post('/confirm', protect, async (req, res) => {
     await AdminEvent.create({
       type: 'resolved',
       title: 'Medical review confirmed by user',
-      detail: `${user.email} confirmed medical review and lifted the block (${result.modifiedCount} assessment(s) resolved)`,
+      // No member email — shared admin queue, see utils/memberPrivacy.js.
+      detail: `A member confirmed medical review and lifted the block (${result.modifiedCount} assessment(s) resolved)`,
       user: req.user._id,
       linkUserId: req.user._id,
       link: 'assessment-management',
+      linkLabel: 'Open Assessment Management',
     });
 
     console.log('[medical-review-confirm] Audit event created successfully');

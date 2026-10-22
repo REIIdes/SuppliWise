@@ -14,6 +14,13 @@
  *   unticked, window still open ...... no cost yet
  *   unticked, window closed ......... costs points, now
  *
+ * And there is a fourth, added with the plan-activation rule: a dose whose
+ * window closed BEFORE the plan existed (a plan completed at 3:00 PM and the
+ * morning stack that came with it). Those cost nothing and are not missed
+ * either, so reporting "nothing missed" with no explanation would leave a user
+ * looking at doses they were never given time for and no account of why they do
+ * not count. `exempt` is what lets the line name the reason.
+ *
  * This file only FORMATS. It never decides whether something was missed, and it
  * never computes a penalty — both come from the API, because the score itself is
  * persisted server-side and read by Insights and the Web3 export, which have no
@@ -37,7 +44,8 @@ export function scoreSyncTone(today) {
 /**
  * The line under the score, or '' when there is nothing true to say.
  *
- * @param {{missed?: number, awaiting?: number, taken?: number, penaltyPoints?: number}} today
+ * @param {{missed?: number, awaiting?: number, taken?: number, exempt?: number,
+ *          penaltyPoints?: number}} today
  *   The API's `stats.wellnessToday`.
  * @returns {string} '' for an older server that does not send the block, or for
  *   a day with no plan on it.
@@ -48,7 +56,15 @@ export function scoreSyncLine(today) {
   const missed = Math.max(0, Number(today.missed) || 0);
   const awaiting = Math.max(0, Number(today.awaiting) || 0);
   const taken = Math.max(0, Number(today.taken) || 0);
+  const exempt = Math.max(0, Number(today.exempt) || 0);
   const points = Math.max(0, Number(today.penaltyPoints) || 0);
+
+  // Said once, and only when it applies — a plan's first, partial day. Appended
+  // to the missed sentence when there are real misses too, because a plan created
+  // this afternoon can still be incomplete on the doses it WAS given time for.
+  const exemption = exempt > 0
+    ? ` ${exempt} ${plural(exempt, 'dose', 'doses')} from before your plan started ${exempt === 1 ? 'is' : 'are'} not counted against you.`
+    : '';
 
   if (missed > 0) {
     const doses = plural(missed, 'dose', 'doses');
@@ -61,7 +77,21 @@ export function scoreSyncLine(today) {
     const still = awaiting > 0
       ? ` ${awaiting} still open — take ${awaiting === 1 ? 'it' : 'them'} on time and today recovers.`
       : ' Nothing is left to take today.';
-    return `${missed} ${doses} missed after ${owner} window closed, ${cost}.${still}`;
+    return `${missed} ${doses} missed after ${owner} window closed, ${cost}.${still}${exemption}`;
+  }
+
+  // Nothing is missed, but something WAS missed by a clock that ran before the
+  // plan existed. Say so — reporting a clean day a user can see is not one is the
+  // kind of silence that reads as a bug — and say what happens next, which is
+  // the part they are actually asking about.
+  if (exempt > 0) {
+    const doses = `${exempt} ${plural(exempt, 'dose', 'doses')}`;
+    const rest = awaiting > 0
+      ? ` ${awaiting} still open, and on time from tomorrow.`
+      : taken > 0
+        ? ' Everything else is taken.'
+        : ' Your plan runs normally from tomorrow.';
+    return `Your plan started mid-day, so ${doses} from earlier ${exempt === 1 ? 'is' : 'are'} not held against you.${rest}`;
   }
 
   if (awaiting > 0) {

@@ -84,7 +84,17 @@ test('the clock the greeting uses is the clock the slots use', () => {
   );
   // The greeting and the slot layout have to read the same variable, not two
   // values that happened to be computed on the same line.
-  assertSourceHas(dashboard(), /layoutPlan\(slotGroups, now\)/, 'the dose windows still read the shared clock');
+  //
+  // The third argument is the server's `planActivation`: which frames a plan is
+  // not held to, because their window closed before the plan existed. It is a
+  // fact ABOUT the plan rather than a second reading of the clock, and it has to
+  // be this page's own copy of it — the same one the wellness score was computed
+  // with — or the tray and the score it sits under can disagree.
+  assertSourceHas(
+    dashboard(),
+    /layoutPlan\(slotGroups, now, planActivation\)/,
+    'the dose windows read the shared clock, and the server\'s activation',
+  );
   assertSourceHas(dashboard(), /greetingFor\(\s*userData,\s*now\s*\)/, 'and so does the greeting');
 });
 

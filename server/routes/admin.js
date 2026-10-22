@@ -39,6 +39,8 @@ const {
   runwayFrom,
   reviewPipeline,
   reviewFrom,
+  calibrationPipeline,
+  calibrationFrom,
   listValueMonthly,
   activationOf,
 } = require('../utils/overviewAnalytics');
@@ -274,6 +276,7 @@ router.get('/overview', async (req, res) => {
       users, assessments, activeSubscriptions, recentUsers, assessmentTrend,
       signups7d, signups30d, planRows, twoFactorEnabled,
       signupSeries, engagementRows, profileRows, runwayRows, reviewRows,
+      calibrationRows,
     ] = await Promise.all([
       User.countDocuments(),
       Assessment.countDocuments(),
@@ -332,6 +335,11 @@ router.get('/overview', async (req, res) => {
       Assessment.aggregate(profilePipeline()),
       User.aggregate(runwayPipeline(now, day7, day30)),
       Assessment.aggregate(reviewPipeline()),
+      // Was the AI second opinion right? Measured over 90 days rather than all
+      // time, because a precision figure computed from a handful of rows in the
+      // first week of a feature is noise, and reporting it as a score would be
+      // worse than reporting nothing.
+      Assessment.aggregate(calibrationPipeline(new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000))),
     ]);
     const planBreakdown = { free: 0, monthly: 0, annual: 0, custom: 0 };
     for (const row of planRows || []) {
@@ -355,6 +363,7 @@ router.get('/overview', async (req, res) => {
     const profile = profileFrom(profileRows);
     const runway = runwayFrom(runwayRows);
     const review = reviewFrom(reviewRows);
+    const calibration = calibrationFrom(calibrationRows);
     const activation = activationOf(engagement.assessors, users);
     res.json({
       metrics: { users, assessments, activeSubscriptions, inactiveSubscriptions: users - activeSubscriptions },
@@ -387,6 +396,10 @@ router.get('/overview', async (req, res) => {
         // Renewal runway, and the review backlog waiting on the admin.
         runway,
         review,
+        // Whether the AI triage second opinion is earning the review-queue space
+        // it takes, against the rules-only baseline. Recording only — no threshold
+        // anywhere reads this. See calibrationPipeline for why.
+        calibration,
         // Priced from the same catalogue the checkout charges from — see
         // listValueMonthly. Labelled as list value in the UI.
         listValueMonthly: listValueMonthly(planBreakdown),

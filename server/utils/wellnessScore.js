@@ -28,10 +28,17 @@
  *   ticked, whenever it was ticked ....... full credit, late included
  *   unticked, window still open ........... not counted either way
  *   unticked, window closed ............... missed, full penalty
+ *   unticked, window closed BEFORE the
+ *   plan existed ......................... exempt, no penalty (plan activation)
  *
  * So an unticked morning pill costs nothing at 8:30 and costs everything at
  * 12:01, and ticking it at 11:55 costs nothing at all. That is the difference
  * between a score that measures discipline and one that measures alarms.
+ *
+ * The fourth line is the one that keeps the rule honest about time travel: a
+ * plan created at 3:00 PM cannot be charged for the morning whose window closed
+ * at noon. See utils/planActivation.js — nothing here needs to know, because the
+ * exemption is decided once, in the rulebook that decides what "missed" means.
  *
  * A day the app was never opened used to escape all of this — no rows, so
  * nothing to miss. Those days are now seeded as unticked before they are scored;
@@ -120,6 +127,11 @@ function penaltyForMisses({ baseline, overallAdherence, streak = 0, today } = {}
  * `missed` and `awaiting` are the two halves of the rule, so the UI can say
  * "2 missed" and "3 still open" without re-deriving anything client-side (and
  * therefore without the client being able to disagree with the score).
+ *
+ * `exempt` is the third bucket, added with the plan-activation rule: doses whose
+ * window closed before this plan existed, which are neither missed nor open. It
+ * is carried through rather than recomputed here so the line under the score can
+ * explain "your plan started mid-day" instead of reporting nothing at all.
  */
 function describeToday(today) {
   const snapshot = today || {};
@@ -128,6 +140,9 @@ function describeToday(today) {
     taken: snapshot.taken || 0,
     missed: snapshot.missed || 0,
     awaiting: snapshot.awaiting || 0,
+    // Clamped like the rest of the counts: a negative or junky figure here would
+    // be read straight into a sentence by the client.
+    exempt: Math.max(0, Number(snapshot.exempt) || 0),
     decided: snapshot.decided || 0,
     adherence: Number.isFinite(snapshot.adherence) ? snapshot.adherence : 100,
   };

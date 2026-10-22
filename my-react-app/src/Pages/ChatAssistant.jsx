@@ -748,6 +748,13 @@ export default function ChatAssistant() {
         // the panel shows a welcome bubble or a failed turn.
         ...(Number.isInteger(data?.messageIndex) ? { msgIndex: data.messageIndex } : {}),
         ...(data.source === 'fallback' ? { kind: 'error' } : {}),
+        // The provider stopped at its output ceiling, so this reply ends
+        // mid-thought rather than at a conclusion. Shown as a note rather than
+        // folded into the answer text: the member asked a question, and the
+        // useful thing to tell them is that there is more of the answer, not
+        // that they should re-read what came back. Before the server reported
+        // the finish reason this was indistinguishable from a complete reply.
+        ...(data.truncated === true ? { truncated: true } : {}),
       }]);
       // Adopt the stored conversation so every later turn
       // appends to it. When the server could not persist
@@ -1231,7 +1238,7 @@ export default function ChatAssistant() {
                   aria-busy={loading}
                 >
                   {messages.map((msg, i) => (
-                    <div key={i} className={`chat-bubble ${msg.role}${msg.kind === 'error' ? ' chat-error' : ''}`}>
+                    <div key={i} className={`chat-bubble ${msg.role}${msg.kind === 'error' ? ' chat-error' : ''}${msg.truncated ? ' chat-truncated' : ''}`}>
                       {msg.role === 'assistant'
                         ? <Markdown text={msg.text} />
                         : <p className="md-p">{msg.text}</p>
@@ -1257,6 +1264,16 @@ export default function ChatAssistant() {
                             );
                           })}
                         </div>
+                      )}
+                      {/* Announced, not just drawn: a screen-reader user is the
+                          one most likely to act on a reply that stops early, and
+                          an answer ending in mid-sentence is otherwise
+                          indistinguishable from a finished one. */}
+                      {msg.truncated && (
+                        <p className="chat-truncated-note" role="note">
+                          This reply reached the assistant&rsquo;s length limit and may be
+                          incomplete &mdash; ask me to continue.
+                        </p>
                       )}
                     </div>
                   ))}

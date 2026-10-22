@@ -1,0 +1,148 @@
+/* The doses a plan is not yet holding the user to: quiet slate, never the red of
+   the missed tray, because nothing here was ever due. Self-contained — this
+   renders on both the tracker and the dashboard, and only one of those pages
+   loads the supplement-card styles. */
+
+.deferred-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+  padding-top: 16px;
+  border-top: 2px dashed #dbe3ec;
+}
+
+.deferred-plan__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* NOT wrap: with a two-line note the count chip jumped to its own row and
+     sat under the sentence instead of beside the heading. */
+  flex-wrap: nowrap;
+  padding: 9px 14px;
+  border: 1px solid #dbe3ec;
+  border-radius: var(--sw-radius-md, 14px);
+  background: linear-gradient(180deg, #f8fafc, #eef2f7);
+}
+
+.deferred-plan__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 50%;
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.deferred-plan__names {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  /* `0`, not `auto`: the note is long enough to fill the row on its own, and a
+     basis of `auto` left the count chip no room, which wrapped it below. */
+  flex: 1 1 0;
+}
+
+.deferred-plan__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #334155;
+}
+
+.deferred-plan__note {
+  font-size: 12px;
+  line-height: 1.45;
+  color: #64748b;
+}
+
+.deferred-plan__count {
+  margin-left: auto;
+  min-width: 24px;
+  flex: none;
+  align-self: flex-start;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.deferred-plan__frame-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.deferred-plan__window {
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #94a3b8;
+}
+
+.deferred-plan__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.deferred-plan__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid #e6ebf1;
+  border-radius: 10px;
+  background: #fbfcfe;
+  color: #94a3b8;
+}
+
+.deferred-plan__dot {
+  display: inline-flex;
+  flex: none;
+}
+
+.deferred-plan__dot--high {
+  color: var(--sw-emerald, #10b981);
+}
+
+.deferred-plan__dot--medium {
+  color: #f59e0b;
+}
+
+.deferred-plan__dot--low {
+  color: #6b7280;
+}
+
+.deferred-plan__name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.deferred-plan__dosage {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+@media (max-width: 768px) {
+  .deferred-plan__item {
+    flex-wrap: wrap;
+  }
+}

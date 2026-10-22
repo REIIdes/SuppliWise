@@ -377,6 +377,15 @@ const disputeSchema = new mongoose.Schema(
     status: { type: String, enum: ['open', 'resolved'], default: 'open', index: true },
     outcome: { type: String, enum: ['buyer', 'seller', ''], default: '' },
     resolvedTx: { type: String, default: '' },
+    // Operator-facing explanation when a verdict could not be turned into a
+    // payout (e.g. the order had already left escrow). Keeps a dispute from
+    // sitting open forever with nothing anyone can do about it.
+    note: { type: String, default: '' },
+    // Payout reservation, not a verdict. tryResolve claims it before moving the
+    // escrow and clears it (or finishes into 'resolved') afterwards, so a
+    // concurrent trigger cannot pay the escrow twice and a crash mid-payout
+    // leaves a recoverable (not permanently stuck) dispute. 0 = unreserved.
+    resolvingSince: { type: Number, default: 0 },
     createdAt: { type: Number, default: () => Date.now() },
     resolvedAt: { type: Number, default: 0 },
   },
@@ -472,6 +481,10 @@ const loyaltyCodeSchema = new mongoose.Schema({
   status: { type: String, enum: ['unused', 'redeemed'], default: 'unused', index: true },
   redeemedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   redeemedOrder: { type: mongoose.Schema.Types.ObjectId, ref: 'SwOrder', default: null },
+    // On-chain burn that paid for this code. Empty means the code was issued
+    // but the WELL was never taken — the failure signal the redeem route uses to
+    // void the code instead of leaving a free one behind.
+    burnTx: { type: String, default: '' },
   createdAt: { type: Number, default: () => Date.now() },
 });
 

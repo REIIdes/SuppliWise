@@ -22,6 +22,11 @@ const {
   anchorHealthLedger,
   anchorPlanEvents,
 } = require('../blockchain/proofs');
+// The plan day and the supplement-name rule the history migration shares with
+// the tracker, so a dose moved across assessments is matched by the same key the
+// day's rows are written and read with. See utils/todayPlanSync.js.
+const { cleanTimeZone, planDayKey } = require('../utils/planDay');
+const { normalizeName } = require('../utils/dailyScheduleSlots');
 
 // Flag an assessment as Priority + notify the user and admins (best-effort,
 // never fails the surrounding request). Idempotent per assessment.
@@ -31,7 +36,7 @@ const {
 //   call sites used to mutate their own response object to `priority: 'Priority'`
 //   unconditionally, which showed "flagged" in the UI for a write the database
 //   never received.
-async function flagSevereAssessment(assessment, reasons, userEmail) {
+async function flagSevereAssessment(assessment, reasons, userEmail, triageVerdict = null) {
   try {
     // Same rule as the admin endpoint. Severity detection re-runs whenever
     // results are saved, so without this a finished assessment could have its
@@ -47,14 +52,54 @@ async function flagSevereAssessment(assessment, reasons, userEmail) {
         user: assessment.user,
         assessmentId: assessment._id,
         linkUserId: assessment.user,
+        // An AdminEvent with no link does not surface in the admin console at
+        // all -- link is how the bell resolves an event to the tab that can act
+        // on it.
+        //
+        // No member identifier in detail. The assessment row the link opens
+        // already carries one and is authorised to; the bell's job is only to say
+        // that severity was detected and the guard declined. See
+        // utils/memberPrivacy.js for why that rule exists.
         link: 'assessment-management',
+        linkLabel: 'Open Assessment Management',
       }).catch(() => {});
       return { flagged: false, reason: verdict.code };
     }
     const label = reasons.length > 0 ? reasons.join('; ') : 'Severe case detected';
+
+    // Record WHERE this flag came from, not merely that it was raised.
+    //
+    // The triage verdict already knows: `aiEscalated` is true only when the rule
+    // engine found nothing and the model's own escalation cleared the confidence
+    // bar. Persisting it is the only thing that lets this layer ever be measured
+    // -- see the `flagSource` block on the schema. Without it a rules flag and a
+    // rules+AI flag are byte-identical documents, and "is the second opinion
+    // catching real misses, or just adding noise to the review queue?" cannot be
+    // answered from any data this system holds.
+    const aiEscalated = Boolean(triageVerdict && triageVerdict.aiEscalated === true);
+    const rawConfidence = Number(triageVerdict && triageVerdict.confidence);
+    const aiConfidence = aiEscalated && Number.isFinite(rawConfidence)
+      ? Math.max(0, Math.min(100, Math.round(rawConfidence)))
+      : null;
+    const raisedAt = new Date();
+
     await Assessment.findByIdAndUpdate(assessment._id, {
       // Priority assessments never expire while flagged (expiresAt: null)
-      $set: { priority: 'Priority', flagReasons: reasons.slice(0, 5), flaggedAt: new Date(), expiresAt: null, resolvedAt: null, resolvedReason: '' },
+      $set: {
+        priority: 'Priority',
+        flagReasons: reasons.slice(0, 5),
+        flaggedAt: raisedAt,
+        expiresAt: null,
+        resolvedAt: null,
+        resolvedReason: '',
+        // 'rules' only when the rules genuinely were the whole story. A missing
+        // verdict (a caller that predates this wiring) is recorded as null rather
+        // than guessed at, so an UNKNOWN provenance is never counted as a rules
+        // decision in the calibration figure.
+        flagSource: triageVerdict ? (aiEscalated ? 'rules+ai' : 'rules') : null,
+        flagAiConfidence: aiConfidence,
+        flagAiEscalatedAt: aiEscalated ? raisedAt : null,
+      },
     });
     await UserNotification.create({
       user: assessment.user,
@@ -62,16 +107,27 @@ async function flagSevereAssessment(assessment, reasons, userEmail) {
       title: 'Health review flagged for your assessment',
       detail: `Our review flagged possible severe concerns (${label}). An administrator has been notified. If you feel unwell, please seek medical care promptly.`,
       assessmentId: assessment._id,
+      // The member is told their assessments are PAUSED, so the bell has to take
+      // them somewhere that shows them the pause. A stored link is always right:
+      // only this writer knows the assessmentId, and the route table is a
+      // title-matching fallback for writers that do not set one.
       link: '/history',
+      linkLabel: 'View the flagged assessment',
     });
     await AdminEvent.create({
       type: 'severe-flag',
       title: 'Severe case flagged',
-      detail: `${userEmail || 'A user'} — ${label}`,
+      detail: label,
       user: assessment.user,
       assessmentId: assessment._id,
       linkUserId: assessment.user,
+      // `link` is how the bell resolves this to the tab that can act on it,
+      // and without it the event never appears in the admin console at all. The
+      // identity is on the assessment row the link opens — already authorised
+      // there — so copying it into a bell payload is pure exposure. See
+      // utils/memberPrivacy.js.
       link: 'assessment-management',
+      linkLabel: 'Open Assessment Management',
     }).catch(() => {});
     return { flagged: true };
   } catch (err) {
@@ -277,7 +333,7 @@ router.post('/', protect, async (req, res) => {
     }
     let severityFlag = { flagged: false, reasons: [] };
     if (severity.flagged && can(req.user, 'priorityAssessment')) {
-      const outcome = await flagSevereAssessment(assessment, severity.reasons, req.user.email);
+      const outcome = await flagSevereAssessment(assessment, severity.reasons, req.user.email, severity);
       if (outcome.flagged) {
         severityFlag = severity;
         // Reflect the flag in this response (the created doc predates the update)
@@ -345,8 +401,8 @@ router.get('/active', protect, async (req, res) => {
     const assessment = await Assessment.findOne({ user: req.user._id, ...notExpiredFilter() })
       .sort({ createdAt: -1 })
       // The ~500 KB `aiResults` blob is projected out on purpose: this route
-      // exists to pre-fill a FORM, and the replacement assessment generates
-      // fresh results. Shipping the old ones costs bandwidth and saves nothing.
+      // exists to pre-fill a FORM, and the replacement assessment generates fresh
+      // results. Shipping the old ones costs bandwidth and saves nothing.
       .select('-aiResults');
     if (!assessment) {
       return res.status(404).json({ message: 'No active assessment.' });
@@ -625,7 +681,7 @@ router.patch('/:id/results', protect, async (req, res) => {
         console.log(`[assessment] AI second opinion unavailable, rules only: ${severity.aiError}`);
       }
       if (severity.flagged) {
-        const outcome = await flagSevereAssessment(assessment, severity.reasons, assessment.userEmail);
+        const outcome = await flagSevereAssessment(assessment, severity.reasons, assessment.userEmail, severity);
         severityFlag = outcome.flagged
           ? severity
           : { flagged: false, reasons: [], suppressed: outcome.reason };
@@ -743,22 +799,29 @@ router.patch('/:id/priority', protect, async (req, res) => {
         : 'Your priority review was released. You can start a new assessment at any time.';
       await UserNotification.create({
         user: existing.user,
-        type: nowRaised ? 'severe-flag' : 'resolved',
+        type: nowRaised ? 'severe-flag' : 'info',
         title,
         detail,
         assessmentId: existing._id,
         link: '/history',
+        linkLabel: nowRaised ? 'View the flagged assessment' : 'View your assessment history',
       }).catch((err) => {
         console.error('[assessment PATCH /:id/priority] notification failed:', err.message);
       });
       await AdminEvent.create({
         type: nowRaised ? 'severe-flag' : 'resolved',
         title: nowRaised ? 'Assessment flagged as Priority' : 'Assessment priority released',
-        detail: `Assessment ${existing._id} — ${detail}`,
+        // No member identifier: the assessment row the link opens already carries
+        // one and is authorised to it. See utils/memberPrivacy.js.
+        detail: detail,
         user: existing.user,
         assessmentId: existing._id,
         linkUserId: existing.user,
+        // An admin event with no `link` never reaches the console — the
+        // bell resolves `link` to the tab that can act on the item, so a missing
+        // one makes an admin action invisible while reporting success.
         link: 'assessment-management',
+        linkLabel: 'Open Assessment Management',
       }).catch((err) => {
         console.error('[assessment PATCH /:id/priority] audit failed:', err.message);
       });
@@ -821,8 +884,28 @@ router.delete('/:id', protect, async (req, res) => {
 });
 
 // @route   POST /api/assessment/:id/migrate-history
-// @desc    Migrate intake history and metrics from an old assessment to a new one
+// @desc    Carry an replaced assessment's tracking history and metrics onto its
+//          replacement — so updating a plan is not restarting the day
 // @access  Private
+//
+// WHY A MOVE AND NOT A COPY
+// The client creates a fresh assessment on Update, which starts with no rows and
+// no streak. Without this route the user's whole history — every ticked dose,
+// every day of adherence, the streak itself — would be orphaned under a
+// deactivated assessment, and the tracker would ask them to take this morning's
+// pills again because the rows that prove they did were filed somewhere else.
+//
+// THREE RULES THIS HANDLER OWNS
+//   NO DUPLICATES. GET / may already have seeded today under the new assessment.
+//   Moving an old row onto the same (day, dose) would double-count it, so those
+//   old rows stay where they are and only their TAKEN state moves across.
+//   PRUNE ONLY PLACEHOLDERS. Today's unticked rows the OLD plan named and the NEW
+//   one dropped must go, or the user is asked for supplements they no longer take
+//   and the day can never reach 100%. A row that was ticked is history. A row
+//   neither plan named was added by hand, so this route has no idea it exists.
+//   METRICS ARE THE MODEL'S FIELDS. This used to copy `oldMetrics.streak` and
+//   `lastStreakUpdate`, which are not fields of DashboardMetrics — every update
+//   silently threw the streak away and set nothing.
 router.post('/:id/migrate-history', protect, async (req, res) => {
   try {
     const { newAssessmentId } = req.body;
@@ -850,11 +933,68 @@ router.post('/:id/migrate-history', protect, async (req, res) => {
     // Import IntakeRecord model
     const IntakeRecord = require('../models/IntakeRecord');
 
-    // Move all IntakeRecords from old assessment to new assessment
+    const doseKey = (row) => `${row.dayKey}|${normalizeName(row.supplementName)}`;
+    const planNames = (assessment) => new Set(
+      ((assessment.aiResults && assessment.aiResults.recommendations) || [])
+        .map((rec) => normalizeName(rec && (rec.name || rec.supplement)))
+        .filter(Boolean),
+    );
+    const oldPlan = planNames(oldAssessment);
+    const newPlan = planNames(newAssessment);
+
+    const [oldRows, newRows] = await Promise.all([
+      IntakeRecord.find({ user: req.user._id, assessment: oldAssessment._id })
+        .select('_id dayKey supplementName taken takenAt')
+        .lean(),
+      IntakeRecord.find({ user: req.user._id, assessment: newAssessment._id })
+        .select('_id dayKey supplementName taken takenAt')
+        .lean(),
+    ]);
+
+    // A dose the replacement already has a row for must not be moved onto it.
+    const alreadyOnNew = new Map();
+    for (const row of newRows) {
+      if (!alreadyOnNew.has(doseKey(row))) alreadyOnNew.set(doseKey(row), row);
+    }
+
+    const blockedIds = [];
+    const inheritTaken = [];
+    for (const row of oldRows) {
+      const existing = alreadyOnNew.get(doseKey(row));
+      if (!existing) continue;
+      blockedIds.push(row._id);
+      // The user really did take this dose today; the row that says so is the old
+      // one, and the row the tracker renders is the new one.
+      if (row.taken && !existing.taken) inheritTaken.push({ _id: existing._id, takenAt: row.takenAt || new Date() });
+    }
+
     const updateResult = await IntakeRecord.updateMany(
-      { user: req.user._id, assessment: oldAssessment._id },
+      { user: req.user._id, assessment: oldAssessment._id, _id: { $nin: blockedIds } },
       { $set: { assessment: newAssessment._id } }
     );
+
+    for (const row of inheritTaken) {
+      await IntakeRecord.updateOne({ _id: row._id }, { $set: { taken: true, takenAt: row.takenAt } });
+    }
+
+    // Today's placeholders for doses the updated plan dropped — read off the rows
+    // being moved, since the replacement's own rows came from its own plan.
+    const timeZone = cleanTimeZone(req.get('x-client-timezone'))
+      || cleanTimeZone(req.user && req.user.timeZone)
+      || 'UTC';
+    const todayKey = planDayKey(new Date(), timeZone);
+    const blocked = new Set(blockedIds.map(String));
+    const prune = oldRows.filter((row) => {
+      const name = normalizeName(row.supplementName);
+      return !blocked.has(String(row._id))
+        && row.dayKey === todayKey
+        && !row.taken
+        && oldPlan.has(name)
+        && !newPlan.has(name);
+    });
+    if (prune.length > 0) {
+      await IntakeRecord.deleteMany({ _id: { $in: prune.map((row) => row._id) }, user: req.user._id });
+    }
 
     // Copy adherence metrics from old assessment's dashboard metrics to new one
     let copiedMetrics = false;
@@ -865,16 +1005,37 @@ router.post('/:id/migrate-history', protect, async (req, res) => {
       });
 
       if (oldMetrics) {
+        // Only the fields the model actually has. `wellnessScore` is left alone
+        // because GET / recomputes it from the history this just moved.
+        //
+        // `assessmentStartDate` is REQUIRED, and an `upsert` with `$set` does not
+        // run document validation — so omitting it used to file a metrics row that
+        // could be read but never saved. The next `GET /api/dashboard` calls
+        // `metrics.save()`, which validates the whole document, and the user's
+        // dashboard answered 500 for the rest of the day. Observed live, not
+        // theorised.
         await DashboardMetrics.findOneAndUpdate(
           { user: req.user._id, assessment: newAssessment._id },
           {
             $set: {
-              streak: oldMetrics.streak || 0,
+              assessmentStartDate: oldMetrics.assessmentStartDate
+                || newAssessment.createdAt
+                || new Date(),
+              currentStreak: oldMetrics.currentStreak || 0,
+              longestStreak: oldMetrics.longestStreak || 0,
+              totalDaysTracked: oldMetrics.totalDaysTracked || 0,
               overallAdherence: oldMetrics.overallAdherence || 0,
-              lastStreakUpdate: oldMetrics.lastStreakUpdate || new Date(),
+              energyLevel: oldMetrics.energyLevel || 'Medium',
+              streakAwardedToday: !!oldMetrics.streakAwardedToday,
+              lastTrackedDate: oldMetrics.lastTrackedDate || '',
+              lastCompletedDay: oldMetrics.lastCompletedDay || '',
+              lastBackfilledDay: oldMetrics.lastBackfilledDay || '',
+              isActive: true,
             }
           },
-          { upsert: true, new: true }
+          // Ask Mongoose to validate the write, so a required field can only ever
+          // be missing from an error here — never from the row that gets read back.
+          { upsert: true, new: true, runValidators: true }
         );
         copiedMetrics = true;
       }
@@ -888,6 +1049,8 @@ router.post('/:id/migrate-history', protect, async (req, res) => {
     res.json({
       message: 'History migrated successfully.',
       recordsMigrated: updateResult.modifiedCount,
+      dosesInherited: inheritTaken.length,
+      staleDosesPruned: prune.length,
       metricsCopied: copiedMetrics,
     });
   } catch (error) {

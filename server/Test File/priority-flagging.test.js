@@ -47,6 +47,8 @@ const {
 
 const { analyzeSeverity } = require('../utils/severity.js');
 const { readCompletionText, detectCreditExhausted, resolveTarget } = require('../utils/aiRouter.js');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const AI_VARS = ['OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'GROQ_API_KEY', 'ANTHROPIC_API_KEY',
   'OPENROUTER_MODEL', 'OPENAI_MODEL', 'GROQ_MODEL', 'ANTHROPIC_MODEL'];
@@ -529,4 +531,67 @@ test('buildSignals and the whole layer survive garbage input', async () => {
       assert.ok(Array.isArray(result.reasons));
     }
   });
+});
+
+// ── 6. Provenance: can this layer ever be measured? ───────────────────────
+
+test('an escalation reports itself as one, and a rules-only flag does not', async () => {
+  // The verdict already carries the distinction — what was missing was recording
+  // it. `aiEscalated` true is the ONLY case in which the model, and not the
+  // engine, is the reason a member's assessments are paused, which makes it the
+  // only case worth measuring.
+  await withCleanEnv(async () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-real';
+    stubFetch(() => anthropicOk({
+      needsPriorityReview: true,
+      confidence: 95,
+      reasons: ['Reports progressive unilateral weakness not covered by the red-flag lists.'],
+    }));
+
+    const result = await analyzePriorityFlagging(SUBTLE);
+    assert.equal(result.flagged, true);
+    assert.equal(result.aiEscalated, true);
+    assert.equal(result.confidence, 95);
+    assert.equal(result.ruleFlagged, false);
+  });
+});
+
+test('a flag the rules found reports no AI escalation, even if asked', async () => {
+  // The provenance the calibration figure depends on. If this ever reported
+  // `aiEscalated: true` for a rules flag, every rules flag would be counted as
+  // evidence about the model — and the model's precision record would be
+  // measuring the rule engine.
+  await withCleanEnv(async () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-real';
+    let called = false;
+    stubFetch(() => { called = true; return anthropicOk({ needsPriorityReview: false, confidence: 10, reasons: [] }); });
+
+    const result = await analyzePriorityFlagging(CHEST_PAIN);
+    assert.equal(result.flagged, true);
+    assert.equal(result.ruleFlagged, true);
+    assert.equal(result.aiEscalated, false);
+    assert.equal(called, false, 'a rules flag is not re-litigated, so no model is even asked');
+  });
+});
+
+test('the schema records where a flag came from, so it can be measured later', () => {
+  // Read from source rather than through Mongoose so the assertion is about the
+  // CONTRACT the flag-raise path depends on, not about model initialisation.
+  //
+  // Without `flagSource`, a rules flag and a rules+AI flag are byte-identical
+  // documents, and "is the second opinion catching what the rules miss, or just
+  // adding noise to the review queue?" cannot be answered from any data this
+  // system holds. That is what made the layer permanently unfalsifiable.
+  const model = fs.readFileSync(
+    path.join(__dirname, '..', 'models', 'Assessment.js'), 'utf8');
+  assert.match(model, /flagSource:\s*\{/);
+  assert.match(model, /'rules\+ai'/);
+  assert.match(model, /flagAiConfidence:\s*\{\s*type:\s*Number/);
+  // Recording only. A safety gate that retunes itself on live clinical outcomes
+  // is the failure mode priorityFlagging's own header warns about.
+  assert.doesNotMatch(
+    fs.readFileSync(path.join(__dirname, '..', 'utils', 'priorityFlagging.js'), 'utf8'),
+    /getCalibration|calibrationFrom/,
+    'no threshold anywhere in the triage layer may read the calibration figure',
+  );
 });

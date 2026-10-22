@@ -42,12 +42,22 @@
  * had the chance to take. When the zone is unknown this module fails OPEN:
  * nothing is treated as missed, so the worst case is a late penalty rather than
  * a wrongful one.
+ *
+ * A PLAN IS ONLY HELD TO A WINDOW THAT EXISTED WITH IT
+ * An assessment completed at 3:00 PM arrives with a Morning stack whose window
+ * closed seven hours earlier. Nothing about the rulebook used to know that, so
+ * those doses were missed the instant the user opened a plan for the first time.
+ * `activation` closes that hole: the window facts of `resolvePlanActivation`
+ * (utils/planActivation.js) name the frames that closed before the plan did, and
+ * they are exempt on that one plan day. This module does NOT import that file —
+ * the dependency runs one way, so the two rulebooks cannot form a cycle and
+ * `evaluateToday` stays importable on its own.
  */
 
 const { timeSlotFromText } = require('./dailyScheduleSlots');
 // The zone-aware clock lives with the day-boundary rule that owns it
 // (utils/planDay.js), so there is exactly one `Intl` reader in the server.
-const { cleanTimeZone, zonedNowParts } = require('./planDay');
+const { cleanTimeZone, planDayKey, zonedNowParts } = require('./planDay');
 
 /** Minutes from local midnight. End is EXCLUSIVE, so a window is half-open:
  *  morning's end of 720 means 11:59:59 is the last second inside it. */
@@ -85,6 +95,9 @@ const WINDOW_STATE = {
 };
 
 const KNOWN_SLOT_KEYS = new Set([...TIMED_SLOTS, 'anytime']);
+
+/** Day keys are zero-padded YYYY-MM-DD, so this is enough to trust one. */
+const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 const asText = (value) => {
   if (typeof value === 'string') return value;
@@ -155,10 +168,50 @@ function slotKeyForRecord(record) {
 }
 
 /**
+ * The slot keys that CANNOT be judged missed on the day being scored, or null.
+ *
+ * WHY IT IS ANCHORED TO ONE DAY
+ * The exemption describes the day the plan arrived, not the plan. Letting it
+ * persist would mean a plan is never held to a morning again — which is why the
+ * activation's own day key is compared against the day `now` falls in, and why a
+ * payload that arrives stale (a tab left open across the 4 AM reset) forgives
+ * nothing: the comparison fails and the plan is judged normally again.
+ *
+ * Fails OPEN in the only direction that is safe: anything unreadable — a missing
+ * activation, an unknown slot, a malformed day key — yields null, so the dose is
+ * judged exactly as it was before this rule existed.
+ *
+ * @param {object|null} activation From `resolvePlanActivation`.
+ * @param {Date} now
+ * @param {string} timeZone
+ * @returns {Set<string>|null}
+ */
+function exemptSlotsFor(activation, now, timeZone) {
+  if (!activation || typeof activation !== 'object') return null;
+  const slots = Array.isArray(activation.graceSlots) ? activation.graceSlots : null;
+  if (!slots || slots.length === 0) return null;
+
+  const activatedDayKey = asText(activation.activatedDayKey);
+  if (!DAY_KEY_RE.test(activatedDayKey)) return null;
+  if (activatedDayKey !== planDayKey(now, timeZone)) return null;
+
+  const exempt = new Set();
+  for (const slot of slots) {
+    const key = asText(slot).toLowerCase();
+    if (KNOWN_SLOT_KEYS.has(key)) exempt.add(key);
+  }
+  return exempt.size > 0 ? exempt : null;
+}
+
+/**
  * Split one day of intake records into what the score may and may not judge.
  *
  * @param {Array} records            Today's IntakeRecords.
- * @param {{now?: Date, timeZone?: string}} [options]
+ * @param {{now?: Date, timeZone?: string, activation?: object|null}} [options]
+ *   `activation` — the plan facts from `resolvePlanActivation`
+ *                 (utils/planActivation.js). Omit it and the behaviour is
+ *                 exactly what it always was, which is what every caller and
+ *                 test that does not care about this rule does.
  * @returns {{
  *   total: number, taken: number, missed: number, awaiting: number,
  *   decided: number, adherence: number
@@ -169,12 +222,17 @@ function slotKeyForRecord(record) {
  *              point: `isTakenLate` is a badge for the UI, never a penalty.
  *   missed   — unticked AND its window has closed. The only thing that costs points.
  *   awaiting — unticked but still takeable on time. Counted, shown, and free.
+ *   exempt   — unticked, and its window closed BEFORE this plan existed. Neither
+ *              missed nor awaiting: it is simply not chargeable, and it gets its
+ *              own figure so the UI can say why instead of quietly counting it
+ *              as something else. See utils/planActivation.js.
  *   adherence— taken / decided, or 100 when nothing has closed yet. A morning
  *              where the afternoon has not arrived must not read as a failure.
  */
-function evaluateToday(records, { now = new Date(), timeZone = '' } = {}) {
+function evaluateToday(records, { now = new Date(), timeZone = '', activation = null } = {}) {
   const list = Array.isArray(records) ? records : [];
   const minutes = localMinutesOfDay(now, timeZone);
+  const exempt = exemptSlotsFor(activation, now, timeZone);
 
   const rows = list.map((record) => ({ record, slot: slotKeyForRecord(record) }));
 
@@ -186,13 +244,24 @@ function evaluateToday(records, { now = new Date(), timeZone = '' } = {}) {
   const anytimeDeadline = timedEnds.length > 0 ? Math.max(...timedEnds) : ANYTIME_FALLBACK_DEADLINE;
 
   const missedSlots = [];
+  const exemptSlots = [];
   let taken = 0;
   let missed = 0;
   let awaiting = 0;
+  let exemptCount = 0;
 
   for (const { record, slot } of rows) {
     if (record && record.taken) {
       taken += 1;
+      continue;
+    }
+    // A window that closed before this plan existed is not a missed dose, and
+    // this is the ONLY place that is decided: the score, the calendar, Insights
+    // and the Web3 export all read what this function returns, so no other
+    // reader can reintroduce the penalty.
+    if (exempt && exempt.has(slot)) {
+      exemptCount += 1;
+      if (!exemptSlots.includes(slot)) exemptSlots.push(slot);
       continue;
     }
     const window = windowFor(slot);
@@ -214,10 +283,12 @@ function evaluateToday(records, { now = new Date(), timeZone = '' } = {}) {
     taken,
     missed,
     awaiting,
+    exempt: exemptCount,
     decided,
     // No window has closed yet, so nothing has been lost yet: 100, not 0.
     adherence: decided > 0 ? Math.round((taken / decided) * 100) : 100,
     missedSlots,
+    exemptSlots,
   };
 }
 
@@ -233,5 +304,6 @@ module.exports = {
   windowFor,
   windowStateForSlot,
   slotKeyForRecord,
+  exemptSlotsFor,
   evaluateToday,
 };

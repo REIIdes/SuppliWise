@@ -311,7 +311,84 @@ test('the open-flag backlog requires an actual flag, not just a null resolution'
   assert.deepEqual(A.reviewFrom(undefined), { priority: 0, openFlags: 0 });
 });
 
-// ── 5. Money ──────────────────────────────────────────────────────────────
+// ── 5. AI triage calibration ──────────────────────────────────────────────
+
+test('only rows with a recorded provenance can be counted as evidence', () => {
+  // `flagSource` is null on every assessment flagged before the field existed.
+  // Backfilling those to 'rules' would manufacture measurements the data does not
+  // hold, and quietly improve the model's own precision record.
+  const match = A.calibrationPipeline(DAY30)[0].$match;
+  assert.deepEqual(match.flagSource, { $in: ['rules', 'rules+ai'] });
+  assert.deepEqual(match.flaggedAt, { $gte: DAY30 });
+});
+
+test('calibration separates decided AI escalations from still-open ones', () => {
+  const facet = A.calibrationPipeline(DAY30)[1].$facet;
+  // The denominator is AI-ONLY escalations. A rules flag that also consulted the
+  // model is not evidence that the model did anything.
+  assert.deepEqual(facet.aiEscalations[0].$match, { flagSource: 'rules+ai' });
+  // "Released" means an admin cleared it — the flag is only released if the
+  // priority was actually taken back down.
+  assert.deepEqual(facet.aiReleased[0].$match.flagSource, 'rules+ai');
+  assert.deepEqual(facet.aiReleased[0].$match.resolvedAt, { $ne: null });
+  assert.equal(facet.aiReleased[0].$match.priority, 'Standard');
+  // Open is reported rather than folded into precision: an unresolved flag is not
+  // a wrong flag, and the panel must be able to say "9 of 20 still open".
+  assert.deepEqual(facet.aiOpen[0].$match, { flagSource: 'rules+ai', resolvedAt: null });
+  // The rules-only baseline, so the AI's precision can be read against it.
+  assert.deepEqual(facet.rulesEscalations[0].$match, { flagSource: 'rules' });
+});
+
+test('an AI layer with nothing recorded reports no score, not a failing one', () => {
+  // "No escalations yet" is a fact about a young deployment, not 0% precision.
+  // A panel rendering 0% would be reporting a failing model that never ran.
+  const out = A.calibrationFrom([]);
+  assert.equal(out.aiEscalations, 0);
+  assert.equal(out.aiPrecisionPct, null);
+  assert.equal(out.rulesPrecisionPct, null);
+  assert.deepEqual(A.calibrationFrom(undefined).aiPrecisionPct, null);
+});
+
+test('an open flag is not counted against the model', () => {
+  const out = A.calibrationFrom([{
+    aiEscalations: [{ _count: 20 }],
+    aiReleased: [{ _count: 5 }],
+    aiOpen: [{ _count: 9 }],
+    rulesEscalations: [{ _count: 40 }],
+    rulesReleased: [{ _count: 8 }],
+  }]);
+  // 20 raised, 9 still open => 11 decided, 5 released => 6 upheld.
+  assert.equal(out.aiDecided, 11);
+  assert.equal(out.aiPrecisionPct, 55);
+  // The baseline the model's number is only meaningful against.
+  assert.equal(out.rulesPrecisionPct, 80);
+  assert.equal(out.aiEscalations, 20);
+  assert.equal(out.aiOpen, 9);
+});
+
+test('the whole calibration figure survives a completely empty collection', () => {
+  assert.deepEqual(A.calibrationFrom([{}]), {
+    aiEscalations: 0,
+    aiReleased: 0,
+    aiOpen: 0,
+    aiDecided: 0,
+    aiPrecisionPct: null,
+    rulesEscalations: 0,
+    rulesReleased: 0,
+    rulesPrecisionPct: null,
+  });
+});
+
+test('a pipeline with no window still runs rather than matching nothing', () => {
+  // A bad `since` must not silently become "no data" — an operator who passed
+  // nothing gets the all-time figure, which is the honest reading.
+  for (const bad of [undefined, null, 'nonsense', new Date('nope')]) {
+    const pipeline = A.calibrationPipeline(bad);
+    assert.ok(pipeline[0].$match.flaggedAt.$gte instanceof Date, String(bad));
+  }
+});
+
+// ── 6. Money ──────────────────────────────────────────────────────────────
 
 test('list value is priced from the catalogue, never from a local copy', () => {
   // A hand-copied price is a number the pricing page can contradict the moment

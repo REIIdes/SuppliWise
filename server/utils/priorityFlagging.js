@@ -76,6 +76,18 @@ const FLAGGING_TIMEOUT_MS = 10000;
  * anything reaching the model is an edge case, and a wrong flag on an edge case
  * is a user whose new assessments pause for no reason. At 80 the model has to be
  * sure it is looking at a real clinical signal.
+ *
+ * The number is only meaningful if the model knows what 80 means. It used to be
+ * asked for a 0-100 "confidence" with no anchor at all, which is a request for a
+ * feeling rather than a measurement — and models asked for a bare confidence
+ * number typically cluster near the top of the scale, which would have made this
+ * gate nearly meaningless without ever reporting an error. The prompt therefore
+ * carries three worked examples spanning 15, 40 and 92, and tells the model to
+ * report true uncertainty and let the threshold decide.
+ *
+ * It is still a static constant, and deliberately so: see the note on
+ * `flagSource` in models/Assessment.js for why nothing tunes it automatically
+ * from measured outcomes.
  */
 const ESCALATION_MIN_CONFIDENCE = 80;
 
@@ -110,7 +122,43 @@ Rules:
   spurious flag pauses the user's ability to start new assessments.
 - reasons must cite the specific reported finding, not a general caution, and
   must never contain a diagnosis, a treatment plan, or advice to the user.
-- Never output medications dosages, contact details, or personal identifiers.`;
+- Never output medications dosages, contact details, or personal identifiers.
+
+CALIBRATION — read this before answering
+These are worked examples of the boundary. Your "confidence" is not a feeling
+about how interesting the case is; it is your estimate that a clinician, reading
+this submission, would want to see it before acting on supplement advice.
+Anchor on the examples below rather than on the wording of any single question.
+
+Example A — needsPriorityReview FALSE, confidence 15
+Submission: "Tired most afternoons, stress at work, drinks about two coffees a
+day, sleeps six hours."
+{"needsPriorityReview": false, "confidence": 15,
+ "reasons": ["Reports non-specific afternoon fatigue with high caffeine intake and short sleep."]}
+Why: ordinary lifestyle fatigue. A reviewer would not be pulled off another
+patient by this, and flagging it trains people to ignore the flags that matter.
+
+Example B — needsPriorityReview FALSE, confidence 40
+Submission: "Occasional heartburn after large meals, takes an antacid when needed."
+{"needsPriorityReview": false, "confidence": 40,
+ "reasons": ["Reports intermittent reflux managed with an over-the-counter antacid."]}
+Why: real and worth mentioning in a plan, but not urgent, and already managed.
+This is the case that sits closest to the line — note it is still false, because
+"common" and "self-managed" are not the same as "a clinician should intervene".
+
+Example C — needsPriorityReview TRUE, confidence 92
+Submission: "Chest pain radiating to my left arm, started two hours ago, also
+feeling short of breath. My father died of a heart attack at 52."
+{"needsPriorityReview": true, "confidence": 92,
+ "reasons": ["Reports acute chest pain radiating to the left arm with shortness of breath and a strong family history of early cardiac disease."]}
+Why: this would be caught by the rule engine and never reach you. It is here to
+anchor the TOP of the scale — when you are certain a clinician must look, say so
+plainly, cite the specific findings, and do not hedge the number.
+
+Use the whole scale, not just its ends. An uncertain answer is useful: report
+your true confidence and let the threshold decide. A model that answers 90 or 95
+to everything is far less useful than one whose number tracks its actual
+uncertainty.`;
 
 function clampConfidence(value) {
   const n = Number(value);
