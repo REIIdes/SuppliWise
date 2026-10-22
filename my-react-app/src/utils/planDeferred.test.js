@@ -237,7 +237,7 @@ test('both plan pages build the view from the server payload and its plan day', 
     assertSourceHas(
       source,
       /deferredPlanView\(planDeferred, \{ todayKey: planDayKey \}\)/,
-      `${file} keys the view to the server\'s plan day`,
+      `${file} keys the view to the server's plan day`,
     );
   }
 });
