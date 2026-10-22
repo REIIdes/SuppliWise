@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { Fragment, useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Navbar from '../Components/Navbar/Navbar';
 import AccountSwitcher from '../Components/AccountSwitcher/AccountSwitcher';
@@ -1506,8 +1506,15 @@ const otpTickRef = useRef(null);
                       <dt>Topics you keep asking about</dt>
                       <dd>
                         {(aiMemory?.topics || []).length ? (
-                          (aiMemory.topics || []).map((topic) => (
-                            <span key={topic} className="assistant-memory__tag">{memoryTopicLabel(topic)}</span>
+                          (aiMemory.topics || []).map((topic, index) => (
+                            // The space between pills is real text, not only a margin.
+                            // Adjacent inline-blocks concatenate when the row is read
+                            // aloud or copied, so without it a screen reader says
+                            // "SleepEnergyStress" instead of three topics.
+                            <Fragment key={topic}>
+                              {index > 0 && ' '}
+                              <span className="assistant-memory__tag">{memoryTopicLabel(topic)}</span>
+                            </Fragment>
                           ))
                         ) : <span className="assistant-memory__none">Nothing yet</span>}
                       </dd>
