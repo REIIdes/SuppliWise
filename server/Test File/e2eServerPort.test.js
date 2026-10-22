@@ -15,11 +15,22 @@
  *   • it costs the ENTIRE file — the suite's tests never ran, so the report is
  *     "Test File/x.test.js — test failed" with no assertion named
  *   • the message names a port and nothing about the feature being tested
+ *
+ * The fix for that made the OTHER half of the problem visible: stepping over a
+ * busy port means a suite that asks for a specific one sometimes gets a
+ * different one, and the test guarding that ("a free requested port is used as
+ * asked") is exactly where the combined run started failing. Two suites could
+ * both be told the same port was free, because "free" was only ever a probe with
+ * no claim behind it. Ports are now LEASED across processes before a child is
+ * booted — see the lease tests at the bottom of this file.
  */
 const test = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
+const { spawn } = require('node:child_process');
 
-const { startTestServer, isListening, freePort } = require('./e2eServer');
+const { startTestServer, isListening, freePort, leasePort, leaseFile } = require('./e2eServer');
 const { validateTestUri } = require('./testDbGuard');
 
 const verdict = validateTestUri();
@@ -54,6 +65,11 @@ test('a free requested port is used as asked', requiresDb, async () => {
   // The preference must not become "always somewhere else": a suite that asks
   // for a specific port and gets a different one every time makes its logs
   // impossible to follow, which is the reason to pass one at all.
+  //
+  // This assertion is what a sibling suite used to break. It is now stable
+  // because `startTestServer` CLAIMS the port (see the lease tests below) before
+  // it boots the child, so nothing else in the run can be handed the same one
+  // while this child is starting.
   const wanted = await freePort(5400);
   const server = await startTestServer({ port: wanted });
   try {
@@ -146,4 +162,84 @@ test('no server is left listening after the suite stops it', requiresDb, async (
   const { port } = server;
   await server.stop();
   assert.equal(await isListening(port), false, `port ${port} is still held after stop()`);
+});
+
+/* ── The leases that make the tests above deterministic ───────────────────── */
+
+test('a port is not leased twice, and comes back when released', () => {
+  const first = leasePort(5480);
+  assert.equal(typeof first, 'function', 'an unclaimed port must be claimable');
+  assert.equal(leasePort(5480), null, 'a second claim of a held port must be refused');
+  first();
+  const again = leasePort(5480);
+  assert.equal(typeof again, 'function', 'a released port must be claimable again');
+  again();
+});
+
+test('an abandoned lease does not fence a port off forever', () => {
+  // What a crashed or SIGKILLed run leaves behind. Without the reclaim, the
+  // lease directory would slowly swallow the whole range and every later run
+  // would fail with "No unclaimed port found" — a failure caused by a run that
+  // ended hours ago, on someone else's machine.
+  const file = leaseFile(5481);
+  fs.writeFileSync(file, JSON.stringify({ pid: 0x7fffffe0, at: Date.now() }));
+  try {
+    const reclaimed = leasePort(5481);
+    assert.equal(typeof reclaimed, 'function', 'a dead holder must not keep the port');
+    reclaimed();
+  } finally {
+    fs.rmSync(file, { force: true });
+  }
+});
+
+test('a lease held by another process is refused, then reclaimed when it dies', async () => {
+  // THE POINT OF THE LEASE. Every suite is its own process, so in-process
+  // bookkeeping proves nothing; this holds the claim in a real second process.
+  const port = 5482;
+  const holder = spawn(process.execPath, ['-e', `
+    const { leasePort } = require(${JSON.stringify(path.join(__dirname, 'e2eServer.js'))});
+    const release = leasePort(${port});
+    if (!release) { console.error('holder could not claim the port'); process.exit(1); }
+    console.log('held');
+    setInterval(() => {}, 1000);
+  `], { stdio: ['ignore', 'pipe', 'pipe'] });
+
+  let stderr = '';
+  holder.stderr.on('data', (chunk) => { stderr += String(chunk); });
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`holder never claimed the port: ${stderr}`)), 20000);
+    holder.stdout.once('data', () => { clearTimeout(timer); resolve(); });
+    holder.once('exit', (code) => { clearTimeout(timer); reject(new Error(`holder exited ${code}: ${stderr}`)); });
+  });
+
+  try {
+    assert.equal(leasePort(port), null, 'a port claimed by another process must be refused');
+    holder.kill('SIGKILL');
+    await new Promise((resolve) => holder.once('exit', resolve));
+    // The child was killed, so its file is still there and its owner is gone.
+    const afterDeath = leasePort(port);
+    assert.equal(typeof afterDeath, 'function', 'the port must be usable once its holder dies');
+    afterDeath();
+  } finally {
+    if (holder.exitCode === null) holder.kill('SIGKILL');
+    fs.rmSync(leaseFile(port), { force: true });
+  }
+});
+
+test('a running harness holds its own port against a second suite', requiresDb, async () => {
+  // The behaviour the combined CI run used to get wrong: suite A is handed 5124,
+  // suite B probes 5124, finds nothing listening yet, is handed the same port,
+  // and one of the two children dies mid-boot. Asserting the claim is held FOR
+  // THE LIFETIME OF THE SERVER (not merely at the instant it was chosen) is what
+  // closes that window.
+  const server = await startTestServer({ port: 5483 });
+  assert.equal(server.ok, true, server.reason || '');
+  try {
+    assert.equal(leasePort(server.port), null, 'the harness must claim the port it boots on');
+  } finally {
+    await server.stop();
+  }
+  const after = leasePort(server.port);
+  assert.equal(typeof after, 'function', 'stopping the server must give the port back');
+  after();
 });

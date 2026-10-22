@@ -29,6 +29,8 @@
  * brought along with it.
  */
 const { spawn } = require('child_process');
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const { connectTestDb, validateTestUri } = require('./testDbGuard');
@@ -59,8 +61,9 @@ async function isListening(port, host = '127.0.0.1') {
  * it. Between this returning and the child process binding there is a window in
  * which another concurrently-running suite can pick the same port, because each
  * file is its own process with no shared state to coordinate through. That race
- * is why `startTestServer` below RETRIES rather than trusting this result: a
- * single check narrows the window enormously, and the retry closes it.
+ * is why `startTestServer` below uses `leaseFreePort` instead of this: a probe
+ * tells you what was true a moment ago, a lease tells you what is still true
+ * when the child binds.
  *
  * @returns {Promise<number>}
  */
@@ -70,6 +73,132 @@ async function freePort(preferred = 5099) {
     if (!(await isListening(port))) return port;
   }
   throw new Error(`No free port found in ${preferred}..${preferred + 40}`);
+}
+
+/* ── Cross-process port leases ───────────────────────────────────────────────
+ *
+ * `node --test` gives every FILE its own process. Ten of those files boot an API
+ * server, and eleven more probe ports for their own reasons, and the only
+ * coordination available was "look, then bind" — which is a race with a window
+ * exactly as wide as the suite's startup time.
+ *
+ * The window is not theoretical. A run of the whole directory failed on
+ * `e2eServerPort.test.js` with "an available port should be honoured exactly":
+ * that test asks for a port it just confirmed free, and got a different one,
+ * because a sibling suite's retry loop landed on it in between. The same file
+ * passes when run alone, which is what makes a race look like a broken feature.
+ *
+ * So a chosen port is now CLAIMED before the child starts, in a place every
+ * process on the machine can see: a file in the OS temp directory, created with
+ * the `wx` flag so the filesystem itself decides the winner. Two suites can no
+ * longer both be given 5124 — one creates the file, the other gets EEXIST and
+ * moves on, before either has spent thirty seconds booting a child to find out.
+ */
+
+/**
+ * A lease is honoured while its owner pid still exists AND the claim is younger
+ * than this.
+ *
+ * Both halves are needed. The pid covers the case that happens every run — a
+ * sibling process is alive and holding the port. The age covers the case that
+ * happens almost never but never recovers on its own: the owner died, and its
+ * pid has been recycled by some unrelated process, so `pidAlive` says "alive"
+ * forever and the port is fenced off permanently.
+ *
+ * The age cannot misfire in the other direction, because of how far apart the
+ * two numbers are: a lease is held for the seconds between choosing a port and
+ * binding it (and, for a running server, until `stop()`), while this is ten
+ * minutes. Stealing a live holder's port would need a child to sit between
+ * those two for ten minutes.
+ */
+const LEASE_TTL_MS = 10 * 60 * 1000;
+
+function leaseDir() {
+  const dir = path.join(os.tmpdir(), 'suppliwise-test-ports');
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function leaseFile(port) {
+  return path.join(leaseDir(), `port-${port}.lock`);
+}
+
+function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // EPERM means the pid exists and belongs to somebody else — alive.
+    return err.code === 'EPERM';
+  }
+}
+
+/**
+ * Claim `port` for this process, or return null if another live process holds it.
+ *
+ * @returns {(() => void) | null} give the port back
+ */
+function leasePort(port) {
+  const file = leaseFile(port);
+  const claim = JSON.stringify({ pid: process.pid, at: Date.now() });
+  // Bounded, because the stale path deletes and re-creates: two processes
+  // reclaiming the same abandoned lease can each delete the other's fresh file,
+  // so the loop is capped rather than trusting the delete to settle. Whichever
+  // create wins the `wx` flag owns the port; the other sees EEXIST again and,
+  // finding a live holder, moves to a different port.
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      fs.writeFileSync(file, claim, { flag: 'wx' });
+      let held = false;
+      return () => {
+        if (held) return;
+        held = true;
+        // Only ever delete a file this process wrote. A crashed run's leftover
+        // lease may have been reclaimed by a healthy sibling in the meantime, and
+        // removing THAT would hand two suites the same port.
+        try {
+          const owner = JSON.parse(fs.readFileSync(file, 'utf8'));
+          if (owner.pid === process.pid) fs.unlinkSync(file);
+        } catch {
+          /* already gone — nothing to release */
+        }
+      };
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+      let owner = null;
+      try {
+        owner = JSON.parse(fs.readFileSync(file, 'utf8'));
+      } catch {
+        // Half-written or unreadable: treat it as abandoned rather than let one
+        // corrupt file fence off a port for every future run.
+      }
+      const age = owner ? Date.now() - Number(owner.at || 0) : Infinity;
+      const alive = owner && pidAlive(Number(owner.pid)) && age < LEASE_TTL_MS;
+      if (alive) return null;
+      try {
+        fs.unlinkSync(file);
+      } catch (unlinkErr) {
+        if (unlinkErr.code !== 'ENOENT') throw unlinkErr;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * The port `startTestServer` actually uses: free, AND leased to nobody else.
+ *
+ * @returns {Promise<{port: number, release: () => void}>}
+ */
+async function leaseFreePort(preferred = 5099) {
+  for (let port = preferred; port < preferred + 40; port += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    if (await isListening(port)) continue;
+    const release = leasePort(port);
+    if (release) return { port, release };
+  }
+  throw new Error(`No unclaimed port found in ${preferred}..${preferred + 40}`);
 }
 
 /**
@@ -144,10 +273,12 @@ async function startTestServer(options = {}) {
   // Retry loop, because "the port was free a moment ago" is not a guarantee.
   //
   // Each file is its own process with no shared state, so two suites starting at
-  // the same instant can both find the same port free and both spawn a child
-  // aimed at it. The loser prints EADDRINUSE and exits. `freePort` above shrinks
-  // that window but cannot close it, so this closes it: a bind failure is
-  // retried on a different port.
+  // the same instant used to both find the same port free and both spawn a child
+  // aimed at it. The loser printed EADDRINUSE and exited, and the retry below
+  // papered over it. `leaseFreePort` is the real fix: the port is claimed in the
+  // filesystem before the child starts, so the collision cannot happen in the
+  // first place. The retry stays for the case no lease can see — a listener that
+  // is not a suite, like a developer's own server on 5124.
   //
   // The failure is recognised from the child's OWN log rather than guessed from
   // the exit code, because a bind failure is not the only reason a child can
@@ -156,15 +287,22 @@ async function startTestServer(options = {}) {
   // failure is retried; anything else is reported immediately.
   const ATTEMPTS = 4;
   let lastReason = '';
+  // The lease held by the attempt currently in flight. Every path out of the
+  // loop drops it except the one that hands the server (and therefore the port)
+  // to the caller, whose `stop()` releases it.
+  let dropLease = null;
 
   for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
     let port;
     try {
-      port = await freePort((options.port || 5099) + attempt);
+      const lease = await leaseFreePort((options.port || 5099) + attempt);
+      port = lease.port;
+      dropLease = lease.release;
     } catch (err) {
       // Throwing out of here skips every `ok:false` path below, so the capture
       // transport would stay open for the rest of the suite — an unsettled handle
       // in the parent, which is precisely what keeps `node --test` from exiting.
+      if (dropLease) dropLease();
       await releaseMail();
       throw err;
     }
@@ -214,8 +352,11 @@ async function startTestServer(options = {}) {
       if (child.exitCode !== null) {
         const output = logs.join('');
         lastReason = `the test server exited with code ${child.exitCode}:\n${output.slice(-1200)}`;
-        // A bind failure means the port was taken between the check and the
-        // bind. Anything else is a real fault and retrying would only hide it.
+        // Give the port back before anything else: a lease held for a child that
+        // is already dead would fence the port off for the rest of the run.
+        if (dropLease) { dropLease(); dropLease = null; }
+        // A bind failure means a non-suite listener owns the port. Anything else
+        // is a real fault and retrying would only hide it.
         if (/\bEADDRINUSE\b/.test(output) && attempt < ATTEMPTS - 1) break;
         await releaseMail();
         return { ok: false, reason: lastReason };
@@ -227,6 +368,10 @@ async function startTestServer(options = {}) {
         if (announced && !(await isListening(port))) announced = false;
       }
       if (announced) {
+        // The caller now owns the port, so the lease goes with it — released when
+        // it calls `stop()`, which every suite does in a `finally`.
+        const releaseLease = dropLease;
+        dropLease = null;
         return {
           ok: true,
           base: `http://127.0.0.1:${port}`,
@@ -245,6 +390,7 @@ async function startTestServer(options = {}) {
               setTimeout(() => { if (child.exitCode === null) child.kill('SIGKILL'); }, 4000);
             });
             await Promise.all([releaseMail(), stopChild()]);
+            if (releaseLease) releaseLease();
           },
         };
       }
@@ -254,12 +400,21 @@ async function startTestServer(options = {}) {
 
     child.kill('SIGKILL');
     lastReason = `the test server never opened port ${port}:\n${logs.join('').slice(-1200)}`;
+    if (dropLease) { dropLease(); dropLease = null; }
     // Timed out without exiting — ported past the deadline rather than crashed.
     // Retrying is still correct: something else may hold the port.
   }
 
+  if (dropLease) dropLease();
   await releaseMail();
   return { ok: false, reason: `${lastReason} (after ${ATTEMPTS} ports)` };
 }
 
-module.exports = { startTestServer, freePort, isListening, connectTestDb };
+module.exports = {
+  startTestServer,
+  freePort,
+  isListening,
+  leasePort,
+  leaseFile,
+  connectTestDb,
+};
