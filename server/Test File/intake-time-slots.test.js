@@ -234,8 +234,42 @@ function chainableQuery(source) {
   return query;
 }
 
+/**
+ * Hold the wall clock still, so a scenario stays a scenario.
+ *
+ * `createdAt: planDayAt(15)` only means "the plan arrived this afternoon" if the
+ * clock is in an afternoon too — and it was not: four tests below passed between
+ * 15:00 and 18:00 UTC and failed outside that window, because the route reads the
+ * real clock to decide which frame is open, which is closed, and therefore what
+ * the plan was given time for. The rule under test compares two instants, so BOTH
+ * belong to the test. This is the same clock-independence the header of this file
+ * already argues for about `dayKey()`; `now` was the half of it still read from
+ * CI's clock.
+ *
+ * @param {Date} now the instant `new Date()` with no arguments reports
+ * @returns {() => void} put the real Date back
+ */
+function pinClock(now) {
+  const RealDate = Date;
+  const ms = new RealDate(now).getTime();
+  // NOT `class extends Date`: a subclass would make every Date built before the
+  // pin fail `x instanceof Date` while it is held, because the check compares
+  // against the SUBCLASS prototype. Production code that re-stamps a missing
+  // timestamp would then take the fake branch, and the test would fail for the
+  // harness rather than for the rule. Sharing the real prototype keeps the two
+  // indistinguishable to everything but the clock reading.
+  function PinnedDate(...args) {
+    return new RealDate(...(args.length ? args : [ms]));
+  }
+  PinnedDate.prototype = RealDate.prototype;
+  Object.setPrototypeOf(PinnedDate, RealDate);
+  PinnedDate.now = () => ms;
+  globalThis.Date = PinnedDate;
+  return () => { globalThis.Date = RealDate; };
+}
+
 /** Mount the real dashboard router with the DB stubbed out. */
-async function withDashboard(fn, { assessment, emulateUpsert = false } = {}) {
+async function withDashboard(fn, { assessment, emulateUpsert = false, now = null } = {}) {
   const originals = {
     assessmentFindOne: Assessment.findOne,
     intakeFind: IntakeRecord.find,
@@ -322,9 +356,11 @@ async function withDashboard(fn, { assessment, emulateUpsert = false } = {}) {
     return { status: res.status, body: json };
   };
 
+  const releaseClock = now ? pinClock(now) : null;
   try {
     return await fn({ call });
   } finally {
+    if (releaseClock) releaseClock();
     await new Promise((resolve) => server.close(resolve));
     authMiddleware.protect = originals.protect;
     Assessment.findOne = originals.assessmentFindOne;
@@ -757,7 +793,10 @@ test('a plan created this afternoon is not charged for this morning', async () =
     // Everything is judged normally from the next plan day — which is 4 AM
     // tomorrow, not midnight, so the key is derived from the rule.
     assert.equal(body.planActivation.firstJudgedDayKey, nextDayKey());
-  }, { assessment: { _id: ASSESSMENT_ID, user: USER_ID, createdAt: planDayAt(15), aiResults: { recommendations: RECOMMENDATIONS, dailySchedule: DAILY_SCHEDULE } } });
+  }, {
+    assessment: { _id: ASSESSMENT_ID, user: USER_ID, createdAt: planDayAt(15), aiResults: { recommendations: RECOMMENDATIONS, dailySchedule: DAILY_SCHEDULE } },
+    now: planDayAt(17),
+  });
 });
 
 test('a plan created before its first window closed is still judged in full', async () => {
@@ -823,7 +862,7 @@ test('ticking a forgiven morning does not change what was forgiven', async () =>
     // streak from being awarded on a partly-unreachable day.
     assert.equal(body.stats.wellnessToday.awaiting, 1);
     assert.equal(body.stats.todaysProgress.taken, 1);
-  }, { assessment });
+  }, { assessment, now: planDayAt(17) });
 });
 
 test('the missed-day backfill does not resurrect the day the plan arrived on', async () => {
@@ -881,7 +920,7 @@ test('GET / does not write a closed frame of an afternoon plan into today', asyn
     assert.equal(body.stats.wellnessToday.total, 2);
     assert.equal(body.stats.wellnessToday.missed, 0);
     assert.equal(body.stats.wellnessToday.exempt, 0, 'nothing to exempt: the forgiven frames were never written');
-  }, { assessment: afternoonAssessment(), emulateUpsert: true });
+  }, { assessment: afternoonAssessment(), emulateUpsert: true, now: planDayAt(17) });
 });
 
 test('the deferred doses are reported on every load, not only the first', async () => {
@@ -923,22 +962,32 @@ test('GET / keeps a dose ticked under the replaced plan ticked', async () => {
   // assessment's row for this plan day — the history migration may not have run,
   // or may have failed — and the new plan must not ask for the pill a second time.
   const takenAt = planDayAt(8, 5);
-  store.seed([
-    { name: 'Omega-3 Fish Oil (EPA/DHA)', timeSlot: 'morning', taken: true },
-    { name: 'Zinc Picolinate', timeSlot: 'afternoon', taken: false },
-  ]);
-  // Move the morning tick onto a row the new assessment cannot see.
-  store.rows[0].assessment = PREVIOUS_ASSESSMENT_ID;
-  store.rows[0].takenAt = takenAt;
+  // Pinned BEFORE the rows are seeded, not only inside the request: the seeder
+  // stamps every row's `date` with the clock it is given, so seeding at the real
+  // moment and reading the page at a pinned one hands the route a day that has not
+  // happened yet, and the inheritance this test is about never runs.
+  const now = planDayAt(17, 30);
+  const releaseSeedClock = pinClock(now);
+  try {
+    store.seed([
+      { name: 'Omega-3 Fish Oil (EPA/DHA)', timeSlot: 'morning', taken: true },
+      { name: 'Zinc Picolinate', timeSlot: 'afternoon', taken: false },
+    ]);
+    // Move the morning tick onto a row the new assessment cannot see.
+    store.rows[0].assessment = PREVIOUS_ASSESSMENT_ID;
+    store.rows[0].takenAt = takenAt;
 
-  await withDashboard(async ({ call }) => {
-    const { body } = await call('/');
-    const omega = body.todaysSupplements.find((s) => s.name === 'Omega-3 Fish Oil (EPA/DHA)');
-    assert.ok(omega, 'the dose taken today is still on today\'s page');
-    assert.equal(omega.taken, true, 'taken, not re-asked');
-    assert.equal(new Date(omega.takenAt).getTime(), takenAt.getTime(), 'with the hour it was actually taken at');
-    assert.equal(body.planDeferred.count, 1, 'and the other morning dose is the one that waits');
-  }, { assessment: afternoonAssessment(), emulateUpsert: true });
+    await withDashboard(async ({ call }) => {
+      const { body } = await call('/');
+      const omega = body.todaysSupplements.find((s) => s.name === 'Omega-3 Fish Oil (EPA/DHA)');
+      assert.ok(omega, 'the dose taken today is still on today\'s page');
+      assert.equal(omega.taken, true, 'taken, not re-asked');
+      assert.equal(new Date(omega.takenAt).getTime(), takenAt.getTime(), 'with the hour it was actually taken at');
+      assert.equal(body.planDeferred.count, 1, 'and the other morning dose is the one that waits');
+    }, { assessment: afternoonAssessment(), emulateUpsert: true, now });
+  } finally {
+    releaseSeedClock();
+  }
 });
 
 test('a dose already on the page is never also listed as deferred', async () => {
