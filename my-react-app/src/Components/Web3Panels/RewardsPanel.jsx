@@ -3,8 +3,10 @@ import {
   getRewardsStatus,
   claimCheckin,
   claimIntakeReward,
+  claimAssessmentReward,
   getRewardEvents,
   getNfts,
+  getLeaderboard,
   checkAchievements,
   stakeTokens,
   unstakeTokens,
@@ -18,6 +20,32 @@ const NFT_EMOJI = {
   'year-hero': '👑', scholar: '🎓', 'data-pioneer': '🧪', governor: '🏛️',
   merchant: '🛒', 'diamond-hands': '💎', 'trailblazer': '🔬', 'verified-pro': '🩺',
 };
+
+// ── Streak calendar ────────────────────────────────────────────────────────
+// 13 weeks is a quarter of habit: long enough that a genuine streak is visible,
+// short enough that the grid stays readable on a phone.
+const WEEKS = 13;
+
+const dayKey = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+// Chronological left→right, nine days to a row. Weekday alignment is NOT
+// attempted: the server keys days in its own local time, so pinning columns to
+// Mon–Sun would mislabel rows for a member whose day boundary differs.
+function heatCells(history) {
+  const set = new Set(history || []);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const total = WEEKS * 9;
+  const cells = [];
+  for (let i = total - 1; i >= 0; i -= 1) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const key = dayKey(d);
+    cells.push({ key, on: set.has(key), today: i === 0 });
+  }
+  return cells;
+}
 
 // Deterministic gradient per token so every badge looks unique but stable.
 // The pair is deliberately dark-to-darker: the hue still varies wildly, but
@@ -37,6 +65,7 @@ export default function RewardsPanel() {
   const [events, setEvents] = useState([]);
   const [nfts, setNfts] = useState(null);
   const [loyalty, setLoyalty] = useState(null);
+  const [board, setBoard] = useState(null);
   const [stakeAmount, setStakeAmount] = useState('100');
   const [redeemAmount, setRedeemAmount] = useState('20');
   const [busy, setBusy] = useState(false);
@@ -44,13 +73,14 @@ export default function RewardsPanel() {
   const loadAll = async (silent = false) => {
     try {
       if (!silent) setLoading(true);
-      const [st, ev, nf, lo] = await Promise.all([
-        getRewardsStatus(), getRewardEvents(30), getNfts(), getLoyalty(),
+      const [st, ev, nf, lo, lb] = await Promise.all([
+        getRewardsStatus(), getRewardEvents(30), getNfts(), getLoyalty(), getLeaderboard(),
       ]);
       setStatus(st);
       setEvents(ev.events || []);
       setNfts(nf);
       setLoyalty(lo);
+      setBoard(lb);
       if (!silent) clear();
     } catch (err) {
       fail(err, 'Could not load rewards.');
@@ -77,10 +107,28 @@ export default function RewardsPanel() {
     }
   };
 
+  // Assessments pay one reward each, so "claim" walks the list the server said
+  // is claimable. Sequentially: every claim appends a block, and firing them in
+  // parallel only makes the writer queue longer.
+  const claimAssessments = () => (
+    (async () => {
+      let minted = 0;
+      let total = 0;
+      for (const a of status.claimableAssessments || []) {
+        const r = await claimAssessmentReward(a.id);
+        if (r && !r.alreadyClaimed) { minted += 1; total += Number(r.amount) || 0; }
+      }
+      return { minted, total };
+    })()
+  );
+
   if (loading && !status) return <Spinner />;
   if (!status) return <Alert alert={alert} onClear={clear} />;
 
   const { params, unlocks, achievements, pendingAchievements } = status;
+  const claimable = status.claimableAssessments || [];
+  const heat = heatCells(status.checkinHistory);
+  const heatOn = heat.filter((c) => c.on).length;
 
   return (
     <div>
@@ -130,12 +178,50 @@ export default function RewardsPanel() {
           >
             {pendingAchievements.length ? `Mint ${pendingAchievements.length} new badge(s) ✨` : 'Check achievements'}
           </button>
+          <button
+            className="w3-btn ghost"
+            disabled={busy || claimable.length === 0}
+            title={claimable.length ? '' : 'Every completed assessment has already been claimed'}
+            onClick={() => run(claimAssessments, (r) => (
+              r.minted ? `+${fmtWell(r.total)} WELL for ${r.minted} completed assessment${r.minted > 1 ? 's' : ''}.` : 'Nothing new to claim.'
+            ))}
+          >
+            {claimable.length ? `Claim ${claimable.length} assessment reward${claimable.length > 1 ? 's' : ''} (+${fmtWell((Number(params.rewardAssessment) || 0) * claimable.length)} WELL)` : '✓ All assessments claimed'}
+          </button>
         </div>
         {!status.intakeEligible && (
           <p className="w3-card-sub" style={{ marginTop: 10, marginBottom: 0 }}>
             💡 Intake reward unlocks once you mark at least one supplement as taken today.
           </p>
         )}
+      </div>
+
+      {/* ── Streak calendar ───────────────────────────────────────────── */}
+      <div className="w3-card">
+        <div className="w3-row between">
+          <div>
+            <div className="w3-card-title">🗓️ Your {WEEKS}-week check-in calendar</div>
+            <p className="w3-card-sub">
+              Every lit square is a day a check-in was minted on-chain — {heatOn} of the last {WEEKS * 9} days.
+            </p>
+          </div>
+          <span className="w3-badge green">{status.streak} day streak</span>
+        </div>
+        <div className="w3-heat" role="img" aria-label={`Check-in calendar: ${heatOn} days checked in over the last ${WEEKS * 9} days`}>
+          {heat.map((c) => (
+            <span
+              key={c.key}
+              className={`w3-heat-cell${c.on ? ' on' : ''}${c.today ? ' today' : ''}`}
+              title={`${c.key}${c.on ? ' — checked in' : ''}`}
+            />
+          ))}
+        </div>
+        <div className="w3-heat-legend">
+          <span className="w3-heat-cell" aria-hidden="true" /> missed
+          <span className="w3-heat-cell on" aria-hidden="true" /> checked in
+          <span className="w3-heat-cell today" aria-hidden="true" /> today
+          <span style={{ marginLeft: 'auto' }}>oldest → newest</span>
+        </div>
       </div>
 
       {/* ── Achievement NFTs ─────────────────────────────────────────── */}
@@ -286,6 +372,53 @@ export default function RewardsPanel() {
               </tbody>
             </table>
           </div>
+        )}
+      </div>
+
+      {/* ── Leaderboard ──────────────────────────────────────────────── */}
+      <div className="w3-card">
+        <div className="w3-row between">
+          <div>
+            <div className="w3-card-title">📊 This week’s leaderboard</div>
+            <p className="w3-card-sub">
+              {board ? `${board.windowDays}-day WELL minted across the community. Members appear as a first name and an initial.` : 'Members appear as a first name and an initial.'}
+            </p>
+          </div>
+          {board?.me?.rank && (
+            <span className="w3-badge blue">You’re #{board.me.rank}</span>
+          )}
+        </div>
+
+        {board && board.entries.length > 0 ? (
+          <>
+            <div className="w3-table-wrap">
+              <table className="w3-table">
+                <thead>
+                  <tr><th>#</th><th>Member</th><th>WELL earned</th><th>Staked</th><th>Streak</th></tr>
+                </thead>
+                <tbody>
+                  {board.entries.map((e) => (
+                    <tr key={e.rank} className={e.me ? 'w3-lb-me' : undefined}>
+                      <td className="w3-mono">{e.rank}</td>
+                      <td>{e.name}{e.me ? ' (you)' : ''}</td>
+                      <td style={{ color: '#16a34a', fontWeight: 700 }}>{fmtWell(e.earned)}</td>
+                      <td>{fmtWell(e.staked)}</td>
+                      <td>{e.streak}d</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {board.me && !board.me.inTop && (
+              <p className="w3-card-sub" style={{ marginTop: 10, marginBottom: 0 }}>
+                {board.me.rank
+                  ? `You’re #${board.me.rank} of ${board.me.participants} with ${fmtWell(board.me.earned)} WELL this week.`
+                  : `No rewards minted yet this week — a daily check-in is the quickest way onto the board. ${board.me.participants} members are ranked.`}
+              </p>
+            )}
+          </>
+        ) : (
+          <Empty icon="📊">Nobody has minted a reward in this window yet.</Empty>
         )}
       </div>
 

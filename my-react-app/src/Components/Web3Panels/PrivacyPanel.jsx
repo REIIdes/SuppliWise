@@ -6,8 +6,11 @@ import {
   getProfileShares,
   createProfileShare,
   revokeProfileShare,
+  getStorageList,
+  getStorage,
+  pinStorage,
 } from '../../api/web3';
-import { Spinner, Alert, Stat, CopyChip, Empty, fmtDay, usePanelState } from './w3ui';
+import { Spinner, Alert, Stat, CopyChip, Empty, fmtDay, fmtTime, usePanelState } from './w3ui';
 
 const SCOPES = [
   { key: 'nutrition-outcomes', label: 'Nutrition outcomes study' },
@@ -23,23 +26,31 @@ export default function PrivacyPanel() {
   const { loading, setLoading, alert, ok, fail, clear } = usePanelState();
   const [shares, setShares] = useState(null);
   const [links, setLinks] = useState(null);
+  const [vault, setVault] = useState({ objects: [], count: 0, totalBytes: 0 });
+  const [note, setNote] = useState('');
+  const [opened, setOpened] = useState(null);
   const [recipient, setRecipient] = useState('');
   const [scope, setScope] = useState(SCOPES[0].key);
   const [ttl, setTtl] = useState('72');
   const [lastDataset, setLastDataset] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  const load = async () => {
+  // `keepMessage` exists because every action here reloads AFTER it has already
+  // set its success line. Clearing during that reload erased "Consent granted
+  // on-chain — +25 WELL" the instant it appeared, so the one message the user
+  // earned was the one thing they never saw.
+  const load = async (keepMessage = false) => {
     try {
-      setLoading(true);
-      const [sh, li] = await Promise.all([getDataShares(), getProfileShares()]);
+      if (!keepMessage) setLoading(true);
+      const [sh, li, vu] = await Promise.all([getDataShares(), getProfileShares(), getStorageList()]);
       setShares(sh);
       setLinks(li.links || []);
-      clear();
+      setVault(vu);
+      if (!keepMessage) clear();
     } catch (err) {
       fail(err, 'Could not load privacy settings.');
     } finally {
-      setLoading(false);
+      if (!keepMessage) setLoading(false);
     }
   };
 
@@ -51,7 +62,8 @@ export default function PrivacyPanel() {
       clear();
       const res = await fn();
       if (onSuccess) onSuccess(res);
-      await load();
+      // Quietly: the receipt onSuccess just wrote is the point of the action.
+      await load(true);
       return res;
     } catch (err) {
       fail(err);
@@ -251,6 +263,105 @@ export default function PrivacyPanel() {
             </div>
           )}
         </div>
+      </div>
+      <div className="w3-card">
+        <div className="w3-card-title">🗄️ Your encrypted vault</div>
+        <p className="w3-card-sub">
+          Notes you pin here are AES-256-GCM encrypted before they leave this device, stored under
+          their own content hash, and that hash is anchored in a block. Decrypting re-hashes the
+          ciphertext, so a tampered object fails its own integrity check instead of silently
+          opening.
+        </p>
+
+        <div className="w3-row" style={{ alignItems: 'flex-end', marginTop: 14 }}>
+          <div style={{ flex: 1, minWidth: 240 }}>
+            <label className="w3-label" htmlFor="vault-note">Pin a note (only you can read it)</label>
+            <textarea
+              id="vault-note"
+              className="w3-input"
+              rows={2}
+              maxLength={2000}
+              placeholder="e.g. My doctor told me to recheck ferritin in March."
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          </div>
+          <button
+            className="w3-btn"
+            disabled={busy || note.trim().length < 3}
+            onClick={() =>
+              run(
+                () => pinStorage({ text: note.trim(), at: Date.now() }, 'note'),
+                (r) => {
+                  setNote('');
+                  ok(r.anchored
+                    ? `Sealed and anchored in block #${r.blockIndex}.`
+                    : 'Sealed and stored. The block is still being written — the vault re-anchors it on the next refresh.');
+                }
+              )
+            }
+          >
+            Encrypt &amp; pin
+          </button>
+        </div>
+
+        <div className="w3-grid" style={{ marginTop: 16 }}>
+          <Stat value={vault.count} label="Objects pinned" tone="green" />
+          <Stat value={`${Math.max(1, Math.round(vault.totalBytes / 1024))} KB`} label="Encrypted at rest" tone="amber" hint="Rounded up when the vault is empty" />
+        </div>
+
+        {vault.objects.length === 0 ? (
+          <Empty icon="🗄️" title="Nothing pinned yet">
+            A pinned note is proof that content-addressed storage is not only for research datasets.
+          </Empty>
+        ) : (
+          <div className="w3-table-wrap" style={{ marginTop: 14 }}>
+            <table className="w3-table">
+              <thead>
+                <tr><th>Kind</th><th>Content id</th><th>Pinned</th><th>Block tx</th><th /></tr>
+              </thead>
+              <tbody>
+                {vault.objects.map((o) => (
+                  <tr key={o.cid}>
+                    <td><span className="w3-badge blue">{o.kind}</span></td>
+                    <td><CopyChip value={o.cid} label={`${o.cid.slice(0, 14)}…`} /></td>
+                    <td>{fmtTime(o.pinnedAt)}</td>
+                    <td>{o.txHash ? <CopyChip value={o.txHash} /> : <span className="w3-badge amber">not anchored</span>}</td>
+                    <td>
+                      <button
+                        className="w3-btn ghost small"
+                        disabled={busy}
+                        onClick={() =>
+                          run(
+                            () => getStorage(o.cid),
+                            (r) => {
+                              setOpened(r);
+                              if (!r.integrityOk) fail({ message: 'Integrity check FAILED for this object — its ciphertext no longer hashes to its content id.' });
+                              else ok('Decrypted and integrity verified ✓');
+                            }
+                          )
+                        }
+                      >
+                        Decrypt
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {opened && (
+          <div style={{ marginTop: 14 }}>
+            <div className="w3-label">
+              Decrypted {opened.kind} · {opened.integrityOk ? 'integrity verified ✓' : 'INTEGRITY FAILED ✗'}
+            </div>
+            <div className="w3-mono" style={{ background: '#f9fafb', padding: 10, borderRadius: 8, maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+              {typeof opened.data === 'string' ? opened.data : JSON.stringify(opened.data, null, 2)}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

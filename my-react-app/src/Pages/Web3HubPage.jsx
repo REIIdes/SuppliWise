@@ -8,6 +8,7 @@ import AiProofPanel from '../Components/Web3Panels/AiProofPanel';
 import EcosystemPanel from '../Components/Web3Panels/EcosystemPanel';
 import SupplyPanel from '../Components/Web3Panels/SupplyPanel';
 import ExplorerPanel from '../Components/Web3Panels/ExplorerPanel';
+import PledgePanel from '../Components/Web3Panels/PledgePanel';
 import { AreaNav, Hero, TabBar } from '../Components/Web3Panels/w3ui';
 import './Web3.css';
 
@@ -17,6 +18,7 @@ import './Web3.css';
 const TABS = [
   { key: 'wallet', icon: '🪪', label: 'Wallet & Identity', Panel: WalletPanel },
   { key: 'rewards', icon: '🏆', label: 'Rewards & NFTs', Panel: RewardsPanel },
+  { key: 'pledges', icon: '🤝', label: 'Health Pledges', Panel: PledgePanel },
   { key: 'ledger', icon: '📒', label: 'Health Ledger', Panel: LedgerPanel },
   { key: 'privacy', icon: '🔒', label: 'Privacy & Data', Panel: PrivacyPanel },
   { key: 'ai', icon: '🤖', label: 'AI Proof', Panel: AiProofPanel },

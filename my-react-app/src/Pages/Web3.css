@@ -1247,7 +1247,13 @@
   font-size: 12px;
   text-align: left;
   cursor: pointer;
-  word-break: break-all;
+  /* The chip's text is already truncated, so it must never wrap: `break-all`
+     let a narrow table column split a hash mid-character ("841 63e ab9…"),
+     which reads as corrupted data. `overflow:hidden` is what keeps the nowrap
+     honest — without it an unbreakable chip is wider than its column and
+     pushes the whole page sideways instead of shrinking. */
+  white-space: nowrap;
+  overflow: hidden;
   transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease,
     transform 0.16s ease;
 }
@@ -1261,6 +1267,8 @@
 
 .w3-hash-text {
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .w3-hash-icon {
@@ -1946,7 +1954,11 @@
 .w3-ach-body,
 .w3-mini,
 .w3-stat-body,
-.w3-hero-body {
+.w3-hero-body,
+/* A scroll container only scrolls if it is allowed to be narrower than its
+   table: with min-width:auto the widest cell — a nowrap tx hash in the repair
+   log — pushed the card, and the page, sideways instead. */
+.w3-table-wrap {
   min-width: 0;
 }
 
@@ -2142,6 +2154,107 @@
     width: 100%;
     justify-content: space-between;
   }
+}
+
+/* ══ Health pledges ═════════════════════════════════════════════════ */
+/* A wall card is quiet on purpose: the text is the content, so everything
+   else (name, day, tx) is metadata at 11–12px. */
+.w3-pledge {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 15px;
+  border: 1px solid var(--w3-line);
+  border-left: 3px solid var(--w3-brand-2);
+  border-radius: 14px;
+  background: var(--w3-paper);
+}
+
+.w3-pledge-text {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--w3-ink);
+  /* Long unbroken input must wrap inside the card, not widen the grid. */
+  overflow-wrap: anywhere;
+}
+
+.w3-pledge-meta,
+.w3-pledge-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.w3-pledge-foot {
+  font-size: 11px;
+  color: var(--w3-faint);
+}
+
+/* ══ Streak calendar ════════════════════════════════════════════════ */
+/* GitHub-style grid: 7 columns (a week) x N rows. Cells are squares that
+   scale down with the container, so the block never forces a horizontal
+   scroll on a phone. */
+.w3-heat {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.w3-heat-cell {
+  aspect-ratio: 1 / 1;
+  border-radius: 5px;
+  background: var(--w3-line);
+}
+
+.w3-heat-cell.on {
+  background: linear-gradient(150deg, var(--w3-lime), var(--w3-brand));
+}
+
+.w3-heat-cell.today {
+  outline: 2px solid var(--w3-amber);
+  outline-offset: 1px;
+}
+
+.w3-heat-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--w3-muted);
+}
+
+/* The legend swatches reuse .w3-heat-cell, but a legend key is a fixed dot —
+   not another square in the stretchy grid. */
+.w3-heat-legend .w3-heat-cell {
+  width: 12px;
+  height: 12px;
+  aspect-ratio: auto;
+  flex: none;
+}
+
+/* ══ Long cell text ═════════════════════════════════════════════════ */
+/* Tables inside a scroll wrapper must not widen themselves: one long machine
+   reason used to push the whole log sideways. */
+.w3-ellip {
+  max-width: 340px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ══ Leaderboard ════════════════════════════════════════════════════ */
+/* The caller's own row is highlighted — a ranking you cannot find yourself on
+   is decoration. */
+.w3-lb-me {
+  background: color-mix(in srgb, var(--w3-lime) 12%, transparent);
+}
+
+.w3-lb-me td {
+  font-weight: 800;
 }
 
 /* ══ Reduced motion ═════════════════════════════════════════════════ */

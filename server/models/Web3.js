@@ -234,6 +234,7 @@ const DEFAULT_PARAMS = {
   daoVotingDays: 3,           // proposal lifetime
   daoQuorumWeight: 50,        // min total voting weight for validity
   healthAnchorReward: 3,      // anchoring a health ledger snapshot
+  pledgeReward: 3,            // minting an on-chain health pledge (feature 16)
 };
 
 const configSchema = new mongoose.Schema({
@@ -528,6 +529,10 @@ const storageObjectSchema = new mongoose.Schema({
   iv: { type: String, required: true },
   tag: { type: String, required: true },
   size: { type: Number, default: 0 },
+  // The chain tx that proves this pin existed at this content address.
+  // Written by POST /storage/pin when the anchor lands; '' (and lazily
+  // re-anchored by GET /storage) while the ledger was busy.
+  anchorTx: { type: String, default: '' },
   pinnedAt: { type: Number, default: () => Date.now() },
 });
 
@@ -646,6 +651,30 @@ const bookingSchema = new mongoose.Schema({
 
 const Booking = mongoose.model('SwBooking', bookingSchema);
 
+// ── Health pledges (feature 16) ────────────────────────────────────────────
+// A public, on-chain commitment ("I will walk 30 minutes every morning this
+// month"). One pledge per member per day: the unique (user, day) index is the
+// rate limit, and the same day key is the idempotent reward refId.
+//
+// `txHash` is '' while the ledger was busy at mint time; GET /pledges lazily
+// re-anchors those rows (the anchor never re-awards the reward — the reward
+// event is keyed independently and already committed).
+const pledgeSchema = new mongoose.Schema({
+  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+  address: { type: String, required: true },
+  text: { type: String, required: true, maxlength: 300 },
+  day: { type: String, required: true },
+  reward: { type: Number, default: 0 },
+  rewardTx: { type: String, default: '' },
+  txHash: { type: String, default: '' },
+  blockIndex: { type: Number, default: -1 },
+  createdAt: { type: Number, default: () => Date.now() },
+});
+pledgeSchema.index({ user: 1, day: 1 }, { unique: true });
+pledgeSchema.index({ createdAt: -1 });
+
+const Pledge = mongoose.model('SwPledge', pledgeSchema);
+
 module.exports = {
   Block,
   ChainAudit,
@@ -673,4 +702,5 @@ module.exports = {
   OracleFeed,
   Expert,
   Booking,
+  Pledge,
 };

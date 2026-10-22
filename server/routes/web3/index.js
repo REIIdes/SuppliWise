@@ -9,6 +9,7 @@ const marketRouter = require('./market');
 const governRouter = require('./govern');
 const dataRouter = require('./data');
 const ecosystemRouter = require('./ecosystem');
+const pledgeRouter = require('./pledge');
 
 // ═══════════════════════════════════════════════════════════════════════════
 // /api/web3 — SuppliWise blockchain layer router.
@@ -61,5 +62,6 @@ router.use('/', marketRouter);      // marketplace, escrow orders, disputes
 router.use('/', governRouter);      // DAO + knowledge base
 router.use('/', dataRouter);        // health ledger, storage, consent, AI proof, shares
 router.use('/', ecosystemRouter);   // trials, oracles, professionals
+router.use('/', pledgeRouter);      // on-chain daily health pledges
 
 module.exports = router;

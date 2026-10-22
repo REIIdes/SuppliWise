@@ -1,6 +1,24 @@
 import { useEffect, useState } from 'react';
-import { getChain, verifyChain, getTx, getChainStatus } from '../../api/web3';
+import { getChain, verifyChain, getTx, getChainStatus, getChainRepairs } from '../../api/web3';
 import { Spinner, Alert, Stat, CopyChip, Empty, fmtTime, trunc, usePanelState } from './w3ui';
+
+// A chain-repair row is a moment the ledger had to defend itself. Each kind
+// tells a different story, and an incident with no matching 'repair' after it
+// is still open — so the tone is decided by the sequence, not by the row alone.
+const REPAIR_KIND = {
+  incident: { icon: '⚠️', label: 'Integrity incident detected', tone: 'amber' },
+  repair: { icon: '🛠️', label: 'Chain repaired', tone: 'green' },
+  'repair-failed': { icon: '✖️', label: 'Repair attempt failed', tone: 'amber' },
+  'quarantine-lifted': { icon: '📦', label: 'Quarantine lifted', tone: 'green' },
+};
+
+function repairTone(rows, i) {
+  const row = rows[i];
+  if (row.kind !== 'incident') return REPAIR_KIND[row.kind]?.tone || '';
+  // rows are newest-first, so "resolved" means a repair at a LATER index.
+  const later = rows.slice(i + 1);
+  return later.some((r) => r.kind === 'repair' || r.kind === 'quarantine-lifted') ? 'green' : 'amber';
+}
 
 // Chain explorer: browse blocks, recompute the whole chain's integrity, and
 // look up any transaction hash (from rewards, escrow, consent, votes…).
@@ -9,6 +27,7 @@ export default function ExplorerPanel() {
   const [chain, setChain] = useState(null);
   const [verify, setVerify] = useState(null);
   const [status, setStatus] = useState(null);
+  const [repairs, setRepairs] = useState([]);
   const [txInput, setTxInput] = useState('');
   const [tx, setTx] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -21,6 +40,9 @@ export default function ExplorerPanel() {
         if (!prev || before == null) return res;
         return { ...res, blocks: [...prev.blocks, ...res.blocks] };
       });
+      // Best-effort: an empty incident log is the boring, correct default, and a
+      // failure here must not blank the explorer that did load.
+      getChainRepairs().then((r) => setRepairs(r.repairs || [])).catch(() => setRepairs([]));
       clear();
     } catch (err) {
       fail(err, 'Could not load the chain.');
@@ -198,6 +220,67 @@ export default function ExplorerPanel() {
                 <tr><td style={{ fontWeight: 600 }}>Data</td><td><div className="w3-mono" style={{ maxHeight: 120, overflow: 'auto' }}>{JSON.stringify(tx.tx.data, null, 2)}</div></td></tr>
                 <tr><td style={{ fontWeight: 600 }}>Payload digest</td><td><CopyChip value={tx.tx.dataHash} label={trunc(tx.tx.dataHash, 14, 8)} /></td></tr>
                 <tr><td style={{ fontWeight: 600 }}>Tx hash</td><td><CopyChip value={tx.tx.txHash} label={tx.tx.txHash} /></td></tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="w3-card">
+        <div className="w3-row between">
+          <div>
+            <div className="w3-card-title">🛠️ Chain incident &amp; repair log</div>
+            <p className="w3-card-sub">
+              A repair rewrites the tip, so the discarded blocks are gone from the chain itself.
+              This log is the permanent record that they existed and why they were dropped.
+            </p>
+          </div>
+          <span className={`w3-badge ${repairs.some((r) => r.kind === 'incident') ? 'amber' : 'green'}`}>
+            {repairs.length ? `${repairs.length} entries` : 'no incidents recorded'}
+          </span>
+        </div>
+
+        {repairs.length === 0 ? (
+          <Empty icon="🛡️">
+            Nothing has ever needed repairing. Every integrity check this chain has run, it passed.
+          </Empty>
+        ) : (
+          <div className="w3-table-wrap">
+            <table className="w3-table">
+              <thead>
+                <tr><th>When</th><th>Event</th><th>Block</th><th>Detail</th></tr>
+              </thead>
+              <tbody>
+                {repairs.map((r, i) => {
+                  const meta = REPAIR_KIND[r.kind] || { icon: '•', label: r.kind, tone: '' };
+                  const tone = repairTone(repairs, i);
+                  return (
+                    <tr key={`${r.at}-${r.kind}-${i}`}>
+                      <td>{fmtTime(r.at)}</td>
+                      <td>
+                        <span className={`w3-badge ${tone || 'blue'}`}>{meta.icon} {meta.label}</span>
+                        {r.actor && r.actor !== 'system' && (
+                          <div className="w3-mono" style={{ fontSize: 11, marginTop: 4 }}>{r.actor}</div>
+                        )}
+                      </td>
+                      <td className="w3-mono">
+                        {Number(r.brokenAt) >= 0 ? `#${r.brokenAt}` : Number(r.keptThrough) >= 0 ? `kept #${r.keptThrough}` : '—'}
+                      </td>
+                      <td>
+                        <div className="w3-ellip" title={r.reason || ''}>{r.reason || r.failureKind || '—'}</div>
+                        {Number(r.discardedCount) > 0 && (
+                          <div className="w3-mono" style={{ fontSize: 11 }}>
+                            {r.discardedCount} block(s) discarded
+                            {r.healthyAfter === true ? ' · chain healthy after' : r.healthyAfter === false ? ' · still unhealthy' : ''}
+                          </div>
+                        )}
+                        {Number(r.durationMs) > 0 && (
+                          <div className="w3-mono" style={{ fontSize: 11 }}>{(r.durationMs / 1000).toFixed(1)}s</div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

@@ -62,6 +62,10 @@ export const verifyChain = ({ full = false } = {}) =>
 // Compact integrity state for the chain banner. Separate from verifyChain
 // because this one is cheap enough to poll, while a full re-verification is not.
 export const getChainStatus = () => w3Fetch('/web3/chain/status');
+// The chain's own incident ledger: every detected break, repair, quarantine and
+// failed repair, newest first. Exposed because a health banner that only says
+// "all good" is not auditable — the member can now see the downtime too.
+export const getChainRepairs = () => w3Fetch('/web3/chain/repairs');
 export const getTx = (hash) => w3Fetch(`/web3/tx/${encodeURIComponent(hash)}`);
 export const getWeb3Config = () => w3Fetch('/web3/config');
 
@@ -104,12 +108,21 @@ export const claimIntakeReward = () => w3Fetch('/web3/rewards/intake', body({}))
 export const claimAssessmentReward = (assessmentId) =>
   w3Fetch('/web3/rewards/assessment', body({ assessmentId }));
 export const getRewardEvents = (limit = 30) => w3Fetch(`/web3/rewards/events?limit=${limit}`);
+// Seven-day WELL ranking across the community, with the caller's own place in
+// it even when they are outside the top 20. Names are masked server-side.
+export const getLeaderboard = () => w3Fetch('/web3/rewards/leaderboard');
 export const getNfts = () => w3Fetch('/web3/rewards/nfts');
 export const checkAchievements = () => w3Fetch('/web3/rewards/achievements/check', body({}));
 export const stakeTokens = (amount) => w3Fetch('/web3/stake', body({ amount }));
 export const unstakeTokens = (amount) => w3Fetch('/web3/unstake', body({ amount }));
 export const getLoyalty = () => w3Fetch('/web3/loyalty');
 export const redeemLoyalty = (amount) => w3Fetch('/web3/loyalty/redeem', body({ amount }));
+
+// ── Health pledges ────────────────────────────────────────────────────────
+// One commitment per day, minted as a block. The wall lists the community's
+// pledges with masked names; `mine` is the caller's own history.
+export const getPledges = () => w3Fetch('/web3/pledges');
+export const createPledge = (text) => w3Fetch('/web3/pledges', body({ text }));
 
 // ── Marketplace, escrow & disputes ────────────────────────────────────────
 export const getListings = (mine = false) => w3Fetch(`/web3/market/listings${mine ? '?mine=1' : ''}`);
@@ -144,6 +157,9 @@ export const verifyHealthCredential = (payload) =>
 export const backupHealthRecord = () => w3Fetch('/web3/health/backup', body({}));
 export const pinStorage = (data, kind) => w3Fetch('/web3/storage/pin', body({ data, kind }));
 export const getStorage = (cid) => w3Fetch(`/web3/storage/${encodeURIComponent(cid)}`);
+// The member's whole encrypted vault (every pinned object + its chain receipt).
+// Distinct from getStorage(cid), which decrypts one object.
+export const getStorageList = () => w3Fetch('/web3/storage');
 export const getDataShares = () => w3Fetch('/web3/data/shares');
 export const createDataShare = (payload) => w3Fetch('/web3/data/shares', body(payload));
 export const revokeDataShare = (shareId) =>

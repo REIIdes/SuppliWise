@@ -83,6 +83,7 @@ const GATED = [
   ['/dao/config', 'dao'],
   ['/dao/proposals', 'dao'],
   ['/knowledge', 'dao'],
+  ['/pledges', 'web3'],
 ];
 
 test('a FREE user is refused everywhere in the blockchain layer', async () => {
@@ -114,6 +115,7 @@ test('each sub-router reports its own feature key, not the first one', async () 
   assert.equal(seen.get('market'), 'market');
   assert.equal(seen.get('dao'), 'dao');
   assert.equal(seen.get('knowledge'), 'dao', 'knowledge base belongs to the DAO gate');
+  assert.equal(seen.get('pledges'), 'web3', 'pledges are part of the core web3 entitlement');
 });
 
 test('a DELUXE user passes the gate', async () => {
@@ -134,7 +136,21 @@ test('every sub-router keeps its own guard, as defence in depth', () => {
     .readdirSync(dir)
     .filter((f) => f.endsWith('.js') && !['index.js', 'guards.js'].includes(f));
 
-  assert.equal(subRouters.length, 7, `expected 7 sub-routers, found ${subRouters.length}`);
+  // The canary is index.js, not a count. A sub-router file that index.js never
+  // mounts is unreachable (so harmless), but a mount that the guard test does
+  // not cover is an open endpoint — and a hardcoded count would silently drift
+  // behind whichever happened first. Deriving the expectation from the real
+  // mount list keeps this true as the layer grows.
+  const indexSrc = fs.readFileSync(path.join(dir, 'index.js'), 'utf8');
+  const mounted = [...indexSrc.matchAll(/require\('\.\/([a-z]+)'\)/g)]
+    .map((m) => m[1])
+    .filter((name) => name !== 'guards')
+    .sort();
+  assert.deepEqual(
+    subRouters.map((f) => f.replace(/\.js$/, '')).sort(),
+    mounted,
+    'every file in routes/web3 must be mounted by index.js, and index.js must mount only real files',
+  );
 
   for (const file of subRouters) {
     const src = fs.readFileSync(path.join(dir, file), 'utf8');

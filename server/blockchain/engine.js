@@ -110,13 +110,21 @@ async function setParam(param, value, actor) {
 // which is the honest answer rather than a fake equality check.
 async function anchor(type, actor, { public: pub = null, secret = null }) {
   try {
-    return await ledger.append([
+    const block = await ledger.append([
       // `secret`, not a precomputed `dataHash`: the ledger owns digest derivation
       // so a caller cannot attach a digest that does not describe its payload.
       secret !== null && secret !== undefined
         ? { type, actor, data: pub, secret }
         : { type, actor, data: pub },
     ]);
+    // `anchored: true` is not decoration — `ledger.append` resolves
+    // { index, hash, txs } and nothing else, so without this line the success
+    // path has `anchored === undefined` while only the failure path says
+    // `false`. Every caller written against the documented contract
+    // (`if (chain.anchored)`) then treats a real block as a failed one and
+    // stores an empty receipt. The flag is set HERE, once, so no route has to
+    // remember the difference between "missing" and "false".
+    return { ...block, anchored: true };
   } catch (err) {
     console.error('[web3 anchor]', type, err.message);
     // The failure is made explicit rather than left as `index: -1` for each
@@ -137,7 +145,10 @@ async function anchor(type, actor, { public: pub = null, secret = null }) {
 // bottleneck under concurrent checks.
 async function anchorMany(entries) {
   try {
-    return await ledger.append(entries);
+    const block = await ledger.append(entries);
+    // Same explicit success flag as anchor(): `anchored` must never be
+    // `undefined` on a block that was actually written.
+    return { ...block, anchored: true };
   } catch (err) {
     console.error('[web3 anchorMany]', err.message);
     // Same explicit failure as anchor(): positional alignment is kept so

@@ -195,6 +195,37 @@ function disputeOutcome(votes, jurors = []) {
   return { outcome: '', buyer, seller, cast, needed, complete: complete && cast > 0 };
 }
 
+// ── Health pledges & leaderboard (features 16 & 17) ────────────────────────
+// A pledge is free text the member MINTS TO THE CHAIN — public forever, to
+// anyone who can open the block explorer. So the rules are strict and live
+// here, pure and unit-testable, not inline in the route:
+//   * 3–280 visible characters (a tweet-sized commitment),
+//   * control characters and zero-width tricks stripped (they hide content in
+//     a payload that is rendered verbatim in the wall and the explorer),
+//   * whitespace collapsed so nothing renders as forty blank lines.
+const PLEDGE_MIN = 3;
+const PLEDGE_MAX = 280;
+
+function sanitizePledge(text) {
+  const cleaned = String(text ?? '')
+    // eslint-disable-next-line no-control-regex -- stripping is the whole point
+    .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029\ufeff]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (cleaned.length < PLEDGE_MIN) return { ok: false, error: 'A pledge needs at least a few words.' };
+  if (cleaned.length > PLEDGE_MAX) return { ok: false, error: `A pledge must fit in ${PLEDGE_MAX} characters.` };
+  return { ok: true, text: cleaned };
+}
+
+// Leaderboards and the pledge wall are member-visible. A full name on a
+// ranked board is a real privacy leak (weighting, health-adjacent activity),
+// so only a first name and a last initial ever leave the server.
+function maskName(user) {
+  const first = String(user?.firstName || user?.name || '').trim().split(/\s+/)[0] || 'Member';
+  const last = String(user?.lastName || '').trim().split(/\s+/)[0] || '';
+  return last ? `${first} ${last.slice(0, 1).toUpperCase()}.` : first;
+}
+
 module.exports = {
   tallyProposal,
   checkinStreak,
@@ -206,4 +237,9 @@ module.exports = {
   eligibleAchievements,
   escrowSplit,
   disputeOutcome,
+  MIN_OPEN_JURY,
+  PLEDGE_MIN,
+  PLEDGE_MAX,
+  sanitizePledge,
+  maskName,
 };

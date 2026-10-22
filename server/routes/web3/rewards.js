@@ -2,12 +2,14 @@ const express = require('express');
 const crypto = require('crypto');
 const {
   Nft,
+  Wallet,
   RewardEvent,
   LoyaltyCode,
 } = require('../../models/Web3');
 const Assessment = require('../../models/Assessment');
 const IntakeRecord = require('../../models/IntakeRecord');
 const DashboardMetrics = require('../../models/DashboardMetrics');
+const User = require('../../models/User');
 const engine = require('../../blockchain/engine');
 const { dayKey, sha256Hex, round2, strictNumber } = require('../../blockchain/crypto');
 const {
@@ -16,11 +18,15 @@ const {
   stakingUnlocks,
   ACHIEVEMENTS,
   eligibleAchievements,
+  maskName,
 } = require('../../blockchain/rules');
 const { requireFeature } = require('../../utils/entitlements');
 
 const router = express.Router();
 const DAY = 86400000;
+// Seven days: long enough that a member who checks in most of the week appears,
+// short enough that a month-old burst of claims cannot hold a slot forever.
+const LEADERBOARD_WINDOW_DAYS = 7;
 
 function userOnly(req, res, next) {
   if (req.user.role === 'admin') return res.status(403).json({ message: 'User account required.' });
@@ -100,6 +106,30 @@ router.get('/rewards/status', async (req, res) => {
     };
     const takenToday = await IntakeRecord.exists({ user: req.user._id, taken: true, dayKey: today }) != null;
 
+    // Assessments that are finished but were never paid. The filter mirrors the
+    // POST /rewards/assessment guard exactly (owned + has aiResults), so a row
+    // listed here is always a claim that will succeed rather than a 400.
+    const recentAssessments = await Assessment
+      .find({ user: req.user._id, aiResults: { $ne: null } })
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .select('_id createdAt')
+      .lean();
+    const paidAssessmentIds = recentAssessments.length === 0 ? [] : (
+      await RewardEvent
+        .find({
+          user: req.user._id,
+          kind: 'assessment',
+          refId: { $in: recentAssessments.map((a) => String(a._id)) },
+        })
+        .select('refId')
+        .lean()
+    ).map((e) => e.refId);
+    const unpaid = new Set(paidAssessmentIds);
+    const claimableAssessments = recentAssessments
+      .filter((a) => !unpaid.has(String(a._id)))
+      .map((a) => ({ id: String(a._id), at: a.createdAt }));
+
     res.json({
       wallet: {
         did: fresh.did,
@@ -114,6 +144,10 @@ router.get('/rewards/status', async (req, res) => {
       streak: stats.streak,
       trackedStreak: stats.trackedStreak,
       checkinCount: stats.checkinDays,
+      // Day keys of every check-in the member has, newest first. The tab draws
+      // a streak calendar from this — the count alone cannot show WHICH days.
+      checkinHistory: stats.checkinRows.map((r) => r.day),
+      claimableAssessments,
       claimedToday,
       intakeEligible: takenToday,
       accruedNow: accrued && accrued.amount ? accrued.amount : 0,
@@ -212,6 +246,73 @@ router.post('/rewards/assessment', async (req, res) => {
   } catch (error) {
     console.error('[web3 POST /rewards/assessment]', error.message);
     res.status(500).json({ message: 'Could not record the assessment reward.' });
+  }
+});
+
+// @route   GET /api/web3/rewards/leaderboard
+// @desc    Seven-day WELL ranking for the whole community, plus the caller's
+//          own place in it. Identities are masked (first name + last initial):
+//          a leaderboard is a public ranking, and a public full name attached
+//          to a health-reward total is a health disclosure.
+// @access  Private
+router.get('/rewards/leaderboard', async (req, res) => {
+  try {
+    const since = Date.now() - LEADERBOARD_WINDOW_DAYS * DAY;
+    const group = [
+      { $match: { at: { $gte: since } } },
+      { $group: { _id: '$user', earned: { $sum: '$amount' }, events: { $sum: 1 } } },
+      { $sort: { earned: -1, events: -1 } },
+    ];
+    const [top, all] = await Promise.all([
+      RewardEvent.aggregate([...group, { $limit: 20 }]),
+      RewardEvent.aggregate(group),
+    ]);
+
+    const ids = top.map((r) => r._id);
+    const [users, wallets, checkins] = await Promise.all([
+      User.find({ _id: { $in: ids } }).select('firstName lastName').lean(),
+      Wallet.find({ user: { $in: ids } }).select('user staked').lean(),
+      RewardEvent.find({ user: { $in: ids }, kind: 'checkin' }).select('user day').lean(),
+    ]);
+    const names = new Map(users.map((u) => [String(u._id), u]));
+    const staked = new Map(wallets.map((w) => [String(w.user), w.staked || 0]));
+    const daysByUser = new Map();
+    for (const row of checkins) {
+      const k = String(row.user);
+      if (!daysByUser.has(k)) daysByUser.set(k, []);
+      daysByUser.get(k).push(row.day);
+    }
+
+    const today = dayKey();
+    const entries = top.map((r, i) => ({
+      rank: i + 1,
+      name: maskName(names.get(String(r._id)) || {}),
+      earned: round2(r.earned),
+      events: r.events,
+      staked: round2(staked.get(String(r._id)) || 0),
+      streak: checkinStreak(daysByUser.get(String(r._id)) || [], today),
+      me: String(r._id) === String(req.user._id),
+    }));
+
+    // The caller's rank even when they are not in the top 20 — counted from the
+    // same grouped totals, so it can never disagree with the visible list.
+    const meId = String(req.user._id);
+    const mineRow = all.find((r) => String(r._id) === meId);
+    const myEarned = mineRow ? round2(mineRow.earned) : 0;
+    const better = all.filter((r) => r.earned > (mineRow ? mineRow.earned : 0)).length;
+    res.json({
+      windowDays: LEADERBOARD_WINDOW_DAYS,
+      entries,
+      me: {
+        rank: mineRow ? better + 1 : null,
+        earned: myEarned,
+        inTop: entries.some((e) => e.me),
+        participants: all.length,
+      },
+    });
+  } catch (error) {
+    console.error('[web3 GET /rewards/leaderboard]', error.message);
+    res.status(500).json({ message: 'Could not load the leaderboard.' });
   }
 });
 

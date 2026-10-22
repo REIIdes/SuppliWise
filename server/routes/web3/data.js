@@ -279,10 +279,76 @@ router.post('/storage/pin', async (req, res) => {
       },
       { upsert: true, new: true }
     );
-    res.status(201).json({ cid: doc.cid, kind: doc.kind, size: doc.size, pinnedAt: doc.pinnedAt });
+    // Anchor the pin. Until now only /health/backup anchored, so the vault UI
+    // could say "pinned on-chain" about a row that existed only in Mongo — the
+    // whole point of feature 8 is that a third party can be shown a block that
+    // commits to this CID. `engine.anchor` never throws; the receipt is only
+    // reported when `anchored` is true.
+    const wallet = await engine.getWalletDoc(req.user._id);
+    const chain = await engine.anchor('storage:pin', wallet.address, {
+      public: { cid: doc.cid, kind: doc.kind },
+    });
+    if (chain.anchored) {
+      const txHash = chain.txs[0] || '';
+      await StorageObject.updateOne({ _id: doc._id }, { $set: { anchorTx: txHash } });
+      return res.status(201).json({
+        cid: doc.cid, kind: doc.kind, size: doc.size, pinnedAt: doc.pinnedAt,
+        txHash, blockIndex: chain.index, anchored: true,
+      });
+    }
+    res.status(201).json({
+      cid: doc.cid, kind: doc.kind, size: doc.size, pinnedAt: doc.pinnedAt,
+      txHash: '', anchored: false,
+    });
   } catch (error) {
     console.error('[web3 POST /storage/pin]', error.message);
     res.status(500).json({ message: 'Could not pin this payload.' });
+  }
+});
+
+// @route   GET /api/web3/storage
+// @desc    The member's own encrypted vault — every object they pinned, with
+//          its on-chain receipt. Registered BEFORE /storage/:cid, otherwise the
+//          param route swallows "storage" as a content id and answers 400.
+// @access  Private
+router.get('/storage', async (req, res) => {
+  try {
+    const rows = await StorageObject.find({ owner: req.user._id })
+      .sort({ pinnedAt: -1 })
+      .limit(100)
+      .lean();
+    // A pin whose block is missing (ledger busy at the time) is anchored lazily
+    // on read, so the vault heals itself instead of storing "no receipt" forever.
+    const missing = rows.filter((r) => !r.anchorTx);
+    if (missing.length > 0) {
+      const wallet = await engine.getWalletDoc(req.user._id);
+      const chain = await engine.anchorMany(missing.map((r) => ({
+        type: 'storage:pin',
+        actor: wallet.address,
+        data: { cid: r.cid, kind: r.kind },
+      })));
+      if (chain.anchored) {
+        await Promise.all(missing.map((r, i) => StorageObject.updateOne(
+          { _id: r._id },
+          { $set: { anchorTx: chain.txs[i] || '' } },
+        )));
+        missing.forEach((r, i) => { r.anchorTx = chain.txs[i] || ''; });
+      }
+    }
+    res.json({
+      objects: rows.map((r) => ({
+        cid: r.cid,
+        kind: r.kind,
+        size: r.size,
+        pinnedAt: r.pinnedAt,
+        txHash: r.anchorTx || '',
+      })),
+      count: rows.length,
+      totalBytes: rows.reduce((sum, r) => sum + (Number(r.size) || 0), 0),
+    });
+  } catch (error) {
+    console.error('[web3 GET /storage]', error.message);
+    res.status(500).json({ message: 'Could not load your vault.' });
   }
 });
 
@@ -325,10 +391,15 @@ router.post('/health/backup', async (req, res) => {
       },
       { upsert: true, new: true }
     );
-    await engine.anchor('storage:pin', wallet.address, {
+    const chain = await engine.anchor('storage:pin', wallet.address, {
       public: { cid: doc.cid, kind: 'health-backup' },
     });
-    res.status(201).json({ cid: doc.cid, assessmentCount: snapshot.assessmentCount, intakeCount: snapshot.intakeCount, pinnedAt: doc.pinnedAt });
+    // The receipt is reported only when the block actually exists. A backup is
+    // still a valid encrypted object without one (GET /storage retries the
+    // anchor lazily), but the response must not imply a proof it does not have.
+    const txHash = chain.anchored ? chain.txs[0] || '' : '';
+    if (txHash) await StorageObject.updateOne({ _id: doc._id }, { $set: { anchorTx: txHash } });
+    res.status(201).json({ cid: doc.cid, assessmentCount: snapshot.assessmentCount, intakeCount: snapshot.intakeCount, pinnedAt: doc.pinnedAt, txHash, anchored: chain.anchored });
   } catch (error) {
     console.error('[web3 POST /health/backup]', error.message);
     res.status(500).json({ message: 'Could not back up your health record.' });

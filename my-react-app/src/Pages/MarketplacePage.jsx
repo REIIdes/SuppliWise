@@ -105,9 +105,12 @@ export default function MarketplacePage() {
     stock: '10',
   });
 
-  const load = async () => {
+  // `keepMessage` because every action reloads AFTER it has already shown its
+  // receipt ("Order placed — 42 WELL locked in escrow…"), and a plain reload
+  // cleared that line the instant it appeared.
+  const load = async (keepMessage = false) => {
     try {
-      setLoading(true);
+      if (!keepMessage) setLoading(true);
       const [m, mineRes, o, d] = await Promise.all([
         getListings(),
         getListings(true),
@@ -118,11 +121,11 @@ export default function MarketplacePage() {
       setMine(mineRes.listings || []);
       setOrders({ bought: o.bought || [], sold: o.sold || [] });
       setDisputeData({ disputes: d.disputes || [], jurorReward: d.jurorReward || 0 });
-      clear();
+      if (!keepMessage) clear();
     } catch (err) {
       fail(err, 'Could not load the marketplace.');
     } finally {
-      setLoading(false);
+      if (!keepMessage) setLoading(false);
     }
   };
 
@@ -134,7 +137,8 @@ export default function MarketplacePage() {
       clear();
       const res = await fn();
       if (onSuccess) onSuccess(res);
-      await load();
+      // Reload quietly: the receipt set in onSuccess is the point of the action.
+      await load(true);
       return res;
     } catch (err) {
       fail(err);
@@ -151,7 +155,13 @@ export default function MarketplacePage() {
       (r) => {
         setDiscount('');
         setTab('orders');
-        ok(`Order placed — ${fmtWell(r.order.total)} WELL locked in escrow (tx ${String(r.escrowTx).slice(0, 12)}…).`);
+        // `escrowTx` is empty only when a paid order's transfer wrote no hash
+        // (a free, fully-discounted order legitimately has none), so the two
+        // cases need different wording — quoting an empty tx as a receipt is
+        // how a payment silently vanishes from the member's view.
+        ok(Number(r.order.total) > 0 && !r.escrowTx
+          ? `Order placed — ${fmtWell(r.order.total)} WELL is in escrow. The block receipt is still being written; open the order to see it.`
+          : `Order placed — ${fmtWell(r.order.total)} WELL locked in escrow${r.escrowTx ? ` (tx ${String(r.escrowTx).slice(0, 12)}…)` : ''}.`);
       }
     );
   };
