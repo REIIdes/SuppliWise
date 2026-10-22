@@ -11,6 +11,7 @@ import {
 } from '../utils/dynamicAssessment.js';
 import { isDeadHour, countdownTo, DEAD_HOURS } from '../utils/slotSchedule.js';
 import useNow from '../hooks/useNow';
+import { useBackendOffline, isBackendDown } from '../hooks/useBackendStatus.js';
 import { useSubscription, SUBSCRIPTION_EVENT } from '../hooks/useSubscription';
 import MedicalAttentionModal from '../Components/MedicalAttentionModal/MedicalAttentionModal';
 import './AssessmentPage.css';
@@ -2404,8 +2405,14 @@ function AssessmentPage() {
   const deadHours = isDeadHour(now);
   const deadHoursCountdown = countdownTo(DEAD_HOURS.end, now);
 
+  /* Same lock while the backend is unreachable: the form's only destination is
+     a server write, so filling it in against a dead API is a dead end. The
+     draft stays in sessionStorage untouched, exactly as during the dead hours,
+     and the global banner tells the user why the page went inert. */
+  const backendOffline = useBackendOffline();
+
   useEffect(() => {
-    if (!deadHours) return undefined;
+    if (!deadHours && !backendOffline) return undefined;
 
     // Same approach as the read-only view: disable the real controls rather
     // than layering an overlay, so a keyboard user cannot tab into a field that
@@ -2438,7 +2445,7 @@ function AssessmentPage() {
         else c.setAttribute('contenteditable', previous);
       });
     };
-  }, [deadHours]);
+  }, [deadHours, backendOffline]);
 
   /* ── Pre-fill "Currently Taking Supplements?" ──────────────────────────
      A returning user is already on a plan built from a previous assessment, and
@@ -2664,6 +2671,9 @@ function AssessmentPage() {
       if (step < TOTAL_STEPS) setStep((s) => s + 1);
       return;
     }
+    // Backstop behind the disabled footer button — a live store read, not the
+    // render-time snapshot, so a step that walked in offline cannot advance.
+    if (isBackendDown()) return;
 
     const stepErrors = validateStep(step, formData);
     if (Object.keys(stepErrors).length > 0) {
@@ -2748,6 +2758,16 @@ function AssessmentPage() {
     // page sat open across midnight.
     if (isDeadHour(new Date())) {
       setSubmitError(`Assessments reopen at ${DEAD_HOURS.endsAt}. Your answers are saved — come back then.`);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    // Same belt-and-braces for reachability: the button is disabled and the
+    // form locked while the store says the server is down, but a submit that
+    // cannot be answered must fail here with a clear message rather than as a
+    // fetch error two awaits deep.
+    if (isBackendDown()) {
+      setSubmitError('Cannot reach the server. Submit resumes automatically once it is back online — your answers are saved.');
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
@@ -3044,7 +3064,13 @@ function AssessmentPage() {
               ← {step === 1 ? (isReadOnly ? 'Back' : 'Cancel') : 'Back'}
             </button>
             {step < TOTAL_STEPS ? (
-              <button className="btn-next" onClick={handleNext}>Next →</button>
+              backendOffline && !isReadOnly ? (
+                <button className="btn-next" type="button" disabled title="Unavailable while the server cannot be reached">
+                  Next →
+                </button>
+              ) : (
+                <button className="btn-next" onClick={handleNext}>Next →</button>
+              )
             ) : (
               isReadOnly ? (
                 <button
@@ -3066,8 +3092,10 @@ function AssessmentPage() {
                     </p>
                   </div>
                 ) : (
-                  <button className="btn-next" onClick={handleSubmit} disabled={submitting}>
-                    {isUpdateMode ? 'Submit Updated Assessment →' : 'Get Recommendations →'}
+                  <button className="btn-next" onClick={handleSubmit} disabled={submitting || backendOffline}>
+                    {backendOffline
+                      ? 'Server unreachable — submit paused'
+                      : (isUpdateMode ? 'Submit Updated Assessment →' : 'Get Recommendations →')}
                   </button>
                 )
               )

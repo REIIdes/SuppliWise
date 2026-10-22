@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, useLocation, Navigate } from 'react-route
 import { Component, lazy, Suspense, useEffect, useState } from 'react';
 import { reloadOnceForStaleChunk } from './utils/chunkReload.js';
 import PWAInstallPrompt from './Components/PWAInstallPrompt';
+import BackendStatusBanner from './Components/BackendStatusBanner/BackendStatusBanner';
 
 import HomePage from './Pages/HomePage';
 
@@ -437,6 +438,7 @@ function App() {
         </Suspense>
         <GlobalChat />
         <PWAInstallPrompt />
+        <BackendStatusBanner />
       </BrowserRouter>
     </ErrorBoundary>
   );

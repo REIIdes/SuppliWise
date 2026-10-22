@@ -1,0 +1,42 @@
+/* Fixed bottom-center notice while the backend is unreachable.
+   Bottom, not top: the sticky navbar owns the top edge on every page, and
+   this bar must never cover Back or the account menu. */
+.backend-offline-banner {
+  position: fixed;
+  left: 50%;
+  bottom: 84px;
+  transform: translateX(-50%);
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(92vw, 560px);
+  padding: 12px 18px;
+  border-radius: 999px;
+  background: #fff7ed;
+  border: 1px solid var(--sw-amber, #f59e0b);
+  color: #92400e;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: center;
+  box-shadow: 0 10px 30px rgba(146, 64, 14, 0.18);
+}
+
+.backend-offline-banner__dot {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--sw-amber, #f59e0b);
+  animation: backend-offline-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes backend-offline-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backend-offline-banner__dot { animation: none; }
+}

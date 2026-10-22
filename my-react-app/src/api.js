@@ -30,6 +30,12 @@ import {
 // gets added without one, because a dead passkey button with an unreachable
 // module behind it is otherwise unrecoverable without a manual browser reload.
 import { isStaleChunkError, reloadOnceForStaleChunk } from './utils/chunkReload.js';
+import {
+  markBackendDown,
+  markBackendUp,
+  setBackendProbe,
+  healthProbeFetch,
+} from './utils/backendStatus.js';
 
 /**
  * Load the WebAuthn browser SDK, self-healing a stale optimizer hash.
@@ -91,6 +97,11 @@ const BASE_URL = getBaseUrl();
 
 // Export BASE_URL so other components can use it
 export { BASE_URL };
+
+// Wire the backend-reachability probe (see utils/backendStatus.js). apiFetch
+// below reports every request's outcome; this probe is only used while the
+// server is considered DOWN, to notice recovery without user action.
+setBackendProbe(() => healthProbeFetch(BASE_URL));
 
 // ── Sessions: tab-scoped credentials + shared account directory ────────────
 // WHAT LIVES WHERE (and why):
@@ -793,6 +804,8 @@ const apiFetch = async (path, options = {}, timeoutMs = 30000) => {
         signal: controller.signal,
       });
       clearTimeout(timer);
+      // Any HTTP answer — even a 4xx/5xx — proves the server process is up.
+      markBackendUp();
       return res;
     } catch (err) {
       clearTimeout(timer);
@@ -808,6 +821,10 @@ const apiFetch = async (path, options = {}, timeoutMs = 30000) => {
         continue;
       }
       if (err instanceof TypeError) {
+        // Connection-level failure survived the retry: the backend is down
+        // (or this device is offline). The whole app switches to view-only
+        // until either a later request succeeds or the health probe does.
+        markBackendDown();
         throw new Error('Cannot reach the server. Check your connection and that the backend is running.', { cause: err });
       }
       throw err;

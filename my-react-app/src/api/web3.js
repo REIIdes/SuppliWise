@@ -1,4 +1,5 @@
 import { BASE_URL, getToken, parseJSON } from '../api';
+import { markBackendDown, markBackendUp } from '../utils/backendStatus.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Web3 API client — every call into the SuppliWise blockchain layer.
@@ -27,9 +28,14 @@ const w3Fetch = async (path, options = {}, timeoutMs = 30000) => {
     if (err.name === 'AbortError') {
       throw new Error('Request timed out. Please try again.', { cause: err });
     }
+    // Same reachability contract as apiFetch: a connection-level failure
+    // flips the app to view-only; a timeout does not (the server may be
+    // alive but slow, and the probe would just re-confirm it).
+    if (err instanceof TypeError) markBackendDown();
     throw new Error('Cannot reach the server. Check your connection and that the backend is running.', { cause: err });
   }
   clearTimeout(timer);
+  markBackendUp();
   const data = await parseJSON(res);
   if (!res.ok) {
     const err = new Error((data && data.message) || 'Something went wrong. Please try again.');

@@ -15,6 +15,7 @@ import { greetingFor } from '../utils/greeting.js';
    page left open across the reset refetches instead of rendering yesterday's
    finished plan. See utils/planDay.js. */
 import usePlanDay from '../hooks/usePlanDay.js';
+import { useBackendOffline, isBackendDown } from '../hooks/useBackendStatus.js';
 import './DashboardPage.css';
 
 /* ── Action cards ───────────────────────────────────────────────────────────
@@ -162,6 +163,9 @@ const EMPTY_STATS = Object.freeze({
 
 function DashboardPage() {
   const navigate = useNavigate();
+  // Backend reachability: the page stays fully rendered while the API is
+  // down, but the actions that need it go inert (see utils/backendStatus.js).
+  const backendOffline = useBackendOffline();
   // Mutable so the profile-heal path below can fill it in when the tab holds
   // a token but no cached profile (session handover/migration edge) — without
   // this the page used to fall through to a blank render.
@@ -539,6 +543,11 @@ function DashboardPage() {
   }, [slotGroups, todaysSupplements, applyIntakeResult]);
 
   const navigateToCard = (cardName) => {
+    // Every card destination needs the backend (its data is a server fetch),
+    // so while the server is unreachable none of them navigate. The cards are
+    // already rendered disabled — this is the backstop against a programmatic
+    // activation, same as the dead-hours check below.
+    if (isBackendDown()) return;
     switch (cardName) {
       case 'assessment': {
         // Dead hours close this action too. The card and the empty-state button
@@ -821,9 +830,24 @@ function DashboardPage() {
         <div className="dashboard-container">
           <div className="dashboard-error">
             <p>{error}</p>
-            <button type="button" onClick={() => navigate('/assessment')} className="dashboard-error__btn">
+            {/* The assessment ends in a server write, so walking into the
+                form while the backend is down only lets the user fill in
+                answers that cannot be submitted. The button goes inert with
+                the connection; the global banner explains why. */}
+            <button
+              type="button"
+              onClick={() => { if (!isBackendDown()) navigate('/assessment'); }}
+              className="dashboard-error__btn"
+              disabled={backendOffline}
+            >
               Go to assessment
             </button>
+            {backendOffline && (
+              <p className="dashboard-error__hint">
+                Actions are paused while the server is unreachable. This button
+                works again as soon as it is back online.
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -1019,12 +1043,17 @@ function DashboardPage() {
             // user straight into a page they could not use — and this card is
             // the main way in, so it has to carry the lock itself.
             const snoozed = card.key === 'assessment' && deadHours;
-            const inert = blocked || snoozed;
+            // Backend down: every card leads to a server-backed page, so all
+            // four go inert together — the page renders, the actions wait.
+            const offlineLocked = backendOffline;
+            const inert = blocked || snoozed || offlineLocked;
             const cardLabel = blocked
               ? `${card.label} — paused until the priority review finishes`
               : snoozed
                 ? `${card.label} — closed until ${DEAD_HOURS.endsAt}`
-                : card.label;
+                : offlineLocked
+                  ? `${card.label} — unavailable until the server is reachable`
+                  : card.label;
             return (
               <button
                 type="button"
@@ -1034,17 +1063,18 @@ function DashboardPage() {
                   `dashboard-card--${card.tone}`,
                   blocked ? 'dashboard-card--blocked' : '',
                   snoozed ? 'dashboard-card--snoozed' : '',
+                  offlineLocked ? 'dashboard-card--blocked' : '',
                 ].filter(Boolean).join(' ')}
                 onClick={() => { if (!inert) navigateToCard(card.key); }}
                 disabled={inert}
                 aria-label={cardLabel}
-                title={snoozed ? `Closed between midnight and ${DEAD_HOURS.endsAt}` : undefined}
+                title={snoozed ? `Closed between midnight and ${DEAD_HOURS.endsAt}` : offlineLocked ? 'Unavailable while the server cannot be reached' : undefined}
               >
                 <span className="card-icon">{card.icon}</span>
                 <span className="card-body">
                   <span className="card-title">{card.label}</span>
                   <span className="card-hint">
-                    {snoozed ? `Closed until ${DEAD_HOURS.endsAt}` : card.hint}
+                    {snoozed ? `Closed until ${DEAD_HOURS.endsAt}` : offlineLocked ? 'Server unreachable — paused' : card.hint}
                   </span>
                 </span>
                 <span className="card-arrow" aria-hidden="true">
@@ -1055,6 +1085,7 @@ function DashboardPage() {
                 </span>
                 {blocked && <span className="card-blocked-tag">Paused</span>}
                 {snoozed && <span className="card-blocked-tag card-blocked-tag--snoozed">Asleep</span>}
+                {offlineLocked && !blocked && !snoozed && <span className="card-blocked-tag">Offline</span>}
               </button>
             );
           })}
@@ -1149,13 +1180,14 @@ function DashboardPage() {
                   // during the dead hours; "Go to AI Recommendations" browses an
                   // existing plan and has no reason to be.
                   onClick={() => {
+                    if (isBackendDown()) return;
                     if (wellnessScore === 0) {
                       if (!deadHours) navigate('/assessment');
                     } else {
                       navigate('/recommendations');
                     }
                   }}
-                  disabled={wellnessScore === 0 && deadHours}
+                  disabled={(wellnessScore === 0 && deadHours) || backendOffline}
                 >
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     {wellnessScore === 0 ? (

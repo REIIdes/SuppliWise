@@ -1556,6 +1556,15 @@
   outline: 3px solid #0d9488;
   outline-offset: 2px;
 }
+.dashboard-wrapper .dashboard-error__btn:disabled {
+  background: #d1d5db;
+  color: #6b7280;
+  cursor: not-allowed;
+}
+.dashboard-wrapper .dashboard-error__hint {
+  font-size: 13px !important;
+  color: #92400e !important;
+}
 
 /* ── Completion toast ───────────────────────────────────────────────────
    Also rendered by TrackIntakePage under the same class names, so the two
