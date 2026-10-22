@@ -65,6 +65,77 @@ export function dynamicTooltip(live, condition) {
 }
 
 /**
+ * ── What Step 3 can actually render ─────────────────────────────
+ *
+ * Whether a symptom checkbox exists depends on three things at once: the
+ * published bundle (arrived, empty, or still in flight), the member's gender,
+ * and their pregnancy answers. The validator used to answer the same question
+ * from the saved answers alone, and wherever the two views disagreed the form
+ * demanded something nobody could give it — Next stopped on an error whose
+ * checkbox had never rendered, which is indistinguishable from a dead button.
+ *
+ * An AI-published label is the sharpest case: its rows come from the bundle, so
+ * if the bundle never arrives, the label can still be sitting in a restored
+ * draft with nothing on screen to answer it. Renderer and validator both call
+ * these so they cannot drift apart again.
+ */
+
+/** Rows Step 3 shows for one selected condition — published pool, or the built-in scoping. */
+export function symptomRowsForCondition(data, condition, live, allSymptoms) {
+  const published = dynamicSymptomsFor(live, condition);
+  if (published !== null) return published;
+  const gender = (data && data.gender) || '';
+  const pregnant = Boolean(data && (data.isPregnant === 'Yes' || data.isBreastfeeding === 'Yes'));
+  return (allSymptoms || []).filter((s) => {
+    if (!s.conditions || s.conditions.length === 0) return false;
+    if (!s.conditions.includes(condition)) return false;
+    if (s.genders && s.genders.length > 0 && !s.genders.includes(gender) && gender !== '') return false;
+    if (s.name === 'Low Libido' && pregnant) return false;
+    return true;
+  });
+}
+
+/**
+ * True when the condition's block renders — which is also the only place its
+ * "No symptoms for X" escape checkbox lives, so this is what decides whether
+ * that condition can be answered at all.
+ */
+export function conditionBlockRenders(data, condition, live, allSymptoms) {
+  if (dynamicSymptomsFor(live, condition) !== null) return true;
+  return symptomRowsForCondition(data, condition, live, allSymptoms).length > 0;
+}
+
+/** The general-symptom block exists only when 'None' is selected and no condition is. */
+export function generalBlockRenders(data) {
+  const conditions = (data && data.medicalConditions) || [];
+  return conditions.includes('None') && conditions.every((c) => c === 'None');
+}
+
+/** Every symptom key that currently has a rendered checkbox. */
+export function visibleSymptomKeys(data, live, allSymptoms, generalSymptoms) {
+  const keys = new Set();
+  const selected = ((data && data.medicalConditions) || []).filter((c) => c !== 'None');
+
+  if (selected.length === 0) {
+    if (generalBlockRenders(data)) {
+      for (const name of generalSymptoms || []) keys.add(`General::${name}`);
+      keys.add('No current symptoms');
+    }
+    return keys;
+  }
+
+  const noSymptomsFor = (data && data.noSymptomsForConditions) || [];
+  for (const condition of selected) {
+    // Marking "no symptoms" collapses the condition's rows away.
+    if (noSymptomsFor.includes(condition)) continue;
+    for (const row of symptomRowsForCondition(data, condition, live, allSymptoms)) {
+      keys.add(`${condition}::${row.name}`);
+    }
+  }
+  return keys;
+}
+
+/**
  * Update-mode repair: symptoms saved before the live bundle arrived may still
  * be plain names that belong to a selected AI-published condition's pool.
  * Prefix them (and move their severity keys) to the `${condition}::${name}`

@@ -5,9 +5,12 @@ import { saveAssessment, getRecommendations, saveAssessmentResults, getPriorityS
 import { prefillSupplements } from '../utils/supplementPrefill.js';
 import {
   mergeConditionGroups,
-  dynamicSymptomsFor,
   dynamicTooltip,
   prefixDynamicSymptoms,
+  symptomRowsForCondition,
+  conditionBlockRenders,
+  generalBlockRenders,
+  visibleSymptomKeys,
 } from '../utils/dynamicAssessment.js';
 import { isDeadHour, countdownTo, DEAD_HOURS } from '../utils/slotSchedule.js';
 import useNow from '../hooks/useNow';
@@ -1385,8 +1388,6 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
   // ── Symptoms ──
   const selectedSymptoms = data.symptoms || [];
   const symptomSeverity = data.symptomSeverity || {};
-  const gender = data.gender || '';
-  const isPregnantOrBreastfeeding = data.isPregnant === 'Yes' || data.isBreastfeeding === 'Yes';
   const [severityErrors, setSeverityErrors] = useState([]);
 
   // Sync parent-level errors (from clicking Next) into local severityErrors state
@@ -1410,7 +1411,11 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
 
     // If trying to CHECK a new symptom, block if any existing symptom is missing severity
     if (!isChecked) {
-      const missingSeverity = filtered.filter(sym => !symptomSeverity[sym]);
+      // Only rows on screen count: a symptom left over from a gender or pregnancy
+      // answer has no severity button to press, so counting it would make every
+      // checkbox in the step ignore the click.
+      const visible = visibleSymptomKeys(data, live, ALL_SYMPTOMS, GENERAL_SYMPTOMS);
+      const missingSeverity = filtered.filter(sym => visible.has(sym) && !symptomSeverity[sym]);
       if (missingSeverity.length > 0) {
         // Scroll to first symptom missing severity
         const firstMissing = missingSeverity[0];
@@ -1605,20 +1610,15 @@ function Step3Combined({ data, onChange, errors = {}, symptomRowRefs = { current
               {selectedConditions.map((condition) => {
                 // AI-published conditions answer from their own evidence-gated
                 // pool; built-ins keep the hard-coded ALL_SYMPTOMS scoping.
-                const dynSymptoms = dynamicSymptomsFor(live, condition);
-                const conditionSymptoms = dynSymptoms ?? ALL_SYMPTOMS.filter(s => {
-                  if (s.conditions.length === 0) return false;
-                  if (!s.conditions.includes(condition)) return false;
-                  if (s.genders.length > 0 && !s.genders.includes(gender) && gender !== '') return false;
-                  if (s.name === 'Low Libido' && isPregnantOrBreastfeeding) return false;
-                  return true;
-                });
+                // Same predicate the validator uses, so a requirement the form
+                // cannot satisfy can never be raised again.
+                const conditionSymptoms = symptomRowsForCondition(data, condition, live, ALL_SYMPTOMS);
 
                 // A built-in with nothing to show stays hidden (pre-existing
                 // behaviour). An AI-published label must ALWAYS render: with an
                 // empty or not-yet-loaded pool, its "No symptoms for X" escape
                 // is the only way Step 3 validation can be satisfied.
-                if (conditionSymptoms.length === 0 && dynSymptoms === null) return null;
+                if (!conditionBlockRenders(data, condition, live, ALL_SYMPTOMS)) return null;
 
                 const noSymptomsChecked = noSymptomsPerCondition.includes(condition);
 
@@ -2070,7 +2070,7 @@ function Step4Lifestyle({ data, onChange, errors, isReadOnly = false, supplement
 }
 
 // ── Validation per step ────────────────────────────────────────────────────
-function validateStep(step, formData) {
+function validateStep(step, formData, live = []) {
   const errors = {};
 
   if (step === 1) {
@@ -2125,18 +2125,25 @@ function validateStep(step, formData) {
     const noneSelected = (formData.medicalConditions || []).includes('None');
     const selectedConditions = (formData.medicalConditions || []).filter(c => c !== 'None');
 
-    // If None selected — must either select a general symptom OR check "None — no symptoms"
-    if (noneSelected) {
+    // If None selected — must either select a general symptom OR check "None — no symptoms".
+    // Only while that block is the one on screen: selecting a condition alongside a
+    // stale 'None' swaps the general list for per-condition groups, and demanding a
+    // General:: answer then points at checkboxes that do not exist.
+    if (noneSelected && selectedConditions.length === 0 && generalBlockRenders(formData)) {
       const hasGeneralSymptom = (formData.symptoms || []).some(s => s.startsWith('General::'));
       const markedNoSymptoms = (formData.symptoms || []).includes('No current symptoms');
       if (!hasGeneralSymptom && !markedNoSymptoms)
         errors.generalSymptoms = 'Please select your current symptoms, or mark that you have none.';
     }
 
-    // If specific conditions selected — must either select symptoms or mark no symptoms for each
+    // If specific conditions selected — must either select symptoms or mark no symptoms for each.
+    // But only for a condition whose block renders. Its "No symptoms for X" escape lives inside
+    // that block, so a hidden block is unsatisfiable — and an AI-published label can arrive from
+    // a saved draft while the published bundle is absent, which is exactly that case.
     if (selectedConditions.length > 0) {
       const noSymptomsFor = formData.noSymptomsForConditions || [];
       const conditionsWithoutAnswer = selectedConditions.filter(c => {
+        if (!conditionBlockRenders(formData, c, live, ALL_SYMPTOMS)) return false;
         const hasSymptom = (formData.symptoms || []).some(s => s.startsWith(c + '::'));
         const markedNoSymptoms = noSymptomsFor.includes(c);
         return !hasSymptom && !markedNoSymptoms;
@@ -2145,10 +2152,16 @@ function validateStep(step, formData) {
         errors.symptomsRequired = conditionsWithoutAnswer;
     }
 
-    // All checked symptoms must have a severity
-    const symptoms = (formData.symptoms || []).filter(s => s !== 'No current symptoms');
+    // All checked symptoms must have a severity — for the rows the form actually shows.
+    // A symptom checked under one gender or pregnancy answer, then hidden when the
+    // answer changed, has no severity button left to press, so asking again deadlocks
+    // the step instead of correcting it.
+    const visible = visibleSymptomKeys(formData, live, ALL_SYMPTOMS, GENERAL_SYMPTOMS);
     const severity = formData.symptomSeverity || {};
-    const missing = symptoms.filter(s => !severity[s]);
+    const missing = (formData.symptoms || [])
+      .filter(s => s !== 'No current symptoms')
+      .filter(s => visible.has(s))
+      .filter(s => !severity[s]);
     if (missing.length > 0)
       errors.symptomSeverity = missing;
   }
@@ -2675,32 +2688,37 @@ function AssessmentPage() {
     // render-time snapshot, so a step that walked in offline cannot advance.
     if (isBackendDown()) return;
 
-    const stepErrors = validateStep(step, formData);
+    const stepErrors = validateStep(step, formData, liveConditions);
     if (Object.keys(stepErrors).length > 0) {
       setErrors(stepErrors);
 
-      // Scroll to the first error so the user sees what's missing
+      // Scroll to the first error so the user sees what's missing. An error with
+      // no anchor anywhere is what made this step read as a dead button, so the
+      // last resort is the top of the card, where the message itself renders.
+      let landed = false;
       const scrollToId = (id) => {
         const el = document.getElementById(id);
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (!el) return;
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        landed = true;
       };
 
       if (stepErrors.age)               scrollToId('field-age');
-      else if (stepErrors.gender)        scrollToId('field-gender');
-      else if (stepErrors.weight)        scrollToId('field-weight');
-      else if (stepErrors.height)        scrollToId('field-height');
+      else if (stepErrors.gender)       scrollToId('field-gender');
+      else if (stepErrors.weight)       scrollToId('field-weight');
+      else if (stepErrors.height)       scrollToId('field-height');
       else if (stepErrors.activityLevel) scrollToId('field-activityLevel');
-      else if (stepErrors.dietType)      scrollToId('field-dietType');
-      else if (stepErrors.healthGoals)   scrollToId('field-healthGoals');
+      else if (stepErrors.dietType)     scrollToId('field-dietType');
+      else if (stepErrors.healthGoals)  scrollToId('field-healthGoals');
       else if (stepErrors.medicalConditions) scrollToId('field-medicalConditions');
       else if (stepErrors.generalSymptoms)   scrollToId('field-generalSymptoms');
       else if (stepErrors.symptomsRequired?.length > 0) scrollToId(`field-condition-${stepErrors.symptomsRequired[0]}`);
       else if (stepErrors.symptomSeverity?.length > 0) {
-        const firstMissing = stepErrors.symptomSeverity[0];
-        const el = symptomRowRefs.current[firstMissing];
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const el = symptomRowRefs.current[stepErrors.symptomSeverity[0]];
+        if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); landed = true; }
       }
 
+      if (!landed) cardTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
     }
     setErrors({});
@@ -2772,7 +2790,7 @@ function AssessmentPage() {
       return;
     }
 
-    const stepErrors = validateStep(step, formData);
+    const stepErrors = validateStep(step, formData, liveConditions);
     if (Object.keys(stepErrors).length > 0) {
       setErrors(stepErrors);
       // Scroll to the first error field in step 4
